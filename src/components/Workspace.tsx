@@ -8,12 +8,13 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import type { DocSettings } from '../document'
+import type { DocSettings, TextFrame } from '../document'
 import { isTyping } from '../dom'
 import { computeLayout } from '../layout'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
+import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
 
 /** pasteboard around the pages, screen px */
@@ -51,9 +52,16 @@ interface Props {
   /** screen mode "Preview": no guides or frame edges, the page as it will print */
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
+  frames: TextFrame[]
+  onFramesChange: (frames: TextFrame[]) => void
   onClose?: () => void
   ref?: Ref<WorkspaceHandle>
 }
+
+/** Smallest dragged rectangle (points) that becomes a text frame — a plain click creates nothing. */
+const MIN_FRAME_PT = 6
+
+const newFrameId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
 
 /** Zoom plus, optionally, "world point (wx, wy) must end up at viewport pixel (sx, sy)". */
 interface View {
@@ -70,7 +78,18 @@ const setScrollX = (el: HTMLElement, x: number) => {
   el.scrollLeft = x - (el.scrollWidth - el.clientWidth)
 }
 
-export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, onPreviewMode, onClose, ref }: Props) {
+export function Workspace({
+  doc,
+  fitKey,
+  showRulers,
+  showGuides,
+  previewMode,
+  onPreviewMode,
+  frames,
+  onFramesChange,
+  onClose,
+  ref,
+}: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
 
   const vpRef = useRef<HTMLDivElement>(null)
@@ -81,6 +100,11 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
   const [space, setSpace] = useState(false)
   const [panning, setPanning] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
+  const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const createStart = useRef<{ x: number; y: number } | null>(null)
 
   const zoom = view.zoom
 
@@ -223,7 +247,35 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
     }
   }, [])
 
-  // ── pointer: pan (Hand tool / Space / middle button) and Zoom tool ──────────────
+  // Delete removes the selected text frame, Escape deselects
+  useEffect(() => {
+    if (!selectedId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        onFramesChange(frames.filter((f) => f.id !== selectedId))
+        setSelectedId(null)
+      } else if (e.key === 'Escape') {
+        setSelectedId(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedId, frames, onFramesChange])
+
+  // ── pointer: pan (Hand tool / Space / middle button), Zoom tool, Type tool ──────
+  /** client (mouse) position → world points */
+  const toWorld = (clientX: number, clientY: number) => {
+    const el = vpRef.current!
+    const rect = el.getBoundingClientRect()
+    const L = live.current
+    return {
+      x: (clientX - rect.left - L.sb + getScrollX(el) - L.tx) / L.zoom,
+      y: (clientY - rect.top + el.scrollTop - L.ty) / L.zoom,
+    }
+  }
+
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) return // scrollbars
@@ -235,17 +287,66 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
     } else if (tool === 'zoom' && e.button === 0) {
       const rect = e.currentTarget.getBoundingClientRect()
       zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
+    } else if (tool === 'type' && e.button === 0) {
+      // start dragging a new text frame
+      const p = toWorld(e.clientX, e.clientY)
+      createStart.current = p
+      setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+      setSelectedId(null)
+      setEditingId(null)
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } else if (tool === 'select' && e.button === 0) {
+      setSelectedId(null)
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (createStart.current) {
+      const p = toWorld(e.clientX, e.clientY)
+      setDraft({ x0: createStart.current.x, y0: createStart.current.y, x1: p.x, y1: p.y })
+      return
+    }
     if (!drag.current) return
     e.currentTarget.scrollLeft -= e.clientX - drag.current.x
     e.currentTarget.scrollTop -= e.clientY - drag.current.y
     drag.current = { x: e.clientX, y: e.clientY }
   }
+  const finishDraft = () => {
+    if (draft && createStart.current) {
+      const w = Math.abs(draft.x1 - draft.x0)
+      const h = Math.abs(draft.y1 - draft.y0)
+      if (w >= MIN_FRAME_PT && h >= MIN_FRAME_PT) {
+        const frame: TextFrame = { id: newFrameId(), x: Math.min(draft.x0, draft.x1), y: Math.min(draft.y0, draft.y1), w, h, text: '' }
+        onFramesChange([...frames, frame])
+        setSelectedId(frame.id)
+        setEditingId(frame.id) // ready to type right away
+      }
+    }
+    createStart.current = null
+    setDraft(null)
+  }
   const endDrag = () => {
+    finishDraft()
     drag.current = null
     setPanning(false)
+  }
+  const cancelDrag = () => {
+    createStart.current = null
+    setDraft(null)
+    drag.current = null
+    setPanning(false)
+  }
+
+  /** clicking an existing frame: the Type tool edits its text, the Selection tool selects it */
+  const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (tool !== 'type' && tool !== 'select') || panMode) return // let the pan / zoom handlers see it
+    e.stopPropagation()
+    // Entering edit mode swaps the clicked <div> for a <textarea>; without this the browser's own
+    // focus handling (which runs after this handler) would move focus away and end editing at once.
+    // While already editing we must not prevent it, or the caret could not be placed by clicking.
+    if (tool === 'type' && editingId !== id) e.preventDefault()
+    setSelectedId(id)
+    setEditingId(tool === 'type' ? id : null)
   }
 
   // only mount what is (nearly) on screen — documents can have thousands of pages
@@ -255,7 +356,9 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
   })
 
   const viewportClass =
-    'viewport' + (previewMode ? ' preview' : '') + (panning ? ' panning' : panMode ? ' pan' : tool === 'zoom' ? ' zoomtool' : '')
+    'viewport' +
+    (previewMode ? ' preview' : '') +
+    (panning ? ' panning' : panMode ? ' pan' : tool === 'zoom' ? ' zoomtool' : tool === 'type' ? ' texttool' : '')
 
   return (
     <div className="workspace">
@@ -291,7 +394,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerCancel={cancelDrag}
           >
             <div className="sheet" style={{ width: sheetW, height: sheetH }}>
               <svg width={sheetW} height={sheetH}>
@@ -299,6 +402,32 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, on
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
+              {frames.map((f) => (
+                <TextFrameView
+                  key={f.id}
+                  frame={f}
+                  zoom={zoom}
+                  tx={tx}
+                  ty={ty}
+                  selected={f.id === selectedId}
+                  editing={f.id === editingId}
+                  showEdge={!previewMode}
+                  onPointerDown={onFramePointerDown(f.id)}
+                  onChange={(text) => onFramesChange(frames.map((x) => (x.id === f.id ? { ...x, text } : x)))}
+                  onStopEditing={() => setEditingId((cur) => (cur === f.id ? null : cur))}
+                />
+              ))}
+              {draft && (
+                <div
+                  className="text-frame-draft"
+                  style={{
+                    left: tx + Math.min(draft.x0, draft.x1) * zoom,
+                    top: ty + Math.min(draft.y0, draft.y1) * zoom,
+                    width: Math.abs(draft.x1 - draft.x0) * zoom,
+                    height: Math.abs(draft.y1 - draft.y0) * zoom,
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>

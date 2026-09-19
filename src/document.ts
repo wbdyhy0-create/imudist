@@ -29,6 +29,19 @@ export interface DocSettings {
   slug: Sides
 }
 
+/** A text frame. Position and size are in world points (see layout.ts), so frames may also sit on the pasteboard. */
+export interface TextFrame {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  text: string
+}
+
+/** Default text size, points (no type panel yet). */
+export const DEFAULT_FONT_PT = 14
+
 export const MIN_PAGE_PT = 1
 export const MAX_PAGE_PT = 16384
 export const MAX_SIDE_PT = 2000

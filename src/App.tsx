@@ -3,11 +3,13 @@ import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { defaultDocSettings, type DocSettings } from './document'
+import { defaultDocSettings, type DocSettings, type TextFrame } from './document'
 import { isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 
 const APP_NAME = 'Imudist'
+const NO_FRAMES: TextFrame[] = []
+const noop = () => {}
 
 export default function App() {
   const [doc, setDoc] = useState<DocSettings | null>(null)
@@ -20,6 +22,8 @@ export default function App() {
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [previewMode, setPreviewMode] = useState(false)
+  /** text frames of the open document (kept here so they survive the New Document panel's live preview) */
+  const [frames, setFrames] = useState<TextFrame[]>(NO_FRAMES)
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
@@ -34,7 +38,10 @@ export default function App() {
         previewMode,
         setPreviewMode,
         newDocument: () => setDialogOpen(true),
-        closeDocument: () => setDoc(null),
+        closeDocument: () => {
+          setDoc(null)
+          setFrames(NO_FRAMES)
+        },
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
@@ -61,6 +68,7 @@ export default function App() {
 
   const create = (d: DocSettings) => {
     setDoc(d)
+    setFrames(NO_FRAMES)
     setDocId((n) => n + 1)
     setNextName((n) => n + 1)
     setLastSettings(d)
@@ -86,7 +94,9 @@ export default function App() {
               showGuides={showGuides}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
-              onClose={preview ? undefined : () => setDoc(null)}
+              frames={preview ? NO_FRAMES : frames}
+              onFramesChange={preview ? noop : setFrames}
+              onClose={preview ? undefined : () => { setDoc(null); setFrames(NO_FRAMES) }}
             />
           ) : (
             <Home appName={APP_NAME} onNew={() => setDialogOpen(true)} />
