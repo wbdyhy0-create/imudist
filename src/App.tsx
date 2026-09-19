@@ -1,0 +1,99 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Home } from './components/Home'
+import { MenuBar } from './components/MenuBar'
+import { NewDocumentDialog } from './components/NewDocumentDialog'
+import { Workspace, type WorkspaceHandle } from './components/Workspace'
+import { defaultDocSettings, type DocSettings } from './document'
+import { buildMenus, findShortcut } from './menus'
+
+const APP_NAME = 'Layout Studio'
+
+export default function App() {
+  const [doc, setDoc] = useState<DocSettings | null>(null)
+  const [docId, setDocId] = useState(0)
+  const [nextName, setNextName] = useState(1)
+  /** settings of the last created document — the next "New Document" starts from them */
+  const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [preview, setPreview] = useState<DocSettings | null>(null)
+  const [showRulers, setShowRulers] = useState(true)
+  const [showGuides, setShowGuides] = useState(true)
+  const ws = useRef<WorkspaceHandle>(null)
+
+  const shown = preview ?? doc
+
+  const menus = useMemo(
+    () =>
+      buildMenus({
+        hasDoc: !!shown,
+        ws,
+        showRulers,
+        showGuides,
+        newDocument: () => setDialogOpen(true),
+        closeDocument: () => setDoc(null),
+        toggleRulers: () => setShowRulers((v) => !v),
+        toggleGuides: () => setShowGuides((v) => !v),
+      }),
+    [shown, showRulers, showGuides],
+  )
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const item = findShortcut(menus, e)
+      if (!item) return
+      e.preventDefault()
+      item.onClick?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menus])
+
+  const closeDialog = () => {
+    setDialogOpen(false)
+    setPreview(null)
+  }
+
+  const create = (d: DocSettings) => {
+    setDoc(d)
+    setDocId((n) => n + 1)
+    setNextName((n) => n + 1)
+    setLastSettings(d)
+    closeDialog()
+  }
+
+  const fitKey = preview
+    ? [preview.width, preview.height, preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
+    : String(docId)
+
+  return (
+    <div className="app">
+      <MenuBar menus={menus} logo="Ls" />
+      <div className="app-body">
+        <div className="stage">
+          {shown ? (
+            <Workspace
+              key={preview ? 'preview' : docId}
+              ref={ws}
+              doc={shown}
+              fitKey={fitKey}
+              showRulers={showRulers}
+              showGuides={showGuides}
+              onClose={preview ? undefined : () => setDoc(null)}
+            />
+          ) : (
+            <Home appName={APP_NAME} onNew={() => setDialogOpen(true)} />
+          )}
+          {dialogOpen && !preview && <div className="stage-dim" />}
+        </div>
+        {dialogOpen && (
+          <NewDocumentDialog
+            initial={{ ...lastSettings, name: `Untitled-${nextName}` }}
+            onCreate={create}
+            onClose={closeDialog}
+            onPreview={setPreview}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
