@@ -10,7 +10,7 @@ interface Props {
   hidden?: boolean
 }
 
-const BG = '#2e2e2e'
+const BG = '#2b2222'
 const LINE = '#8c8c8c'
 const TEXT = '#c4c4c4'
 const MIN_LABEL_GAP = 64

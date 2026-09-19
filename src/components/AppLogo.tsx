@@ -1,20 +1,14 @@
-/** Imudist mark: a page with a folded corner, an "I" and ruler ticks — flat teal, no letters-in-a-square. */
+/**
+ * Imudist mark: two thin page-corner brackets (the layout grid / margins) around "Im".
+ * Drawn as strokes, so it doesn't depend on any installed font. Meant for the dark UI (white letters).
+ */
 export function AppLogo({ size = 24 }: { size?: number }) {
   return (
-    <svg className="app-logo" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <path
-        d="M7 3.500A1.500 1.500 0 0 1 8.500 2H20l7 7v20.500a1.500 1.500 0 0 1-1.500 1.500h-17A1.500 1.500 0 0 1 7 29.500z"
-        fill="#0e8fa6"
-      />
-      <path d="M20 2v5.500A1.500 1.500 0 0 0 21.500 9H27z" fill="#fff" fillOpacity="0.4" />
-      <path
-        d="M13.500 11.500h7M17 11.500v11M13.500 22.500h7"
-        fill="none"
-        stroke="#fff"
-        strokeWidth="2.400"
-        strokeLinecap="round"
-      />
-      <path d="M10 13.500h1.800M10 16h1.100M10 18.500h1.800M10 21h1.100" stroke="#fff" strokeOpacity="0.7" strokeWidth="1" strokeLinecap="round" />
+    <svg className="app-logo" width={(size * 36) / 32} height={size} viewBox="0 0 36 32" aria-hidden="true">
+      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 4H3v24h5M28 4h5v24h-5" stroke="#0066ff" strokeWidth="2.400" />
+        <path d="M11.500 10v12M16 22v-8.500M16 16.300a2.250 2.250 0 0 1 4.500 0V22M20.500 16.300a2.250 2.250 0 0 1 4.500 0V22" stroke="#fff" strokeWidth="2.400" />
+      </g>
     </svg>
   )
 }
