@@ -53,6 +53,9 @@ export function Ruler({ orientation, offset, zoom, unit, hidden }: Props) {
     ctx.fillStyle = TEXT
     ctx.font = '9px "Segoe UI", sans-serif'
     ctx.lineWidth = 1
+    // the page is RTL, but ruler math is plain left-to-right
+    ctx.direction = 'ltr'
+    ctx.textAlign = 'left'
 
     ctx.beginPath()
     for (let k = kMin; k <= kMax; k++) {
@@ -64,8 +67,9 @@ export function Ruler({ orientation, offset, zoom, unit, hidden }: Props) {
         ctx.moveTo(pos, thickness)
         ctx.lineTo(pos, thickness - len)
       } else {
-        ctx.moveTo(thickness, pos)
-        ctx.lineTo(thickness - len, pos)
+        // the vertical ruler sits on the right in the RTL layout, so ticks grow from its left (canvas-facing) edge
+        ctx.moveTo(0, pos)
+        ctx.lineTo(len, pos)
       }
     }
     ctx.stroke()
@@ -78,7 +82,7 @@ export function Ruler({ orientation, offset, zoom, unit, hidden }: Props) {
         ctx.fillText(label, pos + 3, 10)
       } else {
         ctx.save()
-        ctx.translate(3, pos + 3)
+        ctx.translate(9, pos + 3)
         ctx.rotate(Math.PI / 2)
         ctx.fillText(label, 0, 0)
         ctx.restore()

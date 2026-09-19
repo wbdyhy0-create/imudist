@@ -12,27 +12,42 @@ export const toPt = (value: number, unit: Unit) => value * PT_PER_UNIT[unit]
 export const fromPt = (pt: number, unit: Unit) => pt / PT_PER_UNIT[unit]
 
 export const UNIT_OPTIONS: { value: Unit; label: string }[] = [
-  { value: 'px', label: 'Pixels' },
-  { value: 'cm', label: 'Centimeters' },
-  { value: 'mm', label: 'Millimeters' },
-  { value: 'in', label: 'Inches' },
+  { value: 'px', label: 'פיקסלים' },
+  { value: 'cm', label: 'סנטימטרים' },
+  { value: 'mm', label: 'מילימטרים' },
+  { value: 'in', label: 'אינצ׳ים' },
 ]
+
+/** Short form shown next to numbers in fields. */
+export const UNIT_SUFFIX: Record<Unit, string> = { px: 'px', cm: 'ס״מ', mm: 'מ״מ', in: 'אינץ׳' }
 
 export const formatNumber = (n: number) => String(parseFloat(n.toFixed(3)))
 
-export const formatLength = (pt: number, unit: Unit) => `${formatNumber(fromPt(pt, unit))} ${unit}`
+export const formatLength = (pt: number, unit: Unit) => `${formatNumber(fromPt(pt, unit))} ${UNIT_SUFFIX[unit]}`
 
-const LENGTH_RE = /^\s*([+-]?(?:\d+[.,]?\d*|[.,]\d+))\s*(px|pt|cm|mm|in|")?\s*$/i
+const LENGTH_RE = /^\s*([+-]?(?:\d+[.,]?\d*|[.,]\d+))\s*(\S*)\s*$/
 
-/** Parses "12", "12.5 mm", "1,5cm", `2"` … into points. A missing suffix means `fallbackUnit`. */
+// keys are lower-cased with quotes / geresh / gershayim / dots removed
+const SUFFIXES: Record<string, Unit | 'pt'> = {
+  px: 'px', 'פיקסל': 'px', 'פיקסלים': 'px',
+  pt: 'pt',
+  cm: 'cm', 'סמ': 'cm',
+  mm: 'mm', 'ממ': 'mm',
+  in: 'in', inch: 'in', 'אינץ': 'in', 'אינצ': 'in', 'אינצים': 'in',
+}
+
+/** Parses "12", "12.5 mm", "1,5 ס״מ", `2"` … into points. A missing suffix means `fallbackUnit`. */
 export function parseLength(text: string, fallbackUnit: Unit): number | null {
   const m = LENGTH_RE.exec(text)
   if (!m) return null
   const value = parseFloat(m[1].replace(',', '.'))
-  const suffix = (m[2] ?? '').toLowerCase()
-  if (suffix === 'pt') return value
-  const unit: Unit = suffix === '"' ? 'in' : suffix === '' ? fallbackUnit : (suffix as Unit)
-  return toPt(value, unit)
+  const raw = m[2]
+  if (raw === '"' || raw === '״' || raw === '”') return toPt(value, 'in')
+  const key = raw.toLowerCase().replace(/["'״׳”“’‘.]/g, '')
+  if (key === '') return toPt(value, fallbackUnit)
+  const unit = SUFFIXES[key]
+  if (!unit) return null
+  return unit === 'pt' ? value : toPt(value, unit)
 }
 
 export interface PagePreset {

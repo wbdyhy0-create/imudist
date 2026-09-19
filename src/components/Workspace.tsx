@@ -57,6 +57,15 @@ interface View {
   anchor: { wx: number; wy: number; sx: number; sy: number } | null
 }
 
+/**
+ * The viewport scrolls right-to-left (scrollbar on the left, like the rest of the RTL UI).
+ * All geometry math uses "distance from the left edge", so read/write the offset that way.
+ */
+const getScrollX = (el: HTMLElement) => el.scrollLeft + (el.scrollWidth - el.clientWidth)
+const setScrollX = (el: HTMLElement, x: number) => {
+  el.scrollLeft = x - (el.scrollWidth - el.clientWidth)
+}
+
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
 
@@ -64,7 +73,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
 
   const vpRef = useRef<HTMLDivElement>(null)
-  const [vp, setVp] = useState({ w: 0, h: 0 })
+  const [vp, setVp] = useState({ w: 0, h: 0, sb: 0 })
   const [scroll, setScroll] = useState({ x: 0, y: 0 })
   const [view, setView] = useState<View>({ zoom: 1, anchor: null })
   const [tool, setTool] = useState<ToolId>('select')
@@ -97,8 +106,8 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
   })
 
   // latest geometry for event handlers that outlive a render (wheel listener)
-  const live = useRef({ zoom, tx, ty })
-  live.current = { zoom, tx, ty }
+  const live = useRef({ zoom, tx, ty, sb: vp.sb })
+  live.current = { zoom, tx, ty, sb: vp.sb }
 
   // ── view control ───────────────────────────────────────────────────────────────
   const applyView = (z: number, wx: number, wy: number, sx: number, sy: number) =>
@@ -108,7 +117,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
     const el = vpRef.current
     if (!el) return
     const L = live.current
-    applyView(z, (el.scrollLeft + sx - L.tx) / L.zoom, (el.scrollTop + sy - L.ty) / L.zoom, sx, sy)
+    applyView(z, (getScrollX(el) + sx - L.tx) / L.zoom, (el.scrollTop + sy - L.ty) / L.zoom, sx, sy)
   }
   const zoomAtRef = useRef(zoomAt)
   zoomAtRef.current = zoomAt
@@ -150,7 +159,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
   // ── effects ────────────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     const el = vpRef.current!
-    const measure = () => setVp({ w: el.clientWidth, h: el.clientHeight })
+    const measure = () => setVp({ w: el.clientWidth, h: el.clientHeight, sb: el.offsetWidth - el.clientWidth })
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
@@ -162,9 +171,9 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
     const a = view.anchor
     const el = vpRef.current
     if (!a || !el) return
-    el.scrollLeft = tx + a.wx * zoom - a.sx
+    setScrollX(el, tx + a.wx * zoom - a.sx)
     el.scrollTop = ty + a.wy * zoom - a.sy
-    setScroll({ x: el.scrollLeft, y: el.scrollTop })
+    setScroll({ x: getScrollX(el), y: el.scrollTop })
   }, [view])
 
   const ready = vp.w > 0 && vp.h > 0
@@ -181,7 +190,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025))
-      zoomAtRef.current(live.current.zoom * factor, e.clientX - rect.left, e.clientY - rect.top)
+      zoomAtRef.current(live.current.zoom * factor, e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -224,7 +233,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
       setPanning(true)
     } else if (tool === 'zoom' && e.button === 0) {
       const rect = e.currentTarget.getBoundingClientRect()
-      zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left, e.clientY - rect.top)
+      zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -252,10 +261,10 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
       <div className="doc-tabs">
         <div className="doc-tab">
           <span>
-            {doc.name} @ {formatZoom(zoom)}
+            {doc.name} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
           </span>
           {onClose && (
-            <button className="doc-tab-close" aria-label="Close document" onClick={onClose}>
+            <button className="doc-tab-close" aria-label="סגור מסמך" onClick={onClose}>
               ×
             </button>
           )}
@@ -272,12 +281,12 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
           }}
         >
           <div className="ruler-corner" />
-          <Ruler orientation="h" offset={tx - scroll.x} zoom={zoom} unit={doc.unit} hidden={!showRulers} />
+          <Ruler orientation="h" offset={tx - scroll.x + vp.sb} zoom={zoom} unit={doc.unit} hidden={!showRulers} />
           <Ruler orientation="v" offset={ty - scroll.y} zoom={zoom} unit={doc.unit} hidden={!showRulers} />
           <div
             ref={vpRef}
             className={viewportClass}
-            onScroll={(e) => setScroll({ x: e.currentTarget.scrollLeft, y: e.currentTarget.scrollTop })}
+            onScroll={(e) => setScroll({ x: getScrollX(e.currentTarget), y: e.currentTarget.scrollTop })}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}

@@ -47,10 +47,10 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, min = 0, max
   return (
     <div className="num-field">
       <div className="steppers">
-        <button tabIndex={-1} aria-label="Increase" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(1, false)}>
+        <button tabIndex={-1} aria-label="הגדל" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(1, false)}>
           <svg viewBox="0 0 10 6"><path d="M1 5 5 1l4 4" fill="none" stroke="currentColor" strokeWidth="1.400" /></svg>
         </button>
-        <button tabIndex={-1} aria-label="Decrease" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(-1, false)}>
+        <button tabIndex={-1} aria-label="הקטן" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(-1, false)}>
           <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.400" /></svg>
         </button>
       </div>

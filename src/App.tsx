@@ -6,7 +6,7 @@ import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings } from './document'
 import { buildMenus, findShortcut } from './menus'
 
-const APP_NAME = 'Layout Studio'
+const APP_NAME = 'סטודיו פריסה'
 
 export default function App() {
   const [doc, setDoc] = useState<DocSettings | null>(null)
@@ -67,7 +67,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <MenuBar menus={menus} logo="Ls" />
+      <MenuBar menus={menus} logo="פ" />
       <div className="app-body">
         <div className="stage">
           {shown ? (
@@ -87,7 +87,7 @@ export default function App() {
         </div>
         {dialogOpen && (
           <NewDocumentDialog
-            initial={{ ...lastSettings, name: `Untitled-${nextName}` }}
+            initial={{ ...lastSettings, name: `ללא שם-${nextName}` }}
             onCreate={create}
             onClose={closeDialog}
             onPreview={setPreview}

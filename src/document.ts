@@ -58,10 +58,10 @@ export function defaultDocSettings(name: string): DocSettings {
 
 export function validateDoc(d: DocSettings): string | null {
   if (d.margins.left + d.margins.right >= d.width || d.margins.top + d.margins.bottom >= d.height) {
-    return 'The margins are larger than the page.'
+    return 'השוליים גדולים מהעמוד.'
   }
   if (d.gutter * (d.columns - 1) >= d.width - d.margins.left - d.margins.right) {
-    return 'The columns do not fit between the margins.'
+    return 'העמודות לא נכנסות בין השוליים.'
   }
   return null
 }

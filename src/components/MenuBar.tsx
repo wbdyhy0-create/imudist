@@ -76,7 +76,11 @@ function MenuPanel({ items, onDone, nested }: { items: MenuItem[]; onDone: () =>
           >
             <span className="menu-check">{item.checked ? '✓' : ''}</span>
             <span className="menu-text">{item.label}</span>
-            {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}
+            {item.shortcut && (
+              <span className="menu-shortcut" dir="ltr">
+                {item.shortcut}
+              </span>
+            )}
             {item.submenu && (
               <>
                 <svg className="menu-arrow" viewBox="0 0 8 12" aria-hidden="true">
