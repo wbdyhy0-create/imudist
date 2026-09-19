@@ -80,7 +80,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       ],
     },
     {
-      label: 'פריסה',
+      label: 'עמודים',
       items: [
         off('שוליים ועמודות…'),
         sep,
@@ -90,7 +90,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('עמוד אחרון', 'Ctrl+Shift+PageDown', (ws) => ws.lastPage()),
       ],
     },
-    { label: 'טקסט', items: [off('גופן'), off('גודל'), sep, off('יצירת קווי מתאר', 'Ctrl+Shift+O')] },
+    { label: 'טיפוגרפיה', items: [off('גופן'), off('גודל'), sep, off('יצירת קווי מתאר', 'Ctrl+Shift+O')] },
     { label: 'אובייקט', items: [off('שינוי צורה'), off('סדר'), sep, off('קבץ', 'Ctrl+G'), off('בטל קיבוץ', 'Ctrl+Shift+G')] },
     { label: 'טבלה', items: [off('הוספת טבלה…', 'Ctrl+Alt+Shift+T')] },
     {
@@ -106,7 +106,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'קווי עזר', shortcut: 'Ctrl+;', checked: c.showGuides, onClick: c.toggleGuides },
       ],
     },
-    { label: 'חלון', items: [off('כלים'), off('עמודים', 'F12'), off('מאפיינים')] },
+    { label: 'חלון', items: [off('כלים'), off('לוח עמודים', 'F12'), off('מאפיינים')] },
     { label: 'עזרה', items: [off('אודות')] },
   ]
 }

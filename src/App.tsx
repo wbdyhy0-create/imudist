@@ -67,7 +67,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <MenuBar menus={menus} logo="Im" />
+      <MenuBar menus={menus} />
       <div className="app-body">
         <div className="stage">
           {shown ? (

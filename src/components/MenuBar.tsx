@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AppLogo } from './AppLogo'
 
 export interface MenuItem {
   label?: string
@@ -15,7 +16,7 @@ export interface MenuDef {
   items: MenuItem[]
 }
 
-export function MenuBar({ menus, logo }: { menus: MenuDef[]; logo: string }) {
+export function MenuBar({ menus }: { menus: MenuDef[] }) {
   const [open, setOpen] = useState<number | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -37,9 +38,7 @@ export function MenuBar({ menus, logo }: { menus: MenuDef[]; logo: string }) {
 
   return (
     <div className="menubar" ref={ref}>
-      <div className="app-logo" aria-hidden="true">
-        {logo}
-      </div>
+      <AppLogo size={22} />
       {menus.map((menu, i) => (
         <div key={menu.label} className="menu-root">
           <button
