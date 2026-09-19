@@ -6,7 +6,7 @@ import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings } from './document'
 import { buildMenus, findShortcut } from './menus'
 
-const APP_NAME = 'סטודיו פריסה'
+const APP_NAME = 'Imudist'
 
 export default function App() {
   const [doc, setDoc] = useState<DocSettings | null>(null)
@@ -67,7 +67,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <MenuBar menus={menus} logo="פ" />
+      <MenuBar menus={menus} logo="Im" />
       <div className="app-body">
         <div className="stage">
           {shown ? (
