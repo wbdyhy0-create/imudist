@@ -9,6 +9,7 @@ import {
   type Ref,
 } from 'react'
 import type { DocSettings } from '../document'
+import { isTyping } from '../dom'
 import { computeLayout } from '../layout'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
@@ -47,6 +48,9 @@ interface Props {
   fitKey: string
   showRulers: boolean
   showGuides: boolean
+  /** screen mode "Preview": no guides or frame edges, the page as it will print */
+  previewMode: boolean
+  onPreviewMode: (on: boolean) => void
   onClose?: () => void
   ref?: Ref<WorkspaceHandle>
 }
@@ -66,10 +70,7 @@ const setScrollX = (el: HTMLElement, x: number) => {
   el.scrollLeft = x - (el.scrollWidth - el.clientWidth)
 }
 
-const isTyping = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-
-export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }: Props) {
+export function Workspace({ doc, fitKey, showRulers, showGuides, previewMode, onPreviewMode, onClose, ref }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
 
   const vpRef = useRef<HTMLDivElement>(null)
@@ -254,7 +255,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
   })
 
   const viewportClass =
-    'viewport' + (panning ? ' panning' : panMode ? ' pan' : tool === 'zoom' ? ' zoomtool' : '')
+    'viewport' + (previewMode ? ' preview' : '') + (panning ? ' panning' : panMode ? ' pan' : tool === 'zoom' ? ' zoomtool' : '')
 
   return (
     <div className="workspace">
@@ -272,7 +273,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
       </div>
 
       <div className="ws-main">
-        <Toolbox tool={space ? 'hand' : tool} onSelect={setTool} />
+        <Toolbox tool={space ? 'hand' : tool} onSelect={setTool} previewMode={previewMode} onPreviewMode={onPreviewMode} />
         <div
           className="ws-center"
           style={{
@@ -295,7 +296,7 @@ export function Workspace({ doc, fitKey, showRulers, showGuides, onClose, ref }:
             <div className="sheet" style={{ width: sheetW, height: sheetH }}>
               <svg width={sheetW} height={sheetH}>
                 {visible.map((s) => (
-                  <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides} />
+                  <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
             </div>

@@ -38,7 +38,14 @@ export const TOOLS: ToolDef[] = [
   { id: 'zoom', label: 'זום', key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
 ]
 
-export function Toolbox({ tool, onSelect }: { tool: ToolId; onSelect: (id: ToolId) => void }) {
+interface ToolboxProps {
+  tool: ToolId
+  onSelect: (id: ToolId) => void
+  previewMode: boolean
+  onPreviewMode: (on: boolean) => void
+}
+
+export function Toolbox({ tool, onSelect, previewMode, onPreviewMode }: ToolboxProps) {
   return (
     <div className="toolbox" role="toolbar" aria-orientation="vertical" aria-label="כלים">
       {TOOLS.map((t) => (
@@ -58,6 +65,29 @@ export function Toolbox({ tool, onSelect }: { tool: ToolId; onSelect: (id: ToolI
       <div className="swatches" aria-hidden="true">
         <span className="swatch-fill" />
         <span className="swatch-stroke" />
+      </div>
+      <div className="screen-modes" role="group" aria-label="מצב מסך">
+        <button
+          className={'tool' + (!previewMode ? ' active' : '')}
+          title="מצב רגיל (W)"
+          aria-pressed={!previewMode}
+          onClick={() => onPreviewMode(false)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round">
+            <path d="M5 5h14v14H5z" strokeDasharray="2.500 2" />
+            <path d="M9 3v18M15 3v18" strokeWidth="1" />
+          </svg>
+        </button>
+        <button
+          className={'tool' + (previewMode ? ' active' : '')}
+          title="מצב תצוגה מקדימה (W)"
+          aria-pressed={previewMode}
+          onClick={() => onPreviewMode(true)}
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <rect x="5" y="4" width="14" height="16" rx="1" />
+          </svg>
+        </button>
       </div>
     </div>
   )

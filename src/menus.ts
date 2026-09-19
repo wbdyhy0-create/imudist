@@ -7,6 +7,8 @@ export interface MenuContext {
   ws: RefObject<WorkspaceHandle | null>
   showRulers: boolean
   showGuides: boolean
+  previewMode: boolean
+  setPreviewMode: (on: boolean) => void
   newDocument: () => void
   closeDocument: () => void
   toggleRulers: () => void
@@ -104,6 +106,15 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         { label: 'סרגלים', shortcut: 'Ctrl+R', checked: c.showRulers, onClick: c.toggleRulers },
         { label: 'קווי עזר', shortcut: 'Ctrl+;', checked: c.showGuides, onClick: c.toggleGuides },
+        sep,
+        {
+          label: 'מצב מסך',
+          submenu: [
+            { label: 'רגיל', checked: !c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(false) },
+            // W flips between the two modes, like in InDesign
+            { label: 'תצוגה מקדימה', shortcut: 'W', checked: c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(!c.previewMode) },
+          ],
+        },
       ],
     },
     { label: 'חלון', items: [off('כלים'), off('לוח עמודים', 'F12'), off('מאפיינים')] },

@@ -4,6 +4,7 @@ import { MenuBar } from './components/MenuBar'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings } from './document'
+import { isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 
 const APP_NAME = 'Imudist'
@@ -18,6 +19,7 @@ export default function App() {
   const [preview, setPreview] = useState<DocSettings | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
+  const [previewMode, setPreviewMode] = useState(false)
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
@@ -29,16 +31,20 @@ export default function App() {
         ws,
         showRulers,
         showGuides,
+        previewMode,
+        setPreviewMode,
         newDocument: () => setDialogOpen(true),
         closeDocument: () => setDoc(null),
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
-    [shown, showRulers, showGuides],
+    [shown, showRulers, showGuides, previewMode],
   )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // single-key shortcuts (like W) must not fire while typing in a field
+      if (isTyping(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey) return
       const item = findShortcut(menus, e)
       if (!item) return
       e.preventDefault()
@@ -78,6 +84,8 @@ export default function App() {
               fitKey={fitKey}
               showRulers={showRulers}
               showGuides={showGuides}
+              previewMode={previewMode}
+              onPreviewMode={setPreviewMode}
               onClose={preview ? undefined : () => setDoc(null)}
             />
           ) : (
