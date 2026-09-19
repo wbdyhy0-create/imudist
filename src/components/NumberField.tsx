@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { formatLength, fromPt, parseLength, toPt, type Unit } from '../units'
+import { formatLength, formatNumber, fromPt, parseLength, toPt, type Unit } from '../units'
 
 interface Props {
   id?: string
@@ -8,16 +8,22 @@ interface Props {
   value: number
   onChange: (value: number) => void
   unit?: Unit
+  /** replaces the unit's short name in the display (e.g. "pt" for font sizes, which are px == pt) */
+  unitLabel?: string
   min?: number
   max?: number
 }
 
 const STEP: Record<Unit, number> = { px: 1, mm: 1, cm: 0.1, in: 0.1 }
 
-export function NumberField({ id, ariaLabel, value, onChange, unit, min = 0, max = Infinity }: Props) {
+export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, min = 0, max = Infinity }: Props) {
   // non-null while the user is typing
   const [text, setText] = useState<string | null>(null)
-  const display = unit ? formatLength(value, unit) : String(value)
+  const display = unit
+    ? unitLabel
+      ? `${formatNumber(fromPt(value, unit))} ${unitLabel}`
+      : formatLength(value, unit)
+    : String(value)
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
 

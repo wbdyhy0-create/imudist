@@ -199,16 +199,55 @@ svg { display: block; }
 
 .viewport { direction: rtl; position: relative; overflow: auto; background: var(--pasteboard); min-width: 0; min-height: 0; }
 .viewport.preview { background: #0d0909; }
-.viewport.texttool { cursor: crosshair; }
-.text-frame { position: absolute; box-sizing: border-box; color: #111; font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.25; }
+.viewport.texttool, .viewport.linking { cursor: crosshair; }
+.viewport.texttool .text-frame { cursor: text; }
+.viewport.selecttool .text-frame { cursor: move; }
+.viewport.linking .text-frame { cursor: copy; }
+.text-frame { position: absolute; box-sizing: border-box; color: #111; line-height: 1.25; text-rendering: geometricPrecision; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
 .text-frame-body { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .text-frame textarea {
   display: block; width: 100%; height: 100%; margin: 0; padding: 0; resize: none; overflow: hidden; border: 0; outline: 0;
-  background: transparent; color: inherit; font: inherit; line-height: inherit; user-select: text; white-space: pre-wrap;
+  background: transparent; color: inherit; font: inherit; line-height: inherit; text-align: inherit; user-select: text;
+  white-space: pre-wrap; overflow-wrap: anywhere; text-rendering: inherit;
 }
-.text-frame-draft { position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }.viewport.pan { cursor: grab; }
+.text-frame-draft { position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }
+.handle { position: absolute; z-index: 2; width: 7px; height: 7px; box-sizing: border-box; background: #fff; border: 1px solid #ffb02e; }
+.handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
+.handle.n { left: calc(50% - 4px); top: -4px; cursor: ns-resize; }
+.handle.ne { right: -4px; top: -4px; cursor: nesw-resize; }
+.handle.e { right: -4px; top: calc(50% - 4px); cursor: ew-resize; }
+.handle.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.handle.s { left: calc(50% - 4px); bottom: -4px; cursor: ns-resize; }
+.handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+.handle.w { left: -4px; top: calc(50% - 4px); cursor: ew-resize; }
+.port {
+  position: absolute; z-index: 2; width: 12px; height: 12px; box-sizing: border-box; display: grid; place-items: center;
+  background: #fff; border: 1px solid #ffb02e; color: #111; font: 700 11px/1 'Segoe UI', sans-serif; cursor: pointer;
+}
+.port-in { right: -14px; top: -1px; }
+.port-out { left: -14px; bottom: -1px; }
+.port.linked { background: #ffb02e; }
+.port.overflow { background: #e5484d; border-color: #e5484d; color: #fff; }
+.port.armed { background: var(--accent); border-color: #fff; }
+.thread-layer { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.thread-line { stroke: #ffb02e; stroke-width: 1.3; stroke-dasharray: 4 3; }
+
+/* ── properties panel ─────────────────────────────────────── */
+.props-panel { width: 250px; flex: none; overflow-y: auto; padding: 12px 14px 20px; background: var(--bg-panel); border-inline-start: 1px solid var(--line); }
+.props-title { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.props-group { padding: 10px 0 4px; border-top: 1px solid var(--border); }
+.props-group h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.props-group .grid2 { margin-top: 0; margin-bottom: 10px; }
+.props-group > .field { margin-bottom: 10px; }
+.props-warning { margin: 0 0 8px; padding: 6px 8px; border-radius: 4px; background: rgba(229, 72, 77, 0.16); color: var(--danger); }
+.props-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.props-panel .muted { margin: 0 0 8px; }
+.btn.small { height: 26px; padding: 0 12px; font-size: 12px; }
+.glyph { font: 700 14px/1 'Segoe UI', sans-serif; }
+.toggle-group i.glyph { font-weight: 400; }
+.viewport.pan { cursor: grab; }
 .viewport.panning { cursor: grabbing; }
 .viewport.zoomtool { cursor: zoom-in; }
 .sheet { position: relative; direction: ltr; }

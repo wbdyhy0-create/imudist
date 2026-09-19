@@ -29,18 +29,42 @@ export interface DocSettings {
   slug: Sides
 }
 
-/** A text frame. Position and size are in world points (see layout.ts), so frames may also sit on the pasteboard. */
-export interface TextFrame {
+export type TextAlign = 'right' | 'center' | 'left' | 'justify'
+
+/** Character/paragraph formatting. It applies to a whole story (all frames linked together). */
+export interface TextStyle {
+  fontFamily: string
+  /** points */
+  fontSize: number
+  /** physical alignment; Hebrew text normally sits on the right */
+  align: TextAlign
+  bold: boolean
+  italic: boolean
+}
+
+export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, align: 'right', bold: false, italic: false }
+
+/** Fonts with Hebrew glyphs that ship with Windows; a missing one silently falls back to the default. */
+export const FONT_FAMILIES = [
+  'Segoe UI', 'Arial', 'Tahoma', 'Calibri', 'Gisha', 'David', 'Miriam', 'FrankRuehl', 'Narkisim', 'Times New Roman', 'Courier New',
+]
+
+export const LINE_HEIGHT = 1.25
+
+/**
+ * A text frame. Position and size are in world points (see layout.ts), so frames may also sit on the pasteboard.
+ * Frames can be threaded: `next` is the frame the text continues into. The whole story's text (and style)
+ * lives in the first frame of the chain; the other frames only display their share of it.
+ */
+export interface TextFrame extends TextStyle {
   id: string
   x: number
   y: number
   w: number
   h: number
   text: string
+  next: string | null
 }
-
-/** Default text size, points (no type panel yet). */
-export const DEFAULT_FONT_PT = 14
 
 export const MIN_PAGE_PT = 1
 export const MAX_PAGE_PT = 16384

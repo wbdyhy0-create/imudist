@@ -8,13 +8,16 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import type { DocSettings, TextFrame } from '../document'
+import { DEFAULT_TEXT_STYLE, type DocSettings, type TextFrame, type TextStyle } from '../document'
 import { isTyping } from '../dom'
+import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import { computeLayout } from '../layout'
+import { flowFrames } from '../textLayout'
+import { PropertiesPanel } from './PropertiesPanel'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
-import { TextFrameView } from './TextFrameView'
+import { TextFrameView, type CaretRequest } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
 
 /** pasteboard around the pages, screen px */
@@ -49,6 +52,7 @@ interface Props {
   fitKey: string
   showRulers: boolean
   showGuides: boolean
+  showProps: boolean
   /** screen mode "Preview": no guides or frame edges, the page as it will print */
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
@@ -58,7 +62,7 @@ interface Props {
   ref?: Ref<WorkspaceHandle>
 }
 
-/** Smallest dragged rectangle (points) that becomes a text frame — a plain click creates nothing. */
+/** Smallest frame (points): a smaller drag creates nothing, and frames can't be resized below it. */
 const MIN_FRAME_PT = 6
 
 const newFrameId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
@@ -78,11 +82,32 @@ const setScrollX = (el: HTMLElement, x: number) => {
   el.scrollLeft = x - (el.scrollWidth - el.clientWidth)
 }
 
+/** Character offset inside the frame's text under a screen point, or null if the point isn't over its text. */
+function caretOffsetAt(x: number, y: number, frameEl: HTMLElement): number | null {
+  const body = frameEl.querySelector('.text-frame-body')
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+  }
+  let node: Node | null = null
+  let offset = 0
+  if (doc.caretPositionFromPoint) {
+    const p = doc.caretPositionFromPoint(x, y)
+    if (p) [node, offset] = [p.offsetNode, p.offset]
+  } else if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y)
+    if (r) [node, offset] = [r.startContainer, r.startOffset]
+  }
+  if (!body || !node || !body.contains(node)) return null
+  // the text of a frame is a single text node; if the point hit the element itself, offset counts child nodes
+  return node.nodeType === Node.TEXT_NODE ? offset : offset > 0 ? (body.textContent ?? '').length : 0
+}
+
 export function Workspace({
   doc,
   fitKey,
   showRulers,
   showGuides,
+  showProps,
   previewMode,
   onPreviewMode,
   frames,
@@ -91,6 +116,7 @@ export function Workspace({
   ref,
 }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
+  const flow = useMemo(() => flowFrames(frames), [frames])
 
   const vpRef = useRef<HTMLDivElement>(null)
   const [vp, setVp] = useState({ w: 0, h: 0, sb: 0 })
@@ -102,9 +128,15 @@ export function Workspace({
   const drag = useRef<{ x: number; y: number } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  /** an out-port was clicked: the next click on a frame continues the text there */
+  const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  const [caret, setCaret] = useState<(CaretRequest & { frameId: string }) | null>(null)
+  const caretToken = useRef(0)
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
+  /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box } | null>(null)
 
   const zoom = view.zoom
 
@@ -247,24 +279,84 @@ export function Workspace({
     }
   }, [])
 
-  // Delete removes the selected text frame, Escape deselects
+  // ── text frames: editing helpers ───────────────────────────────────────────────
+  const updateFrame = (id: string, patch: Partial<TextFrame>) =>
+    onFramesChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)))
+
+  /** style belongs to the whole story, so it is applied to every frame of the chain */
+  const updateStyle = (id: string, patch: Partial<TextStyle>) => {
+    const ids = new Set(chainOf(frames, id).map((f) => f.id))
+    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)))
+  }
+
+  /**
+   * Store a story's new text. `abs` is where the caret is, as an offset into the new story. The text may have
+   * reflowed, so the caret (and the editing focus) moves to whichever frame now contains that offset.
+   */
+  const applyStory = (headId: string, newStory: string, abs: number) => {
+    const next = frames.map((f) => (f.id === headId ? { ...f, text: newStory } : f))
+    const nf = flowFrames(next)
+    const chain = chainOf(next, headId)
+    const target =
+      chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= newStory.length) ?? chain[chain.length - 1]
+    const tf = nf.get(target.id)!
+    caretToken.current += 1
+    setCaret({ frameId: target.id, pos: Math.max(0, Math.min(abs - tf.start, tf.slice.length)), token: caretToken.current })
+    setEditingId(target.id)
+    setSelectedId(target.id)
+    onFramesChange(next)
+  }
+
+  const handleChange = (frameId: string, newSlice: string, caretPos: number) => {
+    const fl = flow.get(frameId)
+    if (fl) applyStory(fl.headId, fl.story.slice(0, fl.start) + newSlice + fl.story.slice(fl.end), fl.start + caretPos)
+  }
+
+  /** Backspace at the very start of a threaded frame deletes the last character of the previous frame */
+  const backspaceAtStart = (frameId: string) => {
+    const fl = flow.get(frameId)
+    if (fl && fl.start > 0) applyStory(fl.headId, fl.story.slice(0, fl.start - 1) + fl.story.slice(fl.start), fl.start - 1)
+  }
+
+  const completeLink = (toId: string) => {
+    if (linkFrom) {
+      const linked = linkFrames(frames, linkFrom, toId)
+      if (linked) {
+        onFramesChange(linked)
+        setSelectedId(toId)
+      }
+    }
+    setLinkFrom(null)
+  }
+
+  // Delete removes the selected frame, arrows nudge it (Shift = 10 pt), Escape deselects / cancels linking
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedId && !linkFrom) return
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === 'Escape') {
+        if (linkFrom) setLinkFrom(null)
+        else setSelectedId(null)
+      } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
-        onFramesChange(frames.filter((f) => f.id !== selectedId))
+        onFramesChange(removeFrame(frames, selectedId))
         setSelectedId(null)
-      } else if (e.key === 'Escape') {
-        setSelectedId(null)
+      } else if (selectedId && e.key.startsWith('Arrow')) {
+        const f = frames.find((x) => x.id === selectedId)
+        if (!f) return
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        updateFrame(f.id, {
+          x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
+          y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
+        })
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, frames, onFramesChange])
+  }, [selectedId, linkFrom, frames, onFramesChange])
 
-  // ── pointer: pan (Hand tool / Space / middle button), Zoom tool, Type tool ──────
+  // ── pointer: pan (Hand tool / Space / middle button), Zoom, Type and Selection tools ──
   /** client (mouse) position → world points */
   const toWorld = (clientX: number, clientY: number) => {
     const el = vpRef.current!
@@ -276,9 +368,20 @@ export function Workspace({
     }
   }
 
+  const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
+    const f = frames.find((x) => x.id === id)
+    if (!f) return
+    frameDrag.current = { id, mode, start: toWorld(e.clientX, e.clientY), orig: { x: f.x, y: f.y, w: f.w, h: f.h } }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) return // scrollbars
+    if (linkFrom && !panMode) {
+      setLinkFrom(null) // clicked away from any frame
+      return
+    }
     if (panMode || e.button === 1) {
       e.preventDefault()
       drag.current = { x: e.clientX, y: e.clientY }
@@ -301,6 +404,13 @@ export function Workspace({
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (frameDrag.current) {
+      const d = frameDrag.current
+      const p = toWorld(e.clientX, e.clientY)
+      const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT)
+      onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)))
+      return
+    }
     if (createStart.current) {
       const p = toWorld(e.clientX, e.clientY)
       setDraft({ x0: createStart.current.x, y0: createStart.current.y, x1: p.x, y1: p.y })
@@ -316,7 +426,16 @@ export function Workspace({
       const w = Math.abs(draft.x1 - draft.x0)
       const h = Math.abs(draft.y1 - draft.y0)
       if (w >= MIN_FRAME_PT && h >= MIN_FRAME_PT) {
-        const frame: TextFrame = { id: newFrameId(), x: Math.min(draft.x0, draft.x1), y: Math.min(draft.y0, draft.y1), w, h, text: '' }
+        const frame: TextFrame = {
+          ...DEFAULT_TEXT_STYLE,
+          id: newFrameId(),
+          x: Math.min(draft.x0, draft.x1),
+          y: Math.min(draft.y0, draft.y1),
+          w,
+          h,
+          text: '',
+          next: null,
+        }
         onFramesChange([...frames, frame])
         setSelectedId(frame.id)
         setEditingId(frame.id) // ready to type right away
@@ -327,26 +446,72 @@ export function Workspace({
   }
   const endDrag = () => {
     finishDraft()
+    frameDrag.current = null
     drag.current = null
     setPanning(false)
   }
   const cancelDrag = () => {
     createStart.current = null
+    frameDrag.current = null
     setDraft(null)
     drag.current = null
     setPanning(false)
   }
 
-  /** clicking an existing frame: the Type tool edits its text, the Selection tool selects it */
+  /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || (tool !== 'type' && tool !== 'select') || panMode) return // let the pan / zoom handlers see it
+    if (e.button !== 0 || panMode) return // let the pan handler see it
+    if (linkFrom) {
+      e.stopPropagation()
+      e.preventDefault()
+      completeLink(id)
+      return
+    }
+    if (tool !== 'type' && tool !== 'select') return
     e.stopPropagation()
-    // Entering edit mode swaps the clicked <div> for a <textarea>; without this the browser's own
-    // focus handling (which runs after this handler) would move focus away and end editing at once.
-    // While already editing we must not prevent it, or the caret could not be placed by clicking.
-    if (tool === 'type' && editingId !== id) e.preventDefault()
+    if (tool === 'type') {
+      // Entering edit mode swaps the clicked <div> for a <textarea>; without this the browser's own
+      // focus handling (which runs after this handler) would move focus away and end editing at once.
+      // While already editing we must not prevent it, or the caret could not be placed by clicking.
+      if (editingId !== id) {
+        e.preventDefault()
+        // put the caret where the user clicked (the text is about to move from a <div> into a <textarea>)
+        const pos = caretOffsetAt(e.clientX, e.clientY, e.currentTarget)
+        if (pos !== null) {
+          caretToken.current += 1
+          setCaret({ frameId: id, pos, token: caretToken.current })
+        }
+      }
+      setSelectedId(id)
+      setEditingId(id)
+    } else {
+      e.preventDefault()
+      setSelectedId(id)
+      setEditingId(null)
+      beginFrameDrag(e, id, 'move')
+    }
+  }
+  const onHandleDown = (id: string) => (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    e.stopPropagation()
+    e.preventDefault()
     setSelectedId(id)
-    setEditingId(tool === 'type' ? id : null)
+    beginFrameDrag(e, id, handle)
+  }
+  const onOutPortDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (linkFrom && linkFrom !== id) return completeLink(id)
+    const f = frames.find((x) => x.id === id)
+    setSelectedId(id)
+    if (linkFrom === id) setLinkFrom(null)
+    else if (f && !f.next) setLinkFrom(id)
+  }
+  const onInPortDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (linkFrom) return completeLink(id)
+    if (frames.some((f) => f.next === id)) onFramesChange(unlinkBefore(frames, id))
   }
 
   // only mount what is (nearly) on screen — documents can have thousands of pages
@@ -358,7 +523,31 @@ export function Workspace({
   const viewportClass =
     'viewport' +
     (previewMode ? ' preview' : '') +
-    (panning ? ' panning' : panMode ? ' pan' : tool === 'zoom' ? ' zoomtool' : tool === 'type' ? ' texttool' : '')
+    (panning
+      ? ' panning'
+      : panMode
+        ? ' pan'
+        : linkFrom
+          ? ' linking'
+          : tool === 'zoom'
+            ? ' zoomtool'
+            : tool === 'type'
+              ? ' texttool'
+              : tool === 'select'
+                ? ' selecttool'
+                : '')
+
+  // ── selection info for the properties panel and the thread lines ────────────────
+  const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
+  const selChain = selFrame ? chainOf(frames, selFrame.id) : []
+  const threadInfo = selFrame
+    ? {
+        index: selChain.findIndex((f) => f.id === selFrame.id),
+        count: selChain.length,
+        overflow: !!flow.get(selChain[selChain.length - 1].id)?.overflow,
+      }
+    : null
+  const threadPairs = selChain.slice(1).map((b, i) => [selChain[i], b] as const)
 
   return (
     <div className="workspace">
@@ -402,21 +591,61 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
-              {frames.map((f) => (
-                <TextFrameView
-                  key={f.id}
-                  frame={f}
-                  zoom={zoom}
-                  tx={tx}
-                  ty={ty}
-                  selected={f.id === selectedId}
-                  editing={f.id === editingId}
-                  showEdge={!previewMode}
-                  onPointerDown={onFramePointerDown(f.id)}
-                  onChange={(text) => onFramesChange(frames.map((x) => (x.id === f.id ? { ...x, text } : x)))}
-                  onStopEditing={() => setEditingId((cur) => (cur === f.id ? null : cur))}
-                />
-              ))}
+              {frames.map((f) => {
+                const fl = flow.get(f.id)
+                if (!fl) return null
+                return (
+                  <TextFrameView
+                    key={f.id}
+                    frame={f}
+                    style={fl.style}
+                    slice={fl.slice}
+                    overflow={fl.overflow}
+                    hasPrev={fl.prevId !== null}
+                    zoom={zoom}
+                    tx={tx}
+                    ty={ty}
+                    selected={f.id === selectedId}
+                    editing={f.id === editingId}
+                    armed={f.id === linkFrom}
+                    showEdge={!previewMode}
+                    caret={caret && caret.frameId === f.id ? caret : null}
+                    onPointerDown={onFramePointerDown(f.id)}
+                    onDoubleClick={() => {
+                      if (!panMode) {
+                        setSelectedId(f.id)
+                        setEditingId(f.id)
+                      }
+                    }}
+                    onHandleDown={onHandleDown(f.id)}
+                    onOutPortDown={onOutPortDown(f.id)}
+                    onInPortDown={onInPortDown(f.id)}
+                    onChange={(slice, pos) => handleChange(f.id, slice, pos)}
+                    onBackspaceAtStart={() => backspaceAtStart(f.id)}
+                    onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}
+                  />
+                )
+              })}
+              {!previewMode && threadPairs.length > 0 && (
+                <svg className="thread-layer" width={sheetW} height={sheetH} aria-hidden="true">
+                  <defs>
+                    <marker id="thread-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                      <path d="M0 0 8 4 0 8z" fill="#ffb02e" />
+                    </marker>
+                  </defs>
+                  {threadPairs.map(([a, b]) => (
+                    <line
+                      key={a.id}
+                      className="thread-line"
+                      markerEnd="url(#thread-arrow)"
+                      x1={tx + a.x * zoom - 8}
+                      y1={ty + (a.y + a.h) * zoom - 5}
+                      x2={tx + (b.x + b.w) * zoom + 8}
+                      y2={ty + b.y * zoom + 5}
+                    />
+                  ))}
+                </svg>
+              )}
               {draft && (
                 <div
                   className="text-frame-draft"
@@ -431,6 +660,18 @@ export function Workspace({
             </div>
           </div>
         </div>
+        {showProps && (
+          <PropertiesPanel
+            frame={selFrame}
+            style={selFrame ? (flow.get(selFrame.id)?.style ?? null) : null}
+            unit={doc.unit}
+            thread={threadInfo}
+            onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch)}
+            onStyle={(patch) => selFrame && updateStyle(selFrame.id, patch)}
+            onLink={() => selFrame && setLinkFrom(selFrame.id)}
+            onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
+          />
+        )}
       </div>
 
       <StatusBar

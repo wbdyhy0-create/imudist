@@ -22,6 +22,7 @@ export default function App() {
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [previewMode, setPreviewMode] = useState(false)
+  const [showProps, setShowProps] = useState(true)
   /** text frames of the open document (kept here so they survive the New Document panel's live preview) */
   const [frames, setFrames] = useState<TextFrame[]>(NO_FRAMES)
   const ws = useRef<WorkspaceHandle>(null)
@@ -37,6 +38,8 @@ export default function App() {
         showGuides,
         previewMode,
         setPreviewMode,
+        showProps,
+        toggleProps: () => setShowProps((v) => !v),
         newDocument: () => setDialogOpen(true),
         closeDocument: () => {
           setDoc(null)
@@ -45,7 +48,7 @@ export default function App() {
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
-    [shown, showRulers, showGuides, previewMode],
+    [shown, showRulers, showGuides, previewMode, showProps],
   )
 
   useEffect(() => {
@@ -92,6 +95,7 @@ export default function App() {
               fitKey={fitKey}
               showRulers={showRulers}
               showGuides={showGuides}
+              showProps={showProps}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
               frames={preview ? NO_FRAMES : frames}

@@ -9,6 +9,8 @@ export interface MenuContext {
   showGuides: boolean
   previewMode: boolean
   setPreviewMode: (on: boolean) => void
+  showProps: boolean
+  toggleProps: () => void
   newDocument: () => void
   closeDocument: () => void
   toggleRulers: () => void
@@ -117,7 +119,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
       ],
     },
-    { label: 'חלון', items: [off('כלים'), off('לוח עמודים', 'F12'), off('מאפיינים')] },
+    { label: 'חלון', items: [off('כלים'), off('לוח עמודים', 'F12'), { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps }] },
     { label: 'עזרה', items: [off('אודות')] },
   ]
 }
