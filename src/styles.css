@@ -186,11 +186,12 @@ svg { display: block; }
 .tool.active { background: var(--accent); color: #fff; }
 .tool.off { color: #808080; cursor: default; }
 .tool.off:hover { background: none; }
+.tool-sep { width: 22px; height: 1px; margin: 4px 0; background: var(--line); flex: none; }
+.swatches { display: flex; flex-direction: column; align-items: center; gap: 7px; margin-top: 12px; flex: none; }
+.swatch-fill, .swatch-stroke { display: block; width: 18px; height: 18px; border-radius: 50%; }
+.swatch-fill { background: #fff; box-shadow: 0 0 0 1px var(--border-strong); }
+.swatch-stroke { border: 4px solid #fff; box-shadow: 0 0 0 1px var(--border-strong); }
 .screen-modes { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
-.swatches { position: relative; width: 32px; height: 40px; margin-top: 12px; flex: none; }
-.swatch-fill, .swatch-stroke { position: absolute; width: 18px; height: 18px; }
-.swatch-fill { left: 2px; top: 2px; background: #fff; border: 1px solid #999; background-image: linear-gradient(to top right, transparent 46%, #e02020 46%, #e02020 54%, transparent 54%); }
-.swatch-stroke { left: 11px; top: 11px; background: var(--bg-base); border: 5px solid #f4f4f4; }
 
 .ws-center { flex: 1; min-width: 0; display: grid; }
 .ruler-corner { background: var(--bg-raised); }
