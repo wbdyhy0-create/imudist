@@ -82,9 +82,11 @@ export function Toolbox({ tool, onSelect, previewMode, onPreviewMode }: ToolboxP
           aria-pressed={!previewMode}
           onClick={() => onPreviewMode(false)}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round">
-            <path d="M5 5h14v14H5z" strokeDasharray="2.500 2" />
-            <path d="M9 3v18M15 3v18" strokeWidth="1" />
+          {/* monitor with guide lines: the working view */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4.500" width="18" height="12" rx="1.500" />
+            <path d="M9 20h6M12 16.500V20" />
+            <path d="M6.500 8.500h11M6.500 12.500h11" strokeWidth="1" strokeDasharray="2 2" />
           </svg>
         </button>
         <button
@@ -93,8 +95,10 @@ export function Toolbox({ tool, onSelect, previewMode, onPreviewMode }: ToolboxP
           aria-pressed={previewMode}
           onClick={() => onPreviewMode(true)}
         >
-          <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-            <rect x="5" y="4" width="14" height="16" rx="1" />
+          {/* eye: the page as it will be seen */}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2.500 12S6 5.500 12 5.500 21.500 12 21.500 12 18 18.500 12 18.500 2.500 12 2.500 12z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
         </button>
       </div>
