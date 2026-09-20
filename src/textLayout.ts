@@ -1,17 +1,21 @@
-import { LINE_HEIGHT, type TextFrame, type TextStyle } from './document'
+import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from './document'
 import { chainOf, styleOf } from './frames'
+import { buildRunNodes } from './richtext'
+import { normalizeRuns, sliceRuns } from './story'
 
 /** What one frame shows of its story. */
 export interface FrameFlow {
   headId: string
   prevId: string | null
-  /** style of the whole story (taken from its first frame) */
+  /** default style + alignment of the whole story (taken from its first frame) */
   style: TextStyle
   story: string
   /** [start, end) of this frame's share of `story`; the shares of a chain are contiguous */
   start: number
   end: number
   slice: string
+  /** style runs of the slice (they cover exactly `slice`) */
+  runs: Run[]
   /** true on the last frame of a story when some text does not fit anywhere */
   overflow: boolean
 }
@@ -47,12 +51,12 @@ function getMeasurer(): HTMLDivElement {
 const isSpace = (c: string) => /\s/.test(c)
 
 /** End index of the largest part of `story` starting at `start` that fits into the frame's height. */
-function fitEnd(m: HTMLDivElement, story: string, start: number, f: TextFrame): number {
+function fitEnd(m: HTMLDivElement, story: string, runs: Run[], start: number, f: TextFrame): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${f.w}px`
   const fits = (end: number) => {
-    m.textContent = story.slice(start, end)
+    m.replaceChildren(buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1))
     return m.getBoundingClientRect().height <= f.h + 0.5
   }
   if (fits(len)) return len
@@ -90,16 +94,15 @@ export function flowFrames(frames: TextFrame[]): Map<string, FrameFlow> {
     const chain = chainOf(frames, head.id)
     const style = styleOf(head)
     const story = head.text
+    const runs = normalizeRuns(story, head.runs, style)
 
     const m = getMeasurer()
     m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
     m.style.fontSize = `${style.fontSize}px`
-    m.style.fontWeight = style.bold ? '700' : '400'
-    m.style.fontStyle = style.italic ? 'italic' : 'normal'
 
     let start = 0
     chain.forEach((f, i) => {
-      const end = fitEnd(m, story, start, f)
+      const end = fitEnd(m, story, runs, start, f)
       result.set(f.id, {
         headId: head.id,
         prevId: i > 0 ? chain[i - 1].id : null,
@@ -108,6 +111,7 @@ export function flowFrames(frames: TextFrame[]): Map<string, FrameFlow> {
         start,
         end,
         slice: story.slice(start, end),
+        runs: sliceRuns(runs, start, end),
         overflow: i === chain.length - 1 && end < story.length,
       })
       start = end

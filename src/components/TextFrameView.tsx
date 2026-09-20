@@ -1,19 +1,17 @@
-import { useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
-import type { TextFrame, TextStyle } from '../document'
+import type { PointerEvent as ReactPointerEvent } from 'react'
+import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, type HandleId } from '../frames'
-
-/** Where to put the caret in the frame's text box, `token` changes on every request. */
-export interface CaretRequest {
-  pos: number
-  token: number
-}
+import { RichEditor, type SelRequest } from './RichEditor'
 
 interface Props {
   frame: TextFrame
-  /** style of the whole story (the first frame's) */
+  /** default style + alignment of the whole story (the first frame's) */
   style: TextStyle
-  /** the part of the story shown in this frame */
+  /** the part of the story shown in this frame, with its style runs */
   slice: string
+  runs: Run[]
+  /** part of `slice` to draw highlighted while the frame is not being edited: [from, to) */
+  highlight: [number, number] | null
   /** the story has more text than fits in its frames (only set on the last frame of a story) */
   overflow: boolean
   hasPrev: boolean
@@ -27,27 +25,58 @@ interface Props {
   armed: boolean
   /** frame edges, handles and ports are non-printing: hidden in Preview mode */
   showEdge: boolean
-  caret: CaretRequest | null
+  request: SelRequest | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
   onHandleDown: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
   onOutPortDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onInPortDown: (e: ReactPointerEvent<HTMLDivElement>) => void
-  onChange: (slice: string, caretPos: number) => void
+  onEdit: (from: number, to: number, insert: string) => void
+  onSelect: (a: number, b: number) => void
+  onCopyText: () => string | null
   onBackspaceAtStart: () => void
   onStopEditing: () => void
+}
+
+/** Text as read-only spans, with an optional highlighted range. */
+function RichText({ text, runs, scale, highlight }: { text: string; runs: Run[]; scale: number; highlight: [number, number] | null }) {
+  const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
+  let pos = 0
+  for (const run of runs) {
+    const end = pos + run.len
+    // split the run at the highlight edges
+    const cuts = [pos, end]
+    if (highlight) for (const c of highlight) if (c > pos && c < end) cuts.push(c)
+    cuts.sort((a, b) => a - b)
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const [s, e] = [cuts[i], cuts[i + 1]]
+      parts.push({ key: `${s}`, text: text.slice(s, e), run, hl: !!highlight && s >= highlight[0] && e <= highlight[1] })
+    }
+    pos = end
+  }
+  return (
+    <>
+      {parts.map((p) => (
+        <span
+          key={p.key}
+          className={p.hl ? 'sel' : undefined}
+          style={{
+            fontFamily: `"${p.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+            fontSize: p.run.style.fontSize * scale,
+            fontWeight: p.run.style.weight,
+            fontStyle: p.run.style.italic ? 'italic' : 'normal',
+          }}
+        >
+          {p.text}
+        </span>
+      ))}
+    </>
+  )
 }
 
 /** A right-to-left text frame with its handles and thread ports. */
 export function TextFrameView(p: Props) {
   const { frame, style, slice, selected, editing, showEdge } = p
-  const areaRef = useRef<HTMLTextAreaElement>(null)
-
-  // move the caret where the story logic wants it (also when the text just flowed into another frame)
-  useLayoutEffect(() => {
-    if (editing && p.caret && areaRef.current) areaRef.current.setSelectionRange(p.caret.pos, p.caret.pos)
-  }, [editing, p.caret?.token])
-
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
@@ -62,38 +91,28 @@ export function TextFrameView(p: Props) {
         height: frame.h * p.zoom,
         fontSize: style.fontSize * p.zoom,
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-        fontWeight: style.bold ? 700 : 400,
-        fontStyle: style.italic ? 'italic' : 'normal',
+        lineHeight: LINE_HEIGHT,
         textAlign: style.align,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}
     >
       {editing ? (
-        <textarea
-          ref={areaRef}
-          autoFocus
-          dir="rtl"
-          spellCheck={false}
-          aria-label="תיבת טקסט"
-          value={slice}
-          onChange={(e) => p.onChange(e.target.value, e.target.selectionStart)}
-          onFocus={(e) => {
-            const pos = p.caret ? p.caret.pos : slice.length
-            e.currentTarget.setSelectionRange(pos, pos)
-          }}
-          onBlur={p.onStopEditing}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') e.currentTarget.blur()
-            else if (e.key === 'Backspace' && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0 && p.hasPrev) {
-              e.preventDefault()
-              p.onBackspaceAtStart()
-            }
-          }}
+        <RichEditor
+          text={slice}
+          runs={p.runs}
+          scale={p.zoom}
+          hasPrev={p.hasPrev}
+          request={p.request}
+          onEdit={p.onEdit}
+          onSelect={p.onSelect}
+          onBackspaceAtStart={p.onBackspaceAtStart}
+          onCopyText={p.onCopyText}
+          onStop={p.onStopEditing}
         />
       ) : (
         <div className="text-frame-body" dir="rtl">
-          {slice}
+          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} />
         </div>
       )}
 

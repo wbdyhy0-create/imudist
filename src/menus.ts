@@ -11,6 +11,10 @@ export interface MenuContext {
   setPreviewMode: (on: boolean) => void
   showProps: boolean
   toggleProps: () => void
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
   newDocument: () => void
   closeDocument: () => void
   toggleRulers: () => void
@@ -72,14 +76,14 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'עריכה',
       items: [
-        off('בטל', 'Ctrl+Z'),
-        off('בצע שוב', 'Ctrl+Shift+Z'),
+        { label: 'בטל', shortcut: 'Ctrl+Z', disabled: !c.canUndo, onClick: c.undo },
+        { label: 'בצע שוב', shortcut: 'Ctrl+Shift+Z', disabled: !c.canRedo, onClick: c.redo },
         sep,
         off('גזור', 'Ctrl+X'),
         off('העתק', 'Ctrl+C'),
         off('הדבק', 'Ctrl+V'),
         sep,
-        off('בחר הכול', 'Ctrl+A'),
+        { label: 'בחר הכול', shortcut: 'Ctrl+A', disabled: !c.hasDoc, onClick: () => c.ws.current?.selectAllText() },
         off('בטל בחירה', 'Ctrl+Shift+A'),
       ],
     },

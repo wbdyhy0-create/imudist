@@ -31,30 +31,43 @@ export interface DocSettings {
 
 export type TextAlign = 'right' | 'center' | 'left' | 'justify'
 
-/** Character/paragraph formatting. It applies to a whole story (all frames linked together). */
-export interface TextStyle {
+/** Character formatting: can differ from one piece of text to the next. */
+export interface CharStyle {
   fontFamily: string
   /** points */
   fontSize: number
-  /** physical alignment; Hebrew text normally sits on the right */
-  align: TextAlign
-  bold: boolean
+  /** CSS weight, 100 (thin) … 900 (black) */
+  weight: number
   italic: boolean
 }
 
-export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, align: 'right', bold: false, italic: false }
+/** Default character formatting of a story plus its paragraph alignment (which applies to the whole story). */
+export interface TextStyle extends CharStyle {
+  /** physical alignment; Hebrew text normally sits on the right */
+  align: TextAlign
+}
 
-/** Fonts with Hebrew glyphs that ship with Windows; a missing one silently falls back to the default. */
+export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, weight: 400, italic: false, align: 'right' }
+
+/** Fonts with Hebrew glyphs that ship with Windows: used until the real system fonts are loaded. */
 export const FONT_FAMILIES = [
   'Segoe UI', 'Arial', 'Tahoma', 'Calibri', 'Gisha', 'David', 'Miriam', 'FrankRuehl', 'Narkisim', 'Times New Roman', 'Courier New',
 ]
 
 export const LINE_HEIGHT = 1.25
 
+/** `len` consecutive characters of a story that share one character style. */
+export interface Run {
+  len: number
+  style: CharStyle
+}
+
 /**
  * A text frame. Position and size are in world points (see layout.ts), so frames may also sit on the pasteboard.
- * Frames can be threaded: `next` is the frame the text continues into. The whole story's text (and style)
- * lives in the first frame of the chain; the other frames only display their share of it.
+ * Frames can be threaded: `next` is the frame the text continues into. The whole story (`text`, `runs`) lives in
+ * the first frame of the chain; the other frames only display their share of it.
+ * `runs` cover `text` exactly; the style fields of the frame are the story's defaults (used for empty text
+ * and as the base when a run list is missing).
  */
 export interface TextFrame extends TextStyle {
   id: string
@@ -63,9 +76,9 @@ export interface TextFrame extends TextStyle {
   w: number
   h: number
   text: string
+  runs: Run[]
   next: string | null
 }
-
 export const MIN_PAGE_PT = 1
 export const MAX_PAGE_PT = 16384
 export const MAX_SIDE_PT = 2000

@@ -1,11 +1,12 @@
 import type { TextFrame, TextStyle } from './document'
+import { mergeRuns, normalizeRuns } from './story'
 
 export const styleOf = (f: TextFrame): TextStyle => ({
   fontFamily: f.fontFamily,
   fontSize: f.fontSize,
-  align: f.align,
-  bold: f.bold,
+  weight: f.weight,
   italic: f.italic,
+  align: f.align,
 })
 
 /** The frames of the story that `id` belongs to, first frame first (empty if `id` is unknown). */
@@ -44,12 +45,24 @@ export function linkFrames(frames: TextFrame[], fromId: string, toId: string): T
   if (chain.some((f) => f.id === toId)) return null
 
   const head = chain[0]
-  const joined = to.text ? (head.text ? head.text + '\n' + to.text : to.text) : head.text
+  const headRuns = normalizeRuns(head.text, head.runs, head)
+  let joined = head.text
+  let joinedRuns = headRuns
+  if (to.text) {
+    const toRuns = normalizeRuns(to.text, to.runs, to)
+    if (head.text) {
+      joined = head.text + '\n' + to.text
+      joinedRuns = mergeRuns([...headRuns, { len: 1, style: headRuns[headRuns.length - 1].style }, ...toRuns])
+    } else {
+      joined = to.text
+      joinedRuns = toRuns
+    }
+  }
   return frames.map((f) => {
     let n = f
-    if (f.id === head.id) n = { ...n, text: joined }
+    if (f.id === head.id) n = { ...n, text: joined, runs: joinedRuns }
     if (f.id === fromId) n = { ...n, next: toId }
-    if (f.id === toId) n = { ...n, ...styleOf(head), text: '' }
+    if (f.id === toId) n = { ...n, ...styleOf(head), text: '', runs: [] }
     return n
   })
 }
@@ -69,7 +82,7 @@ export function removeFrame(frames: TextFrame[], id: string): TextFrame[] {
     .filter((f) => f.id !== id)
     .map((f) => {
       if (prev && f.id === prev.id) return { ...f, next: gone.next }
-      if (!prev && gone.next && f.id === gone.next) return { ...f, text: gone.text }
+      if (!prev && gone.next && f.id === gone.next) return { ...f, ...styleOf(gone), text: gone.text, runs: gone.runs }
       return f
     })
 }

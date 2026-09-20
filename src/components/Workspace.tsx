@@ -8,16 +8,19 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import { DEFAULT_TEXT_STYLE, type DocSettings, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_TEXT_STYLE, type CharStyle, type DocSettings, type Run, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { isTyping } from '../dom'
 import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import { computeLayout } from '../layout'
-import { flowFrames } from '../textLayout'
+import { caretOffsetAt } from '../richtext'
+import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
+import { flowFrames, type FrameFlow } from '../textLayout'
 import { PropertiesPanel } from './PropertiesPanel'
+import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
-import { TextFrameView, type CaretRequest } from './TextFrameView'
+import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
 
 /** pasteboard around the pages, screen px */
@@ -44,7 +47,15 @@ export interface WorkspaceHandle {
   prevPage: () => void
   nextPage: () => void
   lastPage: () => void
+  /** Ctrl+A while editing text: select the whole story (all frames of the thread) */
+  selectAllText: () => void
 }
+
+/**
+ * Changes of the frames go through here. Changes that share a `key` and come close together (typing, dragging,
+ * stepping a value) are merged into one undo step.
+ */
+export type FramesChange = (frames: TextFrame[], coalesceKey?: string) => void
 
 interface Props {
   doc: DocSettings
@@ -57,7 +68,7 @@ interface Props {
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
   frames: TextFrame[]
-  onFramesChange: (frames: TextFrame[]) => void
+  onFramesChange: FramesChange
   onClose?: () => void
   ref?: Ref<WorkspaceHandle>
 }
@@ -73,6 +84,13 @@ interface View {
   anchor: { wx: number; wy: number; sx: number; sy: number } | null
 }
 
+/** A range of a story's text (character offsets into the whole story). */
+interface TextSel {
+  headId: string
+  a: number
+  b: number
+}
+
 /**
  * The viewport scrolls right-to-left (scrollbar on the left, like the rest of the RTL UI).
  * All geometry math uses "distance from the left edge", so read/write the offset that way.
@@ -80,26 +98,6 @@ interface View {
 const getScrollX = (el: HTMLElement) => el.scrollLeft + (el.scrollWidth - el.clientWidth)
 const setScrollX = (el: HTMLElement, x: number) => {
   el.scrollLeft = x - (el.scrollWidth - el.clientWidth)
-}
-
-/** Character offset inside the frame's text under a screen point, or null if the point isn't over its text. */
-function caretOffsetAt(x: number, y: number, frameEl: HTMLElement): number | null {
-  const body = frameEl.querySelector('.text-frame-body')
-  const doc = document as Document & {
-    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
-  }
-  let node: Node | null = null
-  let offset = 0
-  if (doc.caretPositionFromPoint) {
-    const p = doc.caretPositionFromPoint(x, y)
-    if (p) [node, offset] = [p.offsetNode, p.offset]
-  } else if (document.caretRangeFromPoint) {
-    const r = document.caretRangeFromPoint(x, y)
-    if (r) [node, offset] = [r.startContainer, r.startOffset]
-  }
-  if (!body || !node || !body.contains(node)) return null
-  // the text of a frame is a single text node; if the point hit the element itself, offset counts child nodes
-  return node.nodeType === Node.TEXT_NODE ? offset : offset > 0 ? (body.textContent ?? '').length : 0
 }
 
 export function Workspace({
@@ -130,13 +128,17 @@ export function Workspace({
   const [editingId, setEditingId] = useState<string | null>(null)
   /** an out-port was clicked: the next click on a frame continues the text there */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
-  const [caret, setCaret] = useState<(CaretRequest & { frameId: string }) | null>(null)
-  const caretToken = useRef(0)
+  /** where the editor should put its selection (and in which frame) */
+  const [request, setRequest] = useState<(SelRequest & { frameId: string }) | null>(null)
+  const requestToken = useRef(0)
+  /** the selected text of a story — what the panel's character controls apply to */
+  const [textSel, setTextSel] = useState<TextSel | null>(null)
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string } | null>(null)
+  const dragSeq = useRef(0)
 
   const zoom = view.zoom
 
@@ -201,6 +203,137 @@ export function Workspace({
     goTo(found >= 0 ? found : n < doc.startPage ? 0 : spreads.length - 1)
   }
 
+  // ── text frames: story editing ─────────────────────────────────────────────────
+  const updateFrame = (id: string, patch: Partial<TextFrame>, key?: string) =>
+    onFramesChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)), key)
+
+  const askSelection = (frameId: string, a: number, b: number) => {
+    requestToken.current += 1
+    setRequest({ frameId, a, b, token: requestToken.current })
+  }
+
+  /**
+   * Store a story's new text and runs. `abs` is where the caret goes, as an offset into the new story. The text may
+   * have reflowed, so the caret (and the editing focus) moves to whichever frame now contains that offset.
+   */
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string) => {
+    const next = frames.map((f) => (f.id === headId ? { ...f, text, runs } : f))
+    const nf = flowFrames(next)
+    const chain = chainOf(next, headId)
+    const target =
+      chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
+    const tf = nf.get(target.id)!
+    const pos = Math.max(0, Math.min(abs - tf.start, tf.slice.length))
+    askSelection(target.id, pos, pos)
+    setTextSel({ headId, a: abs, b: abs })
+    setEditingId(target.id)
+    setSelectedId(target.id)
+    onFramesChange(next, key)
+  }
+
+  /** Replace [from, to) of a story with `insert`. */
+  const applyEdit = (headId: string, from: number, to: number, insert: string) => {
+    const head = frames.find((f) => f.id === headId)
+    if (!head) return
+    const r = editStory(head.text, head.runs, from, to, insert, head)
+    commitStory(headId, r.text, r.runs, from + insert.length, `type:${headId}`)
+  }
+
+  /** an edit reported by a frame's editor: offsets are inside that frame's part of the story */
+  const handleEdit = (frameId: string, from: number, to: number, insert: string) => {
+    const fl = flow.get(frameId)
+    if (!fl) return
+    let a = fl.start + from
+    let b = fl.start + to
+    // Ctrl+A across a thread: the edit replaces the selected text of the whole story
+    if (textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
+      a = textSel.a
+      b = textSel.b
+    }
+    applyEdit(fl.headId, a, b, insert)
+  }
+
+  /** Backspace at the very start of a threaded frame deletes the last character of the previous frame */
+  const backspaceAtStart = (frameId: string) => {
+    const fl = flow.get(frameId)
+    if (fl && fl.start > 0) applyEdit(fl.headId, fl.start - 1, fl.start, '')
+  }
+
+  const handleSelect = (frameId: string, a: number, b: number) => {
+    const fl = flow.get(frameId)
+    if (!fl) return
+    // keep a whole-story selection (Ctrl+A) while the browser reports only this frame's part of it
+    if (
+      textSel &&
+      textSel.headId === fl.headId &&
+      textSel.a === 0 &&
+      textSel.b === fl.story.length &&
+      fl.story.length > fl.slice.length &&
+      a === 0 &&
+      b === fl.slice.length
+    ) {
+      return
+    }
+    setTextSel((prev) =>
+      prev && prev.headId === fl.headId && prev.a === fl.start + a && prev.b === fl.start + b
+        ? prev
+        : { headId: fl.headId, a: fl.start + a, b: fl.start + b },
+    )
+  }
+
+  /** text for the clipboard when the selection spans several frames */
+  const copyText = (frameId: string): string | null => {
+    const fl = flow.get(frameId)
+    if (fl && textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
+      return fl.story.slice(textSel.a, textSel.b)
+    }
+    return null
+  }
+
+  const selectAllText = () => {
+    if (!editingId) return
+    const fl = flow.get(editingId)
+    if (!fl) return
+    setTextSel({ headId: fl.headId, a: 0, b: fl.story.length })
+    askSelection(editingId, 0, fl.slice.length)
+  }
+
+  /** Character style change from the panel: applies to the selected text, or to the whole story if none is selected. */
+  const applyCharStyle = (id: string, patch: Partial<CharStyle>) => {
+    const fl = flow.get(id)
+    const head = fl && frames.find((f) => f.id === fl.headId)
+    if (!fl || !head) return
+    const runs = normalizeRuns(head.text, head.runs, head)
+    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
+    const key = `style:${head.id}:${Object.keys(patch).join(',')}`
+    onFramesChange(
+      frames.map((f) => {
+        if (sel) return f.id === head.id ? { ...f, runs: styleRange(runs, sel.a, sel.b, patch) } : f
+        if (f.id === head.id) return { ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) }
+        return chainIds.has(f.id) ? { ...f, ...patch } : f
+      }),
+      key,
+    )
+  }
+
+  /** alignment belongs to the whole story */
+  const applyAlign = (id: string, align: TextAlign) => {
+    const ids = new Set(chainOf(frames, id).map((f) => f.id))
+    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align } : f)), `align:${id}`)
+  }
+
+  const completeLink = (toId: string) => {
+    if (linkFrom) {
+      const linked = linkFrames(frames, linkFrom, toId)
+      if (linked) {
+        onFramesChange(linked)
+        setSelectedId(toId)
+      }
+    }
+    setLinkFrom(null)
+  }
+
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -211,6 +344,7 @@ export function Workspace({
     prevPage: () => goTo(cur - 1),
     nextPage: () => goTo(cur + 1),
     lastPage: () => goTo(spreads.length - 1),
+    selectAllText,
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -279,56 +413,6 @@ export function Workspace({
     }
   }, [])
 
-  // ── text frames: editing helpers ───────────────────────────────────────────────
-  const updateFrame = (id: string, patch: Partial<TextFrame>) =>
-    onFramesChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)))
-
-  /** style belongs to the whole story, so it is applied to every frame of the chain */
-  const updateStyle = (id: string, patch: Partial<TextStyle>) => {
-    const ids = new Set(chainOf(frames, id).map((f) => f.id))
-    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)))
-  }
-
-  /**
-   * Store a story's new text. `abs` is where the caret is, as an offset into the new story. The text may have
-   * reflowed, so the caret (and the editing focus) moves to whichever frame now contains that offset.
-   */
-  const applyStory = (headId: string, newStory: string, abs: number) => {
-    const next = frames.map((f) => (f.id === headId ? { ...f, text: newStory } : f))
-    const nf = flowFrames(next)
-    const chain = chainOf(next, headId)
-    const target =
-      chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= newStory.length) ?? chain[chain.length - 1]
-    const tf = nf.get(target.id)!
-    caretToken.current += 1
-    setCaret({ frameId: target.id, pos: Math.max(0, Math.min(abs - tf.start, tf.slice.length)), token: caretToken.current })
-    setEditingId(target.id)
-    setSelectedId(target.id)
-    onFramesChange(next)
-  }
-
-  const handleChange = (frameId: string, newSlice: string, caretPos: number) => {
-    const fl = flow.get(frameId)
-    if (fl) applyStory(fl.headId, fl.story.slice(0, fl.start) + newSlice + fl.story.slice(fl.end), fl.start + caretPos)
-  }
-
-  /** Backspace at the very start of a threaded frame deletes the last character of the previous frame */
-  const backspaceAtStart = (frameId: string) => {
-    const fl = flow.get(frameId)
-    if (fl && fl.start > 0) applyStory(fl.headId, fl.story.slice(0, fl.start - 1) + fl.story.slice(fl.start), fl.start - 1)
-  }
-
-  const completeLink = (toId: string) => {
-    if (linkFrom) {
-      const linked = linkFrames(frames, linkFrom, toId)
-      if (linked) {
-        onFramesChange(linked)
-        setSelectedId(toId)
-      }
-    }
-    setLinkFrom(null)
-  }
-
   // Delete removes the selected frame, arrows nudge it (Shift = 10 pt), Escape deselects / cancels linking
   useEffect(() => {
     if (!selectedId && !linkFrom) return
@@ -346,15 +430,25 @@ export function Workspace({
         if (!f) return
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
-        updateFrame(f.id, {
-          x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
-          y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
-        })
+        updateFrame(
+          f.id,
+          {
+            x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
+            y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
+          },
+          `nudge:${f.id}`,
+        )
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, linkFrom, frames, onFramesChange])
+
+  // the text selection belongs to one story: forget it when another one is selected
+  const selHead = selectedId ? chainOf(frames, selectedId)[0] : undefined
+  useEffect(() => {
+    if (textSel && selHead?.id !== textSel.headId) setTextSel(null)
+  }, [selHead?.id])
 
   // ── pointer: pan (Hand tool / Space / middle button), Zoom, Type and Selection tools ──
   /** client (mouse) position → world points */
@@ -371,7 +465,14 @@ export function Workspace({
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const f = frames.find((x) => x.id === id)
     if (!f) return
-    frameDrag.current = { id, mode, start: toWorld(e.clientX, e.clientY), orig: { x: f.x, y: f.y, w: f.w, h: f.h } }
+    dragSeq.current += 1
+    frameDrag.current = {
+      id,
+      mode,
+      start: toWorld(e.clientX, e.clientY),
+      orig: { x: f.x, y: f.y, w: f.w, h: f.h },
+      key: `drag:${dragSeq.current}`,
+    }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
 
@@ -408,7 +509,7 @@ export function Workspace({
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
       const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT)
-      onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)))
+      onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
       return
     }
     if (createStart.current) {
@@ -434,6 +535,7 @@ export function Workspace({
           w,
           h,
           text: '',
+          runs: [],
           next: null,
         }
         onFramesChange([...frames, frame])
@@ -470,17 +572,13 @@ export function Workspace({
     if (tool !== 'type' && tool !== 'select') return
     e.stopPropagation()
     if (tool === 'type') {
-      // Entering edit mode swaps the clicked <div> for a <textarea>; without this the browser's own
-      // focus handling (which runs after this handler) would move focus away and end editing at once.
-      // While already editing we must not prevent it, or the caret could not be placed by clicking.
       if (editingId !== id) {
+        // Entering edit mode swaps the text <div> for the editor; without this the browser's own focus
+        // handling (which runs after this handler) would move focus away and end editing at once.
+        // While already editing we must not prevent it, or the caret could not be placed by clicking.
         e.preventDefault()
-        // put the caret where the user clicked (the text is about to move from a <div> into a <textarea>)
-        const pos = caretOffsetAt(e.clientX, e.clientY, e.currentTarget)
-        if (pos !== null) {
-          caretToken.current += 1
-          setCaret({ frameId: id, pos, token: caretToken.current })
-        }
+        const pos = caretOffsetAt(e.clientX, e.clientY, e.currentTarget.querySelector('.text-frame-body'))
+        if (pos !== null) askSelection(id, pos, pos)
       }
       setSelectedId(id)
       setEditingId(id)
@@ -549,6 +647,29 @@ export function Workspace({
     : null
   const threadPairs = selChain.slice(1).map((b, i) => [selChain[i], b] as const)
 
+  // what the panel's text controls show: the selected text's style, else the story's default
+  const panelHead = selChain[0]
+  const panelSel =
+    panelHead && textSel && textSel.headId === panelHead.id && textSel.a !== textSel.b && textSel.b <= panelHead.text.length
+      ? textSel
+      : null
+  const panelStyle: TextStyle | null = panelHead
+    ? {
+        ...(panelSel
+          ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelHead)
+          : charStyleOf(panelHead)),
+        align: panelHead.align,
+      }
+    : null
+
+  /** the part of a frame's text to draw highlighted (frames that are not being edited) */
+  const highlightFor = (fl: FrameFlow): [number, number] | null => {
+    if (!textSel || textSel.headId !== fl.headId || textSel.a >= textSel.b) return null
+    const a = Math.max(textSel.a, fl.start)
+    const b = Math.min(textSel.b, fl.end)
+    return a < b ? [a - fl.start, b - fl.start] : null
+  }
+
   return (
     <div className="workspace">
       <div className="doc-tabs">
@@ -600,6 +721,8 @@ export function Workspace({
                     frame={f}
                     style={fl.style}
                     slice={fl.slice}
+                    runs={fl.runs}
+                    highlight={highlightFor(fl)}
                     overflow={fl.overflow}
                     hasPrev={fl.prevId !== null}
                     zoom={zoom}
@@ -609,7 +732,7 @@ export function Workspace({
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
                     showEdge={!previewMode}
-                    caret={caret && caret.frameId === f.id ? caret : null}
+                    request={request && request.frameId === f.id ? request : null}
                     onPointerDown={onFramePointerDown(f.id)}
                     onDoubleClick={() => {
                       if (!panMode) {
@@ -620,7 +743,9 @@ export function Workspace({
                     onHandleDown={onHandleDown(f.id)}
                     onOutPortDown={onOutPortDown(f.id)}
                     onInPortDown={onInPortDown(f.id)}
-                    onChange={(slice, pos) => handleChange(f.id, slice, pos)}
+                    onEdit={(from, to, insert) => handleEdit(f.id, from, to, insert)}
+                    onSelect={(a, b) => handleSelect(f.id, a, b)}
+                    onCopyText={() => copyText(f.id)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
                     onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}
                   />
@@ -663,11 +788,13 @@ export function Workspace({
         {showProps && (
           <PropertiesPanel
             frame={selFrame}
-            style={selFrame ? (flow.get(selFrame.id)?.style ?? null) : null}
+            style={panelStyle}
+            scope={panelSel ? 'selection' : 'all'}
             unit={doc.unit}
             thread={threadInfo}
-            onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch)}
-            onStyle={(patch) => selFrame && updateStyle(selFrame.id, patch)}
+            onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
+            onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
+            onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
             onLink={() => selFrame && setLinkFrom(selFrame.id)}
             onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
           />
