@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { DocSettings, TextFrame } from '../document'
+import type { DocSettings, ImageFrame, TextFrame } from '../document'
 import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
 import { NumberField } from './NumberField'
@@ -9,6 +9,7 @@ export type InsertWhere = 'after' | 'before' | 'end'
 interface Props {
   doc: DocSettings
   frames: TextFrame[]
+  images: ImageFrame[]
   spreads: SpreadLayout[]
   /** the spread in the middle of the view */
   currentSpread: number
@@ -25,7 +26,7 @@ const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove }: Props) {
+export function PagesPanel({ doc, frames, images, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
 
@@ -36,6 +37,12 @@ export function PagesPanel({ doc, frames, spreads, currentSpread, selected, onSe
     for (const f of frames) byPage[ownerPage(rects, f.x + f.w / 2, f.y + f.h / 2)].push(f)
     return byPage
   }, [doc, frames])
+  const imagesByPage = useMemo(() => {
+    const rs = pageRects(doc)
+    const byPage: ImageFrame[][] = rs.map(() => [])
+    for (const im of images) byPage[ownerPage(rs, im.x + im.w / 2, im.y + im.h / 2)].push(im)
+    return byPage
+  }, [doc, images])
   const rects = useMemo(() => pageRects(doc), [doc])
 
   const scale = Math.min(THUMB_W / doc.width, THUMB_H / doc.height)
@@ -110,6 +117,9 @@ export function PagesPanel({ doc, frames, spreads, currentSpread, selected, onSe
                         strokeWidth={doc.width * 0.006}
                         opacity="0.55"
                       />
+                      {imagesByPage[p.index].map((im) => (
+                        <rect key={im.id} x={im.x - r.x} y={im.y - r.y} width={im.w} height={im.h} fill="#9cc3ff" stroke="#ffb02e" strokeWidth={doc.width * 0.008} />
+                      ))}
                       {framesByPage[p.index].map((f) => (
                         <rect
                           key={f.id}

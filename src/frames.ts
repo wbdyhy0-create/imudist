@@ -97,8 +97,11 @@ export interface Box {
   h: number
 }
 
-/** New box after dragging the whole frame ("move") or one of its handles by (dx, dy) world points. */
-export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: number, min: number): Box {
+/**
+ * New box after dragging the whole frame ("move") or one of its handles by (dx, dy) world points.
+ * With `ratio` (width / height) a corner handle keeps that proportion; edge handles still stretch one side.
+ */
+export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: number, min: number, ratio?: number): Box {
   if (mode === 'move') return { ...orig, x: orig.x + dx, y: orig.y + dy }
   let { x, y, w, h } = orig
   if (mode.includes('e')) w = Math.max(min, orig.w + dx)
@@ -110,6 +113,18 @@ export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: numb
   if (mode.includes('n')) {
     h = Math.max(min, orig.h - dy)
     y = orig.y + orig.h - h
+  }
+  if (ratio && mode.length === 2) {
+    // corner: scale by whichever side was dragged further, then anchor the opposite corner
+    const scale = Math.max(w / orig.w, h / orig.h)
+    w = Math.max(min, orig.w * scale)
+    h = w / ratio
+    if (h < min) {
+      h = min
+      w = h * ratio
+    }
+    if (mode.includes('w')) x = orig.x + orig.w - w
+    if (mode.includes('n')) y = orig.y + orig.h - h
   }
   return { x, y, w, h }
 }

@@ -4,15 +4,18 @@ import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { defaultDocSettings, type DocSettings, type TextFrame } from './document'
+import { defaultDocSettings, type DocSettings, type ImageFrame, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
-import { pickFile } from './fileio'
+import { pickFiles } from './fileio'
+import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
+const NO_IMAGES: ImageFrame[] = []
+const NO_PLACED: PlacedImage[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -20,6 +23,9 @@ const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === lett
 
 export default function App() {
   const session = useDocumentSession()
+  // menu items are memoized, so they call the session through this ref and never run an outdated action
+  const sessionRef = useRef(session)
+  sessionRef.current = session
   const { doc, history } = session
   const [nextName, setNextName] = useState(1)
   /** settings of the last created document — the next "New Document" starts from them */
@@ -35,21 +41,49 @@ export default function App() {
   const [showPages, setShowPages] = useState(true)
   /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
   const [placing, setPlacing] = useState<PlacedText | null>(null)
+  /** pictures loaded from files / the clipboard, waiting for a click on the page */
+  const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
 
-  /** Read a Word / text file and load it into the text cursor. */
-  const placeFile = async (file: File) => {
+  /**
+   * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
+   * the text cursor. Only one kind is loaded at a time.
+   */
+  const placeFiles = async (files: File[]) => {
+    const pictures = files.filter(isImageFile)
     try {
-      setPlacing(await readPlacedText(file))
+      if (pictures.length > 0) {
+        const read: PlacedImage[] = []
+        const problems: string[] = []
+        for (const f of pictures) {
+          try {
+            read.push(await readImageFile(f))
+          } catch (e) {
+            problems.push(e instanceof Error ? e.message : String(f.name))
+          }
+        }
+        if (problems.length > 0) session.showError(read.length > 0 ? 'חלק מהתמונות לא יובאו' : 'לא ניתן לייבא את התמונה', new Error(problems.join('\n')))
+        if (read.length > 0) {
+          setPlacing(null)
+          setPlacingImages(read)
+        }
+      } else if (files.length > 0) {
+        const text = await readPlacedText(files[0])
+        setPlacingImages([])
+        setPlacing(text)
+      }
     } catch (e) {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
-  const importText = async () => {
-    const file = await pickFile('.docx,.txt,.text,.md,.csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-    if (file) await placeFile(file)
+  const importFiles = async () => {
+    const files = await pickFiles(
+      '.docx,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      true,
+    )
+    if (files.length > 0) await placeFiles(files)
   }
   const menus = useMemo(
     () =>
@@ -65,26 +99,27 @@ export default function App() {
         showPages,
         togglePages: () => setShowPages((v) => !v),
         documentSetup: () => setDialog('setup'),
-        importText: () => void importText(),
+        importText: () => void importFiles(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
         undo: history.undo,
         redo: history.redo,
         recent: session.recent,
         canRevert: !!session.file?.handle && session.dirty,
-        openFile: () => void session.openFile(),
-        openRecent: (entry) => void session.openRecent(entry),
-        save: () => void session.save(),
-        saveAs: () => void session.saveAs(),
-        saveCopy: () => void session.saveAs(true),
-        revert: session.revert,
+        openFile: () => void sessionRef.current.openFile(),
+        openRecent: (entry) => void sessionRef.current.openRecent(entry),
+        save: () => void sessionRef.current.save(),
+        saveAs: () => void sessionRef.current.saveAs(),
+        saveCopy: () => void sessionRef.current.saveAs(true),
+        revert: () => sessionRef.current.revert(),
+
         newDocument: () => setDialog('new'),
-        closeDocument: session.closeDocument,
+        closeDocument: () => sessionRef.current.closeDocument(),
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.doc, session.frames],
+    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value],
   )
 
   useEffect(() => {
@@ -112,15 +147,23 @@ export default function App() {
   // a different document: nothing is loaded any more
   useEffect(() => {
     setPlacing(null)
+    setPlacingImages([])
   }, [session.docId, !!doc])
 
   // Ctrl+V outside a text box loads the clipboard text into the text cursor
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (!doc || session.modal || isTyping(e.target)) return
+      const pictures = Array.from(e.clipboardData?.files ?? []).filter(isImageFile)
+      if (pictures.length > 0) {
+        e.preventDefault()
+        void placeFiles(pictures)
+        return
+      }
       const text = e.clipboardData?.getData('text/plain') ?? ''
       if (!text.trim()) return
       e.preventDefault()
+      setPlacingImages([])
       setPlacing(placedFromPlainText('הטקסט מהלוח', text))
     }
     window.addEventListener('paste', onPaste)
@@ -136,10 +179,10 @@ export default function App() {
     const onDrop = (e: DragEvent) => {
       if (!hasFiles(e)) return
       e.preventDefault()
-      const file = e.dataTransfer?.files[0]
-      if (!file) return
-      if (!doc) session.notify('צור מסמך חדש או פתח קובץ לפני הוספת טקסט')
-      else void placeFile(file)
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      if (files.length === 0) return
+      if (!doc) session.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+      else void placeFiles(files)
     }
     window.addEventListener('dragover', onOver)
     window.addEventListener('drop', onDrop)
@@ -191,6 +234,11 @@ export default function App() {
               pageOps={preview ? NO_PAGE_OPS : session.pages}
               placing={preview ? null : placing}
               onPlacingChange={preview ? noop : setPlacing}
+              images={preview ? NO_IMAGES : session.images}
+              assets={session.assets}
+              onImagesChange={preview ? noop : session.changeImages}
+              placingImages={preview ? NO_PLACED : placingImages}
+              onPlacingImagesChange={preview ? noop : setPlacingImages}
               dirty={!preview && session.dirty}
               onClose={preview ? undefined : session.closeDocument}
             />

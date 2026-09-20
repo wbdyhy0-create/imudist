@@ -8,9 +8,22 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import { DEFAULT_TEXT_STYLE, MIN_FRAME_PT, type CharStyle, type DocSettings, type Run, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import {
+  DEFAULT_TEXT_STYLE,
+  MIN_FRAME_PT,
+  type Assets,
+  type CharStyle,
+  type DocSettings,
+  type ImageFit,
+  type ImageFrame,
+  type Run,
+  type TextAlign,
+  type TextFrame,
+  type TextStyle,
+} from '../document'
 import { isTyping } from '../dom'
 import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
+import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { computeLayout } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
@@ -18,6 +31,8 @@ import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
+import { ImageFrameView } from './ImageFrameView'
+import { ImageProperties } from './ImageProperties'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
@@ -82,6 +97,12 @@ interface Props {
   /** text waiting to be placed (the loaded text cursor), or null */
   placing: PlacedText | null
   onPlacingChange: (placed: PlacedText | null) => void
+  images: ImageFrame[]
+  assets: Assets
+  onImagesChange: (images: ImageFrame[], coalesceKey?: string) => void
+  /** pictures waiting to be placed (the loaded image cursor); the first is placed by the next click */
+  placingImages: PlacedImage[]
+  onPlacingImagesChange: (images: PlacedImage[]) => void
   /** the document has changes that are not saved yet */
   dirty?: boolean
   onClose?: () => void
@@ -126,6 +147,11 @@ export function Workspace({
   pageOps,
   placing,
   onPlacingChange,
+  images,
+  assets,
+  onImagesChange,
+  placingImages,
+  onPlacingImagesChange,
   dirty,
   onClose,
   ref,
@@ -161,7 +187,7 @@ export function Workspace({
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
   const dragSeq = useRef(0)
 
   const zoom = view.zoom
@@ -408,6 +434,55 @@ export function Workspace({
     setEditingId(null)
     onPlacingChange(result.remaining)
   }
+
+  /**
+   * Put the first loaded picture on the page. A dragged rectangle: the picture is fitted into it keeping its shape.
+   * A click: natural size (one pixel = one point), scaled down to fit the text area, kept on the page.
+   */
+  const placeImage = (rect: Box | null, at: { x: number; y: number }) => {
+    const next = placingImages[0]
+    if (!next) return
+    const { asset, assetId } = next
+    const page = rects[ownerPage(rects, at.x, at.y)]
+    let w: number
+    let h: number
+    let x: number
+    let y: number
+    if (rect) {
+      const s = Math.min(rect.w / asset.width, rect.h / asset.height)
+      ;[w, h, x, y] = [asset.width * s, asset.height * s, rect.x, rect.y]
+    } else {
+      const maxW = page.w - doc.margins.left - doc.margins.right
+      const maxH = page.h - doc.margins.top - doc.margins.bottom
+      const s = Math.min(1, maxW / asset.width, maxH / asset.height)
+      w = asset.width * s
+      h = asset.height * s
+      x = Math.min(Math.max(at.x, page.x), page.x + page.w - w)
+      y = Math.min(Math.max(at.y, page.y), page.y + page.h - h)
+    }
+    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill' }
+    pageOps.commit({ images: [...images, frame], assets: assets[assetId] ? assets : { ...assets, [assetId]: asset } })
+    setSelectedId(frame.id)
+    setEditingId(null)
+    onPlacingImagesChange(placingImages.slice(1))
+  }
+
+  /** clicking a picture: the Selection tool selects it and starts moving it (other tools pass the click on) */
+  const onImagePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
+    const im = images.find((x) => x.id === id)
+    if (!im) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedPage(ownerPage(rects, im.x + im.w / 2, im.y + im.h / 2))
+    setSelectedId(id)
+    setEditingId(null)
+    beginFrameDrag(e, id, 'move')
+  }
+
+  const updateImage = (id: string, patch: Partial<ImageFrame>, key?: string) =>
+    onImagesChange(images.map((im) => (im.id === id ? { ...im, ...patch } : im)), key)
+
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -499,13 +574,22 @@ export function Workspace({
         else setSelectedId(null)
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
-        onFramesChange(removeFrame(frames, selectedId))
+        if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
+        else onFramesChange(removeFrame(frames, selectedId))
         setSelectedId(null)
       } else if (selectedId && e.key.startsWith('Arrow')) {
-        const f = frames.find((x) => x.id === selectedId)
+        const f = frames.find((x) => x.id === selectedId) ?? images.find((x) => x.id === selectedId)
         if (!f) return
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
+        const moved = {
+          x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
+          y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
+        }
+        if (images.some((im) => im.id === f.id)) {
+          onImagesChange(images.map((im) => (im.id === f.id ? { ...im, ...moved } : im)), `nudge:${f.id}`)
+          return
+        }
         updateFrame(
           f.id,
           {
@@ -518,8 +602,18 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, linkFrom, frames, onFramesChange])
+  }, [selectedId, linkFrom, frames, images, onFramesChange, onImagesChange])
 
+
+  // Escape drops the loaded pictures
+  useEffect(() => {
+    if (placingImages.length === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onPlacingImagesChange([])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [placingImages])
 
   // Escape drops the loaded text
   useEffect(() => {
@@ -550,7 +644,8 @@ export function Workspace({
   }
 
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
-    const f = frames.find((x) => x.id === id)
+    const isImage = images.some((x) => x.id === id)
+    const f = isImage ? images.find((x) => x.id === id) : frames.find((x) => x.id === id)
     if (!f) return
     dragSeq.current += 1
     frameDrag.current = {
@@ -559,6 +654,7 @@ export function Workspace({
       start: toWorld(e.clientX, e.clientY),
       orig: { x: f.x, y: f.y, w: f.w, h: f.h },
       key: `drag:${dragSeq.current}`,
+      kind: isImage ? 'image' : 'frame',
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -582,7 +678,7 @@ export function Workspace({
     } else if (tool === 'zoom' && e.button === 0) {
       const rect = e.currentTarget.getBoundingClientRect()
       zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
-    } else if ((tool === 'type' || placing) && e.button === 0) {
+    } else if ((tool === 'type' || placing || placingImages.length > 0) && e.button === 0) {
       // start dragging a new text frame (with text loaded, the frame receives it)
       placeMods.current = { shift: e.shiftKey, alt: e.altKey }
       const p = toWorld(e.clientX, e.clientY)
@@ -600,6 +696,12 @@ export function Workspace({
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
+      if (d.kind === 'image') {
+        // corners keep the picture's proportions unless Alt is held
+        const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT, e.altKey ? undefined : d.orig.w / d.orig.h)
+        onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
+        return
+      }
       const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT)
       onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
       return
@@ -615,7 +717,15 @@ export function Workspace({
     drag.current = { x: e.clientX, y: e.clientY }
   }
   const finishDraft = () => {
-    if (draft && createStart.current && placing) {
+    if (draft && createStart.current && placingImages.length > 0) {
+      const w = Math.abs(draft.x1 - draft.x0)
+      const h = Math.abs(draft.y1 - draft.y0)
+      // a dragged rectangle sets the size; a plain click places the picture at its natural size
+      placeImage(
+        w >= MIN_FRAME_PT && h >= MIN_FRAME_PT ? { x: Math.min(draft.x0, draft.x1), y: Math.min(draft.y0, draft.y1), w, h } : null,
+        { x: draft.x0, y: draft.y0 },
+      )
+    } else if (draft && createStart.current && placing) {
       const w = Math.abs(draft.x1 - draft.x0)
       const h = Math.abs(draft.y1 - draft.y0)
       // a dragged rectangle is the frame; a plain click uses the column under the pointer
@@ -737,7 +847,7 @@ export function Workspace({
       ? ' panning'
       : panMode
         ? ' pan'
-        : placing
+        : placing || placingImages.length > 0
           ? ' placing'
           : linkFrom
           ? ' linking'
@@ -751,6 +861,7 @@ export function Workspace({
 
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
+  const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
   const selChain = selFrame ? chainOf(frames, selFrame.id) : []
   const threadInfo = selFrame
     ? {
@@ -786,6 +897,22 @@ export function Workspace({
 
   return (
     <div className="workspace">
+      {placingImages.length > 0 && (
+        <div className="place-banner" role="status">
+          <img className="place-thumb" src={placingImages[0].asset.dataUrl} alt="" />
+          <div className="place-title">
+            <b>
+              <bdi>{placingImages[0].asset.name}</bdi>
+            </b>{' '}
+            · {placingImages[0].asset.width}×{placingImages[0].asset.height} פיקסלים
+            {placingImages.length > 1 && <> · עוד {placingImages.length - 1} תמונות בתור</>}
+          </div>
+          <button className="btn small" onClick={() => onPlacingImagesChange([])}>
+            בטל
+          </button>
+          <div className="place-hint">לחץ על העמוד כדי למקם את התמונה בגודלה המקורי, או גרור מלבן כדי להגדיר את הגודל. Esc = ביטול.</div>
+        </div>
+      )}
       {placing && (
         <div className="place-banner" role="status">
           <div className="place-title">
@@ -848,6 +975,20 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
+              {images.map((im) => (
+                <ImageFrameView
+                  key={im.id}
+                  image={im}
+                  asset={assets[im.assetId]}
+                  zoom={zoom}
+                  tx={tx}
+                  ty={ty}
+                  selected={im.id === selectedId}
+                  showEdge={!previewMode}
+                  onPointerDown={onImagePointerDown(im.id)}
+                  onHandleDown={onHandleDown(im.id)}
+                />
+              ))}
               {frames.map((f) => {
                 const fl = flow.get(f.id)
                 if (!fl) return null
@@ -927,6 +1068,7 @@ export function Workspace({
               <PagesPanel
                 doc={doc}
                 frames={frames}
+                images={images}
                 spreads={spreads}
                 currentSpread={cur}
                 selected={selPage}
@@ -936,7 +1078,24 @@ export function Workspace({
                 onMove={movePage}
               />
             )}
-            {showProps && (
+            {showProps && selImage && (
+              <ImageProperties
+                image={selImage}
+                asset={assets[selImage.assetId]}
+                unit={doc.unit}
+                onGeometry={(patch) => updateImage(selImage.id, patch, `geo:${selImage.id}`)}
+                onFit={(fit: ImageFit) => updateImage(selImage.id, { fit })}
+                onMatchShape={() => {
+                  const a = assets[selImage.assetId]
+                  if (a) updateImage(selImage.id, { h: selImage.w * (a.height / a.width) })
+                }}
+                onDelete={() => {
+                  onImagesChange(images.filter((im) => im.id !== selImage.id))
+                  setSelectedId(null)
+                }}
+              />
+            )}
+            {showProps && !selImage && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}

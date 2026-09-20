@@ -79,6 +79,36 @@ export interface TextFrame extends TextStyle {
   runs: Run[]
   next: string | null
 }
+/** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
+export type ImageFit = 'fill' | 'fit' | 'stretch'
+
+/** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
+export interface ImageFrame {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+  assetId: string
+  fit: ImageFit
+}
+
+/** The data of an imported picture. Several frames can show the same asset. */
+export interface Asset {
+  /** the file's name, for the user */
+  name: string
+  mime: string
+  /** the whole file as a data: URL, so it travels inside the .imudist file */
+  dataUrl: string
+  /** size in pixels */
+  width: number
+  height: number
+}
+
+export type Assets = Record<string, Asset>
+
+/** Largest picture file we import. */
+export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** Smallest text frame (points): a smaller drag creates nothing, and frames can't be resized below it. */
 export const MIN_FRAME_PT = 6
 export const MIN_PAGE_PT = 1

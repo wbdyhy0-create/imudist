@@ -181,7 +181,7 @@ function FontSource({ status, count }: { status: string; count: number }) {
   )
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+export function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="props-group">
       <h3>{title}</h3>
@@ -190,7 +190,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
+export function Labeled({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="field">
       <div className="field-label">{label}</div>

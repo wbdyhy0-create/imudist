@@ -93,14 +93,15 @@ export async function ensureReadPermission(handle: FileSystemFileHandle): Promis
   return (await h.requestPermission({ mode: 'read' })) === 'granted'
 }
 
-/** Let the user pick any file (through a hidden <input>). Resolves to null when the dialog is cancelled. */
-export function pickFile(accept: string): Promise<File | null> {
+/** Let the user pick files (through a hidden <input>). Resolves to an empty list when the dialog is cancelled. */
+export function pickFiles(accept: string, multiple = false): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = accept
-    input.onchange = () => resolve(input.files?.[0] ?? null)
-    input.addEventListener('cancel', () => resolve(null))
+    input.multiple = multiple
+    input.onchange = () => resolve(Array.from(input.files ?? []))
+    input.addEventListener('cancel', () => resolve([]))
     input.click()
   })
 }

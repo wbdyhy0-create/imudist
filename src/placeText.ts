@@ -2,7 +2,7 @@ import { MAX_PAGES, type DocSettings, type TextFrame } from './document'
 import { chainOf, styleOf, type Box } from './frames'
 import type { PlacedText } from './importText'
 import { computeLayout, pageMargins, type PageSide } from './layout'
-import { ownerPage, pageRects, type DocContent, type PageRect } from './pages'
+import { ownerPage, pageRects, type PageRect } from './pages'
 import { normalizeRuns, sliceRuns } from './story'
 import { fitStoryEnd, flowFrames } from './textLayout'
 
@@ -62,7 +62,8 @@ export interface PourTarget {
 }
 
 export interface PourResult {
-  content: DocContent
+  /** the document settings and text frames after placing (pictures are untouched) */
+  content: { doc: DocSettings; frames: TextFrame[] }
   /** the frame that holds the story (the first of the thread) */
   headId: string
   /** semi-auto: the text that did not fit and stays loaded */

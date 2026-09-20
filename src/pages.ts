@@ -1,14 +1,23 @@
-import { MAX_PAGES, type DocSettings, type TextFrame } from './document'
+import { MAX_PAGES, type Assets, type DocSettings, type ImageFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout } from './layout'
 
-/** Pure operations on the pages of a document. Text frames follow the page they sit on. */
+/** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
 export interface PageRect {
   x: number
   y: number
   w: number
   h: number
+}
+
+/** Everything the user has made: the settings and the objects on the pages. It is what undo / save / open handle. */
+export interface DocContent {
+  doc: DocSettings
+  frames: TextFrame[]
+  images: ImageFrame[]
+  /** picture data, by id (kept even when no frame uses it, so undo can bring the picture back) */
+  assets: Assets
 }
 
 /** World rectangle of every page, indexed by page index. */
@@ -20,7 +29,7 @@ export function pageRects(doc: DocSettings): PageRect[] {
   return rects
 }
 
-/** The page a point belongs to: the one containing it, or the nearest one (frames on the pasteboard follow it). */
+/** The page a point belongs to: the one containing it, or the nearest one (objects on the pasteboard follow it). */
 export function ownerPage(rects: PageRect[], cx: number, cy: number): number {
   let best = 0
   let bestDist = Infinity
@@ -37,68 +46,64 @@ export function ownerPage(rects: PageRect[], cx: number, cy: number): number {
 }
 
 /**
- * Re-position frames after the pages changed. Every frame belongs to the page it was on (`oldDoc`); `map` says which
- * page that is afterwards, or null when the page is gone (its frames are deleted, keeping any text thread intact).
+ * Re-position the objects after the pages changed. Every object belongs to the page it was on; `map` says which
+ * page that is afterwards, or null when the page is gone (its objects are deleted, keeping any text thread intact).
  */
-export function remapFrames(frames: TextFrame[], oldDoc: DocSettings, newDoc: DocSettings, map: (oldIndex: number) => number | null): TextFrame[] {
-  const oldRects = pageRects(oldDoc)
+export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex: number) => number | null): DocContent {
+  const oldRects = pageRects(c.doc)
   const newRects = pageRects(newDoc)
-  const moved = new Map<string, { x: number; y: number }>()
-  const gone: string[] = []
 
-  for (const f of frames) {
-    const o = ownerPage(oldRects, f.x + f.w / 2, f.y + f.h / 2)
+  /** the new position of a box, or null if its page is gone */
+  const follow = (b: { x: number; y: number; w: number; h: number }) => {
+    const o = ownerPage(oldRects, b.x + b.w / 2, b.y + b.h / 2)
     const n = map(o)
-    if (n === null || !newRects[n]) gone.push(f.id)
-    else moved.set(f.id, { x: newRects[n].x + (f.x - oldRects[o].x), y: newRects[n].y + (f.y - oldRects[o].y) })
+    return n === null || !newRects[n] ? null : { x: newRects[n].x + (b.x - oldRects[o].x), y: newRects[n].y + (b.y - oldRects[o].y) }
   }
 
-  let out = frames.map((f) => (moved.has(f.id) ? { ...f, ...moved.get(f.id)! } : f))
-  for (const id of gone) out = removeFrame(out, id)
-  return out
-}
+  let frames = c.frames.map((f) => {
+    const p = follow(f)
+    return p ? { ...f, ...p } : f
+  })
+  for (const f of c.frames) if (!follow(f)) frames = removeFrame(frames, f.id)
 
-export interface DocContent {
-  doc: DocSettings
-  frames: TextFrame[]
+  const images = c.images.flatMap((im) => {
+    const p = follow(im)
+    return p ? [{ ...im, ...p }] : []
+  })
+  return { doc: newDoc, frames, images, assets: c.assets }
 }
 
 /** Insert `count` blank pages so the first new one gets index `at` (0 … pages). */
-export function insertPages(doc: DocSettings, frames: TextFrame[], at: number, count: number): DocContent | null {
-  count = Math.min(count, MAX_PAGES - doc.pages)
+export function insertPages(c: DocContent, at: number, count: number): DocContent | null {
+  count = Math.min(count, MAX_PAGES - c.doc.pages)
   if (count < 1) return null
-  at = Math.max(0, Math.min(at, doc.pages))
-  const next = { ...doc, pages: doc.pages + count }
-  return { doc: next, frames: remapFrames(frames, doc, next, (i) => (i >= at ? i + count : i)) }
+  at = Math.max(0, Math.min(at, c.doc.pages))
+  return remapContent(c, { ...c.doc, pages: c.doc.pages + count }, (i) => (i >= at ? i + count : i))
 }
 
-/** Delete pages (and the frames on them). A document keeps at least one page. */
-export function deletePages(doc: DocSettings, frames: TextFrame[], indices: number[]): DocContent | null {
-  const del = new Set(indices.filter((i) => i >= 0 && i < doc.pages))
-  if (del.size === 0 || del.size >= doc.pages) return null
-  const next = { ...doc, pages: doc.pages - del.size }
-  return {
-    doc: next,
-    frames: remapFrames(frames, doc, next, (i) => {
-      if (del.has(i)) return null
-      let before = 0
-      for (const d of del) if (d < i) before++
-      return i - before
-    }),
-  }
+/** Delete pages (and what is on them). A document keeps at least one page. */
+export function deletePages(c: DocContent, indices: number[]): DocContent | null {
+  const del = new Set(indices.filter((i) => i >= 0 && i < c.doc.pages))
+  if (del.size === 0 || del.size >= c.doc.pages) return null
+  return remapContent(c, { ...c.doc, pages: c.doc.pages - del.size }, (i) => {
+    if (del.has(i)) return null
+    let before = 0
+    for (const d of del) if (d < i) before++
+    return i - before
+  })
 }
 
 /** Move the page at `from` so that it ends up at index `to` (in the final order). */
-export function movePage(doc: DocSettings, frames: TextFrame[], from: number, to: number): DocContent | null {
-  if (from === to || from < 0 || to < 0 || from >= doc.pages || to >= doc.pages) return null
-  const order = Array.from({ length: doc.pages }, (_, i) => i)
+export function movePage(c: DocContent, from: number, to: number): DocContent | null {
+  if (from === to || from < 0 || to < 0 || from >= c.doc.pages || to >= c.doc.pages) return null
+  const order = Array.from({ length: c.doc.pages }, (_, i) => i)
   order.splice(to, 0, order.splice(from, 1)[0])
   // order[newIndex] = oldIndex
   const newIndexOf = new Map(order.map((oldIndex, newIndex) => [oldIndex, newIndex]))
-  return { doc, frames: remapFrames(frames, doc, doc, (i) => newIndexOf.get(i) ?? null) }
+  return remapContent(c, c.doc, (i) => newIndexOf.get(i) ?? null)
 }
 
-/** Replace the document's settings (size, margins, page count …); frames stay on their pages. */
-export function applySettings(doc: DocSettings, frames: TextFrame[], next: DocSettings): DocContent {
-  return { doc: next, frames: remapFrames(frames, doc, next, (i) => (i < next.pages ? i : null)) }
+/** Replace the document's settings (size, margins, page count …); objects stay on their pages. */
+export function applySettings(c: DocContent, next: DocSettings): DocContent {
+  return remapContent(c, next, (i) => (i < next.pages ? i : null))
 }

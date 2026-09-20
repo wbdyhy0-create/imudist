@@ -8,13 +8,18 @@ import {
   MIN_PAGE_PT,
   defaultDocSettings,
   validateDoc,
+  type Asset,
+  type Assets,
   type CharStyle,
   type DocSettings,
+  type ImageFit,
+  type ImageFrame,
   type Run,
   type Sides,
   type TextAlign,
   type TextFrame,
 } from './document'
+import type { DocContent } from './pages'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
 
@@ -22,7 +27,7 @@ import type { Unit } from './units'
 export const FILE_EXT = '.imudist'
 const FORMAT = 'imudist'
 /** Bump when the file layout changes in a way older readers can't understand. */
-const VERSION = 1
+const VERSION = 2
 
 export interface DocumentFile {
   format: typeof FORMAT
@@ -30,11 +35,17 @@ export interface DocumentFile {
   savedAt: string
   settings: DocSettings
   frames: TextFrame[]
+  /** version 2+: pictures on the pages, and the data of the pictures they use */
+  images: ImageFrame[]
+  assets: Assets
 }
 
-/** The file's text for a document. */
-export function serializeDocument(doc: DocSettings, frames: TextFrame[]): string {
-  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: doc, frames }
+/** The file's text for a document. Only the pictures that are still in use are stored. */
+export function serializeDocument(c: DocContent): string {
+  const used = new Set(c.images.map((i) => i.assetId))
+  const assets: Assets = {}
+  for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
+  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets }
   return JSON.stringify(file)
 }
 
@@ -147,11 +158,56 @@ function parseFrames(v: unknown): TextFrame[] {
   return frames
 }
 
+const DATA_URL = /^data:image\/(png|jpeg|gif|webp|svg\+xml|bmp|avif);base64,/
+
+function parseAssets(v: unknown): Assets {
+  const out: Assets = Object.create(null) // no prototype: an id like "__proto__" must stay an ordinary key
+  if (!isObj(v)) return out
+  for (const [id, raw] of Object.entries(v)) {
+    if (!isObj(raw) || typeof raw.dataUrl !== 'string') continue
+    const m = DATA_URL.exec(raw.dataUrl)
+    if (!m) continue // anything that is not a picture data URL is refused
+    const asset: Asset = {
+      name: str(raw.name, 'תמונה'),
+      mime: 'image/' + m[1],
+      dataUrl: raw.dataUrl,
+      width: int(raw.width, 300, 1, 1e6),
+      height: int(raw.height, 300, 1, 1e6),
+    }
+    out[id] = asset
+  }
+  return out
+}
+
+function parseImages(v: unknown, assets: Assets): ImageFrame[] {
+  if (!Array.isArray(v)) return []
+  const out: ImageFrame[] = []
+  const used = new Set<string>()
+  for (const raw of v) {
+    if (!isObj(raw)) continue
+    const assetId = str(raw.assetId, '')
+    if (!assets[assetId]) continue // its picture is missing from the file
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `i${out.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    out.push({
+      id,
+      assetId,
+      x: num(raw.x, 0, -1e6, 1e6),
+      y: num(raw.y, 0, -1e6, 1e6),
+      w: num(raw.w, 100, MIN_FRAME_PT, MAX_PAGE_PT),
+      h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
+      fit: oneOf<ImageFit>(raw.fit, ['fill', 'fit', 'stretch'], 'fill'),
+    })
+  }
+  return out
+}
+
 /**
  * Read the text of a file. The document takes its name from the file (like other desktop programs),
  * so `name` is the file's name without the extension.
  */
-export function parseDocument(text: string, name: string): { doc: DocSettings; frames: TextFrame[] } {
+export function parseDocument(text: string, name: string): DocContent {
   let data: unknown
   try {
     data = JSON.parse(text)
@@ -162,5 +218,6 @@ export function parseDocument(text: string, name: string): { doc: DocSettings; f
   if (typeof data.version === 'number' && data.version > VERSION) {
     throw new FileFormatError('הקובץ נשמר בגרסה חדשה יותר של Imudist. עדכן את התוכנה כדי לפתוח אותו.')
   }
-  return { doc: parseSettings(data.settings, name), frames: parseFrames(data.frames) }
+  const assets = parseAssets(data.assets)
+  return { doc: parseSettings(data.settings, name), frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets }
 }

@@ -18,12 +18,17 @@ export function useHistory<T>(initial: T) {
   const [h, setH] = useState<State<T>>({ past: [], present: initial, future: [] })
   const last = useRef<{ key: string; at: number } | null>(null)
 
-  const change = useCallback((next: T, key?: string) => {
+  /** 
+ext may be a function of the current value, so a change is always applied to the newest state */
+  const change = useCallback((next: T | ((prev: T) => T), key?: string) => {
     const now = Date.now()
     // decided here (not inside the updater) so React may safely run the updater more than once
     const merge = !!key && last.current?.key === key && now - last.current.at < COALESCE_MS
     last.current = key ? { key, at: now } : null
-    setH((s) => (next === s.present ? s : { past: merge ? s.past : [...s.past, s.present].slice(-MAX_STEPS), present: next, future: [] }))
+    setH((s) => {
+      const value = typeof next === 'function' ? (next as (prev: T) => T)(s.present) : next
+      return value === s.present ? s : { past: merge ? s.past : [...s.past, s.present].slice(-MAX_STEPS), present: value, future: [] }
+    })
   }, [])
 
   const undo = useCallback(() => {
