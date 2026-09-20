@@ -29,6 +29,8 @@ export interface PageOps {
   move: (from: number, to: number) => void
   /** replace the document's settings (Document Setup) */
   setup: (next: DocSettings) => void
+  /** replace the whole content (e.g. after placing a long text that added pages and frames) */
+  commit: (content: DocContent) => void
 }
 
 /**
@@ -91,6 +93,7 @@ export function useDocumentSession() {
     remove: (indices) => state && applyPages(deletePages(state.doc, state.frames, indices)),
     move: (from, to) => state && applyPages(movePage(state.doc, state.frames, from, to)),
     setup: (next) => state && applyPages(applySettings(state.doc, state.frames, next)),
+    commit: (content) => applyPages(content),
   }
 
   const install = (d: DocSettings, f: TextFrame[], ref: FileRef | null) => {
@@ -282,5 +285,7 @@ export function useDocumentSession() {
     save,
     saveAs,
     revert,
+    showError: fail,
+    notify,
   }
 }

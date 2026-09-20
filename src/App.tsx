@@ -7,12 +7,14 @@ import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
+import { pickFile } from './fileio'
+import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
 const noop = () => {}
-const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop }
+const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
@@ -31,10 +33,24 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
   const [showPages, setShowPages] = useState(true)
+  /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
+  const [placing, setPlacing] = useState<PlacedText | null>(null)
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
 
+  /** Read a Word / text file and load it into the text cursor. */
+  const placeFile = async (file: File) => {
+    try {
+      setPlacing(await readPlacedText(file))
+    } catch (e) {
+      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+    }
+  }
+  const importText = async () => {
+    const file = await pickFile('.docx,.txt,.text,.md,.csv,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    if (file) await placeFile(file)
+  }
   const menus = useMemo(
     () =>
       buildMenus({
@@ -49,6 +65,7 @@ export default function App() {
         showPages,
         togglePages: () => setShowPages((v) => !v),
         documentSetup: () => setDialog('setup'),
+        importText: () => void importText(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
         undo: history.undo,
@@ -92,6 +109,45 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [menus, preview, history.redo, session.modal])
 
+  // a different document: nothing is loaded any more
+  useEffect(() => {
+    setPlacing(null)
+  }, [session.docId, !!doc])
+
+  // Ctrl+V outside a text box loads the clipboard text into the text cursor
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!doc || session.modal || isTyping(e.target)) return
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      if (!text.trim()) return
+      e.preventDefault()
+      setPlacing(placedFromPlainText('הטקסט מהלוח', text))
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [doc, session.modal])
+
+  // dropping a Word / text file onto the window loads it into the text cursor
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
+    const onOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault()
+    }
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      const file = e.dataTransfer?.files[0]
+      if (!file) return
+      if (!doc) session.notify('צור מסמך חדש או פתח קובץ לפני הוספת טקסט')
+      else void placeFile(file)
+    }
+    window.addEventListener('dragover', onOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onOver)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [doc])
   // the browser tab shows the document's name, with a dot while it has unsaved changes
   useEffect(() => {
     document.title = doc ? `${session.dirty ? '• ' : ''}${doc.name} — ${APP_NAME}` : APP_NAME
@@ -133,6 +189,8 @@ export default function App() {
               frames={preview ? NO_FRAMES : session.frames}
               onFramesChange={preview ? noop : session.changeFrames}
               pageOps={preview ? NO_PAGE_OPS : session.pages}
+              placing={preview ? null : placing}
+              onPlacingChange={preview ? noop : setPlacing}
               dirty={!preview && session.dirty}
               onClose={preview ? undefined : session.closeDocument}
             />

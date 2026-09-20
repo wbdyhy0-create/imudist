@@ -11,7 +11,9 @@ import {
 import { DEFAULT_TEXT_STYLE, MIN_FRAME_PT, type CharStyle, type DocSettings, type Run, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { isTyping } from '../dom'
 import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
+import { countWords, type PlacedText } from '../importText'
 import { computeLayout } from '../layout'
+import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
@@ -77,6 +79,9 @@ interface Props {
   frames: TextFrame[]
   onFramesChange: FramesChange
   pageOps: PageOps
+  /** text waiting to be placed (the loaded text cursor), or null */
+  placing: PlacedText | null
+  onPlacingChange: (placed: PlacedText | null) => void
   /** the document has changes that are not saved yet */
   dirty?: boolean
   onClose?: () => void
@@ -119,6 +124,8 @@ export function Workspace({
   frames,
   onFramesChange,
   pageOps,
+  placing,
+  onPlacingChange,
   dirty,
   onClose,
   ref,
@@ -129,6 +136,9 @@ export function Workspace({
   /** the page that Insert / Delete act on (the last one clicked) */
   const [selectedPage, setSelectedPage] = useState(0)
   const pendingNav = useRef<number | null>(null)
+  const [flowMode, setFlowMode] = useState<FlowMode>('auto')
+  /** modifier keys held when the placing click started */
+  const placeMods = useRef({ shift: false, alt: false })
 
   const vpRef = useRef<HTMLDivElement>(null)
   const [vp, setVp] = useState({ w: 0, h: 0, sb: 0 })
@@ -384,6 +394,20 @@ export function Workspace({
     setLinkFrom(null)
   }
 
+
+  /**
+   * Pour the loaded text into a frame at `target`. Shift = semi-automatic, Alt = automatic, otherwise the mode
+   * chosen in the banner. The whole result is one undo step.
+   */
+  const doPlace = (target: { box: Box; frameId?: string }, mods: { shift: boolean; alt: boolean }) => {
+    if (!placing) return
+    const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
+    const result = pourText(doc, frames, placing, target, mode)
+    pageOps.commit(result.content)
+    setSelectedId(result.headId)
+    setEditingId(null)
+    onPlacingChange(result.remaining)
+  }
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -496,6 +520,17 @@ export function Workspace({
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, linkFrom, frames, onFramesChange])
 
+
+  // Escape drops the loaded text
+  useEffect(() => {
+    if (!placing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onPlacingChange(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [placing])
+
   // the text selection belongs to one story: forget it when another one is selected
   const selHead = selectedId ? chainOf(frames, selectedId)[0] : undefined
   useEffect(() => {
@@ -547,8 +582,9 @@ export function Workspace({
     } else if (tool === 'zoom' && e.button === 0) {
       const rect = e.currentTarget.getBoundingClientRect()
       zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
-    } else if (tool === 'type' && e.button === 0) {
-      // start dragging a new text frame
+    } else if ((tool === 'type' || placing) && e.button === 0) {
+      // start dragging a new text frame (with text loaded, the frame receives it)
+      placeMods.current = { shift: e.shiftKey, alt: e.altKey }
       const p = toWorld(e.clientX, e.clientY)
       createStart.current = p
       setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
@@ -579,7 +615,16 @@ export function Workspace({
     drag.current = { x: e.clientX, y: e.clientY }
   }
   const finishDraft = () => {
-    if (draft && createStart.current) {
+    if (draft && createStart.current && placing) {
+      const w = Math.abs(draft.x1 - draft.x0)
+      const h = Math.abs(draft.y1 - draft.y0)
+      // a dragged rectangle is the frame; a plain click uses the column under the pointer
+      const box =
+        w >= MIN_FRAME_PT && h >= MIN_FRAME_PT
+          ? { x: Math.min(draft.x0, draft.x1), y: Math.min(draft.y0, draft.y1), w, h }
+          : boxAtClick(doc, draft.x0, draft.y0)
+      doPlace({ box }, placeMods.current)
+    } else if (draft && createStart.current) {
       const w = Math.abs(draft.x1 - draft.x0)
       const h = Math.abs(draft.y1 - draft.y0)
       if (w >= MIN_FRAME_PT && h >= MIN_FRAME_PT) {
@@ -621,6 +666,15 @@ export function Workspace({
     if (e.button !== 0 || panMode) return // let the pan handler see it
     const clicked = frames.find((f) => f.id === id)
     if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
+    if (placing) {
+      // an empty frame can receive the loaded text; anything else is ignored
+      e.stopPropagation()
+      e.preventDefault()
+      if (clicked && !clicked.text && !clicked.next && !frames.some((x) => x.next === clicked.id)) {
+        doPlace({ box: { x: clicked.x, y: clicked.y, w: clicked.w, h: clicked.h }, frameId: clicked.id }, { shift: e.shiftKey, alt: e.altKey })
+      }
+      return
+    }
     if (linkFrom) {
       e.stopPropagation()
       e.preventDefault()
@@ -683,7 +737,9 @@ export function Workspace({
       ? ' panning'
       : panMode
         ? ' pan'
-        : linkFrom
+        : placing
+          ? ' placing'
+          : linkFrom
           ? ' linking'
           : tool === 'zoom'
             ? ' zoomtool'
@@ -730,6 +786,28 @@ export function Workspace({
 
   return (
     <div className="workspace">
+      {placing && (
+        <div className="place-banner" role="status">
+          <div className="place-title">
+            <b>{placing.name}</b> · {countWords(placing.text).toLocaleString('he-IL')} מילים מוכנות להצבה
+          </div>
+          <div className="place-modes" role="group" aria-label="אופן הזרימה">
+            <button className={flowMode === 'auto' ? 'on' : ''} title="הטקסט זורם מעמוד לעמוד ומוסיף עמודים לפי הצורך" onClick={() => setFlowMode('auto')}>
+              זרימה אוטומטית
+            </button>
+            <button className={flowMode === 'semi' ? 'on' : ''} title="ממלא תיבה ומחכה ללחיצה הבאה" onClick={() => setFlowMode('semi')}>
+              חצי-אוטומטית
+            </button>
+            <button className={flowMode === 'single' ? 'on' : ''} title="תיבה אחת; מה שלא נכנס נשאר כגלישה" onClick={() => setFlowMode('single')}>
+              תיבה אחת
+            </button>
+          </div>
+          <button className="btn small" onClick={() => onPlacingChange(null)}>
+            בטל
+          </button>
+          <div className="place-hint">לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.</div>
+        </div>
+      )}
       <div className="doc-tabs">
         <div className="doc-tab">
           <span>

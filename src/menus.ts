@@ -19,6 +19,8 @@ export interface MenuContext {
   showPages: boolean
   togglePages: () => void
   documentSetup: () => void
+  /** load a Word / text file into the text cursor */
+  importText: () => void
   recent: RecentEntry[]
   /** the document lives in a file and has unsaved changes */
   canRevert: boolean
@@ -74,7 +76,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'שמור עותק…', shortcut: 'Ctrl+Alt+S', disabled: !c.hasDoc, onClick: c.saveCopy },
         { label: 'חזור לגרסה שנשמרה', disabled: !c.canRevert, onClick: c.revert },
         sep,
-        off('הוספת קובץ…', 'Ctrl+Shift+I'),
+        { label: 'הוספת קובץ…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
         off('ייבוא XML…'),
         sep,
         off('ייצוא…', 'Ctrl+E'),

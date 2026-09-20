@@ -92,3 +92,15 @@ export async function ensureReadPermission(handle: FileSystemFileHandle): Promis
   if ((await h.queryPermission({ mode: 'read' })) === 'granted') return true
   return (await h.requestPermission({ mode: 'read' })) === 'granted'
 }
+
+/** Let the user pick any file (through a hidden <input>). Resolves to null when the dialog is cancelled. */
+export function pickFile(accept: string): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = accept
+    input.onchange = () => resolve(input.files?.[0] ?? null)
+    input.addEventListener('cancel', () => resolve(null))
+    input.click()
+  })
+}
