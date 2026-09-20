@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run } from '../document'
-import { buildRunNodes, readSelectionIn, setSelectionIn } from '../richtext'
+import { buildRunNodes, buildWrapFloats, readSelectionIn, setSelectionIn } from '../richtext'
 import { diffEdit, wordEnd, wordStart } from '../story'
+import { floatsKey, type WrapFloat } from '../wrap'
 
 /** Ask the editor to select characters [a, b) of its text (a caret when a === b). `token` changes on each request. */
 export interface SelRequest {
@@ -16,6 +17,8 @@ interface Props {
   runs: Run[]
   /** zoom: font sizes are stored in points */
   scale: number
+  /** areas kept free of text because of pictures with text wrap */
+  floats: WrapFloat[]
   hasPrev: boolean
   request: SelRequest | null
   /** replace the characters [from, to) of `text` with `insert` */
@@ -43,11 +46,11 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${p.text}|${JSON.stringify(p.runs)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
-      el.replaceChildren(buildRunNodes(p.text, p.runs, p.scale))
+      el.replaceChildren(...buildWrapFloats(p.floats, p.scale), buildRunNodes(p.text, p.runs, p.scale))
       if (p.text.endsWith('\n')) el.appendChild(document.createElement('br')) // keeps the empty last line reachable
       shown.current = sig
     }

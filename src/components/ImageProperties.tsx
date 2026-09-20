@@ -1,6 +1,8 @@
-import { MAX_PAGE_PT, type Asset, type ImageFit, type ImageFrame } from '../document'
+import { DEFAULT_WRAP_OFFSET, MAX_PAGE_PT, type Asset, type ImageFit, type ImageFrame, type WrapMode } from '../document'
 import type { Box } from '../frames'
+import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
+import { ArrangeButtons } from './ArrangeButtons'
 import { NumberField } from './NumberField'
 import { Group, Labeled } from './PropertiesPanel'
 
@@ -10,10 +12,19 @@ interface Props {
   unit: Unit
   onGeometry: (patch: Partial<Box>) => void
   onFit: (fit: ImageFit) => void
+  onWrap: (wrap: WrapMode) => void
+  onWrapOffset: (offset: number) => void
+  onArrange: (op: ArrangeOp) => void
   /** make the frame the same shape as the picture (keeping its width) */
   onMatchShape: () => void
   onDelete: () => void
 }
+
+const WRAPS: { id: WrapMode; label: string; hint: string }[] = [
+  { id: 'none', label: 'ללא', hint: 'הטקסט לא מושפע מהתמונה (הם יכולים לחפוף)' },
+  { id: 'around', label: 'סביב', hint: 'הטקסט זורם בצד הרחב של התמונה, מעליה ומתחתיה' },
+  { id: 'jump', label: 'דילוג', hint: 'הטקסט נעצר מעל התמונה וממשיך מתחתיה' },
+]
 
 const FITS: { id: ImageFit; label: string; hint: string }[] = [
   { id: 'fill', label: 'מילוי', hint: 'התמונה ממלאת את כל המסגרת ונחתכת בקצוות אם צריך' },
@@ -22,7 +33,8 @@ const FITS: { id: ImageFit; label: string; hint: string }[] = [
 ]
 
 /** The properties panel of a selected picture. */
-export function ImageProperties({ image, asset, unit, onGeometry, onFit, onMatchShape, onDelete }: Props) {
+export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onArrange, onMatchShape, onDelete }: Props) {
+  const wrap = image.wrap ?? 'none'
   // pixels per inch at the current size: a hint for print quality (72 pt = 1 inch)
   const ppi = asset ? Math.round(asset.width / (image.w / 72)) : null
 
@@ -46,6 +58,28 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onMatch
           </Labeled>
         </div>
         <p className="muted">גרירת פינה שומרת על היחס. החזק Alt כדי לשנות חופשי.</p>
+      </Group>
+
+      <Group title="סדר שכבות">
+        <ArrangeButtons onArrange={onArrange} />
+      </Group>
+
+      <Group title="עטיפת טקסט">
+        <div className="place-modes">
+          {WRAPS.map((w) => (
+            <button key={w.id} className={wrap === w.id ? 'on' : ''} title={w.hint} onClick={() => onWrap(w.id)}>
+              {w.label}
+            </button>
+          ))}
+        </div>
+        {wrap !== 'none' && (
+          <div style={{ marginTop: 8 }}>
+            <Labeled label="מרווח מהתמונה">
+              <NumberField value={image.wrapOffset ?? DEFAULT_WRAP_OFFSET} unit={unit} min={0} max={200} onChange={onWrapOffset} />
+            </Labeled>
+          </div>
+        )}
+        <p className="muted">העטיפה משפיעה על כל תיבת טקסט שחופפת לתמונה, בלי קשר לסדר השכבות.</p>
       </Group>
 
       <Group title="התאמה למסגרת">

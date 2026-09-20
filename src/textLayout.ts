@@ -1,7 +1,8 @@
-import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from './document'
+import { LINE_HEIGHT, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
 import { chainOf, styleOf } from './frames'
-import { buildRunNodes } from './richtext'
+import { buildRunNodes, buildWrapFloats } from './richtext'
 import { normalizeRuns, sliceRuns } from './story'
+import { floatsKey, wrapFloatsFor, type WrapFloat } from './wrap'
 
 /** What one frame shows of its story. */
 export interface FrameFlow {
@@ -22,7 +23,11 @@ export interface FrameFlow {
 
 let measurer: HTMLDivElement | null = null
 
-/** A hidden element laid out exactly like a frame's text, used to find how much text fits. */
+/**
+ * A hidden element laid out exactly like a frame's text, used to find how much text fits. The text goes into a plain
+ * block inside it: the outer element (absolutely positioned) would grow to contain wrap floats, the inner one only
+ * ends where the last line ends.
+ */
 function getMeasurer(): HTMLDivElement {
   if (!measurer) {
     const m = document.createElement('div')
@@ -43,6 +48,7 @@ function getMeasurer(): HTMLDivElement {
       textRendering: 'geometricPrecision',
       lineHeight: String(LINE_HEIGHT),
     })
+    m.appendChild(document.createElement('div'))
     document.body.appendChild(m)
     measurer = m
   }
@@ -65,13 +71,23 @@ const capacityOf = (box: { w: number; h: number }, fontSize: number) =>
  * `hint` is a guess for how many characters fit (e.g. from the last layout). The search starts there and widens,
  * so only text about the size of one frame is ever laid out — not the rest of a long story.
  */
-function fitEnd(m: HTMLDivElement, story: string, runs: Run[], start: number, box: { w: number; h: number }, fontSize: number, hint?: number): number {
+function fitEnd(
+  m: HTMLDivElement,
+  story: string,
+  runs: Run[],
+  start: number,
+  box: { w: number; h: number },
+  fontSize: number,
+  floats: WrapFloat[],
+  hint?: number,
+): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${box.w}px`
+  const inner = m.firstElementChild as HTMLElement
   const fits = (end: number) => {
-    m.replaceChildren(buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1))
-    return m.getBoundingClientRect().height <= box.h + 0.5
+    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1))
+    return inner.getBoundingClientRect().height <= box.h + 0.5
   }
 
   let lo = start // fits (empty)
@@ -111,10 +127,18 @@ function fitEnd(m: HTMLDivElement, story: string, runs: Run[], start: number, bo
 }
 
 /** How much of `story` (from `start`) fits into a box of the given size, with the story's default style. */
-export function fitStoryEnd(story: string, runs: Run[], style: TextStyle, start: number, box: { w: number; h: number }, hint?: number): number {
+export function fitStoryEnd(
+  story: string,
+  runs: Run[],
+  style: TextStyle,
+  start: number,
+  box: { w: number; h: number },
+  floats: WrapFloat[] = [],
+  hint?: number,
+): number {
   const m = getMeasurer()
   configure(m, style)
-  return fitEnd(m, story, runs, start, box, style.fontSize, hint)
+  return fitEnd(m, story, runs, start, box, style.fontSize, floats, hint)
 }
 
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
@@ -122,8 +146,8 @@ const cache = new Map<string, { text: string; runs: Run[]; sig: string; flows: F
 /** last number of characters per frame, the starting point of the next search */
 const lengths = new Map<string, number>()
 
-/** Distribute every story's text over its frames. Keyed by frame id. */
-export function flowFrames(frames: TextFrame[]): Map<string, FrameFlow> {
+/** Distribute every story's text over its frames (keeping clear of wrapped pictures). Keyed by frame id. */
+export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<string, FrameFlow> {
   const result = new Map<string, FrameFlow>()
   const seen = new Set<string>()
   const hasPrev = new Set(frames.map((f) => f.next).filter((n): n is string => !!n))
@@ -134,8 +158,11 @@ export function flowFrames(frames: TextFrame[]): Map<string, FrameFlow> {
     const chain = chainOf(frames, head.id)
     const style = styleOf(head)
     const story = head.text
-    // everything the layout depends on: default style, and the id and size of every frame in the thread
-    const sig = `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.align}|` + chain.map((f) => `${f.id}:${f.w}:${f.h}`).join(',')
+    const floats = chain.map((f) => wrapFloatsFor(f, images))
+    // everything the layout depends on: default style, and the id, size and wrap areas of every frame in the thread
+    const sig =
+      `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.align}|` +
+      chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
     const hit = cache.get(head.id)
     let flows: FrameFlow[]
@@ -148,7 +175,7 @@ export function flowFrames(frames: TextFrame[]): Map<string, FrameFlow> {
       flows = []
       let start = 0
       chain.forEach((f, i) => {
-        const end = fitEnd(m, story, runs, start, f, style.fontSize, lengths.get(f.id))
+        const end = fitEnd(m, story, runs, start, f, style.fontSize, floats[i], lengths.get(f.id))
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,

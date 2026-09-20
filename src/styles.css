@@ -207,13 +207,14 @@ svg { display: block; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
 .text-frame-body { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+.wrap-float { pointer-events: none; user-select: none; }
 .rich-editor {
   display: block; width: 100%; height: 100%; overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext;
   user-select: text; cursor: text; caret-color: #111; text-rendering: inherit;
 }
 .text-frame-body .sel { background: #b3d4ff; }
 .text-frame ::selection { background: #b3d4ff; }
-.text-frame-draft { position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }
+.text-frame-draft { z-index: 1000000; position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }
 .handle { position: absolute; z-index: 2; width: 7px; height: 7px; box-sizing: border-box; background: #fff; border: 1px solid #ffb02e; }
 .handle.nw { left: -4px; top: -4px; cursor: nwse-resize; }
 .handle.n { left: calc(50% - 4px); top: -4px; cursor: ns-resize; }
@@ -232,7 +233,7 @@ svg { display: block; }
 .port.linked { background: #ffb02e; }
 .port.overflow { background: #e5484d; border-color: #e5484d; color: #fff; }
 .port.armed { background: var(--accent); border-color: #fff; }
-.thread-layer { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.thread-layer { z-index: 1000000; position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .thread-line { stroke: #ffb02e; stroke-width: 1.3; stroke-dasharray: 4 3; }
 
 /* ── properties panel ─────────────────────────────────────── */
@@ -363,6 +364,7 @@ svg { display: block; }
 .place-title b { font-weight: 600; }
 .place-modes { display: flex; gap: 6px; }
 .place-modes button { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 13px; background: var(--bg-field); }
+.place-modes.arrange { flex-wrap: wrap; }
 .place-modes button.on { background: var(--accent); border-color: var(--accent-line); color: #fff; }
 .place-hint { flex: 1 1 100%; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
 /* ── pictures ────────────────────────────────────────────── */

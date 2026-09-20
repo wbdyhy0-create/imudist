@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import { MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
+import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
+import { ArrangeButtons } from './ArrangeButtons'
 import { FontPicker } from './FontPicker'
 import { NumberField } from './NumberField'
 
@@ -18,6 +20,7 @@ interface Props {
   onGeometry: (patch: Partial<Box>) => void
   onCharStyle: (patch: Partial<CharStyle>) => void
   onAlign: (align: TextAlign) => void
+  onArrange: (op: ArrangeOp) => void
   onLink: () => void
   onUnlink: () => void
 }
@@ -29,7 +32,7 @@ const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'justify', label: 'יישור דו-צדדי', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
 ]
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onLink, onUnlink }: Props) {
+export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onArrange, onLink, onUnlink }: Props) {
   const catalog = useFontCatalog()
 
   // The panel's buttons must not take the focus away from the text being edited.
@@ -67,6 +70,10 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
                 <NumberField value={frame.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
               </Labeled>
             </div>
+          </Group>
+
+          <Group title="סדר שכבות">
+            <ArrangeButtons onArrange={onArrange} />
           </Group>
 
           <Group title="טקסט">

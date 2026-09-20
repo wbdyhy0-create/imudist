@@ -121,7 +121,24 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       ],
     },
     { label: 'טיפוגרפיה', items: [off('גופן'), off('גודל'), sep, off('יצירת קווי מתאר', 'Ctrl+Shift+O')] },
-    { label: 'אובייקט', items: [off('שינוי צורה'), off('סדר'), sep, off('קבץ', 'Ctrl+G'), off('בטל קיבוץ', 'Ctrl+Shift+G')] },
+    {
+      label: 'אובייקט',
+      items: [
+        off('שינוי צורה'),
+        {
+          label: 'סדר',
+          submenu: [
+            doc('הבא לחזית', 'Ctrl+Shift+]', (ws) => ws.arrange('front')),
+            doc('קדימה', 'Ctrl+]', (ws) => ws.arrange('forward')),
+            doc('אחורה', 'Ctrl+[', (ws) => ws.arrange('backward')),
+            doc('שלח לרקע', 'Ctrl+Shift+[', (ws) => ws.arrange('back')),
+          ],
+        },
+        sep,
+        off('קבץ', 'Ctrl+G'),
+        off('בטל קיבוץ', 'Ctrl+Shift+G'),
+      ],
+    },
     { label: 'טבלה', items: [off('הוספת טבלה…', 'Ctrl+Alt+Shift+T')] },
     {
       label: 'תצוגה',
@@ -152,7 +169,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
 
 // ── keyboard shortcuts, derived from the same menu definitions ───────────────────
 
-const CODE: Record<string, string> = { '=': 'Equal', '-': 'Minus', ';': 'Semicolon' }
+const CODE: Record<string, string> = { '=': 'Equal', '-': 'Minus', ';': 'Semicolon', '[': 'BracketLeft', ']': 'BracketRight' }
 
 /** Layout-independent: letters/digits are matched by physical key so Hebrew layouts work too. */
 function matches(e: KeyboardEvent, shortcut: string): boolean {

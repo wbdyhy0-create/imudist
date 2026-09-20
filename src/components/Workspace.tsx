@@ -29,8 +29,10 @@ import { computeLayout } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
+import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
+import { wrapFloatsFor } from '../wrap'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
@@ -72,6 +74,8 @@ export interface WorkspaceHandle {
   /** add one page after the selected page / delete the selected page */
   addPage: () => void
   deletePage: () => void
+  /** move the selected object in the stacking order */
+  arrange: (op: ArrangeOp) => void
 }
 
 /**
@@ -157,7 +161,9 @@ export function Workspace({
   ref,
 }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
-  const flow = useMemo(() => flowFrames(frames), [frames])
+  const flow = useMemo(() => flowFrames(frames, images), [frames, images])
+  /** stacking rank of every object (1 = the back) */
+  const rank = useMemo(() => new Map(stackOrder(frames, images).map((o, i) => [o.id, i + 1])), [frames, images])
   const rects = useMemo(() => pageRects(doc), [doc])
   /** the page that Insert / Delete act on (the last one clicked) */
   const [selectedPage, setSelectedPage] = useState(0)
@@ -304,7 +310,7 @@ export function Workspace({
    */
   const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string) => {
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs } : f))
-    const nf = flowFrames(next)
+    const nf = flowFrames(next, images)
     const chain = chainOf(next, headId)
     const target =
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
@@ -428,7 +434,7 @@ export function Workspace({
   const doPlace = (target: { box: Box; frameId?: string }, mods: { shift: boolean; alt: boolean }) => {
     if (!placing) return
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
-    const result = pourText(doc, frames, placing, target, mode)
+    const result = pourText(doc, frames, images, placing, target, mode)
     pageOps.commit(result.content)
     setSelectedId(result.headId)
     setEditingId(null)
@@ -460,7 +466,7 @@ export function Workspace({
       x = Math.min(Math.max(at.x, page.x), page.x + page.w - w)
       y = Math.min(Math.max(at.y, page.y), page.y + page.h - h)
     }
-    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill' }
+    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images) }
     pageOps.commit({ images: [...images, frame], assets: assets[assetId] ? assets : { ...assets, [assetId]: asset } })
     setSelectedId(frame.id)
     setEditingId(null)
@@ -483,6 +489,13 @@ export function Workspace({
   const updateImage = (id: string, patch: Partial<ImageFrame>, key?: string) =>
     onImagesChange(images.map((im) => (im.id === id ? { ...im, ...patch } : im)), key)
 
+  /** move an object in the stacking order (frames and pictures together): one undo step */
+  const arrangeObject = (id: string | null, op: ArrangeOp) => {
+    if (!id) return
+    const r = arrange(frames, images, id, op)
+    if (r) pageOps.commit(r)
+  }
+
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -496,6 +509,7 @@ export function Workspace({
     selectAllText,
     addPage: () => insertPages(1, 'after'),
     deletePage: deleteSelectedPage,
+    arrange: (op) => arrangeObject(selectedId, op),
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -748,6 +762,7 @@ export function Workspace({
           text: '',
           runs: [],
           next: null,
+          z: nextZ(frames, images),
         }
         onFramesChange([...frames, frame])
         setSelectedId(frame.id)
@@ -774,6 +789,7 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return // let the pan handler see it
+    if (placingImages.length > 0) return // the click places a picture on the page, even over a text frame
     const clicked = frames.find((f) => f.id === id)
     if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
     if (placing) {
@@ -983,6 +999,7 @@ export function Workspace({
                   zoom={zoom}
                   tx={tx}
                   ty={ty}
+                  z={rank.get(im.id) ?? 0}
                   selected={im.id === selectedId}
                   showEdge={!previewMode}
                   onPointerDown={onImagePointerDown(im.id)}
@@ -1000,6 +1017,8 @@ export function Workspace({
                     slice={fl.slice}
                     runs={fl.runs}
                     highlight={highlightFor(fl)}
+                    floats={wrapFloatsFor(f, images)}
+                    z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
                     hasPrev={fl.prevId !== null}
                     zoom={zoom}
@@ -1085,6 +1104,9 @@ export function Workspace({
                 unit={doc.unit}
                 onGeometry={(patch) => updateImage(selImage.id, patch, `geo:${selImage.id}`)}
                 onFit={(fit: ImageFit) => updateImage(selImage.id, { fit })}
+                onWrap={(wrap) => updateImage(selImage.id, { wrap })}
+                onWrapOffset={(wrapOffset) => updateImage(selImage.id, { wrapOffset }, `wrapoff:${selImage.id}`)}
+                onArrange={(op) => arrangeObject(selImage.id, op)}
                 onMatchShape={() => {
                   const a = assets[selImage.assetId]
                   if (a) updateImage(selImage.id, { h: selImage.w * (a.height / a.width) })
@@ -1105,6 +1127,7 @@ export function Workspace({
             onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
             onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
             onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
+            onArrange={(op) => selFrame && arrangeObject(selFrame.id, op)}
             onLink={() => selFrame && setLinkFrom(selFrame.id)}
             onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
           />

@@ -78,9 +78,20 @@ export interface TextFrame extends TextStyle {
   text: string
   runs: Run[]
   next: string | null
+  /** stacking order (higher = in front). Missing = the default layer: text frames in front of pictures */
+  z?: number
 }
 /** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
+
+/**
+ * How text flows around a picture. none: text ignores it (they may overlap). around: text runs beside it, on the
+ * wider side, and above and below. jump: text stops above it and continues below (nothing beside it).
+ */
+export type WrapMode = 'none' | 'around' | 'jump'
+
+/** Space kept free around a wrapped picture, points. */
+export const DEFAULT_WRAP_OFFSET = 8
 
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
@@ -91,6 +102,12 @@ export interface ImageFrame {
   h: number
   assetId: string
   fit: ImageFit
+  /** stacking order (higher = in front). Missing = the default layer: pictures behind text frames */
+  z?: number
+  /** text wrap (missing = none) */
+  wrap?: WrapMode
+  /** distance kept between the picture and wrapped text (missing = DEFAULT_WRAP_OFFSET) */
+  wrapOffset?: number
 }
 
 /** The data of an imported picture. Several frames can show the same asset. */

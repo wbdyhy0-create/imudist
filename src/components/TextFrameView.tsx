@@ -1,6 +1,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, type HandleId } from '../frames'
+import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 
 interface Props {
@@ -12,6 +13,10 @@ interface Props {
   runs: Run[]
   /** part of `slice` to draw highlighted while the frame is not being edited: [from, to) */
   highlight: [number, number] | null
+  /** areas kept free of text because of pictures with text wrap */
+  floats: WrapFloat[]
+  /** stacking rank (higher = in front) */
+  z: number
   /** the story has more text than fits in its frames (only set on the last frame of a story) */
   overflow: boolean
   hasPrev: boolean
@@ -39,7 +44,7 @@ interface Props {
 }
 
 /** Text as read-only spans, with an optional highlighted range. */
-function RichText({ text, runs, scale, highlight }: { text: string; runs: Run[]; scale: number; highlight: [number, number] | null }) {
+function RichText({ text, runs, scale, highlight, floats }: { text: string; runs: Run[]; scale: number; highlight: [number, number] | null; floats: WrapFloat[] }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
   for (const run of runs) {
@@ -56,6 +61,13 @@ function RichText({ text, runs, scale, highlight }: { text: string; runs: Run[];
   }
   return (
     <>
+      {floats.map((f, i) => (
+        <div
+          key={`float${i}`}
+          className="wrap-float"
+          style={{ float: f.side, width: f.width * scale, height: f.height * scale, shapeOutside: shapeOf(f, scale) }}
+        />
+      ))}
       {parts.map((p) => (
         <span
           key={p.key}
@@ -85,6 +97,7 @@ export function TextFrameView(p: Props) {
     <div
       className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '')}
       style={{
+        zIndex: p.z,
         left: p.tx + frame.x * p.zoom,
         top: p.ty + frame.y * p.zoom,
         width: frame.w * p.zoom,
@@ -102,6 +115,7 @@ export function TextFrameView(p: Props) {
           text={slice}
           runs={p.runs}
           scale={p.zoom}
+          floats={p.floats}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -112,7 +126,7 @@ export function TextFrameView(p: Props) {
         />
       ) : (
         <div className="text-frame-body" dir="rtl">
-          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} />
+          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} />
         </div>
       )}
 

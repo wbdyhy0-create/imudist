@@ -1,5 +1,6 @@
 import {
   DEFAULT_TEXT_STYLE,
+  DEFAULT_WRAP_OFFSET,
   MAX_COLUMNS,
   MAX_PAGES,
   MAX_PAGE_PT,
@@ -18,6 +19,7 @@ import {
   type Sides,
   type TextAlign,
   type TextFrame,
+  type WrapMode,
 } from './document'
 import type { DocContent } from './pages'
 import { normalizeRuns } from './story'
@@ -105,6 +107,9 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
   }
 }
 
+/** the optional stacking order of an object */
+const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 'number' && Number.isFinite(raw.z) ? { z: int(raw.z, 0, -1e9, 1e9) } : {})
+
 function parseFrames(v: unknown): TextFrame[] {
   if (!Array.isArray(v)) return []
   const D = DEFAULT_TEXT_STYLE
@@ -134,6 +139,7 @@ function parseFrames(v: unknown): TextFrame[] {
       text,
       runs: normalizeRuns(text, runs, base),
       next: typeof raw.next === 'string' ? raw.next : null,
+      ...zOf(raw),
     })
   }
 
@@ -198,6 +204,9 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       w: num(raw.w, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       fit: oneOf<ImageFit>(raw.fit, ['fill', 'fit', 'stretch'], 'fill'),
+      ...zOf(raw),
+      ...(raw.wrap === 'around' || raw.wrap === 'jump' ? { wrap: raw.wrap as WrapMode } : {}),
+      ...(typeof raw.wrapOffset === 'number' ? { wrapOffset: num(raw.wrapOffset, DEFAULT_WRAP_OFFSET, 0, 500) } : {}),
     })
   }
   return out

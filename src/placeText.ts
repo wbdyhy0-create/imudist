@@ -1,10 +1,12 @@
-import { MAX_PAGES, type DocSettings, type TextFrame } from './document'
+import { MAX_PAGES, type DocSettings, type ImageFrame, type TextFrame } from './document'
 import { chainOf, styleOf, type Box } from './frames'
 import type { PlacedText } from './importText'
 import { computeLayout, pageMargins, type PageSide } from './layout'
 import { ownerPage, pageRects, type PageRect } from './pages'
+import { nextZ } from './stacking'
 import { normalizeRuns, sliceRuns } from './story'
 import { fitStoryEnd, flowFrames } from './textLayout'
+import { wrapFloatsFor } from './wrap'
 
 /**
  * How placed text fills frames.
@@ -79,28 +81,29 @@ const newId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.r
  * Semi-automatic flow: each click adds one frame to the same story. The first click creates the story in a frame;
  * later clicks link a new frame after the last one (`placed.continueFrom`). The text stays loaded while some is left over.
  */
-function pourSemi(doc: DocSettings, frames: TextFrame[], placed: PlacedText, target: PourTarget): PourResult {
+function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], placed: PlacedText, target: PourTarget): PourResult {
   const existing = target.frameId ? frames.find((f) => f.id === target.frameId) : undefined
   const box: Box = existing ? { x: existing.x, y: existing.y, w: existing.w, h: existing.h } : target.box
   const id = existing?.id ?? newId()
   const others = frames.filter((f) => f.id !== existing?.id)
   // the frame the new one continues from (it may have been deleted since the last click)
   const tail = placed.continueFrom ? others.find((f) => f.id === placed.continueFrom && !f.next) : undefined
+  const z = nextZ(frames, images)
 
   let next: TextFrame[]
   let headId: string
   if (tail) {
     const head = chainOf(others, tail.id)[0]
-    const frame: TextFrame = { ...styleOf(head), id, x: box.x, y: box.y, w: box.w, h: box.h, text: '', runs: [], next: null }
+    const frame: TextFrame = { ...styleOf(head), id, x: box.x, y: box.y, w: box.w, h: box.h, text: '', runs: [], next: null, z }
     next = [...others.map((f) => (f.id === tail.id ? { ...f, next: id } : f)), frame]
     headId = head.id
   } else {
     const runs = normalizeRuns(placed.text, placed.runs, placed.style)
-    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, next: null }]
+    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, next: null, z }]
     headId = id
   }
 
-  const last = flowFrames(next).get(id)!
+  const last = flowFrames(next, images).get(id)!
   const headFrame = next.find((f) => f.id === headId)!
   const storyRuns = normalizeRuns(headFrame.text, headFrame.runs, headFrame)
   const remaining: PlacedText | null = last.overflow
@@ -112,9 +115,17 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], placed: PlacedText, tar
 /**
  * Put a text into the document. The result is one new document state, so it is a single undo step.
  * In auto mode the text keeps flowing into the following columns and pages; pages are added when it runs out.
+ * `images` are only read: pictures with text wrap keep the text out of their area.
  */
-export function pourText(doc: DocSettings, frames: TextFrame[], placed: PlacedText, target: PourTarget, mode: FlowMode): PourResult {
-  if (mode === 'semi') return pourSemi(doc, frames, placed, target)
+export function pourText(
+  doc: DocSettings,
+  frames: TextFrame[],
+  images: ImageFrame[],
+  placed: PlacedText,
+  target: PourTarget,
+  mode: FlowMode,
+): PourResult {
+  if (mode === 'semi') return pourSemi(doc, frames, images, placed, target)
   const story = placed.text
   const style = placed.style
   const runs = normalizeRuns(story, placed.runs, style)
@@ -132,7 +143,7 @@ export function pourText(doc: DocSettings, frames: TextFrame[], placed: PlacedTe
 
   const boxes: Box[] = [first]
   const ends: number[] = []
-  let start = fitStoryEnd(story, runs, style, 0, first)
+  let start = fitStoryEnd(story, runs, style, 0, first, wrapFloatsFor(first, images))
   ends.push(start)
 
   if (mode === 'auto' && start < story.length) {
@@ -155,7 +166,7 @@ export function pourText(doc: DocSettings, frames: TextFrame[], placed: PlacedTe
       const box = columnBoxes(curDoc, rects[page], sides[page])[col]
       col++
       if (box.w < 8 || box.h < 8) break
-      const end = fitStoryEnd(story, runs, style, start, box, Math.max(1, lastLen))
+      const end = fitStoryEnd(story, runs, style, start, box, wrapFloatsFor(box, images), Math.max(1, lastLen))
       if (end <= start) break // the frame is smaller than one line
       boxes.push(box)
       ends.push(end)
@@ -165,6 +176,7 @@ export function pourText(doc: DocSettings, frames: TextFrame[], placed: PlacedTe
   }
 
   const ids = boxes.map((_, i) => (i === 0 && existing ? existing.id : newId()))
+  const z = nextZ(frames, images)
   const made: TextFrame[] = boxes.map((b, i) => ({
     ...style,
     id: ids[i],
@@ -176,6 +188,8 @@ export function pourText(doc: DocSettings, frames: TextFrame[], placed: PlacedTe
     text: i === 0 ? story : '',
     runs: i === 0 ? runs : [],
     next: i < boxes.length - 1 ? ids[i + 1] : null,
+    // an existing frame keeps its place in the stack
+    z: i === 0 && existing ? existing.z : z,
   }))
 
   return {

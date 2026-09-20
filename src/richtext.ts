@@ -1,4 +1,5 @@
 import type { CharStyle, Run } from './document'
+import { shapeOf, type WrapFloat } from './wrap'
 
 /** CSS for one run. `scale` is the zoom (1 for measuring); font sizes are stored in points. */
 export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) {
@@ -20,6 +21,27 @@ export function buildRunNodes(text: string, runs: Run[], scale: number): Documen
     pos += r.len
   }
   return frag
+}
+
+/**
+ * Empty floated shapes that keep text out of the areas of pictures (text wrap). They go before the text, inside the same
+ * container, so the browser flows the lines around them. They hold no characters, so text offsets are unaffected.
+ */
+export function buildWrapFloats(floats: WrapFloat[], scale: number): HTMLElement[] {
+  return floats.map((f) => {
+    const el = document.createElement('div')
+    el.className = 'wrap-float'
+    el.contentEditable = 'false'
+    Object.assign(el.style, {
+      float: f.side,
+      width: `${f.width * scale}px`,
+      height: `${f.height * scale}px`,
+      shapeOutside: shapeOf(f, scale),
+      pointerEvents: 'none',
+      userSelect: 'none',
+    })
+    return el
+  })
 }
 
 /** Character offset of a DOM position (node, offset) counted in the text of `root`. */
