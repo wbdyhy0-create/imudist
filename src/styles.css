@@ -318,3 +318,21 @@ svg { display: block; }
 .font-picker-empty { padding: 6px 8px; color: var(--text-dim); }
 .scope-hint { margin: 0 0 8px; padding: 5px 8px; border-radius: 4px; background: var(--bg-field); color: var(--text-dim); }
 .scope-hint.on { color: #fff; background: rgba(0, 102, 255, 0.28); }
+/* ── file dialogs, toast, recent files ───────────────────── */
+.modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
+.modal { width: min(440px, calc(100vw - 32px)); padding: 22px 24px 18px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
+.modal h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.modal p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.modal-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn.danger { background: #c0392b; color: #fff; }
+.btn.danger:hover:not(:disabled) { background: #a93226; }
+.toast {
+  position: fixed; z-index: 150; bottom: 44px; inset-inline-start: 50%; transform: translateX(50%); padding: 8px 16px;
+  background: #101010; border: 1px solid var(--border-strong); border-radius: 6px; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); pointer-events: none;
+}
+.recent-list { margin: 0; padding: 0; list-style: none; max-width: 560px; }
+.recent-list button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 6px; text-align: start; }
+.recent-list button:hover { background: var(--bg-raised); }
+.recent-list svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+.recent-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-date { color: var(--text-dim); font-size: 11px; white-space: nowrap; }

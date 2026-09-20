@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
+import { Modal } from './components/Modal'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
-import { useHistory } from './history'
 import { buildMenus, findShortcut } from './menus'
+import { useDocumentSession } from './useDocumentSession'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -15,8 +16,8 @@ const noop = () => {}
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
-  const [doc, setDoc] = useState<DocSettings | null>(null)
-  const [docId, setDocId] = useState(0)
+  const session = useDocumentSession()
+  const { doc, history } = session
   const [nextName, setNextName] = useState(1)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
@@ -26,9 +27,6 @@ export default function App() {
   const [showGuides, setShowGuides] = useState(true)
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
-  /** text frames of the open document (kept here so they survive the New Document panel's live preview) */
-  const history = useHistory<TextFrame[]>(NO_FRAMES)
-  const frames = history.value
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
@@ -48,19 +46,26 @@ export default function App() {
         canRedo: history.canRedo && !preview,
         undo: history.undo,
         redo: history.redo,
+        recent: session.recent,
+        canRevert: !!session.file?.handle && session.dirty,
+        openFile: () => void session.openFile(),
+        openRecent: (entry) => void session.openRecent(entry),
+        save: () => void session.save(),
+        saveAs: () => void session.saveAs(),
+        saveCopy: () => void session.saveAs(true),
+        revert: session.revert,
         newDocument: () => setDialogOpen(true),
-        closeDocument: () => {
-          setDoc(null)
-          history.reset(NO_FRAMES)
-        },
+        closeDocument: session.closeDocument,
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
-    [shown, showRulers, showGuides, previewMode, showProps, history.canUndo, history.canRedo, history.undo, history.redo, preview],
+    // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
+    [shown, showRulers, showGuides, previewMode, showProps, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.doc, session.frames],
   )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (session.modal) return // a question is open: only the question's own keys
       const typing = isTyping(e.target)
       // single-key shortcuts (like W) must not fire while typing in a field
       if (typing && !e.ctrlKey && !e.metaKey && !e.altKey) return
@@ -78,25 +83,28 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menus, preview, history.redo])
+  }, [menus, preview, history.redo, session.modal])
+
+  // the browser tab shows the document's name, with a dot while it has unsaved changes
+  useEffect(() => {
+    document.title = doc ? `${session.dirty ? '• ' : ''}${doc.name} — ${APP_NAME}` : APP_NAME
+  }, [doc, session.dirty])
 
   const closeDialog = () => {
     setDialogOpen(false)
     setPreview(null)
   }
 
-  const create = (d: DocSettings) => {
-    setDoc(d)
-    history.reset(NO_FRAMES)
-    setDocId((n) => n + 1)
-    setNextName((n) => n + 1)
-    setLastSettings(d)
-    closeDialog()
-  }
+  const create = (d: DocSettings) =>
+    session.createDocument(d, () => {
+      setNextName((n) => n + 1)
+      setLastSettings(d)
+      closeDialog()
+    })
 
   const fitKey = preview
     ? [preview.width, preview.height, preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
-    : String(docId)
+    : String(session.docId)
 
   return (
     <div className="app">
@@ -105,7 +113,7 @@ export default function App() {
         <div className="stage">
           {shown ? (
             <Workspace
-              key={preview ? 'preview' : docId}
+              key={preview ? 'preview' : session.docId}
               ref={ws}
               doc={shown}
               fitKey={fitKey}
@@ -114,12 +122,19 @@ export default function App() {
               showProps={showProps}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
-              frames={preview ? NO_FRAMES : frames}
+              frames={preview ? NO_FRAMES : session.frames}
               onFramesChange={preview ? noop : history.change}
-              onClose={preview ? undefined : () => { setDoc(null); history.reset(NO_FRAMES) }}
+              dirty={!preview && session.dirty}
+              onClose={preview ? undefined : session.closeDocument}
             />
           ) : (
-            <Home appName={APP_NAME} onNew={() => setDialogOpen(true)} />
+            <Home
+              appName={APP_NAME}
+              recent={session.recent}
+              onNew={() => setDialogOpen(true)}
+              onOpen={() => void session.openFile()}
+              onOpenRecent={(entry) => void session.openRecent(entry)}
+            />
           )}
           {dialogOpen && !preview && <div className="stage-dim" />}
         </div>
@@ -132,6 +147,8 @@ export default function App() {
           />
         )}
       </div>
+      {session.toast && <div className="toast" role="status">{session.toast}</div>}
+      {session.modal && <Modal spec={session.modal} />}
     </div>
   )
 }

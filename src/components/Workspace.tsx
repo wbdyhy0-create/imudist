@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import { DEFAULT_TEXT_STYLE, type CharStyle, type DocSettings, type Run, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_TEXT_STYLE, MIN_FRAME_PT, type CharStyle, type DocSettings, type Run, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { isTyping } from '../dom'
 import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import { computeLayout } from '../layout'
@@ -69,12 +69,11 @@ interface Props {
   onPreviewMode: (on: boolean) => void
   frames: TextFrame[]
   onFramesChange: FramesChange
+  /** the document has changes that are not saved yet */
+  dirty?: boolean
   onClose?: () => void
   ref?: Ref<WorkspaceHandle>
 }
-
-/** Smallest frame (points): a smaller drag creates nothing, and frames can't be resized below it. */
-const MIN_FRAME_PT = 6
 
 const newFrameId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
 
@@ -110,6 +109,7 @@ export function Workspace({
   onPreviewMode,
   frames,
   onFramesChange,
+  dirty,
   onClose,
   ref,
 }: Props) {
@@ -675,7 +675,7 @@ export function Workspace({
       <div className="doc-tabs">
         <div className="doc-tab">
           <span>
-            {doc.name} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
+            {doc.name}{dirty ? ' *' : ''} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
           </span>
           {onClose && (
             <button className="doc-tab-close" aria-label="סגור מסמך" onClick={onClose}>

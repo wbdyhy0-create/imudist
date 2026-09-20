@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import type { MenuDef, MenuItem } from './components/MenuBar'
 import type { WorkspaceHandle } from './components/Workspace'
+import type { RecentEntry } from './recent'
 
 export interface MenuContext {
   hasDoc: boolean
@@ -15,6 +16,15 @@ export interface MenuContext {
   canRedo: boolean
   undo: () => void
   redo: () => void
+  recent: RecentEntry[]
+  /** the document lives in a file and has unsaved changes */
+  canRevert: boolean
+  openFile: () => void
+  openRecent: (entry: RecentEntry) => void
+  save: () => void
+  saveAs: () => void
+  saveCopy: () => void
+  revert: () => void
   newDocument: () => void
   closeDocument: () => void
   toggleRulers: () => void
@@ -47,14 +57,19 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             off('ספרייה…'),
           ],
         },
-        off('פתח…', 'Ctrl+O'),
-        { label: 'פתח אחרון', submenu: [], disabled: true },
+        { label: 'פתח…', shortcut: 'Ctrl+O', onClick: c.openFile },
+        {
+          label: 'פתח אחרון',
+          submenu: c.recent.length
+            ? c.recent.map((r) => ({ label: r.name, onClick: () => c.openRecent(r) }))
+            : [{ label: 'אין קבצים אחרונים', disabled: true }],
+        },
         sep,
         { label: 'סגור', shortcut: 'Ctrl+W', disabled: !c.hasDoc, onClick: c.closeDocument },
-        off('שמור', 'Ctrl+S'),
-        off('שמור בשם…', 'Ctrl+Shift+S'),
-        off('שמור עותק…', 'Ctrl+Alt+S'),
-        off('חזור לגרסה שנשמרה'),
+        { label: 'שמור', shortcut: 'Ctrl+S', disabled: !c.hasDoc, onClick: c.save },
+        { label: 'שמור בשם…', shortcut: 'Ctrl+Shift+S', disabled: !c.hasDoc, onClick: c.saveAs },
+        { label: 'שמור עותק…', shortcut: 'Ctrl+Alt+S', disabled: !c.hasDoc, onClick: c.saveCopy },
+        { label: 'חזור לגרסה שנשמרה', disabled: !c.canRevert, onClick: c.revert },
         sep,
         off('הוספת קובץ…', 'Ctrl+Shift+I'),
         off('ייבוא XML…'),

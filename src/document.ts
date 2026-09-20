@@ -79,6 +79,8 @@ export interface TextFrame extends TextStyle {
   runs: Run[]
   next: string | null
 }
+/** Smallest text frame (points): a smaller drag creates nothing, and frames can't be resized below it. */
+export const MIN_FRAME_PT = 6
 export const MIN_PAGE_PT = 1
 export const MAX_PAGE_PT = 16384
 export const MAX_SIDE_PT = 2000
