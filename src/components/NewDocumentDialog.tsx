@@ -18,11 +18,14 @@ interface Props {
   onClose: () => void
   /** live draft shown in the workspace next to the panel while "Preview" is on, null otherwise */
   onPreview: (doc: DocSettings | null) => void
+  /** 'new': create a document. 'setup': change the settings of the open one (no name, no live preview). */
+  mode?: 'new' | 'setup'
 }
 
 type SidesKey = 'margins' | 'bleed' | 'slug'
 
-export function NewDocumentDialog({ initial, onCreate, onClose, onPreview }: Props) {
+export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode = 'new' }: Props) {
+  const setup = mode === 'setup'
   const [d, setD] = useState<DocSettings>(initial)
   const [preview, setPreview] = useState(false)
   const [linked, setLinked] = useState<Record<SidesKey, boolean>>({ margins: true, bleed: true, slug: false })
@@ -31,8 +34,8 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview }: Pro
   const patch = (p: Partial<DocSettings>) => setD((s) => ({ ...s, ...p }))
 
   useEffect(() => {
-    onPreview(preview && !error ? d : null)
-  }, [preview, error, d, onPreview])
+    onPreview(!setup && preview && !error ? d : null)
+  }, [setup, preview, error, d, onPreview])
 
   const setSide = (key: SidesKey, side: keyof Sides, v: number) =>
     setD((s) => ({
@@ -49,20 +52,22 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview }: Pro
   const pickPreset = (w: number, h: number) => (landscape ? patch({ width: h, height: w }) : patch({ width: w, height: h }))
 
   const create = () => {
-    if (!error) onCreate({ ...d, name: d.name.trim() || 'ללא שם' })
+    if (!error) onCreate({ ...d, name: setup ? initial.name : d.name.trim() || 'ללא שם' })
   }
 
   return (
-    <aside className="nd-panel" role="dialog" aria-label="מסמך חדש">
+    <aside className="nd-panel" role="dialog" aria-label={setup ? 'הגדרת מסמך' : 'מסמך חדש'}>
       <div className="nd-scroll">
-        <h2 className="nd-heading">פרטי המסמך</h2>
-        <input
-          className="nd-name"
-          aria-label="שם המסמך"
-          value={d.name}
-          onChange={(e) => patch({ name: e.target.value })}
-          onFocus={(e) => e.currentTarget.select()}
-        />
+        <h2 className="nd-heading">{setup ? 'הגדרת מסמך' : 'פרטי המסמך'}</h2>
+        {!setup && (
+          <input
+            className="nd-name"
+            aria-label="שם המסמך"
+            value={d.name}
+            onChange={(e) => patch({ name: e.target.value })}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+        )}
 
         <div className="field-label">גודל עמוד</div>
         <div className="presets">
@@ -193,12 +198,16 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview }: Pro
 
       {error && <div className="nd-error">{error}</div>}
       <footer className="nd-footer">
-        <label className="check-inline">
-          <Check checked={preview} onChange={setPreview} />
-          <span>תצוגה מקדימה</span>
-        </label>
+        {setup ? (
+          <span className="check-inline" />
+        ) : (
+          <label className="check-inline">
+            <Check checked={preview} onChange={setPreview} />
+            <span>תצוגה מקדימה</span>
+          </label>
+        )}
         <button className="btn primary" disabled={!!error} onClick={create}>
-          צור
+          {setup ? 'אישור' : 'צור'}
         </button>
         <button className="btn outline" onClick={onClose}>
           סגור

@@ -12,9 +12,11 @@ import { DEFAULT_TEXT_STYLE, MIN_FRAME_PT, type CharStyle, type DocSettings, typ
 import { isTyping } from '../dom'
 import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import { computeLayout } from '../layout'
+import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
+import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
@@ -22,6 +24,7 @@ import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
 import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
+import type { PageOps } from '../useDocumentSession'
 
 /** pasteboard around the pages, screen px */
 const PAD = 120
@@ -49,6 +52,9 @@ export interface WorkspaceHandle {
   lastPage: () => void
   /** Ctrl+A while editing text: select the whole story (all frames of the thread) */
   selectAllText: () => void
+  /** add one page after the selected page / delete the selected page */
+  addPage: () => void
+  deletePage: () => void
 }
 
 /**
@@ -64,11 +70,13 @@ interface Props {
   showRulers: boolean
   showGuides: boolean
   showProps: boolean
+  showPages: boolean
   /** screen mode "Preview": no guides or frame edges, the page as it will print */
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
   frames: TextFrame[]
   onFramesChange: FramesChange
+  pageOps: PageOps
   /** the document has changes that are not saved yet */
   dirty?: boolean
   onClose?: () => void
@@ -105,16 +113,22 @@ export function Workspace({
   showRulers,
   showGuides,
   showProps,
+  showPages,
   previewMode,
   onPreviewMode,
   frames,
   onFramesChange,
+  pageOps,
   dirty,
   onClose,
   ref,
 }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
   const flow = useMemo(() => flowFrames(frames), [frames])
+  const rects = useMemo(() => pageRects(doc), [doc])
+  /** the page that Insert / Delete act on (the last one clicked) */
+  const [selectedPage, setSelectedPage] = useState(0)
+  const pendingNav = useRef<number | null>(null)
 
   const vpRef = useRef<HTMLDivElement>(null)
   const [vp, setVp] = useState({ w: 0, h: 0, sb: 0 })
@@ -201,6 +215,42 @@ export function Workspace({
   const goToPage = (n: number) => {
     const found = spreads.findIndex((s) => s.pages.some((p) => p.number === n))
     goTo(found >= 0 ? found : n < doc.startPage ? 0 : spreads.length - 1)
+  }
+
+  // ── pages ──────────────────────────────────────────────────────────────────────
+  const selPage = Math.min(selectedPage, doc.pages - 1)
+  const spreadOfPage = (i: number) => Math.max(0, spreads.findIndex((s) => s.pages.some((p) => p.index === i)))
+
+  // after the pages changed, scroll to the page in question once the new layout is in place
+  useEffect(() => {
+    if (pendingNav.current === null) return
+    goTo(spreadOfPage(pendingNav.current))
+    pendingNav.current = null
+  }, [spreads])
+
+  const selectPage = (i: number) => {
+    setSelectedPage(i)
+    goTo(spreadOfPage(i))
+  }
+  const insertPages = (count: number, where: InsertWhere) => {
+    if (doc.pages >= 9999) return
+    const at = where === 'end' ? doc.pages : where === 'before' ? selPage : selPage + 1
+    pendingNav.current = at
+    setSelectedPage(at)
+    pageOps.insert(at, count)
+  }
+  const deleteSelectedPage = () => {
+    if (doc.pages <= 1) return
+    const next = Math.min(selPage, doc.pages - 2)
+    pendingNav.current = next
+    setSelectedPage(next)
+    pageOps.remove([selPage])
+  }
+  const movePage = (from: number, to: number) => {
+    if (from === to) return
+    pendingNav.current = to
+    setSelectedPage(to)
+    pageOps.move(from, to)
   }
 
   // ── text frames: story editing ─────────────────────────────────────────────────
@@ -345,6 +395,8 @@ export function Workspace({
     nextPage: () => goTo(cur + 1),
     lastPage: () => goTo(spreads.length - 1),
     selectAllText,
+    addPage: () => insertPages(1, 'after'),
+    deletePage: deleteSelectedPage,
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -483,6 +535,10 @@ export function Workspace({
       setLinkFrom(null) // clicked away from any frame
       return
     }
+    if (e.button === 0 && !panMode) {
+      const p = toWorld(e.clientX, e.clientY)
+      setSelectedPage(ownerPage(rects, p.x, p.y))
+    }
     if (panMode || e.button === 1) {
       e.preventDefault()
       drag.current = { x: e.clientX, y: e.clientY }
@@ -563,6 +619,8 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return // let the pan handler see it
+    const clicked = frames.find((f) => f.id === id)
+    if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
     if (linkFrom) {
       e.stopPropagation()
       e.preventDefault()
@@ -785,7 +843,22 @@ export function Workspace({
             </div>
           </div>
         </div>
-        {showProps && (
+        {(showPages || showProps) && (
+          <div className="side-panels">
+            {showPages && (
+              <PagesPanel
+                doc={doc}
+                frames={frames}
+                spreads={spreads}
+                currentSpread={cur}
+                selected={selPage}
+                onSelect={selectPage}
+                onInsert={insertPages}
+                onDelete={deleteSelectedPage}
+                onMove={movePage}
+              />
+            )}
+            {showProps && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}
@@ -798,6 +871,8 @@ export function Workspace({
             onLink={() => selFrame && setLinkFrom(selFrame.id)}
             onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
           />
+            )}
+          </div>
         )}
       </div>
 

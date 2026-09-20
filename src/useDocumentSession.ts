@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
 import type { DocSettings, TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
@@ -15,36 +15,43 @@ import {
   type FileRef,
 } from './fileio'
 import { useHistory } from './history'
+import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
 import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
 
 const NO_FRAMES: TextFrame[] = []
 
-/** What was last written to disk: the document is "modified" while it differs from this. */
-interface Saved {
-  doc: DocSettings
-  frames: TextFrame[]
-}
-
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
+/** Operations on the pages of the open document. Each one is a single undo step. */
+export interface PageOps {
+  insert: (at: number, count: number) => void
+  remove: (indices: number[]) => void
+  move: (from: number, to: number) => void
+  /** replace the document's settings (Document Setup) */
+  setup: (next: DocSettings) => void
+}
+
 /**
- * Everything about the open document as a whole: its settings, its content with undo history, the file it lives in,
- * whether it has unsaved changes, and the open / save / close actions (with the "save changes?" questions).
+ * Everything about the open document as a whole: its settings and content with one undo history, the file it lives
+ * in, whether it has unsaved changes, and the open / save / close actions (with the "save changes?" questions).
  */
 export function useDocumentSession() {
-  const history = useHistory<TextFrame[]>(NO_FRAMES)
-  const [doc, setDoc] = useState<DocSettings | null>(null)
+  /** the open document; null on the home screen */
+  const history = useHistory<DocContent | null>(null)
+  const state = history.value
+  const doc = state?.doc ?? null
+  const frames = state?.frames ?? NO_FRAMES
   /** changes for every newly created or opened document, so views can start fresh */
   const [docId, setDocId] = useState(0)
   const [file, setFile] = useState<FileRef | null>(null)
-  const [saved, setSaved] = useState<Saved | null>(null)
+  /** the content that was last written to disk: the document is "modified" while it is a different object */
+  const [saved, setSaved] = useState<DocContent | null>(null)
   const [modal, setModal] = useState<ModalSpec | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [recent, setRecent] = useState<RecentEntry[]>([])
   const toastTimer = useRef<number | undefined>(undefined)
 
-  const frames = history.value
-  const dirty = !!doc && (!saved || saved.doc !== doc || saved.frames !== frames)
+  const dirty = !!state && saved !== state
 
   useEffect(() => {
     void listRecent().then(setRecent)
@@ -70,12 +77,28 @@ export function useDocumentSession() {
   const fail = (title: string, e: unknown) =>
     setModal({ title, message: messageOf(e), buttons: [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }] })
 
+  // ── editing ────────────────────────────────────────────────────────────────────
+  /** the frames changed (typing, dragging …); changes with the same key merge into one undo step */
+  const changeFrames = (next: TextFrame[], key?: string) => {
+    if (state && next !== state.frames) history.change({ doc: state.doc, frames: next }, key)
+  }
+
+  const applyPages = (result: DocContent | null) => {
+    if (result) history.change(result)
+  }
+  const pages: PageOps = {
+    insert: (at, count) => state && applyPages(insertPages(state.doc, state.frames, at, count)),
+    remove: (indices) => state && applyPages(deletePages(state.doc, state.frames, indices)),
+    move: (from, to) => state && applyPages(movePage(state.doc, state.frames, from, to)),
+    setup: (next) => state && applyPages(applySettings(state.doc, state.frames, next)),
+  }
+
   const install = (d: DocSettings, f: TextFrame[], ref: FileRef | null) => {
-    setDoc(d)
+    const content = { doc: d, frames: f }
+    history.reset(content)
     setDocId((n) => n + 1)
-    history.reset(f)
     setFile(ref)
-    setSaved({ doc: d, frames: f })
+    setSaved(content)
   }
 
   const remember = (handle: FileSystemFileHandle | null) => {
@@ -85,20 +108,20 @@ export function useDocumentSession() {
   // ── saving ─────────────────────────────────────────────────────────────────────
   /** Save the document to a file of the user's choice. `copy`: write a copy and keep working on the original. */
   const saveAs = async (copy = false): Promise<boolean> => {
-    if (!doc) return false
-    const text = serializeDocument(doc, frames)
+    if (!state) return false
+    const text = serializeDocument(state.doc, state.frames)
     try {
       if (!hasFilePicker) {
-        const name = fileNameFor(doc.name)
+        const name = fileNameFor(state.doc.name)
         downloadText(name, text)
         if (!copy) {
           setFile({ name, handle: null })
-          setSaved({ doc, frames })
+          setSaved(state)
         }
         notify(`הקובץ ${name} הורד לתיקיית ההורדות`)
         return true
       }
-      const ref = await saveWithPicker(fileNameFor(doc.name), text)
+      const ref = await saveWithPicker(fileNameFor(state.doc.name), text)
       if (!ref) return false
       if (copy) {
         notify(`נשמר עותק: ${ref.name}`)
@@ -106,10 +129,14 @@ export function useDocumentSession() {
       }
       // the document takes its name from the file, like other desktop programs
       const name = baseName(ref.name)
-      const next = name && name !== doc.name ? { ...doc, name } : doc
-      setDoc(next)
+      let content = state
+      if (name && name !== state.doc.name) {
+        content = { ...state, doc: { ...state.doc, name } }
+        // renaming isn't an undoable edit: give earlier steps the new name as well
+        history.replace(content, (s) => (s ? { ...s, doc: { ...s.doc, name } } : s))
+      }
       setFile(ref)
-      setSaved({ doc: next, frames })
+      setSaved(content)
       remember(ref.handle)
       notify(`נשמר: ${ref.name}`)
       return true
@@ -121,11 +148,11 @@ export function useDocumentSession() {
 
   /** Save in place; asks for a file the first time. Resolves to false if it was cancelled or failed. */
   const save = async (): Promise<boolean> => {
-    if (!doc) return false
+    if (!state) return false
     if (!file?.handle) return saveAs()
     try {
-      await writeToHandle(file.handle, serializeDocument(doc, frames))
-      setSaved({ doc, frames })
+      await writeToHandle(file.handle, serializeDocument(state.doc, state.frames))
+      setSaved(state)
       remember(file.handle)
       notify(`נשמר: ${file.name}`)
       return true
@@ -171,8 +198,7 @@ export function useDocumentSession() {
 
   const closeDocument = () =>
     guard(() => {
-      setDoc(null)
-      history.reset(NO_FRAMES)
+      history.reset(null)
       setFile(null)
       setSaved(null)
     })
@@ -237,13 +263,13 @@ export function useDocumentSession() {
     })
   }
 
-  const dismissModal = useCallback(() => setModal(null), [])
-
   return {
     doc,
     docId,
     frames,
     history,
+    changeFrames,
+    pages,
     file,
     dirty,
     modal,
@@ -256,6 +282,5 @@ export function useDocumentSession() {
     save,
     saveAs,
     revert,
-    dismissModal,
   }
 }

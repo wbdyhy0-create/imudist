@@ -16,6 +16,9 @@ export interface MenuContext {
   canRedo: boolean
   undo: () => void
   redo: () => void
+  showPages: boolean
+  togglePages: () => void
+  documentSetup: () => void
   recent: RecentEntry[]
   /** the document lives in a file and has unsaved changes */
   canRevert: boolean
@@ -77,7 +80,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('ייצוא…', 'Ctrl+E'),
         sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
-        off('הגדרת מסמך…', 'Ctrl+Alt+P'),
+        { label: 'הגדרת מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },
         off('התאמת פריסה…', 'Alt+Shift+P'),
         sep,
         off('מידע על הקובץ…', 'Ctrl+Alt+Shift+I'),
@@ -105,7 +108,9 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'עמודים',
       items: [
-        off('שוליים ועמודות…'),
+        { label: 'הוסף עמוד', disabled: !c.hasDoc, onClick: () => c.ws.current?.addPage() },
+        { label: 'מחק עמוד', disabled: !c.hasDoc, onClick: () => c.ws.current?.deletePage() },
+        { label: 'שוליים ועמודות…', disabled: !c.hasDoc, onClick: c.documentSetup },
         sep,
         doc('עמוד ראשון', 'Ctrl+Shift+PageUp', (ws) => ws.firstPage()),
         doc('עמוד קודם', 'Shift+PageUp', (ws) => ws.prevPage()),
@@ -138,7 +143,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
       ],
     },
-    { label: 'חלון', items: [off('כלים'), off('לוח עמודים', 'F12'), { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps }] },
+    { label: 'חלון', items: [off('כלים'), { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages }, { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps }] },
     { label: 'עזרה', items: [off('אודות')] },
   ]
 }

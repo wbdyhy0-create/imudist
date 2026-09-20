@@ -7,11 +7,12 @@ import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
-import { useDocumentSession } from './useDocumentSession'
+import { useDocumentSession, type PageOps } from './useDocumentSession'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
 const noop = () => {}
+const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
@@ -21,12 +22,15 @@ export default function App() {
   const [nextName, setNextName] = useState(1)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
-  const [dialogOpen, setDialogOpen] = useState(false)
+  /** the left-hand dialog: creating a document, or changing the open document's settings */
+  const [dialog, setDialog] = useState<'new' | 'setup' | null>(null)
+  const dialogOpen = dialog !== null
   const [preview, setPreview] = useState<DocSettings | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
+  const [showPages, setShowPages] = useState(true)
   const ws = useRef<WorkspaceHandle>(null)
 
   const shown = preview ?? doc
@@ -42,6 +46,9 @@ export default function App() {
         setPreviewMode,
         showProps,
         toggleProps: () => setShowProps((v) => !v),
+        showPages,
+        togglePages: () => setShowPages((v) => !v),
+        documentSetup: () => setDialog('setup'),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
         undo: history.undo,
@@ -54,13 +61,13 @@ export default function App() {
         saveAs: () => void session.saveAs(),
         saveCopy: () => void session.saveAs(true),
         revert: session.revert,
-        newDocument: () => setDialogOpen(true),
+        newDocument: () => setDialog('new'),
         closeDocument: session.closeDocument,
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, previewMode, showProps, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.doc, session.frames],
+    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.doc, session.frames],
   )
 
   useEffect(() => {
@@ -91,7 +98,7 @@ export default function App() {
   }, [doc, session.dirty])
 
   const closeDialog = () => {
-    setDialogOpen(false)
+    setDialog(null)
     setPreview(null)
   }
 
@@ -120,10 +127,12 @@ export default function App() {
               showRulers={showRulers}
               showGuides={showGuides}
               showProps={showProps}
+              showPages={showPages}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
               frames={preview ? NO_FRAMES : session.frames}
-              onFramesChange={preview ? noop : history.change}
+              onFramesChange={preview ? noop : session.changeFrames}
+              pageOps={preview ? NO_PAGE_OPS : session.pages}
               dirty={!preview && session.dirty}
               onClose={preview ? undefined : session.closeDocument}
             />
@@ -131,14 +140,27 @@ export default function App() {
             <Home
               appName={APP_NAME}
               recent={session.recent}
-              onNew={() => setDialogOpen(true)}
+              onNew={() => setDialog('new')}
               onOpen={() => void session.openFile()}
               onOpenRecent={(entry) => void session.openRecent(entry)}
             />
           )}
           {dialogOpen && !preview && <div className="stage-dim" />}
         </div>
-        {dialogOpen && (
+        {dialog === 'setup' && doc && (
+          <NewDocumentDialog
+            mode="setup"
+            initial={doc}
+            onCreate={(next) => {
+              // nothing changed: nothing to undo or save
+              if (JSON.stringify(next) !== JSON.stringify(doc)) session.pages.setup(next)
+              closeDialog()
+            }}
+            onClose={closeDialog}
+            onPreview={noop}
+          />
+        )}
+        {dialog === 'new' && (
           <NewDocumentDialog
             initial={{ ...lastSettings, name: `ללא שם-${nextName}` }}
             onCreate={create}

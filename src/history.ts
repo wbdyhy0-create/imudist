@@ -36,11 +36,19 @@ export function useHistory<T>(initial: T) {
     setH((s) => (s.future.length ? { past: [...s.past, s.present], present: s.future[0], future: s.future.slice(1) } : s))
   }, [])
 
+  /**
+   * Swap the current value without recording a step (e.g. renaming after a save). mapOther is applied to every
+   * value in the undo / redo lists too, so the change is not undone by going back in time.
+   */
+  const replace = useCallback((value: T, mapOther?: (s: T) => T) => {
+    setH((s) => ({ past: mapOther ? s.past.map(mapOther) : s.past, present: value, future: mapOther ? s.future.map(mapOther) : s.future }))
+  }, [])
+
   /** start over with `value` and no history (new or closed document) */
   const reset = useCallback((value: T) => {
     last.current = null
     setH({ past: [], present: value, future: [] })
   }, [])
 
-  return { value: h.present, change, undo, redo, reset, canUndo: h.past.length > 0, canRedo: h.future.length > 0 }
+  return { value: h.present, change, undo, redo, reset, replace, canUndo: h.past.length > 0, canRedo: h.future.length > 0 }
 }
