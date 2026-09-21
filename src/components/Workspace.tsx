@@ -1414,9 +1414,23 @@ export function Workspace({
    * A moved or resized object: the edges that move are held exactly on a line when one is near. The move / resize gets
    * corrected offsets, and the lines to show.
    */
-  const snapDrag = (orig: Box, mode: 'move' | HandleId, dx: number, dy: number) => {
+  const snapDrag = (orig: Box, mode: 'move' | HandleId, dx: number, dy: number, fromCenter = false) => {
     const tol = SNAP_PX / live.current.zoom
     const move = mode === 'move'
+    if (fromCenter && !move) {
+      // stretching to both sides: the edge under the pointer and the opposite edge, which moves the other way, can each catch a line
+      const axis = (lo: boolean, hi: boolean, at: number, size: number, d: number, lines: SnapLine[]) => {
+        if (!lo && !hi) return { d, line: undefined as SnapLine | undefined }
+        const moving = snapEdges([hi ? at + size + d : at + d], lines, tol)
+        const mirror = snapEdges([hi ? at - d : at + size - d], lines, tol)
+        if (moving && (!mirror || Math.abs(moving.delta) <= Math.abs(mirror.delta))) return { d: d + moving.delta, line: moving.line }
+        if (mirror) return { d: d - mirror.delta, line: mirror.line }
+        return { d, line: undefined }
+      }
+      const cx = axis(mode.includes('w'), mode.includes('e'), orig.x, orig.w, dx, snapLinesRef.current.v)
+      const cy = axis(mode.includes('n'), mode.includes('s'), orig.y, orig.h, dy, snapLinesRef.current.h)
+      return { dx: cx.d, dy: cy.d, lines: [cx.line, cy.line].filter((l): l is SnapLine => !!l) }
+    }
     const xs = move ? [orig.x + dx, orig.x + orig.w + dx] : [...(mode.includes('w') ? [orig.x + dx] : []), ...(mode.includes('e') ? [orig.x + orig.w + dx] : [])]
     const ys = move ? [orig.y + dy, orig.y + orig.h + dy] : [...(mode.includes('n') ? [orig.y + dy] : []), ...(mode.includes('s') ? [orig.y + orig.h + dy] : [])]
     let sx = xs.length ? snapEdges(xs, snapLinesRef.current.v, tol) : null
@@ -1775,23 +1789,24 @@ export function Workspace({
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
       // the edges that move are held on the margins, column edges, page edges and guides (Ctrl = free)
-      const snapped = e.ctrlKey || e.metaKey ? null : snapDrag(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y)
+      // Alt stretches to both sides at once, around the middle
+      const snapped = e.ctrlKey || e.metaKey ? null : snapDrag(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, e.altKey)
       const dx = snapped ? snapped.dx : p.x - d.start.x
       const dy = snapped ? snapped.dy : p.y - d.start.y
       setSnapShown((cur) => (snapped && snapped.lines.length > 0 ? snapped.lines : cur.length ? [] : cur))
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
-        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined)
+        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
         onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
         return
       }
       if (d.kind === 'image') {
-        // corners keep the picture's proportions unless Alt is held
-        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.altKey ? undefined : d.orig.w / d.orig.h)
+        // corners keep the picture's proportions unless Shift is held
+        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? undefined : d.orig.w / d.orig.h, e.altKey)
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
         return
       }
-      const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
+      const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, undefined, e.altKey)
       onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
       return
     }

@@ -100,9 +100,26 @@ export interface Box {
 /**
  * New box after dragging the whole frame ("move") or one of its handles by (dx, dy) world points.
  * With `ratio` (width / height) a corner handle keeps that proportion; edge handles still stretch one side.
+ * With `fromCenter` the opposite side moves the same amount the other way, so the box stays around its middle.
  */
-export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: number, min: number, ratio?: number): Box {
+export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: number, min: number, ratio?: number, fromCenter = false): Box {
   if (mode === 'move') return { ...orig, x: orig.x + dx, y: orig.y + dy }
+  if (fromCenter) {
+    const sx = mode.includes('e') ? 1 : mode.includes('w') ? -1 : 0
+    const sy = mode.includes('s') ? 1 : mode.includes('n') ? -1 : 0
+    let w = sx ? Math.max(min, orig.w + 2 * sx * dx) : orig.w
+    let h = sy ? Math.max(min, orig.h + 2 * sy * dy) : orig.h
+    if (ratio && mode.length === 2) {
+      const scale = Math.max(w / orig.w, h / orig.h)
+      w = Math.max(min, orig.w * scale)
+      h = w / ratio
+      if (h < min) {
+        h = min
+        w = h * ratio
+      }
+    }
+    return { x: orig.x + (orig.w - w) / 2, y: orig.y + (orig.h - h) / 2, w, h }
+  }
   let { x, y, w, h } = orig
   if (mode.includes('e')) w = Math.max(min, orig.w + dx)
   if (mode.includes('w')) {

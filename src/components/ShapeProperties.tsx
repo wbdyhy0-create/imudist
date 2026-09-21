@@ -77,7 +77,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
             <NumberField value={shape.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
           </Labeled>
         </div>
-        <p className="muted">Shift בגרירת פינה שומר על היחס בין הרוחב לגובה.</p>
+        <p className="muted">Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.</p>
       </Group>
 
       {shape.kind === 'polygon' && (

@@ -57,7 +57,7 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap,
             <NumberField value={image.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
           </Labeled>
         </div>
-        <p className="muted">גרירת פינה שומרת על היחס. החזק Alt כדי לשנות חופשי.</p>
+        <p className="muted">גרירת פינה שומרת על היחס. החזק Shift כדי לשנות חופשי. Alt מותח לשני הצדדים בשווה.</p>
       </Group>
 
       <Group title="סדר שכבות">
