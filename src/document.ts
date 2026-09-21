@@ -155,6 +155,14 @@ export function defaultDocSettings(name: string): DocSettings {
   }
 }
 
+/** The smallest page that still holds the margins and the columns (with a little room for text). */
+export function minPageSize(d: DocSettings): { w: number; h: number } {
+  return {
+    w: Math.max(MIN_PAGE_PT, d.margins.left + d.margins.right + d.gutter * (d.columns - 1) + 12),
+    h: Math.max(MIN_PAGE_PT, d.margins.top + d.margins.bottom + 12),
+  }
+}
+
 export function validateDoc(d: DocSettings): string | null {
   if (d.margins.left + d.margins.right >= d.width || d.margins.top + d.margins.bottom >= d.height) {
     return 'השוליים גדולים מהעמוד.'

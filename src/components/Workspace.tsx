@@ -10,7 +10,9 @@ import {
 } from 'react'
 import {
   DEFAULT_TEXT_STYLE,
+  MAX_PAGE_PT,
   MIN_FRAME_PT,
+  minPageSize,
   type Assets,
   type CharStyle,
   type DocSettings,
@@ -22,7 +24,7 @@ import {
   type TextStyle,
 } from '../document'
 import { isTyping } from '../dom'
-import { chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
+import { HANDLES, chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { computeLayout } from '../layout'
@@ -36,6 +38,7 @@ import { wrapFloatsFor } from '../wrap'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
+import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
@@ -195,6 +198,8 @@ export function Workspace({
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
   const dragSeq = useRef(0)
+  /** resizing the pages by a handle of the Page tool: the current size and the last pointer position (screen px) */
+  const pageDrag = useRef<{ mode: HandleId; x: number; y: number; w: number; h: number; key: string } | null>(null)
 
   const zoom = view.zoom
 
@@ -561,7 +566,7 @@ export function Workspace({
         setSpace(true)
         return
       }
-      const t = TOOLS.find((t) => t.enabled && t.code === e.code && !e.shiftKey)
+      const t = TOOLS.find((t) => t.enabled && t.code === e.code && !!t.shift === e.shiftKey)
       if (t) setTool(t.id)
     }
     const up = (e: KeyboardEvent) => {
@@ -673,6 +678,71 @@ export function Workspace({
     vpRef.current!.setPointerCapture(e.pointerId)
   }
 
+  /** every page has the same size: change it for the whole document (typed values and dragging share one undo step per gesture) */
+  const setPageSize = (w: number, h: number, key: string) => {
+    const min = minPageSize(doc)
+    const round = (v: number, lo: number) => Math.round(Math.min(MAX_PAGE_PT, Math.max(lo, v)) * 1000) / 1000
+    const width = round(w, min.w)
+    const height = round(h, min.h)
+    if (width !== doc.width || height !== doc.height) pageOps.setup({ ...doc, width, height }, key)
+  }
+
+  /** where the selected page's edges are on screen (px, inside the sheet) if the pages had these settings */
+  const pageEdges = (d: DocSettings) => {
+    const lay = computeLayout(d)
+    const b = lay.bounds
+    const ox = Math.max(PAD, (vp.w - (b.maxX - b.minX) * zoom) / 2)
+    const oy = Math.max(PAD, (vp.h - (b.maxY - b.minY) * zoom) / 2)
+    const r = pageRects(d)[selPage]
+    const left = ox - b.minX * zoom + r.x * zoom
+    const top = oy - b.minY * zoom + r.y * zoom
+    return { left, right: left + r.w * zoom, top, bottom: top + r.h * zoom }
+  }
+
+  /**
+   * A handle of the Page tool. The pages are laid out from a fixed corner (and centered while they fit in the window),
+   * so how far an edge moves for a change of size depends on the layout: measure it, so the dragged edge follows the
+   * pointer. An edge that the layout keeps in place grows the page away from it instead.
+   */
+  const onPageHandleDown = (mode: HandleId, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    dragSeq.current += 1
+    pageDrag.current = { mode, x: e.clientX, y: e.clientY, w: doc.width, h: doc.height, key: `pagesize:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const movePageHandle = (d: NonNullable<typeof pageDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const dx = e.clientX - d.x
+    const dy = e.clientY - d.y
+    d.x = e.clientX
+    d.y = e.clientY
+    const min = minPageSize(doc)
+    /** Newton steps on the (piecewise linear) position of the edge until it is under the pointer; null when the layout keeps it in place */
+    const solve = (size: number, lo: number, hi: number, delta: number, edge: (s: number) => number): number | null => {
+      const target = edge(size) + delta
+      let s = size
+      for (let i = 0; i < 6; i++) {
+        const here = edge(s)
+        const slope = edge(s + 1) - here
+        if (Math.abs(slope) < 0.05) return i === 0 ? null : s
+        s = Math.min(hi, Math.max(lo, s + (target - here) / slope))
+      }
+      return s
+    }
+    if (d.mode.includes('e') || d.mode.includes('w')) {
+      const east = d.mode.includes('e')
+      const edge = (s: number) => pageEdges({ ...doc, width: s, height: d.h })[east ? 'right' : 'left']
+      d.w = solve(d.w, min.w, MAX_PAGE_PT, dx, edge) ?? Math.min(MAX_PAGE_PT, Math.max(min.w, d.w + (east ? dx : -dx) / zoom))
+    }
+    if (d.mode.includes('s') || d.mode.includes('n')) {
+      const south = d.mode.includes('s')
+      const edge = (s: number) => pageEdges({ ...doc, width: d.w, height: s })[south ? 'bottom' : 'top']
+      d.h = solve(d.h, min.h, MAX_PAGE_PT, dy, edge) ?? Math.min(MAX_PAGE_PT, Math.max(min.h, d.h + (south ? dy : -dy) / zoom))
+    }
+    setPageSize(d.w, d.h, d.key)
+  }
+
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) return // scrollbars
@@ -707,6 +777,10 @@ export function Workspace({
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (pageDrag.current) {
+      movePageHandle(pageDrag.current, e)
+      return
+    }
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
@@ -775,12 +849,14 @@ export function Workspace({
   const endDrag = () => {
     finishDraft()
     frameDrag.current = null
+    pageDrag.current = null
     drag.current = null
     setPanning(false)
   }
   const cancelDrag = () => {
     createStart.current = null
     frameDrag.current = null
+    pageDrag.current = null
     setDraft(null)
     drag.current = null
     setPanning(false)
@@ -869,6 +945,8 @@ export function Workspace({
           ? ' linking'
           : tool === 'zoom'
             ? ' zoomtool'
+            : tool === 'page'
+              ? ' pagetool'
             : tool === 'type'
               ? ' texttool'
               : tool === 'select'
@@ -951,6 +1029,7 @@ export function Workspace({
           <div className="place-hint">לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.</div>
         </div>
       )}
+      {tool === 'page' && !previewMode && !space && <PageToolBar doc={doc} onSize={(w, h) => setPageSize(w, h, 'pagesize:bar')} />}
       <div className="doc-tabs">
         <div className="doc-tab">
           <span>
@@ -1047,6 +1126,16 @@ export function Workspace({
                   />
                 )
               })}
+              {tool === 'page' && !previewMode && !space && rects[selPage] && (
+                <div
+                  className="page-frame"
+                  style={{ left: tx + rects[selPage].x * zoom, top: ty + rects[selPage].y * zoom, width: rects[selPage].w * zoom, height: rects[selPage].h * zoom }}
+                >
+                  {HANDLES.map((h) => (
+                    <div key={h} className={'handle ' + h} onPointerDown={(e) => onPageHandleDown(h, e)} />
+                  ))}
+                </div>
+              )}
               {!previewMode && threadPairs.length > 0 && (
                 <svg className="thread-layer" width={sheetW} height={sheetH} aria-hidden="true">
                   <defs>

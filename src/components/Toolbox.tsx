@@ -14,6 +14,8 @@ interface ToolDef {
   key?: string
   /** KeyboardEvent.code, so the shortcut also works on a Hebrew keyboard layout */
   code?: string
+  /** the shortcut needs Shift */
+  shift?: boolean
   enabled: boolean
   icon: ReactNode
 }
@@ -26,7 +28,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
 
   { id: 'type', label: 'טקסט', group: 2, key: 'T', code: 'KeyT', enabled: true, icon: <path d="M6 5h12M12 5v14M9 19h6" /> },
-  { id: 'page', label: 'עמוד', group: 2, key: 'Shift+P', enabled: false, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
+  { id: 'page', label: 'עמוד', group: 2, key: 'Shift+P', code: 'KeyP', shift: true, enabled: true, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
   { id: 'collector', label: 'אוסף תוכן', group: 2, key: 'B', enabled: false, icon: <path d="M4 4h10v10H4zM10 10h10v10H10z" /> },
 
   { id: 'frame', label: 'מסגרת מלבנית', group: 3, key: 'F', enabled: false, icon: <path d="M4 5h16v14H4zM4 5l16 14M20 5 4 19" /> },

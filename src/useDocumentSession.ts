@@ -30,7 +30,7 @@ export interface PageOps {
   remove: (indices: number[]) => void
   move: (from: number, to: number) => void
   /** replace the document's settings (Document Setup) */
-  setup: (next: DocSettings) => void
+  setup: (next: DocSettings, coalesceKey?: string) => void
   /** change several parts of the content at once (e.g. placing a long text that added pages and frames, or a picture) */
   commit: (patch: Partial<DocContent>) => void
 }
@@ -100,7 +100,7 @@ export function useDocumentSession() {
     insert: (at, count) => history.change((s) => (s && insertPages(s, at, count)) || s),
     remove: (indices) => history.change((s) => (s && deletePages(s, indices)) || s),
     move: (from, to) => history.change((s) => (s && movePage(s, from, to)) || s),
-    setup: (next) => history.change((s) => (s ? applySettings(s, next) : s)),
+    setup: (next, key) => history.change((s) => (s ? applySettings(s, next) : s), key),
     commit: (patch) => history.change((s) => (s ? { ...s, ...patch } : s)),
   }
   const install = (content: DocContent, ref: FileRef | null) => {

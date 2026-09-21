@@ -167,6 +167,24 @@ svg { display: block; }
 
 /* ── workspace ────────────────────────────────────────────── */
 .workspace { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-bar); }
+.page-bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 6px 12px; background: var(--bg-raised); border-bottom: 1px solid var(--line); }
+.page-bar-field { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.page-bar-field .num-field { width: 112px; }
+.page-bar-field .select { width: 96px; }
+.page-bar .place-modes button { display: inline-flex; align-items: center; gap: 6px; }
+.orient-icon { width: 10px; height: 12px; }
+.page-bar .muted { margin: 0; }
+.page-frame { position: absolute; z-index: 900000; pointer-events: none; outline: 2px solid var(--accent-line); }
+.page-frame .handle { pointer-events: auto; border-color: var(--accent-line); border-width: 2px; width: 9px; height: 9px; }
+.page-frame .handle.nw { left: -5px; top: -5px; }
+.page-frame .handle.n { left: calc(50% - 5px); top: -5px; }
+.page-frame .handle.ne { right: -5px; top: -5px; }
+.page-frame .handle.e { right: -5px; top: calc(50% - 5px); }
+.page-frame .handle.se { right: -5px; bottom: -5px; }
+.page-frame .handle.s { left: calc(50% - 5px); bottom: -5px; }
+.page-frame .handle.sw { left: -5px; bottom: -5px; }
+.page-frame .handle.w { left: -5px; top: calc(50% - 5px); }
+.viewport.pagetool { cursor: default; }
 .doc-tabs { height: 28px; flex: none; display: flex; align-items: flex-end; padding: 0 8px; background: #1a1414; }
 .doc-tab {
   height: 24px; display: flex; align-items: center; gap: 10px; padding-inline: 12px 8px; background: var(--bg-raised);
