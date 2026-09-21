@@ -1,15 +1,16 @@
 import { GUIDE_COLORS } from '../document'
 
 interface Props {
-  value: string
+  /** null = the selected guides have different colors */
+  value: string | null
   onChange: (color: string) => void
 }
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+const same = (a: string, b: string | null) => b !== null && a.toLowerCase() === b.toLowerCase()
 
 /** A row of color swatches for guides, plus a free color picker. */
 export function GuideColors({ value, onChange }: Props) {
-  const inPalette = GUIDE_COLORS.some((c) => same(c.value, value))
+  const inPalette = value === null || GUIDE_COLORS.some((c) => same(c.value, value))
   return (
     <div className="swatch-row" role="radiogroup" aria-label="צבע קו עזר">
       {GUIDE_COLORS.map((c) => (
@@ -25,7 +26,7 @@ export function GuideColors({ value, onChange }: Props) {
         />
       ))}
       <label className={'swatch-chip custom' + (!inPalette ? ' on' : '')} title="צבע אחר…" style={!inPalette ? { background: value } : undefined}>
-        <input type="color" value={value} onChange={(e) => onChange(e.target.value)} aria-label="צבע אחר" />
+        <input type="color" value={value ?? '#000000'} onChange={(e) => onChange(e.target.value)} aria-label="צבע אחר" />
       </label>
     </div>
   )

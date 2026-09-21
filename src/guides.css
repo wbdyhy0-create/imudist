@@ -30,3 +30,11 @@
 .dlg-summary { margin: 0; color: var(--text-dim); }
 .dlg-summary.warn { color: var(--danger); }
 .modal.wide .modal-buttons { margin-top: 4px; }
+
+/* hovering a guide shows which one a click would take */
+.guide.live:hover::before { box-shadow: 0 0 5px var(--gc); }
+.guide.h.live:hover::before { top: 2px; height: 3px; }
+.guide.v.live:hover::before { left: 2px; width: 3px; }
+.guide.selected::before { box-shadow: 0 0 6px var(--gc); }
+.marquee { position: absolute; z-index: 850000; pointer-events: none; border: 1px dashed var(--accent-line); background: rgba(61, 139, 255, 0.12); }
+.ctx-menu { position: fixed; z-index: 2000000; min-width: 190px; inset-inline-start: auto; top: auto; }

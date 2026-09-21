@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
@@ -41,6 +42,7 @@ import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { wrapFloatsFor } from '../wrap'
+import { ContextMenu } from './ContextMenu'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
@@ -52,7 +54,7 @@ import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
-import { formatLength } from '../units'
+import { UNIT_OPTIONS, formatLength, type Unit } from '../units'
 import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
 import type { PageOps } from '../useDocumentSession'
@@ -205,7 +207,22 @@ export function Workspace({
   const [space, setSpace] = useState(false)
   const [panning, setPanning] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** the selected text frame or picture (guides have their own, multiple, selection) */
+  const [selectedId, setSelectedIdRaw] = useState<string | null>(null)
+  const [guideSel, setGuideSel] = useState<string[]>([])
+  const setSelectedId = (id: string | null) => {
+    setSelectedIdRaw(id)
+    if (id) setGuideSel([])
+  }
+  const selectGuides = (ids: string[]) => {
+    setGuideSel(ids)
+    setSelectedIdRaw(null)
+  }
+  /** rubber band (world pt) while dragging over the canvas with the Selection tool: it selects the guides it touches */
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const marqueeBase = useRef<string[] | null>(null)
+  /** the right-click menu of the rulers (units), at a screen position */
+  const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   /** an out-port was clicked: the next click on a frame continues the text there */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
@@ -231,6 +248,7 @@ export function Workspace({
   const pageDrag = useRef<{ mode: HandleId; x: number; y: number; w: number; h: number; key: string } | null>(null)
 
   const zoom = view.zoom
+  const guidesVisible = showGuides && !previewMode
 
   // ── geometry: world (pt) → screen (px) inside the scrollable sheet ──────────────
   const cw = bounds.maxX - bounds.minX
@@ -546,7 +564,7 @@ export function Workspace({
     const color = orig?.color ?? guideColor
     let last: { page: number; pos: number; remove: boolean } | null = orig ? { page: orig.page, pos: orig.pos, remove: false } : null
     if (orig) {
-      setSelectedId(orig.id)
+      selectGuides([orig.id])
       setEditingId(null)
       setGuideDrag({ id, axis, color, ...last! })
     }
@@ -570,7 +588,7 @@ export function Workspace({
       if (last.remove) {
         if (id) {
           onGuidesChange(cur.filter((g) => g.id !== id))
-          setSelectedId(null)
+          setGuideSel([])
         }
       } else if (orig) {
         if (last.page !== orig.page || last.pos !== orig.pos) {
@@ -580,7 +598,7 @@ export function Workspace({
       } else if (cur.length < MAX_GUIDES) {
         const g: Guide = { id: newGuideId(), page: last.page, axis, pos: last.pos, color }
         onGuidesChange([...cur, g])
-        setSelectedId(g.id)
+        selectGuides([g.id])
         setEditingId(null)
         onShowGuides()
       }
@@ -590,6 +608,63 @@ export function Workspace({
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+  }
+
+  /** a click on a guide: Shift / Ctrl adds it to (or removes it from) the selection, a drag of a selected group moves the whole group */
+  const onGuidePointerDown = (g: Guide, e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      selectGuides(guideSel.includes(g.id) ? guideSel.filter((x) => x !== g.id) : [...guideSel, g.id])
+      setEditingId(null)
+      return
+    }
+    if (guideSel.length > 1 && guideSel.includes(g.id)) {
+      e.preventDefault()
+      e.stopPropagation()
+      const start = toWorld(e.clientX, e.clientY)
+      const chosen = new Set(guideSel)
+      const origin = new Map(guides.filter((x) => chosen.has(x.id)).map((x) => [x.id, x.pos]))
+      dragSeq.current += 1
+      const key = `guidegroup:${dragSeq.current}`
+      const onMove = (ev: PointerEvent) => {
+        const p = toWorld(ev.clientX, ev.clientY)
+        const dx = p.x - start.x
+        const dy = p.y - start.y
+        if (dx === 0 && dy === 0) return
+        onGuidesChange(
+          latestGuides.current.map((x) => (chosen.has(x.id) ? { ...x, pos: Math.round((origin.get(x.id)! + (x.axis === 'h' ? dy : dx)) * 100) / 100 } : x)),
+          key,
+        )
+      }
+      const stop = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', stop)
+        window.removeEventListener('pointercancel', stop)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', stop)
+      window.addEventListener('pointercancel', stop)
+      return
+    }
+    beginGuideDrag(g.axis, g.id, e)
+  }
+
+  /** the guides that touch a world rectangle (a guide is a thin line, so it gets a few pixels of reach) */
+  const guidesInRect = (x0: number, y0: number, x1: number, y1: number): string[] => {
+    const reach = 3 / zoom
+    const [minX, maxX] = [Math.min(x0, x1) - reach, Math.max(x0, x1) + reach]
+    const [minY, maxY] = [Math.min(y0, y1) - reach, Math.max(y0, y1) + reach]
+    return latestGuides.current
+      .filter((g) => {
+        const r = rects[g.page]
+        if (!r) return false
+        return g.axis === 'h'
+          ? r.y + g.pos >= minY && r.y + g.pos <= maxY && r.x <= maxX && r.x + r.w >= minX
+          : r.x + g.pos >= minX && r.x + g.pos <= maxX && r.y <= maxY && r.y + r.h >= minY
+      })
+      .map((g) => g.id)
   }
 
   const updateGuide = (id: string, patch: Partial<Guide>, key?: string) =>
@@ -689,27 +764,38 @@ export function Workspace({
     }
   }, [])
 
-  // Delete removes the selected frame, arrows nudge it (Shift = 10 pt), Escape deselects / cancels linking
+  // Delete removes the selected frame or guides, arrows nudge them (Shift = 10 pt), Escape deselects / cancels linking
   useEffect(() => {
-    if (!selectedId && !linkFrom) return
+    const guidesSelected = guidesVisible && guideSel.length > 0
+    if (!selectedId && !linkFrom && !guidesSelected) return
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'Escape') {
         if (linkFrom) setLinkFrom(null)
-        else setSelectedId(null)
+        else {
+          setSelectedId(null)
+          setGuideSel([])
+        }
+      } else if (guidesSelected && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault()
+        const chosen = new Set(guideSel)
+        onGuidesChange(guides.filter((g) => !chosen.has(g.id)))
+        setGuideSel([])
+      } else if (guidesSelected && e.key.startsWith('Arrow')) {
+        // a guide moves along its own axis only
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const chosen = new Set(guideSel)
+        const along = (axis: GuideAxis) =>
+          axis === 'h' ? (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0) : e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
+        if (guides.some((g) => chosen.has(g.id) && along(g.axis) !== 0)) {
+          onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, pos: g.pos + along(g.axis) } : g)), 'nudge:guides')
+        }
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
-        if (guides.some((g) => g.id === selectedId)) onGuidesChange(guides.filter((g) => g.id !== selectedId))
-        else if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
+        if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
         else onFramesChange(removeFrame(frames, selectedId))
         setSelectedId(null)
-      } else if (selectedId && e.key.startsWith('Arrow') && guides.some((g) => g.id === selectedId)) {
-        // a guide moves along its own axis only
-        const g = guides.find((x) => x.id === selectedId)!
-        const step = e.shiftKey ? 10 : 1
-        const d = g.axis === 'h' ? (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0) : e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
-        e.preventDefault()
-        if (d) onGuidesChange(guides.map((x) => (x.id === g.id ? { ...x, pos: x.pos + d } : x)), `nudge:${g.id}`)
       } else if (selectedId && e.key.startsWith('Arrow')) {
         const f = frames.find((x) => x.id === selectedId) ?? images.find((x) => x.id === selectedId)
         if (!f) return
@@ -723,19 +809,12 @@ export function Workspace({
           onImagesChange(images.map((im) => (im.id === f.id ? { ...im, ...moved } : im)), `nudge:${f.id}`)
           return
         }
-        updateFrame(
-          f.id,
-          {
-            x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
-            y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
-          },
-          `nudge:${f.id}`,
-        )
+        updateFrame(f.id, moved, `nudge:${f.id}`)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, linkFrom, frames, images, guides, onFramesChange, onImagesChange, onGuidesChange])
+  }, [selectedId, guideSel, guidesVisible, linkFrom, frames, images, guides, onFramesChange, onImagesChange, onGuidesChange])
 
 
   // Escape drops the loaded pictures
@@ -888,9 +967,25 @@ export function Workspace({
       e.currentTarget.setPointerCapture(e.pointerId)
     } else if (tool === 'select' && e.button === 0) {
       setSelectedId(null)
+      // dragging over empty canvas draws a rubber band that selects the guides it touches (Shift / Ctrl adds to the selection)
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey
+      if (!additive) setGuideSel([])
+      if (guidesVisible) {
+        const p = toWorld(e.clientX, e.clientY)
+        marqueeBase.current = additive ? guideSel : []
+        setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (marqueeBase.current && marquee) {
+      const p = toWorld(e.clientX, e.clientY)
+      setMarquee({ ...marquee, x1: p.x, y1: p.y })
+      const hits = guidesInRect(marquee.x0, marquee.y0, p.x, p.y)
+      setGuideSel([...new Set([...marqueeBase.current, ...hits])])
+      return
+    }
     if (pageDrag.current) {
       movePageHandle(pageDrag.current, e)
       return
@@ -964,6 +1059,8 @@ export function Workspace({
     finishDraft()
     frameDrag.current = null
     pageDrag.current = null
+    marqueeBase.current = null
+    setMarquee(null)
     drag.current = null
     setPanning(false)
   }
@@ -971,6 +1068,8 @@ export function Workspace({
     createStart.current = null
     frameDrag.current = null
     pageDrag.current = null
+    marqueeBase.current = null
+    setMarquee(null)
     setDraft(null)
     drag.current = null
     setPanning(false)
@@ -1070,7 +1169,7 @@ export function Workspace({
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
-  const selGuide = selectedId ? (guides.find((g) => g.id === selectedId) ?? null) : null
+  const selGuides = guidesVisible ? guides.filter((g) => guideSel.includes(g.id)) : []
   const selChain = selFrame ? chainOf(frames, selFrame.id) : []
   const threadInfo = selFrame
     ? {
@@ -1098,6 +1197,13 @@ export function Workspace({
 
   /** a guide can be grabbed with the Selection tool only, and not while something is being placed */
   const guidesLive = tool === 'select' && !space && !placing && placingImages.length === 0 && !linkFrom
+  const openRulerMenu = (e: ReactMouseEvent<HTMLElement>) => {
+    e.preventDefault()
+    setRulerMenu({ x: e.clientX, y: e.clientY })
+  }
+  const setRulerUnit = (unit: Unit) => {
+    if (unit !== doc.unit) pageOps.setup({ ...doc, unit }, 'unit')
+  }
   const guideFromRuler = (axis: GuideAxis) => (e: ReactPointerEvent<HTMLElement>) => {
     if (!panMode && !placing && placingImages.length === 0) beginGuideDrag(axis, null, e)
   }
@@ -1182,8 +1288,8 @@ export function Workspace({
           }}
         >
           <div className="ruler-corner" />
-          <Ruler orientation="h" offset={tx - scroll.x + vp.sb} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('h')} />
-          <Ruler orientation="v" offset={ty - scroll.y} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('v')} />
+          <Ruler orientation="h" offset={tx - scroll.x + vp.sb} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('h')} onMenu={openRulerMenu} />
+          <Ruler orientation="v" offset={ty - scroll.y} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('v')} onMenu={openRulerMenu} />
           <div
             ref={vpRef}
             className={viewportClass}
@@ -1263,9 +1369,9 @@ export function Workspace({
                     return st ? (
                       <div
                         key={g.id}
-                        className={`guide ${g.axis}${g.id === selectedId ? ' selected' : ''}${guidesLive ? ' live' : ''}`}
+                        className={`guide ${g.axis}${guideSel.includes(g.id) ? ' selected' : ''}${guidesLive ? ' live' : ''}`}
                         style={st}
-                        onPointerDown={(e) => beginGuideDrag(g.axis, g.id, e)}
+                        onPointerDown={(e) => onGuidePointerDown(g, e)}
                       />
                     ) : null
                   })}
@@ -1290,6 +1396,17 @@ export function Workspace({
                       )
                     })()}
                 </>
+              )}
+              {marquee && (
+                <div
+                  className="marquee"
+                  style={{
+                    left: tx + Math.min(marquee.x0, marquee.x1) * zoom,
+                    top: ty + Math.min(marquee.y0, marquee.y1) * zoom,
+                    width: Math.abs(marquee.x1 - marquee.x0) * zoom,
+                    height: Math.abs(marquee.y1 - marquee.y0) * zoom,
+                  }}
+                />
               )}
               {tool === 'page' && !previewMode && !space && rects[selPage] && (
                 <div
@@ -1351,19 +1468,21 @@ export function Workspace({
                 onMove={movePage}
               />
             )}
-            {showProps && selGuide && (
+            {showProps && selGuides.length > 0 && (
               <GuideProperties
-                guide={selGuide}
-                pageNumber={doc.startPage + selGuide.page}
+                guides={selGuides}
+                pageNumber={doc.startPage + selGuides[0].page}
                 unit={doc.unit}
-                onPos={(pos) => updateGuide(selGuide.id, { pos }, `guidepos:${selGuide.id}`)}
+                onPos={(pos) => updateGuide(selGuides[0].id, { pos }, `guidepos:${selGuides[0].id}`)}
                 onColor={(color) => {
                   setGuideColor(color)
-                  updateGuide(selGuide.id, { color })
+                  const chosen = new Set(selGuides.map((g) => g.id))
+                  onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, color } : g)))
                 }}
                 onDelete={() => {
-                  onGuidesChange(guides.filter((g) => g.id !== selGuide.id))
-                  setSelectedId(null)
+                  const chosen = new Set(selGuides.map((g) => g.id))
+                  onGuidesChange(guides.filter((g) => !chosen.has(g.id)))
+                  setGuideSel([])
                 }}
               />
             )}
@@ -1387,7 +1506,7 @@ export function Workspace({
                 }}
               />
             )}
-            {showProps && !selImage && !selGuide && (
+            {showProps && !selImage && selGuides.length === 0 && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}
@@ -1406,6 +1525,18 @@ export function Workspace({
         )}
       </div>
 
+      {rulerMenu && (
+        <ContextMenu
+          x={rulerMenu.x}
+          y={rulerMenu.y}
+          onClose={() => setRulerMenu(null)}
+          items={[
+            { label: 'יחידות מידה', disabled: true },
+            { separator: true },
+            ...UNIT_OPTIONS.map((u) => ({ label: u.label, checked: doc.unit === u.value, onClick: () => setRulerUnit(u.value) })),
+          ]}
+        />
+      )}
       {guidesDialog && (
         <CreateGuidesDialog
           doc={doc}
