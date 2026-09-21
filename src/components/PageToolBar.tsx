@@ -1,4 +1,4 @@
-import { MAX_PAGE_PT, customSizeCount, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
+import { MAX_PAGE_PT, customMarginCount, customSizeCount, marginsOf, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
 import { PAGE_PRESETS, matchPreset } from '../units'
 import { NumberField } from './NumberField'
 
@@ -21,8 +21,10 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
   const { w: width, h: height } = pageSize(doc, page)
   const landscape = width > height
   const preset = matchPreset(width, height)
-  const min = minPageSize(doc)
+  const min = minPageSize(doc, all ? 'all' : page)
   const custom = customSizeCount(doc)
+  const customMargins = customMarginCount(doc)
+  const margins = marginsOf(doc, page)
   const facing = doc.facingPages && doc.perRow >= 2
   // the interface is right-to-left, so the first field of the row is on the right
   const marginFields: { key: keyof Sides; label: string }[] = [
@@ -81,16 +83,16 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
         </button>
       </div>
       <div className="page-bar-margins" role="group" aria-label="שוליים">
-        <b>שוליים</b>
+        <b>{all ? 'שוליים (כל העמודים)' : `שוליים של עמוד ${doc.startPage + page}`}</b>
         {marginFields.map((f) => (
           <label key={f.key} className="page-bar-field">
             <span>{f.label}</span>
             <NumberField
-              value={doc.margins[f.key]}
+              value={margins[f.key]}
               unit={doc.unit}
               min={0}
-              max={maxMargin(doc, f.key)}
-              onChange={(v) => onMargins({ ...doc.margins, [f.key]: v })}
+              max={maxMargin(doc, f.key, all ? 'all' : page)}
+              onChange={(v) => onMargins({ ...margins, [f.key]: v })}
             />
           </label>
         ))}
@@ -100,8 +102,9 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
         החל על כל העמודים
       </label>
       <span className="muted">
-        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו. קווי השוליים הכחולים גם הם ניתנים לגרירה (Shift = כל הצדדים).
-        {custom > 0 ? ` ${custom} עמודים בגודל אישי.` : ''}
+        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו. קווי השוליים הכחולים בתוך העמוד ניתנים לגרירה (Shift = כל הצדדים), והם משנים רק את העמוד הנבחר.
+        {custom > 0 ? ` ${custom === 1 ? 'עמוד אחד' : `${custom} עמודים`} בגודל אישי.` : ''}
+        {customMargins > 0 ? ` ${customMargins === 1 ? 'עמוד אחד' : `${customMargins} עמודים`} עם שוליים אישיים.` : ''}
       </span>
     </div>
   )

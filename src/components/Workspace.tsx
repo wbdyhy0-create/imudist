@@ -16,10 +16,12 @@ import {
   MAX_GUIDES,
   MAX_PAGE_PT,
   MIN_FRAME_PT,
+  marginsOf,
   maxMargin,
   minPageSize,
   pageSize,
   validateDoc,
+  withPageMargins,
   withPageSize,
   type Assets,
   type CharStyle,
@@ -520,8 +522,9 @@ export function Workspace({
       const s = Math.min(rect.w / asset.width, rect.h / asset.height)
       ;[w, h, x, y] = [asset.width * s, asset.height * s, rect.x, rect.y]
     } else {
-      const maxW = page.w - doc.margins.left - doc.margins.right
-      const maxH = page.h - doc.margins.top - doc.margins.bottom
+      const pm = marginsOf(doc, ownerPage(rects, at.x, at.y))
+      const maxW = page.w - pm.left - pm.right
+      const maxH = page.h - pm.top - pm.bottom
       const s = Math.min(1, maxW / asset.width, maxH / asset.height)
       w = asset.width * s
       h = asset.height * s
@@ -970,11 +973,14 @@ export function Workspace({
     // on left-hand pages of facing pages the physical left margin is the "outside" one, stored on the right
     const swapped = doc.facingPages && doc.perRow >= 2 && side === 'left'
     const key: keyof Sides = d.edge === 'left' || d.edge === 'right' ? (swapped ? (d.edge === 'left' ? 'right' : 'left') : d.edge) : d.edge
-    const v = Math.round(Math.min(maxMargin(doc, key), Math.max(0, value)) * 100) / 100
-    const margins: Sides = e.shiftKey ? { top: v, bottom: v, left: v, right: v } : { ...doc.margins, [key]: v }
-    if (validateDoc({ ...doc, margins })) return
-    if (margins.top !== doc.margins.top || margins.bottom !== doc.margins.bottom || margins.left !== doc.margins.left || margins.right !== doc.margins.right) {
-      pageOps.setup({ ...doc, margins }, d.key)
+    const target = sizeAll ? 'all' : d.page
+    const cur = marginsOf(doc, d.page)
+    const v = Math.round(Math.min(maxMargin(doc, key, target), Math.max(0, value)) * 100) / 100
+    const margins: Sides = e.shiftKey ? { top: v, bottom: v, left: v, right: v } : { ...cur, [key]: v }
+    const next = withPageMargins(doc, target, margins)
+    if (validateDoc(next)) return
+    if (margins.top !== cur.top || margins.bottom !== cur.bottom || margins.left !== cur.left || margins.right !== cur.right) {
+      pageOps.setup(next, d.key)
     }
   }
 
@@ -1319,7 +1325,8 @@ export function Workspace({
           onAll={setSizeAll}
           onSize={(w, h) => setPageSize(w, h, 'pagesize:bar')}
           onMargins={(margins) => {
-            if (!validateDoc({ ...doc, margins })) pageOps.setup({ ...doc, margins }, 'margins:bar')
+            const next = withPageMargins(doc, sizeAll ? 'all' : selPage, margins)
+            if (!validateDoc(next)) pageOps.setup(next, 'margins:bar')
           }}
         />
       )}
@@ -1477,7 +1484,7 @@ export function Workspace({
                   {(() => {
                     const r = rects[selPage]
                     const side = spreads[spreadOfPage(selPage)].pages.find((p) => p.index === selPage)?.side ?? 'single'
-                    const m = pageMargins(doc, side)
+                    const m = pageMargins(doc, side, selPage)
                     const inner = { left: m.left * zoom, top: m.top * zoom, width: (r.w - m.left - m.right) * zoom, height: (r.h - m.top - m.bottom) * zoom }
                     return (['top', 'bottom', 'left', 'right'] as const).map((edge) => {
                       const style: CSSProperties =
@@ -1493,7 +1500,7 @@ export function Workspace({
                           key={edge}
                           className={'margin-edge ' + (edge === 'top' || edge === 'bottom' ? 'h' : 'v')}
                           style={style}
-                          title="גרור כדי לשנות את השוליים (Shift = כל הצדדים יחד)"
+                          title="גרור כדי לשנות את השוליים של העמוד (Shift = כל הצדדים יחד)"
                           onPointerDown={(e) => onMarginEdgeDown(edge, e)}
                         />
                       )

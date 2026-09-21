@@ -85,7 +85,7 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
               .sort((a, b) => a.x - b.x)
               .map((p) => {
                 const r = rects[p.index]
-                const m = pageMargins(doc, p.side)
+                const m = pageMargins(doc, p.side, p.index)
                 // every thumbnail fits the same box, so a small page looks small next to a big one only up to that box
                 const scale = Math.min(THUMB_W / p.w, THUMB_H / p.h)
                 return (

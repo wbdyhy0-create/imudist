@@ -1,4 +1,4 @@
-import { pageSize, type DocSettings, type Sides } from './document'
+import { marginsOf, pageSize, type DocSettings, type Sides } from './document'
 
 export type PageSide = 'left' | 'right' | 'single'
 
@@ -172,8 +172,8 @@ export function pageSidesOf(doc: DocSettings): PageSide[] {
 }
 
 /** Margins as physical sides of one page (swaps inside/outside on left-hand pages). */
-export function pageMargins(doc: DocSettings, side: PageSide): Sides {
-  const m = doc.margins
+export function pageMargins(doc: DocSettings, side: PageSide, index: number): Sides {
+  const m = marginsOf(doc, index)
   if (!doc.facingPages || side !== 'left') return m
   return { top: m.top, bottom: m.bottom, left: m.right, right: m.left }
 }

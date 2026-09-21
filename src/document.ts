@@ -27,6 +27,8 @@ export interface DocSettings {
   perRow: number
   /** sizes of the pages that differ from width × height, by page index (null / missing = the document's size) */
   pageSizes: (PageSize | null)[]
+  /** margins of the pages that differ from `margins`, by page index (null / missing = the document's margins) */
+  pageMargins: (Sides | null)[]
   unit: Unit
   binding: Binding
   pages: number
@@ -185,6 +187,7 @@ export function defaultDocSettings(name: string): DocSettings {
     height: PAGE_PRESETS[0].height,
     perRow: 1,
     pageSizes: [],
+    pageMargins: [],
     unit: 'mm',
     binding: 'rtl',
     pages: 1,
@@ -199,26 +202,32 @@ export function defaultDocSettings(name: string): DocSettings {
   }
 }
 
-/** The smallest page that still holds the margins and the columns (with a little room for text). */
-export function minPageSize(d: DocSettings): { w: number; h: number } {
-  return {
-    w: Math.max(MIN_PAGE_PT, d.margins.left + d.margins.right + d.gutter * (d.columns - 1) + 12),
-    h: Math.max(MIN_PAGE_PT, d.margins.top + d.margins.bottom + 12),
-  }
-}
-
 /** The size of a page: its own if it has one, otherwise the document's. */
 export function pageSize(d: DocSettings, index: number): PageSize {
   return d.pageSizes[index] ?? { w: d.width, h: d.height }
 }
 
-/** Drops sizes of pages that do not exist and the ones equal to the document's size, so equal settings look equal. */
+const sameSides = (a: Sides, b: Sides) => a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.right === b.right
+
+/** The margins of a page as stored (left = inside, right = outside when facing pages are on): its own if it has some. */
+export function marginsOf(d: DocSettings, index: number): Sides {
+  return d.pageMargins[index] ?? d.margins
+}
+
+/**
+ * Drops the sizes and margins of pages that do not exist and the ones equal to the document's, so equal settings look
+ * equal. Returns the same object when nothing had to change.
+ */
 export function normalizeSizes(d: DocSettings): DocSettings {
   const sizes: (PageSize | null)[] = d.pageSizes
     .slice(0, d.pages)
     .map((z) => (z && (Math.abs(z.w - d.width) > 0.001 || Math.abs(z.h - d.height) > 0.001) ? z : null))
   while (sizes.length > 0 && sizes[sizes.length - 1] === null) sizes.pop()
-  return sizes.length === d.pageSizes.length && sizes.every((z, i) => z === d.pageSizes[i]) ? d : { ...d, pageSizes: sizes }
+  const margins: (Sides | null)[] = d.pageMargins.slice(0, d.pages).map((m) => (m && !sameSides(m, d.margins) ? m : null))
+  while (margins.length > 0 && margins[margins.length - 1] === null) margins.pop()
+  const sameSizes = sizes.length === d.pageSizes.length && sizes.every((z, i) => z === d.pageSizes[i])
+  const sameMargins = margins.length === d.pageMargins.length && margins.every((m, i) => m === d.pageMargins[i])
+  return sameSizes && sameMargins ? d : { ...d, pageSizes: sizes, pageMargins: margins }
 }
 
 /** The settings with one page (`index`) or every page (`'all'`) set to a new size. */
@@ -230,18 +239,45 @@ export function withPageSize(d: DocSettings, index: number | 'all', w: number, h
   return normalizeSizes({ ...d, pageSizes: sizes })
 }
 
-/** How many pages have a size of their own. */
-export const customSizeCount = (d: DocSettings) => d.pageSizes.filter((z, i) => z && i < d.pages).length
+/** The settings with one page (`index`) or every page (`'all'`) given new margins. */
+export function withPageMargins(d: DocSettings, index: number | 'all', margins: Sides): DocSettings {
+  if (index === 'all') return { ...d, margins, pageMargins: [] }
+  const list = [...d.pageMargins]
+  while (list.length <= index) list.push(null)
+  list[index] = margins
+  return normalizeSizes({ ...d, pageMargins: list })
+}
 
-/** The largest a margin may be: the smallest page must still hold the other margins and the columns. */
-export function maxMargin(d: DocSettings, key: keyof Sides): number {
+/** How many pages have a size / margins of their own. */
+export const customSizeCount = (d: DocSettings) => d.pageSizes.filter((z, i) => z && i < d.pages).length
+export const customMarginCount = (d: DocSettings) => d.pageMargins.filter((m, i) => m && i < d.pages).length
+
+/**
+ * The smallest a page can be and still hold its margins and the columns (with a little room for text).
+ * `index`: one page; `'all'`: every page gets the document's margins.
+ */
+export function minPageSize(d: DocSettings, index: number | 'all' = 'all'): { w: number; h: number } {
+  const m = index === 'all' ? d.margins : marginsOf(d, index)
+  return {
+    w: Math.max(MIN_PAGE_PT, m.left + m.right + d.gutter * (d.columns - 1) + 12),
+    h: Math.max(MIN_PAGE_PT, m.top + m.bottom + 12),
+  }
+}
+
+/**
+ * The largest a margin may be: the page must still hold the other margins and the columns.
+ * `index`: that page's margins and size; `'all'`: the smallest page with the document's margins.
+ */
+export function maxMargin(d: DocSettings, key: keyof Sides, index: number | 'all' = 'all'): number {
+  const pages = index === 'all' ? Array.from({ length: d.pages }, (_, i) => i) : [index]
   let best = Infinity
-  for (let i = 0; i < d.pages; i++) {
+  for (const i of pages) {
     const z = pageSize(d, i)
+    const m = index === 'all' ? d.margins : marginsOf(d, i)
     const room =
       key === 'top' || key === 'bottom'
-        ? z.h - (d.margins.top + d.margins.bottom - d.margins[key]) - 12
-        : z.w - (d.margins.left + d.margins.right - d.margins[key]) - d.gutter * (d.columns - 1) - 12
+        ? z.h - (m.top + m.bottom - m[key]) - 12
+        : z.w - (m.left + m.right - m[key]) - d.gutter * (d.columns - 1) - 12
     best = Math.min(best, room)
   }
   return Math.max(0, Math.min(best, MAX_SIDE_PT))
@@ -250,11 +286,13 @@ export function maxMargin(d: DocSettings, key: keyof Sides): number {
 export function validateDoc(d: DocSettings): string | null {
   for (let i = 0; i < d.pages; i++) {
     const z = pageSize(d, i)
-    if (d.margins.left + d.margins.right >= z.w || d.margins.top + d.margins.bottom >= z.h) {
-      return d.pageSizes[i] ? `השוליים גדולים מעמוד ${d.startPage + i}.` : 'השוליים גדולים מהעמוד.'
+    const m = marginsOf(d, i)
+    const own = !!d.pageSizes[i] || !!d.pageMargins[i]
+    if (m.left + m.right >= z.w || m.top + m.bottom >= z.h) {
+      return own ? `השוליים גדולים מעמוד ${d.startPage + i}.` : 'השוליים גדולים מהעמוד.'
     }
-    if (d.gutter * (d.columns - 1) >= z.w - d.margins.left - d.margins.right) {
-      return d.pageSizes[i] ? `העמודות לא נכנסות בין השוליים של עמוד ${d.startPage + i}.` : 'העמודות לא נכנסות בין השוליים.'
+    if (d.gutter * (d.columns - 1) >= z.w - m.left - m.right) {
+      return own ? `העמודות לא נכנסות בין השוליים של עמוד ${d.startPage + i}.` : 'העמודות לא נכנסות בין השוליים.'
     }
   }
   return null

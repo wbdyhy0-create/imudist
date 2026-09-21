@@ -31,7 +31,7 @@ export function SpreadView({ doc, spread, zoom, tx, ty, showGuides }: Props) {
     : spread.pages.map((p) => ({ x: p.x, w: p.w, h: p.h, key: String(p.index) }))
 
   const pageGuides = (p: PageLayout) => {
-    const m = pageMargins(doc, p.side)
+    const m = pageMargins(doc, p.side, p.index)
     const left = X(p.x) + m.left * zoom
     const mTop = top + m.top * zoom
     const mW = (p.w - m.left - m.right) * zoom

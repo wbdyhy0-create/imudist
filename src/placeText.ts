@@ -26,8 +26,8 @@ function pageSides(doc: DocSettings): PageSide[] {
 }
 
 /** The text boxes of a page: its margin area cut into columns, in reading order (right-to-left binding starts on the right). */
-export function columnBoxes(doc: DocSettings, rect: PageRect, side: PageSide): Box[] {
-  const m = pageMargins(doc, side)
+export function columnBoxes(doc: DocSettings, rect: PageRect, side: PageSide, index: number): Box[] {
+  const m = pageMargins(doc, side, index)
   const cols = Math.max(1, doc.columns)
   const contentW = rect.w - m.left - m.right
   const colW = (contentW - doc.gutter * (cols - 1)) / cols
@@ -43,9 +43,9 @@ export function boxAtClick(doc: DocSettings, x: number, y: number): Box {
   const rects = pageRects(doc)
   const sides = pageSides(doc)
   const page = ownerPage(rects, x, y)
-  let best = columnBoxes(doc, rects[page], sides[page])[0]
+  let best = columnBoxes(doc, rects[page], sides[page], page)[0]
   let bestDist = Infinity
-  for (const c of columnBoxes(doc, rects[page], sides[page])) {
+  for (const c of columnBoxes(doc, rects[page], sides[page], page)) {
     const d = Math.abs(c.x + c.w / 2 - x)
     if (d < bestDist) {
       bestDist = d
@@ -149,7 +149,7 @@ export function pourText(
   if (mode === 'auto' && start < story.length) {
     // continue in the column after the first frame, then page after page
     let page = ownerPage(rects, first.x + first.w / 2, first.y + first.h / 2)
-    const firstCols = columnBoxes(curDoc, rects[page], sides[page])
+    const firstCols = columnBoxes(curDoc, rects[page], sides[page], page)
     let col = firstCols.reduce((best, c, i) => (Math.abs(c.x + c.w / 2 - (first.x + first.w / 2)) < Math.abs(firstCols[best].x + firstCols[best].w / 2 - (first.x + first.w / 2)) ? i : best), 0) + 1
     let lastLen = ends[0]
 
@@ -163,7 +163,7 @@ export function pourText(
         curDoc = { ...curDoc, pages: curDoc.pages + 1 }
         refresh()
       }
-      const box = columnBoxes(curDoc, rects[page], sides[page])[col]
+      const box = columnBoxes(curDoc, rects[page], sides[page], page)[col]
       col++
       if (box.w < 8 || box.h < 8) break
       const end = fitStoryEnd(story, runs, style, start, box, wrapFloatsFor(box, images), Math.max(1, lastLen))

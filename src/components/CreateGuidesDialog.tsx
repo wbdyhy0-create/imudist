@@ -66,7 +66,7 @@ export function CreateGuidesDialog({ doc, page, initialColor, existing, onCreate
     let v = 0
     let h = 0
     for (const i of targets) {
-      const g = guidePositions(doc, sides[i] ?? 'single', pageSize(doc, i), spec)
+      const g = guidePositions(doc, sides[i] ?? 'single', pageSize(doc, i), i, spec)
       v += g.v.length
       h += g.h.length
     }

@@ -6,10 +6,13 @@ import {
   MAX_PER_ROW,
   MAX_SIDE_PT,
   MIN_PAGE_PT,
+  customMarginCount,
   customSizeCount,
+  marginsOf,
   normalizeSizes,
   pageSize,
   validateDoc,
+  withPageMargins,
   withPageSize,
   type DocSettings,
   type Sides,
@@ -53,6 +56,7 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
   const patch = (p: Partial<DocSettings>) => setD((s) => ({ ...s, ...p }))
   const page = Math.min(sel, d.pages - 1)
   const custom = customSizeCount(d)
+  const customMargins = customMarginCount(d)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -65,8 +69,15 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const setSide = (key: SidesKey, side: keyof Sides, v: number) =>
+  const setSide = (key: 'bleed' | 'slug', side: keyof Sides, v: number) =>
     setD((s) => ({ ...s, [key]: linked[key] ? { top: v, bottom: v, left: v, right: v } : { ...s[key], [side]: v } }))
+  /** margins of the selected page only, or of every page (see "scope") */
+  const setMargin = (side: keyof Sides, v: number) =>
+    setD((s) => {
+      const cur = scope === 'all' ? s.margins : marginsOf(s, Math.min(sel, s.pages - 1))
+      const next: Sides = linked.margins ? { top: v, bottom: v, left: v, right: v } : { ...cur, [side]: v }
+      return withPageMargins(s, scope === 'all' ? 'all' : Math.min(sel, s.pages - 1), next)
+    })
 
   // ── page size, for all the pages or for the selected one ─────────────────────
   const target = scope === 'all' ? 'all' : page
@@ -88,6 +99,7 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
             <p>
               <bdi>{d.name}</bdi> · {d.pages} עמודים
               {custom > 0 && ` · ${custom} בגודל אישי`}
+              {customMargins > 0 && ` · ${customMargins} בשוליים אישיים`}
             </p>
           </div>
           <button className="setup-x" aria-label="סגור" onClick={onClose}>
@@ -182,18 +194,7 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
 
               {tab === 'size' && (
                 <>
-                  <div className="setup-group">
-                    <div className="setup-label">השינוי חל על</div>
-                    <div className="seg" role="radiogroup" aria-label="היקף השינוי">
-                      <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>
-                        כל העמודים
-                      </button>
-                      <button role="radio" aria-checked={scope === 'page'} className={scope === 'page' ? 'on' : ''} onClick={() => setScope('page')}>
-                        עמוד {d.startPage + page} בלבד
-                      </button>
-                    </div>
-                    {scope === 'page' && <p className="setup-hint">אפשר לבחור עמוד אחר בלחיצה עליו בלוח שבצד.</p>}
-                  </div>
+                  <ScopeSwitch scope={scope} onScope={setScope} label={`עמוד ${d.startPage + page} בלבד`} />
 
                   <div className="size-cards">
                     {PAGE_PRESETS.map((p) => (
@@ -257,17 +258,26 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
 
               {tab === 'margins' && (
                 <>
+                  <ScopeSwitch scope={scope} onScope={setScope} label={`עמוד ${d.startPage + page} בלבד`} />
                   <div className="setup-group">
                     <div className="setup-label">שוליים</div>
                     <SidesEditor
-                      value={d.margins}
+                      value={scope === 'all' ? d.margins : marginsOf(d, page)}
                       unit={d.unit}
                       facing={d.facingPages && d.perRow >= 2}
                       linked={linked.margins}
                       onLink={() => setLinked((l) => ({ ...l, margins: !l.margins }))}
-                      onChange={(side, v) => setSide('margins', side, v)}
+                      onChange={setMargin}
                     />
                   </div>
+                  {customMargins > 0 && (
+                    <div className="custom-note">
+                      <span>{customMargins === 1 ? 'עמוד אחד' : `${customMargins} עמודים`} עם שוליים שונים משאר המסמך.</span>
+                      <button className="btn small" onClick={() => setD((s) => ({ ...s, pageMargins: [] }))}>
+                        אפס לשוליים אחידים
+                      </button>
+                    </div>
+                  )}
                   <div className="setup-row">
                     <Labeled label="עמודות בעמוד">
                       <NumberField value={d.columns} min={1} max={MAX_COLUMNS} onChange={(v) => patch({ columns: v })} />
@@ -336,6 +346,24 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
   )
 }
 
+/** "Change all the pages" or "only the page selected on the board". */
+function ScopeSwitch({ scope, onScope, label }: { scope: 'all' | 'page'; onScope: (s: 'all' | 'page') => void; label: string }) {
+  return (
+    <div className="setup-group">
+      <div className="setup-label">השינוי חל על</div>
+      <div className="seg" role="radiogroup" aria-label="היקף השינוי">
+        <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => onScope('all')}>
+          כל העמודים
+        </button>
+        <button role="radio" aria-checked={scope === 'page'} className={scope === 'page' ? 'on' : ''} onClick={() => onScope('page')}>
+          {label}
+        </button>
+      </div>
+      {scope === 'page' && <p className="setup-hint">אפשר לבחור עמוד אחר בלחיצה עליו בלוח שבצד.</p>}
+    </div>
+  )
+}
+
 function Labeled({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="setup-field">
@@ -387,7 +415,7 @@ function SetupBoard({ doc, selected, onSelect }: { doc: DocSettings; selected: n
       <svg viewBox={viewBox} preserveAspectRatio="xMidYMin meet" role="group" aria-label="עמודים" style={{ width: `min(100%, ${Math.round((b.maxX - b.minX + pad * 2) * 0.55)}px)` }}>
         {layout.spreads.map((s) =>
           s.pages.map((p) => {
-            const m = pageMargins(doc, p.side)
+            const m = pageMargins(doc, p.side, p.index)
             const fs = Math.min(p.w, p.h) * 0.11
             const on = p.index === selected
             return (
