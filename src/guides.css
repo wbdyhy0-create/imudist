@@ -38,3 +38,8 @@
 .guide.selected::before { box-shadow: 0 0 6px var(--gc); }
 .marquee { position: absolute; z-index: 850000; pointer-events: none; border: 1px dashed var(--accent-line); background: rgba(61, 139, 255, 0.12); }
 .ctx-menu { position: fixed; z-index: 2000000; min-width: 190px; inset-inline-start: auto; top: auto; }
+
+/* page tool: which page it changes */
+.page-bar-badge { padding: 3px 12px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; }
+.page-bar-check { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.page-bar-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent-line); }

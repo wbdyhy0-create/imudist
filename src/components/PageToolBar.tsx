@@ -1,20 +1,26 @@
-import { MAX_PAGE_PT, minPageSize, type DocSettings } from '../document'
+import { MAX_PAGE_PT, customSizeCount, minPageSize, pageSize, type DocSettings } from '../document'
 import { PAGE_PRESETS, matchPreset } from '../units'
 import { NumberField } from './NumberField'
 
 interface Props {
   doc: DocSettings
+  /** the selected page: its size is the one shown and changed (unless `all`) */
+  page: number
+  /** change every page instead of only the selected one */
+  all: boolean
+  onAll: (all: boolean) => void
   onSize: (width: number, height: number) => void
 }
 
 const CUSTOM = 'custom'
 
-/** The control bar of the Page tool: the size of the pages, a size preset and the orientation. */
-export function PageToolBar({ doc, onSize }: Props) {
-  const { width, height } = doc
+/** The control bar of the Page tool: the size of the selected page, a size preset and the orientation. */
+export function PageToolBar({ doc, page, all, onAll, onSize }: Props) {
+  const { w: width, h: height } = pageSize(doc, page)
   const landscape = width > height
   const preset = matchPreset(width, height)
   const min = minPageSize(doc)
+  const custom = customSizeCount(doc)
 
   const orient = (toLandscape: boolean) => {
     if (toLandscape !== landscape && width !== height) onSize(height, width)
@@ -26,6 +32,9 @@ export function PageToolBar({ doc, onSize }: Props) {
 
   return (
     <div className="page-bar" role="group" aria-label="כלי עמוד">
+      <span className="page-bar-badge" title="העמוד שהכלי משנה">
+        {all ? 'כל העמודים' : `עמוד ${doc.startPage + page}`}
+      </span>
       <label className="page-bar-field">
         <span>רוחב</span>
         <NumberField value={width} unit={doc.unit} min={min.w} max={MAX_PAGE_PT} onChange={(v) => onSize(v, height)} />
@@ -61,7 +70,14 @@ export function PageToolBar({ doc, onSize }: Props) {
           לרוחב
         </button>
       </div>
-      <span className="muted">אפשר גם לגרור את הידיות על העמוד. הגודל חל על כל עמודי המסמך.</span>
+      <label className="page-bar-check" title="כשהאפשרות פעילה, שינוי הגודל חל על כל עמודי המסמך">
+        <input type="checkbox" checked={all} onChange={(e) => onAll(e.target.checked)} />
+        החל על כל העמודים
+      </label>
+      <span className="muted">
+        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו.
+        {custom > 0 ? ` ${custom} עמודים בגודל אישי.` : ''}
+      </span>
     </div>
   )
 }

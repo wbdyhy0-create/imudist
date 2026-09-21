@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
+import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
@@ -210,7 +211,7 @@ export default function App() {
     })
 
   const fitKey = preview
-    ? [preview.width, preview.height, preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
+    ? [preview.width, preview.height, preview.perRow, JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
     : String(session.docId)
 
   return (
@@ -258,16 +259,18 @@ export default function App() {
           {dialogOpen && !preview && <div className="stage-dim" />}
         </div>
         {dialog === 'setup' && doc && (
-          <NewDocumentDialog
-            mode="setup"
+          <DocumentSetupDialog
             initial={doc}
-            onCreate={(next) => {
+            onApply={(next) => {
               // nothing changed: nothing to undo or save
-              if (JSON.stringify(next) !== JSON.stringify(doc)) session.pages.setup(next)
+              if (JSON.stringify(next) !== JSON.stringify(doc)) {
+                session.pages.setup(next)
+                // bring the rearranged pages into view once the new layout is in place
+                window.setTimeout(() => ws.current?.fitSpread(), 60)
+              }
               closeDialog()
             }}
             onClose={closeDialog}
-            onPreview={noop}
           />
         )}
         {dialog === 'new' && (

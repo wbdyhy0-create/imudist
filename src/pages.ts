@@ -1,4 +1,4 @@
-import { MAX_PAGES, type Assets, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
+import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type PageSize, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout } from './layout'
 
@@ -26,7 +26,7 @@ export interface DocContent {
 export function pageRects(doc: DocSettings): PageRect[] {
   const rects: PageRect[] = new Array(doc.pages)
   for (const s of computeLayout(doc).spreads) {
-    for (const p of s.pages) rects[p.index] = { x: p.x, y: s.y, w: doc.width, h: doc.height }
+    for (const p of s.pages) rects[p.index] = { x: p.x, y: s.y, w: p.w, h: p.h }
   }
   return rects
 }
@@ -80,24 +80,39 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
   return { doc: newDoc, frames, images, assets: c.assets, guides }
 }
 
+/** The per-page sizes after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */
+function remapSizes(doc: DocSettings, pages: number, map: (i: number) => number | null): (PageSize | null)[] {
+  const out: (PageSize | null)[] = new Array(pages).fill(null)
+  doc.pageSizes.forEach((z, i) => {
+    const n = map(i)
+    if (z && n !== null && n >= 0 && n < pages) out[n] = z
+  })
+  while (out.length > 0 && out[out.length - 1] === null) out.pop()
+  return out
+}
+
 /** Insert `count` blank pages so the first new one gets index `at` (0 … pages). */
 export function insertPages(c: DocContent, at: number, count: number): DocContent | null {
   count = Math.min(count, MAX_PAGES - c.doc.pages)
   if (count < 1) return null
   at = Math.max(0, Math.min(at, c.doc.pages))
-  return remapContent(c, { ...c.doc, pages: c.doc.pages + count }, (i) => (i >= at ? i + count : i))
+  const map = (i: number) => (i >= at ? i + count : i)
+  const pages = c.doc.pages + count
+  return remapContent(c, { ...c.doc, pages, pageSizes: remapSizes(c.doc, pages, map) }, map)
 }
 
 /** Delete pages (and what is on them). A document keeps at least one page. */
 export function deletePages(c: DocContent, indices: number[]): DocContent | null {
   const del = new Set(indices.filter((i) => i >= 0 && i < c.doc.pages))
   if (del.size === 0 || del.size >= c.doc.pages) return null
-  return remapContent(c, { ...c.doc, pages: c.doc.pages - del.size }, (i) => {
+  const map = (i: number) => {
     if (del.has(i)) return null
     let before = 0
     for (const d of del) if (d < i) before++
     return i - before
-  })
+  }
+  const pages = c.doc.pages - del.size
+  return remapContent(c, { ...c.doc, pages, pageSizes: remapSizes(c.doc, pages, map) }, map)
 }
 
 /** Move the page at `from` so that it ends up at index `to` (in the final order). */
@@ -107,10 +122,11 @@ export function movePage(c: DocContent, from: number, to: number): DocContent | 
   order.splice(to, 0, order.splice(from, 1)[0])
   // order[newIndex] = oldIndex
   const newIndexOf = new Map(order.map((oldIndex, newIndex) => [oldIndex, newIndex]))
-  return remapContent(c, c.doc, (i) => newIndexOf.get(i) ?? null)
+  const map = (i: number) => newIndexOf.get(i) ?? null
+  return remapContent(c, { ...c.doc, pageSizes: remapSizes(c.doc, c.doc.pages, map) }, map)
 }
 
 /** Replace the document's settings (size, margins, page count …); objects stay on their pages. */
 export function applySettings(c: DocContent, next: DocSettings): DocContent {
-  return remapContent(c, next, (i) => (i < next.pages ? i : null))
+  return remapContent(c, normalizeSizes(next), (i) => (i < next.pages ? i : null))
 }

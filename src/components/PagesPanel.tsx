@@ -45,9 +45,6 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
   }, [doc, images])
   const rects = useMemo(() => pageRects(doc), [doc])
 
-  const scale = Math.min(THUMB_W / doc.width, THUMB_H / doc.height)
-  const tw = doc.width * scale
-  const th = doc.height * scale
 
   return (
     <section className="pages-panel" aria-label="עמודים">
@@ -89,6 +86,8 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
               .map((p) => {
                 const r = rects[p.index]
                 const m = pageMargins(doc, p.side)
+                // every thumbnail fits the same box, so a small page looks small next to a big one only up to that box
+                const scale = Math.min(THUMB_W / p.w, THUMB_H / p.h)
                 return (
                   <button
                     key={p.index}
@@ -105,20 +104,20 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
                       if (Number.isInteger(from)) onMove(from, p.index)
                     }}
                   >
-                    <svg width={tw} height={th} viewBox={`0 0 ${doc.width} ${doc.height}`} aria-hidden="true">
-                      <rect width={doc.width} height={doc.height} fill="#fff" />
+                    <svg width={p.w * scale} height={p.h * scale} viewBox={`0 0 ${p.w} ${p.h}`} aria-hidden="true">
+                      <rect width={p.w} height={p.h} fill="#fff" />
                       <rect
                         x={m.left}
                         y={m.top}
-                        width={doc.width - m.left - m.right}
-                        height={doc.height - m.top - m.bottom}
+                        width={p.w - m.left - m.right}
+                        height={p.h - m.top - m.bottom}
                         fill="none"
                         stroke="#24a6ff"
-                        strokeWidth={doc.width * 0.006}
+                        strokeWidth={p.w * 0.006}
                         opacity="0.55"
                       />
                       {imagesByPage[p.index].map((im) => (
-                        <rect key={im.id} x={im.x - r.x} y={im.y - r.y} width={im.w} height={im.h} fill="#9cc3ff" stroke="#ffb02e" strokeWidth={doc.width * 0.008} />
+                        <rect key={im.id} x={im.x - r.x} y={im.y - r.y} width={im.w} height={im.h} fill="#9cc3ff" stroke="#ffb02e" strokeWidth={p.w * 0.008} />
                       ))}
                       {framesByPage[p.index].map((f) => (
                         <rect
@@ -129,7 +128,7 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
                           height={f.h}
                           fill="#d3d8e0"
                           stroke="#ffb02e"
-                          strokeWidth={doc.width * 0.008}
+                          strokeWidth={p.w * 0.008}
                         />
                       ))}
                     </svg>

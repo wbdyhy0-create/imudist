@@ -1,4 +1,4 @@
-import { MAX_GUIDES, type DocSettings, type Guide } from './document'
+import { MAX_GUIDES, pageSize, type DocSettings, type Guide, type PageSize } from './document'
 import { pageMargins, type PageSide } from './layout'
 
 /** Making many guides at once: an equal division of the page, or lines at a fixed distance. */
@@ -24,12 +24,12 @@ export const DEFAULT_GUIDE_SPEC: GuideSpec = { mode: 'divide', cols: 2, colGap: 
 const EPS = 0.01
 
 /** Positions (points from the page's left / top edge) of the vertical and horizontal guides of one page. */
-export function guidePositions(doc: DocSettings, side: PageSide, spec: GuideSpec): { v: number[]; h: number[] } {
+export function guidePositions(doc: DocSettings, side: PageSide, size: PageSize, spec: GuideSpec): { v: number[]; h: number[] } {
   const m = spec.area === 'margins' ? pageMargins(doc, side) : { top: 0, bottom: 0, left: 0, right: 0 }
   const x0 = m.left
   const y0 = m.top
-  const x1 = doc.width - m.right
-  const y1 = doc.height - m.bottom
+  const x1 = size.w - m.right
+  const y1 = size.h - m.bottom
 
   const line = (start: number, end: number, count: number, gap: number): number[] => {
     const n = Math.max(0, Math.floor(count))
@@ -73,7 +73,7 @@ export function applyGuideSpec(
   const target = new Set(pages)
   const out = replace ? existing.filter((g) => !target.has(g.page)) : [...existing]
   for (const page of pages) {
-    const { v, h } = guidePositions(doc, sides[page] ?? 'single', spec)
+    const { v, h } = guidePositions(doc, sides[page] ?? 'single', pageSize(doc, page), spec)
     const add = (axis: 'h' | 'v', pos: number) => {
       if (out.length >= MAX_GUIDES) return
       if (out.some((g) => g.page === page && g.axis === axis && Math.abs(g.pos - pos) < EPS)) return

@@ -29,11 +29,11 @@ function pageSides(doc: DocSettings): PageSide[] {
 export function columnBoxes(doc: DocSettings, rect: PageRect, side: PageSide): Box[] {
   const m = pageMargins(doc, side)
   const cols = Math.max(1, doc.columns)
-  const contentW = doc.width - m.left - m.right
+  const contentW = rect.w - m.left - m.right
   const colW = (contentW - doc.gutter * (cols - 1)) / cols
   const boxes: Box[] = []
   for (let i = 0; i < cols; i++) {
-    boxes.push({ x: rect.x + m.left + i * (colW + doc.gutter), y: rect.y + m.top, w: colW, h: doc.height - m.top - m.bottom })
+    boxes.push({ x: rect.x + m.left + i * (colW + doc.gutter), y: rect.y + m.top, w: colW, h: rect.h - m.top - m.bottom })
   }
   return doc.binding === 'rtl' ? boxes.reverse() : boxes
 }

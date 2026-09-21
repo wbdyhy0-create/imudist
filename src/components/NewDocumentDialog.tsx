@@ -3,6 +3,7 @@ import {
   MAX_COLUMNS,
   MAX_PAGES,
   MAX_PAGE_PT,
+  MAX_PER_ROW,
   MAX_SIDE_PT,
   MIN_PAGE_PT,
   validateDoc,
@@ -141,8 +142,16 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           <Field label="עמודים">
             <NumberField value={d.pages} min={1} max={MAX_PAGES} onChange={(v) => patch({ pages: v })} />
           </Field>
-          <Field label="עמודים מקבילים">
-            <Check checked={d.facingPages} onChange={(v) => patch({ facingPages: v })} />
+          <Field label="עמודים בשורה">
+            <NumberField
+              value={d.perRow}
+              min={1}
+              max={MAX_PER_ROW}
+              onChange={(v) => patch({ perRow: v, facingPages: v >= 2 ? d.facingPages : false })}
+            />
+          </Field>
+          <Field label="דף כפול (עמודים צמודים)">
+            <Check checked={d.facingPages && d.perRow >= 2} onChange={(v) => patch({ facingPages: v, perRow: v ? Math.max(2, d.perRow) : d.perRow })} />
           </Field>
           <Field label="מספר עמוד ראשון">
             <NumberField value={d.startPage} min={1} max={MAX_PAGES} onChange={(v) => patch({ startPage: v })} />
@@ -167,7 +176,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           <SidesEditor
             value={d.margins}
             unit={d.unit}
-            facing={d.facingPages}
+            facing={d.facingPages && d.perRow >= 2}
             linked={linked.margins}
             onLink={() => setLinked((l) => ({ ...l, margins: !l.margins }))}
             onChange={(side, v) => setSide('margins', side, v)}
@@ -179,7 +188,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           <SidesEditor
             value={d.bleed}
             unit={d.unit}
-            facing={d.facingPages}
+            facing={d.facingPages && d.perRow >= 2}
             linked={linked.bleed}
             onLink={() => setLinked((l) => ({ ...l, bleed: !l.bleed }))}
             onChange={(side, v) => setSide('bleed', side, v)}
@@ -188,7 +197,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           <SidesEditor
             value={d.slug}
             unit={d.unit}
-            facing={d.facingPages}
+            facing={d.facingPages && d.perRow >= 2}
             linked={linked.slug}
             onLink={() => setLinked((l) => ({ ...l, slug: !l.slug }))}
             onChange={(side, v) => setSide('slug', side, v)}
@@ -247,7 +256,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function SidesEditor({
+export function SidesEditor({
   value,
   unit,
   facing,

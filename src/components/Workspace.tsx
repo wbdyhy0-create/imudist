@@ -17,6 +17,8 @@ import {
   MAX_PAGE_PT,
   MIN_FRAME_PT,
   minPageSize,
+  pageSize,
+  withPageSize,
   type Assets,
   type CharStyle,
   type DocSettings,
@@ -300,7 +302,8 @@ export function Workspace({
   }
   const fitPage = (i = cur) => {
     const s = spreads[i]
-    fitRect(s.pages[0].x, s.y, doc.width, s.h)
+    const p = s.pages.find((x) => x.index === selectedPage) ?? s.pages[0]
+    fitRect(p.x, s.y, p.w, p.h)
   }
   const goTo = (i: number) => {
     const s = spreads[Math.min(spreads.length - 1, Math.max(0, i))]
@@ -871,13 +874,18 @@ export function Workspace({
     vpRef.current!.setPointerCapture(e.pointerId)
   }
 
-  /** every page has the same size: change it for the whole document (typed values and dragging share one undo step per gesture) */
+  /** the Page tool changes every page at once instead of only the selected one */
+  const [sizeAll, setSizeAll] = useState(false)
+  /** the settings with the selected page (or all pages) given a new size */
+  const sizedDoc = (w: number, h: number) => withPageSize(doc, sizeAll ? 'all' : selPage, w, h)
+  /** change the size of the selected page (typed values and dragging share one undo step per gesture) */
   const setPageSize = (w: number, h: number, key: string) => {
     const min = minPageSize(doc)
     const round = (v: number, lo: number) => Math.round(Math.min(MAX_PAGE_PT, Math.max(lo, v)) * 1000) / 1000
     const width = round(w, min.w)
     const height = round(h, min.h)
-    if (width !== doc.width || height !== doc.height) pageOps.setup({ ...doc, width, height }, key)
+    const cur = pageSize(doc, selPage)
+    if (width !== cur.w || height !== cur.h) pageOps.setup(sizedDoc(width, height), key)
   }
 
   /** where the selected page's edges are on screen (px, inside the sheet) if the pages had these settings */
@@ -902,7 +910,8 @@ export function Workspace({
     e.stopPropagation()
     e.preventDefault()
     dragSeq.current += 1
-    pageDrag.current = { mode, x: e.clientX, y: e.clientY, w: doc.width, h: doc.height, key: `pagesize:${dragSeq.current}` }
+    const cur = pageSize(doc, selPage)
+    pageDrag.current = { mode, x: e.clientX, y: e.clientY, w: cur.w, h: cur.h, key: `pagesize:${dragSeq.current}` }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   const movePageHandle = (d: NonNullable<typeof pageDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
@@ -925,12 +934,12 @@ export function Workspace({
     }
     if (d.mode.includes('e') || d.mode.includes('w')) {
       const east = d.mode.includes('e')
-      const edge = (s: number) => pageEdges({ ...doc, width: s, height: d.h })[east ? 'right' : 'left']
+      const edge = (s: number) => pageEdges(sizedDoc(s, d.h))[east ? 'right' : 'left']
       d.w = solve(d.w, min.w, MAX_PAGE_PT, dx, edge) ?? Math.min(MAX_PAGE_PT, Math.max(min.w, d.w + (east ? dx : -dx) / zoom))
     }
     if (d.mode.includes('s') || d.mode.includes('n')) {
       const south = d.mode.includes('s')
-      const edge = (s: number) => pageEdges({ ...doc, width: d.w, height: s })[south ? 'bottom' : 'top']
+      const edge = (s: number) => pageEdges(sizedDoc(d.w, s))[south ? 'bottom' : 'top']
       d.h = solve(d.h, min.h, MAX_PAGE_PT, dy, edge) ?? Math.min(MAX_PAGE_PT, Math.max(min.h, d.h + (south ? dy : -dy) / zoom))
     }
     setPageSize(d.w, d.h, d.key)
@@ -1264,7 +1273,15 @@ export function Workspace({
           <div className="place-hint">לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.</div>
         </div>
       )}
-      {tool === 'page' && !previewMode && !space && <PageToolBar doc={doc} onSize={(w, h) => setPageSize(w, h, 'pagesize:bar')} />}
+      {tool === 'page' && !previewMode && !space && (
+        <PageToolBar
+          doc={doc}
+          page={selPage}
+          all={sizeAll}
+          onAll={setSizeAll}
+          onSize={(w, h) => setPageSize(w, h, 'pagesize:bar')}
+        />
+      )}
       <div className="doc-tabs">
         <div className="doc-tab">
           <span>

@@ -11,14 +11,26 @@ export interface Sides {
   right: number
 }
 
+/** The size of one page, points. */
+export interface PageSize {
+  w: number
+  h: number
+}
+
 /** Every length is in points. */
 export interface DocSettings {
   name: string
+  /** the size of the pages (a page listed in `pageSizes` has its own) */
   width: number
   height: number
+  /** pages next to each other in one row (1 = every page has its own row) */
+  perRow: number
+  /** sizes of the pages that differ from width × height, by page index (null / missing = the document's size) */
+  pageSizes: (PageSize | null)[]
   unit: Unit
   binding: Binding
   pages: number
+  /** the pages of a row touch and form a spread, with inside / outside margins (needs `perRow` ≥ 2) */
   facingPages: boolean
   startPage: number
   primaryTextFrame: boolean
@@ -161,6 +173,8 @@ export const MAX_PAGE_PT = 16384
 export const MAX_SIDE_PT = 2000
 export const MAX_PAGES = 9999
 export const MAX_COLUMNS = 100
+/** Most pages that can sit side by side in one row. */
+export const MAX_PER_ROW = 10
 
 const sides = (v: number): Sides => ({ top: v, bottom: v, left: v, right: v })
 
@@ -169,6 +183,8 @@ export function defaultDocSettings(name: string): DocSettings {
     name,
     width: PAGE_PRESETS[0].width,
     height: PAGE_PRESETS[0].height,
+    perRow: 1,
+    pageSizes: [],
     unit: 'mm',
     binding: 'rtl',
     pages: 1,
@@ -191,12 +207,41 @@ export function minPageSize(d: DocSettings): { w: number; h: number } {
   }
 }
 
+/** The size of a page: its own if it has one, otherwise the document's. */
+export function pageSize(d: DocSettings, index: number): PageSize {
+  return d.pageSizes[index] ?? { w: d.width, h: d.height }
+}
+
+/** Drops sizes of pages that do not exist and the ones equal to the document's size, so equal settings look equal. */
+export function normalizeSizes(d: DocSettings): DocSettings {
+  const sizes: (PageSize | null)[] = d.pageSizes
+    .slice(0, d.pages)
+    .map((z) => (z && (Math.abs(z.w - d.width) > 0.001 || Math.abs(z.h - d.height) > 0.001) ? z : null))
+  while (sizes.length > 0 && sizes[sizes.length - 1] === null) sizes.pop()
+  return sizes.length === d.pageSizes.length && sizes.every((z, i) => z === d.pageSizes[i]) ? d : { ...d, pageSizes: sizes }
+}
+
+/** The settings with one page (`index`) or every page (`'all'`) set to a new size. */
+export function withPageSize(d: DocSettings, index: number | 'all', w: number, h: number): DocSettings {
+  if (index === 'all') return { ...d, width: w, height: h, pageSizes: [] }
+  const sizes = [...d.pageSizes]
+  while (sizes.length <= index) sizes.push(null)
+  sizes[index] = { w, h }
+  return normalizeSizes({ ...d, pageSizes: sizes })
+}
+
+/** How many pages have a size of their own. */
+export const customSizeCount = (d: DocSettings) => d.pageSizes.filter((z, i) => z && i < d.pages).length
+
 export function validateDoc(d: DocSettings): string | null {
-  if (d.margins.left + d.margins.right >= d.width || d.margins.top + d.margins.bottom >= d.height) {
-    return 'השוליים גדולים מהעמוד.'
-  }
-  if (d.gutter * (d.columns - 1) >= d.width - d.margins.left - d.margins.right) {
-    return 'העמודות לא נכנסות בין השוליים.'
+  for (let i = 0; i < d.pages; i++) {
+    const z = pageSize(d, i)
+    if (d.margins.left + d.margins.right >= z.w || d.margins.top + d.margins.bottom >= z.h) {
+      return d.pageSizes[i] ? `השוליים גדולים מעמוד ${d.startPage + i}.` : 'השוליים גדולים מהעמוד.'
+    }
+    if (d.gutter * (d.columns - 1) >= z.w - d.margins.left - d.margins.right) {
+      return d.pageSizes[i] ? `העמודות לא נכנסות בין השוליים של עמוד ${d.startPage + i}.` : 'העמודות לא נכנסות בין השוליים.'
+    }
   }
   return null
 }

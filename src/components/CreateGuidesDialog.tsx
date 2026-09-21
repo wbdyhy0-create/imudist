@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { DEFAULT_GUIDE_COLOR, MAX_GUIDES, type DocSettings } from '../document'
+import { DEFAULT_GUIDE_COLOR, MAX_GUIDES, pageSize, type DocSettings } from '../document'
 import { DEFAULT_GUIDE_SPEC, guidePositions, type GuideMode, type GuideSpec } from '../guides'
 import { pageSidesOf } from '../layout'
 import { UNIT_OPTIONS, type Unit } from '../units'
@@ -66,7 +66,7 @@ export function CreateGuidesDialog({ doc, page, initialColor, existing, onCreate
     let v = 0
     let h = 0
     for (const i of targets) {
-      const g = guidePositions(doc, sides[i] ?? 'single', spec)
+      const g = guidePositions(doc, sides[i] ?? 'single', pageSize(doc, i), spec)
       v += g.v.length
       h += g.h.length
     }

@@ -82,7 +82,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('ייצוא…', 'Ctrl+E'),
         sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
-        { label: 'הגדרת מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },
+        { label: 'הגדרות מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },
         off('התאמת פריסה…', 'Alt+Shift+P'),
         sep,
         off('מידע על הקובץ…', 'Ctrl+Alt+Shift+I'),

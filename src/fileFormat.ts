@@ -2,6 +2,7 @@ import {
   DEFAULT_TEXT_STYLE,
   DEFAULT_WRAP_OFFSET,
   MAX_GUIDES,
+  MAX_PER_ROW,
   MAX_COLUMNS,
   MAX_PAGES,
   MAX_PAGE_PT,
@@ -9,6 +10,7 @@ import {
   MIN_FRAME_PT,
   MIN_PAGE_PT,
   defaultDocSettings,
+  normalizeSizes,
   validateDoc,
   type Asset,
   type Assets,
@@ -17,6 +19,7 @@ import {
   type Guide,
   type ImageFit,
   type ImageFrame,
+  type PageSize,
   type Run,
   type Sides,
   type TextAlign,
@@ -77,6 +80,13 @@ const sidesOf = (v: unknown, fallback: Sides): Sides =>
       }
     : fallback
 
+function parsePageSizes(v: unknown): (PageSize | null)[] {
+  if (!Array.isArray(v)) return []
+  return v.slice(0, MAX_PAGES).map((z) =>
+    isObj(z) ? { w: num(z.w, 0, MIN_PAGE_PT, MAX_PAGE_PT), h: num(z.h, 0, MIN_PAGE_PT, MAX_PAGE_PT) } : null,
+  ).map((z) => (z && z.w > 0 && z.h > 0 ? z : null))
+}
+
 function parseSettings(v: unknown, name: string): DocSettings {
   const d = defaultDocSettings(name)
   if (!isObj(v)) return d
@@ -84,6 +94,9 @@ function parseSettings(v: unknown, name: string): DocSettings {
     name,
     width: num(v.width, d.width, MIN_PAGE_PT, MAX_PAGE_PT),
     height: num(v.height, d.height, MIN_PAGE_PT, MAX_PAGE_PT),
+    // files from before "pages per row": facing pages meant two per row
+    perRow: int(v.perRow, bool(v.facingPages, false) ? 2 : 1, 1, MAX_PER_ROW),
+    pageSizes: parsePageSizes(v.pageSizes),
     unit: oneOf<Unit>(v.unit, ['px', 'cm', 'mm', 'in'], d.unit),
     binding: oneOf(v.binding, ['ltr', 'rtl'], d.binding),
     pages: int(v.pages, 1, 1, MAX_PAGES),
@@ -96,8 +109,9 @@ function parseSettings(v: unknown, name: string): DocSettings {
     bleed: sidesOf(v.bleed, d.bleed),
     slug: sidesOf(v.slug, d.slug),
   }
-  if (validateDoc(settings)) throw new FileFormatError('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).')
-  return settings
+  const clean = normalizeSizes(settings)
+  if (validateDoc(clean)) throw new FileFormatError('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).')
+  return clean
 }
 
 function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
