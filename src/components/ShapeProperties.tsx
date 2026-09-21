@@ -95,10 +95,16 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
       </Group>
 
       <Group title="קו">
-        <FillPicker label="צבע הקו" value={shape.stroke} onChange={(stroke) => onChange({ stroke })} />
+        <FillPicker
+          label="צבע הקו"
+          value={shape.stroke}
+          // adding a line to a shape that has none gives it a visible weight
+          onChange={(stroke) => onChange(stroke && shape.strokeWidth === 0 ? { stroke, strokeWidth: 1 } : { stroke })}
+        />
         <div style={{ marginTop: 8 }}>
-          <Labeled label="עובי הקו">
-            <NumberField value={shape.strokeWidth} unit={unit} min={0} max={200} onChange={(v) => onChange({ strokeWidth: v })} />
+          <Labeled label="עובי הקו (נקודות)">
+            {/* line weights are counted in points, in quarter steps: 0.25, 0.5, 0.75, 1, 1.25 … (Shift = ten steps) */}
+            <NumberField value={shape.strokeWidth} unit="px" unitLabel="pt" step={0.25} min={0} max={200} onChange={(v) => onChange({ strokeWidth: v })} />
           </Labeled>
         </div>
       </Group>

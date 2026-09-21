@@ -10,13 +10,15 @@ interface Props {
   unit?: Unit
   /** replaces the unit's short name in the display (e.g. "pt" for font sizes, which are px == pt) */
   unitLabel?: string
+  /** how much the arrows and the up / down keys change the value, in the displayed unit (default: 1 mm, 0.1 cm / in) */
+  step?: number
   min?: number
   max?: number
 }
 
 const STEP: Record<Unit, number> = { px: 1, mm: 1, cm: 0.1, in: 0.1 }
 
-export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, min = 0, max = Infinity }: Props) {
+export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity }: Props) {
   // non-null while the user is typing
   const [text, setText] = useState<string | null>(null)
   const display = unit
@@ -33,7 +35,7 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, m
   }
 
   const bump = (dir: 1 | -1, big: boolean) => {
-    const step = (unit ? STEP[unit] : 1) * (big ? 10 : 1)
+    const step = (stepSize ?? (unit ? STEP[unit] : 1)) * (big ? 10 : 1)
     const next = unit ? toPt(fromPt(value, unit) + dir * step, unit) : value + dir * step
     onChange(clamp(next))
     setText(null)
