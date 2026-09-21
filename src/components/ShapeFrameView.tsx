@@ -8,7 +8,7 @@ import { normalizeRuns } from '../story'
 /** Distance of a rounding handle from the arc of its corner, screen px. */
 export const CORNER_HANDLE_OFFSET = 14
 /** Below this size (screen px) the rounding handles would sit on top of each other, so they are hidden. */
-const MIN_CORNER_HANDLES = 56
+export const MIN_CORNER_HANDLES = 56
 
 interface Props {
   shape: ShapeFrame

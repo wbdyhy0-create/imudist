@@ -68,7 +68,7 @@ import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
 import { PathTextEditor } from './PathTextEditor'
-import { CORNER_HANDLE_OFFSET, ShapeFrameView, type PathPeg } from './ShapeFrameView'
+import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
@@ -318,7 +318,11 @@ export function Workspace({
   const enterHeld = useRef(false)
   const shapeBoxRef = useRef<Box | null>(null)
   /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
-  const cornerDrag = useRef<{ id: string; corners: number[]; origin: number; sweep: boolean; grab: number; key: string } | null>(null)
+  const cornerDrag = useRef<{ id: string; corners: number[]; origin: number; sweep: boolean; grab: number; last: { x: number; y: number }; key: string } | null>(null)
+  /** a rubber band that started on empty canvas next to a selected rectangle: once it touches the rounding handles it picks corners instead of objects */
+  const cornerMarquee = useRef<{ id: string; picking: boolean } | null>(null)
+  /** the shape whose corner pick must survive the selection change that is about to happen */
+  const keepPick = useRef<string | null>(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** "change all corners together": a drag on any rounding handle rounds all four corners */
   const [roundTogether, setRoundTogether] = useState(true)
@@ -327,6 +331,10 @@ export function Workspace({
   const activeCornersOf = (id: string): number[] => (!roundTogether && cornerPick?.id === id ? cornerPick.corners : [0, 1, 2, 3])
   // another object (or none): the corner pick is over
   useEffect(() => {
+    if (keepPick.current !== null && keepPick.current === selectedId) {
+      keepPick.current = null
+      return
+    }
     setCornerPick(null)
   }, [selectedId])
   /** the settings window of a shape tool (double click on the tool) */
@@ -1522,25 +1530,44 @@ export function Workspace({
     const p = toWorld(e.clientX, e.clientY)
     const inward = ((p.x - (sh.x + c.fx * sh.w)) * c.sx + (p.y - (sh.y + c.fy * sh.h)) * c.sy) / 2
     dragSeq.current += 1
-    cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether && active.length === 4, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], key: `round:${dragSeq.current}` }
+    cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether && active.length === 4, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], last: p, key: `round:${dragSeq.current}` }
     setHotCorners(corners)
     vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** where the rounding handle of a corner is (world points) */
+  const cornerHandleAt = (sh: ShapeFrame, k: number) => {
+    const c = CORNERS[k]
+    const at = fitRadii(sh.radii, sh.w, sh.h)[k] + CORNER_HANDLE_OFFSET / live.current.zoom
+    return { x: sh.x + c.fx * sh.w + c.sx * at, y: sh.y + c.fy * sh.h + c.sy * at }
+  }
+  /** the corners whose rounding handles a world rectangle touches */
+  const cornerHitsInRect = (id: string, x0: number, y0: number, x1: number, y1: number): number[] => {
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh || sh.kind !== 'rect') return []
+    const pad = 7 / live.current.zoom // a handle has some size of its own
+    const [lx, hx, ly, hy] = [Math.min(x0, x1) - pad, Math.max(x0, x1) + pad, Math.min(y0, y1) - pad, Math.max(y0, y1) + pad]
+    return CORNERS.flatMap((_, k) => {
+      const h = cornerHandleAt(sh, k)
+      return h.x >= lx && h.x <= hx && h.y >= ly && h.y <= hy ? [k] : []
+    })
   }
   const moveCorner = (d: NonNullable<typeof cornerDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
     const sh = shapes.find((x) => x.id === d.id)
     if (!sh) return
     const p = toWorld(e.clientX, e.clientY)
     const maxR = Math.min(sh.w, sh.h) / 2
-    const shown = fitRadii(sh.radii, sh.w, sh.h)
     // passing over the rounding handle of another corner while the button is held adds that corner
-    const reach = 12 / live.current.zoom
-    CORNERS.forEach((c, k) => {
+    // (the whole stretch the pointer went since the last move counts, so a quick sweep cannot jump over a handle)
+    const reach = 14 / live.current.zoom
+    CORNERS.forEach((_, k) => {
       if (!d.sweep || d.corners.includes(k)) return
-      const at = shown[k] + CORNER_HANDLE_OFFSET / live.current.zoom
-      const hx = sh.x + c.fx * sh.w + c.sx * at
-      const hy = sh.y + c.fy * sh.h + c.sy * at
-      if (Math.hypot(p.x - hx, p.y - hy) <= reach) d.corners = [...d.corners, k]
+      const h = cornerHandleAt(sh, k)
+      const [sx, sy] = [p.x - d.last.x, p.y - d.last.y]
+      const len2 = sx * sx + sy * sy
+      const t = len2 > 0 ? Math.min(1, Math.max(0, ((h.x - d.last.x) * sx + (h.y - d.last.y) * sy) / len2)) : 0
+      if (Math.hypot(d.last.x + sx * t - h.x, d.last.y + sy * t - h.y) <= reach) d.corners = [...d.corners, k]
     })
+    d.last = p
     setHotCorners(d.corners)
     // the radius follows the pointer's distance in from the corner that was grabbed
     const c0 = CORNERS[d.origin]
@@ -1734,6 +1761,8 @@ export function Workspace({
       // guides (Shift / Ctrl adds to the selection that was there)
       const additive = e.shiftKey || e.ctrlKey || e.metaKey
       const before = selectedId ? [selectedId] : multiSel
+      const near = selectedId ? shapes.find((x) => x.id === selectedId) : undefined
+      cornerMarquee.current = !additive && !roundTogether && !previewMode && near?.kind === 'rect' && Math.min(near.w, near.h) * zoom >= MIN_CORNER_HANDLES ? { id: near.id, picking: false } : null
       setSelectedId(null)
       if (!additive) {
         setGuideSel([])
@@ -1768,6 +1797,24 @@ export function Workspace({
       const p = toWorld(e.clientX, e.clientY)
       offsetObjects(d.origins, p.x - d.start.x, p.y - d.start.y, d.key)
       return
+    }
+    if (cornerMarquee.current && marquee) {
+      const cm = cornerMarquee.current
+      const p = toWorld(e.clientX, e.clientY)
+      const hits = cornerHitsInRect(cm.id, marquee.x0, marquee.y0, p.x, p.y)
+      if (hits.length > 0 || cm.picking) {
+        // the band is over the rounding handles: it picks those corners, and the shape stays the selected object
+        cm.picking = true
+        setMarquee({ ...marquee, x1: p.x, y1: p.y })
+        if (selectedId !== cm.id) {
+          keepPick.current = cm.id
+          setSelectedIdRaw(cm.id)
+        }
+        setMultiSel([])
+        setGuideSel([])
+        setCornerPick(hits.length > 0 && hits.length < 4 ? { id: cm.id, corners: hits } : null)
+        return
+      }
     }
     if (marqueeBase.current && marquee) {
       const p = toWorld(e.clientX, e.clientY)
@@ -1901,6 +1948,7 @@ export function Workspace({
     setPageSnap(null)
     marginDrag.current = null
     marqueeBase.current = null
+    cornerMarquee.current = null
     setMarquee(null)
     drag.current = null
     setPanning(false)
@@ -1920,6 +1968,7 @@ export function Workspace({
     setPageSnap(null)
     marginDrag.current = null
     marqueeBase.current = null
+    cornerMarquee.current = null
     setMarquee(null)
     setDraft(null)
     drag.current = null
