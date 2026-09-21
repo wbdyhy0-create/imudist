@@ -5,17 +5,22 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
 import {
+  DEFAULT_GUIDE_COLOR,
   DEFAULT_TEXT_STYLE,
+  MAX_GUIDES,
   MAX_PAGE_PT,
   MIN_FRAME_PT,
   minPageSize,
   type Assets,
   type CharStyle,
   type DocSettings,
+  type Guide,
+  type GuideAxis,
   type ImageFit,
   type ImageFrame,
   type Run,
@@ -27,7 +32,8 @@ import { isTyping } from '../dom'
 import { HANDLES, chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
-import { computeLayout } from '../layout'
+import { applyGuideSpec } from '../guides'
+import { computeLayout, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
@@ -35,6 +41,8 @@ import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { wrapFloatsFor } from '../wrap'
+import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
+import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
@@ -44,6 +52,7 @@ import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
+import { formatLength } from '../units'
 import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
 import type { PageOps } from '../useDocumentSession'
@@ -52,6 +61,8 @@ import type { PageOps } from '../useDocumentSession'
 const PAD = 120
 const RULER = 20
 const FIT_MARGIN = 40
+/** how far a guide sticks out beyond its page, screen px */
+const GUIDE_OVER = 14
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 40
 const ZOOM_STEPS = [0.05, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 40]
@@ -79,6 +90,10 @@ export interface WorkspaceHandle {
   deletePage: () => void
   /** move the selected object in the stacking order */
   arrange: (op: ArrangeOp) => void
+  /** open the dialog that creates several guides at once */
+  createGuides: () => void
+  /** delete the guides of the selected page */
+  clearGuides: () => void
 }
 
 /**
@@ -110,6 +125,10 @@ interface Props {
   /** pictures waiting to be placed (the loaded image cursor); the first is placed by the next click */
   placingImages: PlacedImage[]
   onPlacingImagesChange: (images: PlacedImage[]) => void
+  guides: Guide[]
+  onGuidesChange: (guides: Guide[], coalesceKey?: string) => void
+  /** guides are hidden by the View menu: show them again (when the user makes one) */
+  onShowGuides: () => void
   /** the document has changes that are not saved yet */
   dirty?: boolean
   onClose?: () => void
@@ -159,6 +178,9 @@ export function Workspace({
   onImagesChange,
   placingImages,
   onPlacingImagesChange,
+  guides,
+  onGuidesChange,
+  onShowGuides,
   dirty,
   onClose,
   ref,
@@ -198,6 +220,13 @@ export function Workspace({
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
   const dragSeq = useRef(0)
+  /** a guide being dragged out of a ruler or moved (not yet stored); `remove` = it is over a ruler / panel, so letting go deletes it */
+  const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean } | null>(null)
+  /** the color new guides get: the last one the user chose */
+  const [guideColor, setGuideColor] = useState(DEFAULT_GUIDE_COLOR)
+  const [guidesDialog, setGuidesDialog] = useState(false)
+  const latestGuides = useRef(guides)
+  latestGuides.current = guides
   /** resizing the pages by a handle of the Page tool: the current size and the last pointer position (screen px) */
   const pageDrag = useRef<{ mode: HandleId; x: number; y: number; w: number; h: number; key: string } | null>(null)
 
@@ -501,6 +530,79 @@ export function Workspace({
     if (r) pageOps.commit(r)
   }
 
+  // ── ruler guides ───────────────────────────────────────────────────────────────
+  const newGuideId = () => globalThis.crypto?.randomUUID?.() ?? `g${Date.now()}${Math.random()}`
+
+  /**
+   * Drag a guide: out of a ruler (`id` = null, a new one) or an existing one. The guide follows the pointer without
+   * touching the document; letting go over the canvas stores it (one undo step), over a ruler or a panel deletes it.
+   */
+  const beginGuideDrag = (axis: GuideAxis, id: string | null, e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const orig = id ? guides.find((g) => g.id === id) : undefined
+    if (id && !orig) return
+    const color = orig?.color ?? guideColor
+    let last: { page: number; pos: number; remove: boolean } | null = orig ? { page: orig.page, pos: orig.pos, remove: false } : null
+    if (orig) {
+      setSelectedId(orig.id)
+      setEditingId(null)
+      setGuideDrag({ id, axis, color, ...last! })
+    }
+
+    const onMove = (ev: PointerEvent) => {
+      const box = vpRef.current!.getBoundingClientRect()
+      const inside = ev.clientX >= box.left && ev.clientX <= box.right && ev.clientY >= box.top && ev.clientY <= box.bottom
+      const p = toWorld(ev.clientX, ev.clientY)
+      const page = ownerPage(rects, p.x, p.y)
+      const r = rects[page]
+      last = { page, pos: Math.round((axis === 'h' ? p.y - r.y : p.x - r.x) * 100) / 100, remove: !inside }
+      setGuideDrag({ id, axis, color, ...last })
+    }
+    const finish = (commit: boolean) => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      setGuideDrag(null)
+      if (!commit || !last) return
+      const cur = latestGuides.current
+      if (last.remove) {
+        if (id) {
+          onGuidesChange(cur.filter((g) => g.id !== id))
+          setSelectedId(null)
+        }
+      } else if (orig) {
+        if (last.page !== orig.page || last.pos !== orig.pos) {
+          const to = last
+          onGuidesChange(cur.map((g) => (g.id === id ? { ...g, page: to.page, pos: to.pos } : g)))
+        }
+      } else if (cur.length < MAX_GUIDES) {
+        const g: Guide = { id: newGuideId(), page: last.page, axis, pos: last.pos, color }
+        onGuidesChange([...cur, g])
+        setSelectedId(g.id)
+        setEditingId(null)
+        onShowGuides()
+      }
+    }
+    const onUp = () => finish(true)
+    const onCancel = () => finish(false)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+
+  const updateGuide = (id: string, patch: Partial<Guide>, key?: string) =>
+    onGuidesChange(guides.map((g) => (g.id === id ? { ...g, ...patch } : g)), key)
+
+  const applyGuideRequest = (r: CreateGuidesRequest) => {
+    const pages = r.allPages ? Array.from({ length: doc.pages }, (_, i) => i) : [selPage]
+    setGuideColor(r.color)
+    onGuidesChange(applyGuideSpec(doc, pageSidesOf(doc), guides, pages, r.spec, r.color, r.replace, newGuideId))
+    setGuidesDialog(false)
+    onShowGuides()
+  }
+
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -515,6 +617,10 @@ export function Workspace({
     addPage: () => insertPages(1, 'after'),
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
+    createGuides: () => setGuidesDialog(true),
+    clearGuides: () => {
+      if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
+    },
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -593,9 +699,17 @@ export function Workspace({
         else setSelectedId(null)
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
-        if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
+        if (guides.some((g) => g.id === selectedId)) onGuidesChange(guides.filter((g) => g.id !== selectedId))
+        else if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
         else onFramesChange(removeFrame(frames, selectedId))
         setSelectedId(null)
+      } else if (selectedId && e.key.startsWith('Arrow') && guides.some((g) => g.id === selectedId)) {
+        // a guide moves along its own axis only
+        const g = guides.find((x) => x.id === selectedId)!
+        const step = e.shiftKey ? 10 : 1
+        const d = g.axis === 'h' ? (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0) : e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
+        e.preventDefault()
+        if (d) onGuidesChange(guides.map((x) => (x.id === g.id ? { ...x, pos: x.pos + d } : x)), `nudge:${g.id}`)
       } else if (selectedId && e.key.startsWith('Arrow')) {
         const f = frames.find((x) => x.id === selectedId) ?? images.find((x) => x.id === selectedId)
         if (!f) return
@@ -621,7 +735,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, linkFrom, frames, images, onFramesChange, onImagesChange])
+  }, [selectedId, linkFrom, frames, images, guides, onFramesChange, onImagesChange, onGuidesChange])
 
 
   // Escape drops the loaded pictures
@@ -956,6 +1070,7 @@ export function Workspace({
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
+  const selGuide = selectedId ? (guides.find((g) => g.id === selectedId) ?? null) : null
   const selChain = selFrame ? chainOf(frames, selFrame.id) : []
   const threadInfo = selFrame
     ? {
@@ -980,6 +1095,20 @@ export function Workspace({
         align: panelHead.align,
       }
     : null
+
+  /** a guide can be grabbed with the Selection tool only, and not while something is being placed */
+  const guidesLive = tool === 'select' && !space && !placing && placingImages.length === 0 && !linkFrom
+  const guideFromRuler = (axis: GuideAxis) => (e: ReactPointerEvent<HTMLElement>) => {
+    if (!panMode && !placing && placingImages.length === 0) beginGuideDrag(axis, null, e)
+  }
+  const guideStyle = (axis: GuideAxis, page: number, pos: number, color: string): CSSProperties | null => {
+    const r = rects[page]
+    if (!r) return null
+    const base = axis === 'h'
+      ? { left: tx + r.x * zoom - GUIDE_OVER, top: ty + (r.y + pos) * zoom - 3, width: r.w * zoom + 2 * GUIDE_OVER }
+      : { left: tx + (r.x + pos) * zoom - 3, top: ty + r.y * zoom - GUIDE_OVER, height: r.h * zoom + 2 * GUIDE_OVER }
+    return { ...base, '--gc': color } as unknown as CSSProperties
+  }
 
   /** the part of a frame's text to draw highlighted (frames that are not being edited) */
   const highlightFor = (fl: FrameFlow): [number, number] | null => {
@@ -1053,8 +1182,8 @@ export function Workspace({
           }}
         >
           <div className="ruler-corner" />
-          <Ruler orientation="h" offset={tx - scroll.x + vp.sb} zoom={zoom} unit={doc.unit} hidden={!showRulers} />
-          <Ruler orientation="v" offset={ty - scroll.y} zoom={zoom} unit={doc.unit} hidden={!showRulers} />
+          <Ruler orientation="h" offset={tx - scroll.x + vp.sb} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('h')} />
+          <Ruler orientation="v" offset={ty - scroll.y} zoom={zoom} unit={doc.unit} hidden={!showRulers} onGuideDown={guideFromRuler('v')} />
           <div
             ref={vpRef}
             className={viewportClass}
@@ -1126,6 +1255,42 @@ export function Workspace({
                   />
                 )
               })}
+              {showGuides && !previewMode && (
+                <>
+                  {guides.map((g) => {
+                    if (g.id === guideDrag?.id) return null
+                    const st = guideStyle(g.axis, g.page, g.pos, g.color ?? DEFAULT_GUIDE_COLOR)
+                    return st ? (
+                      <div
+                        key={g.id}
+                        className={`guide ${g.axis}${g.id === selectedId ? ' selected' : ''}${guidesLive ? ' live' : ''}`}
+                        style={st}
+                        onPointerDown={(e) => beginGuideDrag(g.axis, g.id, e)}
+                      />
+                    ) : null
+                  })}
+                  {guideDrag &&
+                    (() => {
+                      const st = guideStyle(guideDrag.axis, guideDrag.page, guideDrag.pos, guideDrag.color)
+                      const r = rects[guideDrag.page]
+                      if (!st || !r) return null
+                      const tip: CSSProperties =
+                        guideDrag.axis === 'h'
+                          ? { left: tx + r.x * zoom + 8, top: ty + (r.y + guideDrag.pos) * zoom - 24 }
+                          : { left: tx + (r.x + guideDrag.pos) * zoom + 8, top: ty + r.y * zoom + 8 }
+                      return (
+                        <>
+                          <div className={`guide ${guideDrag.axis} selected${guideDrag.remove ? ' removing' : ''}`} style={st} />
+                          {!guideDrag.remove && (
+                            <div className="guide-tip" style={tip}>
+                              {formatLength(guideDrag.pos, doc.unit)}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                </>
+              )}
               {tool === 'page' && !previewMode && !space && rects[selPage] && (
                 <div
                   className="page-frame"
@@ -1186,6 +1351,22 @@ export function Workspace({
                 onMove={movePage}
               />
             )}
+            {showProps && selGuide && (
+              <GuideProperties
+                guide={selGuide}
+                pageNumber={doc.startPage + selGuide.page}
+                unit={doc.unit}
+                onPos={(pos) => updateGuide(selGuide.id, { pos }, `guidepos:${selGuide.id}`)}
+                onColor={(color) => {
+                  setGuideColor(color)
+                  updateGuide(selGuide.id, { color })
+                }}
+                onDelete={() => {
+                  onGuidesChange(guides.filter((g) => g.id !== selGuide.id))
+                  setSelectedId(null)
+                }}
+              />
+            )}
             {showProps && selImage && (
               <ImageProperties
                 image={selImage}
@@ -1206,7 +1387,7 @@ export function Workspace({
                 }}
               />
             )}
-            {showProps && !selImage && (
+            {showProps && !selImage && !selGuide && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}
@@ -1225,6 +1406,16 @@ export function Workspace({
         )}
       </div>
 
+      {guidesDialog && (
+        <CreateGuidesDialog
+          doc={doc}
+          page={selPage}
+          initialColor={guideColor}
+          existing={guides.length}
+          onCreate={applyGuideRequest}
+          onClose={() => setGuidesDialog(false)}
+        />
+      )}
       <StatusBar
         zoom={zoom}
         onZoomTo={(z) => zoomAt(z, vp.w / 2, vp.h / 2)}

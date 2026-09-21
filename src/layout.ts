@@ -116,6 +116,13 @@ export function computeLayout(doc: DocSettings): DocLayout {
   return { spreads, bounds }
 }
 
+/** The side (left / right / single) of every page, by page index. */
+export function pageSidesOf(doc: DocSettings): PageSide[] {
+  const sides: PageSide[] = []
+  for (const s of computeLayout(doc).spreads) for (const p of s.pages) sides[p.index] = p.side
+  return sides
+}
+
 /** Margins as physical sides of one page (swaps inside/outside on left-hand pages). */
 export function pageMargins(doc: DocSettings, side: PageSide): Sides {
   const m = doc.margins

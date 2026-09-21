@@ -110,6 +110,34 @@ export interface ImageFrame {
   wrapOffset?: number
 }
 
+/** Ruler guides: horizontal ('h') lines run across a page, vertical ('v') ones from top to bottom. */
+export type GuideAxis = 'h' | 'v'
+
+/** A guide line. It belongs to one page and is placed by its distance from that page's top (h) or left (v) edge. */
+export interface Guide {
+  id: string
+  page: number
+  axis: GuideAxis
+  /** points from the page's top edge (h) or left edge (v) */
+  pos: number
+  /** #rrggbb; missing = the default guide color */
+  color?: string
+}
+
+export const GUIDE_COLORS: { value: string; label: string }[] = [
+  { value: '#00d1b2', label: 'טורקיז' },
+  { value: '#3d8bff', label: 'כחול' },
+  { value: '#f5b800', label: 'צהוב' },
+  { value: '#ff8a3d', label: 'כתום' },
+  { value: '#ff5c5c', label: 'אדום' },
+  { value: '#ff7ac6', label: 'ורוד' },
+  { value: '#a78bfa', label: 'סגול' },
+  { value: '#8a8f98', label: 'אפור' },
+]
+export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[0].value
+/** No document may hold more guides than this. */
+export const MAX_GUIDES = 5000
+
 /** The data of an imported picture. Several frames can show the same asset. */
 export interface Asset {
   /** the file's name, for the user */

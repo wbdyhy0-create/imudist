@@ -1,0 +1,32 @@
+/* ── ruler guides ─────────────────────────────────────────── */
+.ruler { touch-action: none; }
+.ruler-h { cursor: ns-resize; }
+.ruler-v { cursor: ew-resize; }
+.guide { position: absolute; z-index: 800000; pointer-events: none; }
+.guide.live { pointer-events: auto; }
+.guide::before { content: ''; position: absolute; background: var(--gc); }
+.guide.h { height: 7px; cursor: ns-resize; }
+.guide.h::before { left: 0; right: 0; top: 3px; height: 1px; }
+.guide.v { width: 7px; cursor: ew-resize; }
+.guide.v::before { top: 0; bottom: 0; left: 3px; width: 1px; }
+.guide.selected.h::before { top: 2px; height: 3px; }
+.guide.selected.v::before { left: 2px; width: 3px; }
+.guide.removing { opacity: 0.35; }
+.guide-tip { position: absolute; z-index: 800001; pointer-events: none; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.8); color: #fff; font-size: 11px; direction: ltr; white-space: nowrap; }
+
+.swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch-chip { position: relative; width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; outline: 1px solid var(--border-strong); cursor: pointer; }
+.swatch-chip.on { border-color: var(--bg-raised); outline: 2px solid #fff; }
+.swatch-chip.custom { background: conic-gradient(#f66, #fd6, #6f8, #6df, #86f, #f6d, #f66); overflow: hidden; }
+.swatch-chip.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+.modal.wide { width: min(520px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 32px); overflow: auto; }
+.modal.wide h2 { margin: 0; }
+.dlg-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; align-items: start; }
+.dlg-block { margin: 0; padding: 8px 12px 10px; border: 1px solid var(--border); border-radius: 6px; display: grid; gap: 10px; }
+.dlg-block legend { padding: 0 6px; color: var(--text-dim); }
+.dlg-check { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.dlg-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-line); }
+.dlg-summary { margin: 0; color: var(--text-dim); }
+.dlg-summary.warn { color: var(--danger); }
+.modal.wide .modal-buttons { margin-top: 4px; }

@@ -8,6 +8,8 @@ interface Props {
   zoom: number
   unit: Unit
   hidden?: boolean
+  /** the pointer went down on the ruler: a guide is being dragged out of it */
+  onGuideDown?: (e: React.PointerEvent<HTMLCanvasElement>) => void
 }
 
 const BG = '#2b2222'
@@ -15,7 +17,7 @@ const LINE = '#8c8c8c'
 const TEXT = '#c4c4c4'
 const MIN_LABEL_GAP = 64
 
-export function Ruler({ orientation, offset, zoom, unit, hidden }: Props) {
+export function Ruler({ orientation, offset, zoom, unit, hidden, onGuideDown }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useLayoutEffect(() => {
@@ -91,5 +93,5 @@ export function Ruler({ orientation, offset, zoom, unit, hidden }: Props) {
   })
 
   if (hidden) return <div />
-  return <canvas ref={ref} className={'ruler ruler-' + orientation} />
+  return <canvas ref={ref} className={'ruler ruler-' + orientation} onPointerDown={onGuideDown} />
 }

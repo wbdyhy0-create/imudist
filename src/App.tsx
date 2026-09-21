@@ -4,7 +4,7 @@ import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { defaultDocSettings, type DocSettings, type ImageFrame, type TextFrame } from './document'
+import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { pickFiles } from './fileio'
@@ -16,6 +16,7 @@ const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
 const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
+const NO_GUIDES: Guide[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -239,6 +240,9 @@ export default function App() {
               onImagesChange={preview ? noop : session.changeImages}
               placingImages={preview ? NO_PLACED : placingImages}
               onPlacingImagesChange={preview ? noop : setPlacingImages}
+              guides={preview ? NO_GUIDES : session.guides}
+              onGuidesChange={preview ? noop : session.changeGuides}
+              onShowGuides={() => setShowGuides(true)}
               dirty={!preview && session.dirty}
               onClose={preview ? undefined : session.closeDocument}
             />

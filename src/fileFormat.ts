@@ -1,6 +1,7 @@
 import {
   DEFAULT_TEXT_STYLE,
   DEFAULT_WRAP_OFFSET,
+  MAX_GUIDES,
   MAX_COLUMNS,
   MAX_PAGES,
   MAX_PAGE_PT,
@@ -13,6 +14,7 @@ import {
   type Assets,
   type CharStyle,
   type DocSettings,
+  type Guide,
   type ImageFit,
   type ImageFrame,
   type Run,
@@ -40,6 +42,7 @@ export interface DocumentFile {
   /** version 2+: pictures on the pages, and the data of the pictures they use */
   images: ImageFrame[]
   assets: Assets
+  guides: Guide[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
@@ -47,7 +50,7 @@ export function serializeDocument(c: DocContent): string {
   const used = new Set(c.images.map((i) => i.assetId))
   const assets: Assets = {}
   for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
-  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets }
+  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets, guides: c.guides }
   return JSON.stringify(file)
 }
 
@@ -212,6 +215,29 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
   return out
 }
 
+function parseGuides(v: unknown, pages: number): Guide[] {
+  if (!Array.isArray(v)) return []
+  const out: Guide[] = []
+  const used = new Set<string>()
+  for (const raw of v) {
+    if (!isObj(raw) || out.length >= MAX_GUIDES) continue
+    if (raw.axis !== 'h' && raw.axis !== 'v') continue
+    const page = int(raw.page, -1, -1, 1e6)
+    if (page < 0 || page >= pages) continue
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `g${out.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    out.push({
+      id,
+      page,
+      axis: raw.axis,
+      pos: num(raw.pos, 0, -1e6, 1e6),
+      ...(typeof raw.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? { color: raw.color } : {}),
+    })
+  }
+  return out
+}
+
 /**
  * Read the text of a file. The document takes its name from the file (like other desktop programs),
  * so `name` is the file's name without the extension.
@@ -228,5 +254,6 @@ export function parseDocument(text: string, name: string): DocContent {
     throw new FileFormatError('הקובץ נשמר בגרסה חדשה יותר של Imudist. עדכן את התוכנה כדי לפתוח אותו.')
   }
   const assets = parseAssets(data.assets)
-  return { doc: parseSettings(data.settings, name), frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets }
+  const doc = parseSettings(data.settings, name)
+  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages) }
 }

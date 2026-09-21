@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import type { DocSettings, ImageFrame, TextFrame } from './document'
+import type { DocSettings, Guide, ImageFrame, TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -21,6 +21,7 @@ import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
 const NO_FRAMES: TextFrame[] = []
 const NO_IMAGES: ImageFrame[] = []
 const NO_ASSETS = {}
+const NO_GUIDES: Guide[] = []
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
@@ -47,6 +48,7 @@ export function useDocumentSession() {
   const frames = state?.frames ?? NO_FRAMES
   const images = state?.images ?? NO_IMAGES
   const assets = state?.assets ?? NO_ASSETS
+  const guides = state?.guides ?? NO_GUIDES
   /** changes for every newly created or opened document, so views can start fresh */
   const [docId, setDocId] = useState(0)
   const [file, setFile] = useState<FileRef | null>(null)
@@ -95,6 +97,8 @@ export function useDocumentSession() {
     history.change((s) => (s && next !== s.frames ? { ...s, frames: next } : s), key)
   const changeImages = (next: ImageFrame[], key?: string) =>
     history.change((s) => (s && next !== s.images ? { ...s, images: next } : s), key)
+  const changeGuides = (next: Guide[], key?: string) =>
+    history.change((s) => (s && next !== s.guides ? { ...s, guides: next } : s), key)
 
   const pages: PageOps = {
     insert: (at, count) => history.change((s) => (s && insertPages(s, at, count)) || s),
@@ -203,7 +207,7 @@ export function useDocumentSession() {
 
   const createDocument = (d: DocSettings, onDone?: () => void) =>
     guard(() => {
-      install({ doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS }, null)
+      install({ doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES }, null)
       onDone?.()
     })
 
@@ -279,9 +283,11 @@ export function useDocumentSession() {
     frames,
     images,
     assets,
+    guides,
     history,
     changeFrames,
     changeImages,
+    changeGuides,
     pages,
     file,
     dirty,

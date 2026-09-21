@@ -338,7 +338,7 @@ svg { display: block; }
 .scope-hint { margin: 0 0 8px; padding: 5px 8px; border-radius: 4px; background: var(--bg-field); color: var(--text-dim); }
 .scope-hint.on { color: #fff; background: rgba(0, 102, 255, 0.28); }
 /* ── file dialogs, toast, recent files ───────────────────── */
-.modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 2000000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
 .modal { width: min(440px, calc(100vw - 32px)); padding: 22px 24px 18px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
 .modal h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
 .modal p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
