@@ -4,6 +4,8 @@ import { AppLogo } from './AppLogo'
 export interface MenuItem {
   label?: string
   shortcut?: string
+  /** a shortcut that is only written next to the item: the key is handled elsewhere (e.g. Ctrl+C by the browser's copy event) */
+  shownShortcut?: string
   onClick?: () => void
   disabled?: boolean
   checked?: boolean
@@ -75,9 +77,9 @@ function MenuPanel({ items, onDone, nested }: { items: MenuItem[]; onDone: () =>
           >
             <span className="menu-check">{item.checked ? '✓' : ''}</span>
             <span className="menu-text">{item.label}</span>
-            {item.shortcut && (
+            {(item.shortcut ?? item.shownShortcut) && (
               <span className="menu-shortcut" dir="ltr">
-                {item.shortcut}
+                {item.shortcut ?? item.shownShortcut}
               </span>
             )}
             {item.submenu && (

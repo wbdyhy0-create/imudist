@@ -55,6 +55,7 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
+import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
@@ -121,6 +122,11 @@ export interface WorkspaceHandle {
   arrange: (op: ArrangeOp) => void
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
   shapeOp: (op: BoolOp) => void
+  /** copy / cut / paste the selected objects, and a copy right on top of them */
+  copy: () => void
+  cut: () => void
+  paste: () => void
+  duplicateInPlace: () => void
   /** open the dialog that creates several guides at once */
   createGuides: () => void
   /** delete the guides of the selected page */
@@ -782,6 +788,130 @@ export function Workspace({
     if (s !== shapes) onShapesChange(s, key)
   }
 
+  // ── copy, paste, duplicate ─────────────────────────────────────────────────────
+  /** the selected text frames, pictures and shapes (not guides) */
+  const selectedObjectIds = () => (selectedId ? [selectedId] : multiSel).filter((id) => frames.some((f) => f.id === id) || images.some((im) => im.id === id) || shapes.some((sh) => sh.id === id))
+
+  /**
+   * Copies of the given objects, as they are now. A text frame is copied as what it shows (a frame of a thread only its
+   * part of the story), as one frame of its own.
+   */
+  const snapshotObjects = (ids: string[]): ClipObjects | null => {
+    const set = new Set(ids)
+    const nf = frames
+      .filter((f) => set.has(f.id))
+      .map((f): TextFrame => {
+        const fl = flow.get(f.id)
+        return fl ? { ...f, ...fl.style, text: fl.slice, runs: fl.runs, next: null } : { ...f, next: null }
+      })
+    const ni = images.filter((im) => set.has(im.id))
+    const ns = shapes.filter((sh) => set.has(sh.id))
+    if (nf.length + ni.length + ns.length === 0) return null
+    const used = Object.fromEntries(ni.filter((im) => assets[im.assetId]).map((im) => [im.assetId, assets[im.assetId]]))
+    return { frames: nf, images: ni, shapes: ns, assets: used }
+  }
+
+  /**
+   * Put copies of the objects into the document, in front of everything and moved by `by`, in one undo step. The new
+   * objects are selected. Returns their ids, in the order frames, pictures, shapes.
+   */
+  const insertObjects = (data: ClipObjects, by: { x: number; y: number }): string[] => {
+    // keep the objects' order among themselves: the copies get consecutive layers above everything
+    const order = new Map(stackOrder(data.frames, data.images, data.shapes).map((o, i) => [o.id, i]))
+    const base = nextZ(frames, images, shapes)
+    const layer = (id: string) => base + (order.get(id) ?? 0)
+    const moved = <T extends { id: string; x: number; y: number; z?: number }>(o: T): T => ({ ...o, id: newFrameId(), x: o.x + by.x, y: o.y + by.y, z: layer(o.id) })
+    const nf = data.frames.map(moved)
+    const ni = data.images.map(moved)
+    const ns = data.shapes.map(moved)
+    const missing = Object.fromEntries(Object.entries(data.assets).filter(([id]) => !assets[id]))
+    pageOps.commit({
+      frames: [...frames, ...nf],
+      images: [...images, ...ni],
+      shapes: [...shapes, ...ns],
+      ...(Object.keys(missing).length > 0 ? { assets: { ...assets, ...missing } } : {}),
+    })
+    const ids = [...nf, ...ni, ...ns].map((o) => o.id)
+    setGuideSel([])
+    setEditingId(null)
+    setPathEdit(null)
+    if (ids.length === 1) {
+      setMultiSel([])
+      setSelectedIdRaw(ids[0])
+    } else {
+      setMultiSel(ids)
+      setSelectedIdRaw(null)
+    }
+    return ids
+  }
+
+  /** copy (or cut) the selected objects into the program's clipboard; returns the marker text for the system clipboard, or null if nothing is selected */
+  const copyObjects = (cut: boolean): string | null => {
+    const ids = selectedObjectIds()
+    const data = snapshotObjects(ids)
+    if (!data) return null
+    const token = setClip(data)
+    if (cut) deleteSelection(ids, [])
+    return token
+  }
+  /** the menu's Copy / Cut: there is no clipboard event, so the marker text is written to the system clipboard here */
+  const copyToClipboard = async (cut: boolean) => {
+    const token = copyObjects(cut)
+    if (!token) return
+    try {
+      await navigator.clipboard?.writeText(token)
+    } catch {
+      // no permission: pasting inside the program still works from the menu
+    }
+  }
+
+  /** paste copied objects: each paste lands a bit further right and lower than the one before */
+  const pasteEntry = (entry: NonNullable<ReturnType<typeof lastClip>>) => {
+    entry.pastes += 1
+    insertObjects(entry.data, { x: entry.pastes * 14, y: entry.pastes * 14 })
+  }
+  const pasteFromClipboard = () => {
+    const entry = lastClip()
+    if (entry) pasteEntry(entry)
+  }
+
+  /** a copy right on top of the selected objects (Ctrl+F) */
+  const duplicateSelection = () => {
+    const data = snapshotObjects(selectedObjectIds())
+    if (data) insertObjects(data, { x: 0, y: 0 })
+  }
+
+  /**
+   * Alt + drag on an object: it is copied on the spot and the copy is what the pointer drags, so the original stays.
+   * With several objects selected all of them are copied and dragged together.
+   */
+  const altDuplicateDrag = (id: string, e: ReactPointerEvent<Element>): boolean => {
+    const ids = multiSel.length > 1 && multiSel.includes(id) ? multiSel : [id]
+    const data = snapshotObjects(ids)
+    if (!data) return false
+    e.stopPropagation()
+    e.preventDefault()
+    const created = insertObjects(data, { x: 0, y: 0 })
+    const flat = [...data.frames, ...data.images, ...data.shapes]
+    dragSeq.current += 1
+    const start = toWorld(e.clientX, e.clientY)
+    if (created.length === 1) {
+      const src = flat[0]
+      frameDrag.current = {
+        id: created[0],
+        mode: 'move',
+        start,
+        orig: { x: src.x, y: src.y, w: src.w, h: src.h },
+        key: `drag:${dragSeq.current}`,
+        kind: data.shapes.length ? 'shape' : data.images.length ? 'image' : 'frame',
+      }
+    } else {
+      groupDrag.current = { origins: new Map(created.map((cid, i) => [cid, { x: flat[i].x, y: flat[i].y }])), start, key: `group:${dragSeq.current}` }
+    }
+    vpRef.current!.setPointerCapture(e.pointerId)
+    return true
+  }
+
   /**
    * Combine the selected shapes into one (a single undo step). The shapes are taken from the back to the front, so
    * "subtract" cuts the back shape with the ones on top of it, and the result has the back shape's colors.
@@ -831,6 +961,7 @@ export function Workspace({
    * them all. Returns true when this took the click.
    */
   const handleMultiPointer = (id: string, e: ReactPointerEvent<Element>): boolean => {
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) return altDuplicateDrag(id, e)
     const current = selectedId ? [selectedId] : multiSel
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       e.stopPropagation()
@@ -901,6 +1032,10 @@ export function Workspace({
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
     shapeOp: (op) => combineSelectedShapes(op),
+    copy: () => void copyToClipboard(false),
+    cut: () => void copyToClipboard(true),
+    paste: () => pasteFromClipboard(),
+    duplicateInPlace: () => duplicateSelection(),
     createGuides: () => setGuidesDialog(true),
     clearGuides: () => {
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
@@ -1075,6 +1210,37 @@ export function Workspace({
       window.removeEventListener('keydown', sync)
       window.removeEventListener('keyup', sync)
       window.removeEventListener('blur', release)
+    }
+  }, [])
+
+  // Ctrl+C / Ctrl+X / Ctrl+V on objects: the browser's own copy, cut and paste events, so the keys work like everywhere else
+  const clipOps = useRef({ copy: copyObjects, paste: pasteEntry })
+  clipOps.current = { copy: copyObjects, paste: pasteEntry }
+  useEffect(() => {
+    const onCopyOrCut = (e: ClipboardEvent) => {
+      if (isTyping(e.target)) return // text being edited (or a field): the normal copy of the text
+      const token = clipOps.current.copy(e.type === 'cut')
+      if (!token) return // no object selected: leave the event alone
+      e.preventDefault()
+      e.clipboardData?.setData('text/plain', token)
+    }
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTyping(e.target)) return
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      // only our own marker: text or pictures from elsewhere go to the place-text / place-picture cursor as before
+      if (!isClipToken(text)) return
+      const entry = clipForToken(text)
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      if (entry) clipOps.current.paste(entry)
+    }
+    window.addEventListener('copy', onCopyOrCut)
+    window.addEventListener('cut', onCopyOrCut)
+    window.addEventListener('paste', onPaste, true) // capture: before the program's other paste handler
+    return () => {
+      window.removeEventListener('copy', onCopyOrCut)
+      window.removeEventListener('cut', onCopyOrCut)
+      window.removeEventListener('paste', onPaste, true)
     }
   }, [])
 
