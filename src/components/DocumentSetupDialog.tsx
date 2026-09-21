@@ -186,8 +186,8 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
                   <Switch
                     checked={d.primaryTextFrame}
                     onChange={(v) => patch({ primaryTextFrame: v })}
-                    title="מסגרת טקסט ראשית"
-                    hint="מסמן בכל עמוד את אזור הטקסט הראשי בתוך השוליים"
+                    title="תיבת טקסט בכל עמוד"
+                    hint="כל עמוד מקבל תיבת טקסט שיושבת בדיוק על השוליים (או תיבה לכל עמודה), גם עמודים שיתווספו אחר כך"
                   />
                 </>
               )}

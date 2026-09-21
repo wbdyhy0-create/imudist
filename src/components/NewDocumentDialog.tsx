@@ -156,7 +156,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           <Field label="מספר עמוד ראשון">
             <NumberField value={d.startPage} min={1} max={MAX_PAGES} onChange={(v) => patch({ startPage: v })} />
           </Field>
-          <Field label="מסגרת טקסט ראשית">
+          <Field label="תיבת טקסט בכל עמוד">
             <Check checked={d.primaryTextFrame} onChange={(v) => patch({ primaryTextFrame: v })} />
           </Field>
         </div>

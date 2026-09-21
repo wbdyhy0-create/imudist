@@ -35,6 +35,7 @@ export interface DocSettings {
   /** the pages of a row touch and form a spread, with inside / outside margins (needs `perRow` ≥ 2) */
   facingPages: boolean
   startPage: number
+  /** every page gets a text frame on its margins (new pages too) */
   primaryTextFrame: boolean
   columns: number
   gutter: number
@@ -228,7 +229,7 @@ export function defaultDocSettings(name: string): DocSettings {
     pages: 1,
     facingPages: false,
     startPage: 1,
-    primaryTextFrame: false,
+    primaryTextFrame: true,
     columns: 1,
     gutter: toPt(5, 'mm'),
     margins: sides(toPt(15, 'mm')),

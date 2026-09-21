@@ -51,6 +51,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
+import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
@@ -267,6 +268,11 @@ export function Workspace({
   }
   /** rubber band (world pt) while dragging over the canvas with the Selection tool: it selects the guides it touches */
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  /** the snapping lines of the document, and the ones an object is held on right now (drawn while dragging) */
+  const snapLines = useMemo(() => snapLinesOf(doc, guides), [doc, guides])
+  const snapLinesRef = useRef(snapLines)
+  snapLinesRef.current = snapLines
+  const [snapShown, setSnapShown] = useState<SnapLine[]>([])
   const marqueeBase = useRef<{ guides: string[]; objects: string[] } | null>(null)
   /** moving several selected objects together: where each one was, and where the pointer started */
   const groupDrag = useRef<{ origins: Map<string, { x: number; y: number }>; start: { x: number; y: number }; key: string } | null>(null)
@@ -1097,6 +1103,29 @@ export function Workspace({
     }
   }
 
+  /** a dragged point held on the page edges, margins, column edges and guides (each coordinate on its own); `off` skips it */
+  const snapPoint = (p: { x: number; y: number }, off: boolean) => {
+    if (off) return { p, lines: [] as SnapLine[] }
+    const tol = SNAP_PX / live.current.zoom
+    const sx = snapEdges([p.x], snapLinesRef.current.v, tol)
+    const sy = snapEdges([p.y], snapLinesRef.current.h, tol)
+    return { p: { x: p.x + (sx?.delta ?? 0), y: p.y + (sy?.delta ?? 0) }, lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
+  }
+
+  /**
+   * A moved or resized object: the edges that move are held exactly on a line when one is near. The move / resize gets
+   * corrected offsets, and the lines to show.
+   */
+  const snapDrag = (orig: Box, mode: 'move' | HandleId, dx: number, dy: number) => {
+    const tol = SNAP_PX / live.current.zoom
+    const move = mode === 'move'
+    const xs = move ? [orig.x + dx, orig.x + orig.w + dx] : [...(mode.includes('w') ? [orig.x + dx] : []), ...(mode.includes('e') ? [orig.x + orig.w + dx] : [])]
+    const ys = move ? [orig.y + dy, orig.y + orig.h + dy] : [...(mode.includes('n') ? [orig.y + dy] : []), ...(mode.includes('s') ? [orig.y + orig.h + dy] : [])]
+    const sx = xs.length ? snapEdges(xs, snapLinesRef.current.v, tol) : null
+    const sy = ys.length ? snapEdges(ys, snapLinesRef.current.h, tol) : null
+    return { dx: dx + (sx?.delta ?? 0), dy: dy + (sy?.delta ?? 0), lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
+  }
+
   /**
    * The box of the shape being drawn for a pointer position. Free by default, from the starting corner towards the
    * pointer in any direction. Shift (or Enter) keeps it exactly regular — a square, a circle, a hexagon with equal sides —
@@ -1106,7 +1135,9 @@ export function Workspace({
     const s0 = shapeStart.current
     if (!s0) return
     lastShapePointer.current = { x: clientX, y: clientY }
-    const p = toWorld(clientX, clientY)
+    const snapped = snapPoint(toWorld(clientX, clientY), false)
+    const p = snapped.p
+    setSnapShown(snapped.lines)
     let dx = p.x - s0.x
     let dy = p.y - s0.y
     if (m.shift || enterHeld.current) {
@@ -1349,7 +1380,7 @@ export function Workspace({
     } else if ((tool === 'type' || placing || placingImages.length > 0) && e.button === 0) {
       // start dragging a new text frame (with text loaded, the frame receives it)
       placeMods.current = { shift: e.shiftKey, alt: e.altKey }
-      const p = toWorld(e.clientX, e.clientY)
+      const p = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey).p
       createStart.current = p
       setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       setSelectedId(null)
@@ -1357,7 +1388,7 @@ export function Workspace({
       e.preventDefault()
       e.currentTarget.setPointerCapture(e.pointerId)
     } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && e.button === 0) {
-      const p = toWorld(e.clientX, e.clientY)
+      const p = snapPoint(toWorld(e.clientX, e.clientY), false).p
       shapeStart.current = { kind: tool, x: p.x, y: p.y }
       shapeBoxRef.current = null
       setSelectedId(null)
@@ -1414,25 +1445,31 @@ export function Workspace({
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
+      // the edges that move are held on the margins, column edges, page edges and guides (Ctrl = free)
+      const snapped = e.ctrlKey || e.metaKey ? null : snapDrag(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y)
+      const dx = snapped ? snapped.dx : p.x - d.start.x
+      const dy = snapped ? snapped.dy : p.y - d.start.y
+      setSnapShown((cur) => (snapped && snapped.lines.length > 0 ? snapped.lines : cur.length ? [] : cur))
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
-        const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined)
+        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined)
         onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
         return
       }
       if (d.kind === 'image') {
         // corners keep the picture's proportions unless Alt is held
-        const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT, e.altKey ? undefined : d.orig.w / d.orig.h)
+        const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.altKey ? undefined : d.orig.w / d.orig.h)
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
         return
       }
-      const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT)
+      const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
       onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
       return
     }
     if (createStart.current) {
-      const p = toWorld(e.clientX, e.clientY)
-      setDraft({ x0: createStart.current.x, y0: createStart.current.y, x1: p.x, y1: p.y })
+      const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
+      setSnapShown(snapped.lines)
+      setDraft({ x0: createStart.current.x, y0: createStart.current.y, x1: snapped.p.x, y1: snapped.p.y })
       return
     }
     if (!drag.current) return
@@ -1504,6 +1541,7 @@ export function Workspace({
   const endDrag = () => {
     finishShape()
     finishDraft()
+    setSnapShown((cur) => (cur.length ? [] : cur))
     // a rubber band that caught a single object leaves it selected the ordinary way (with its panel and handles)
     if (marqueeBase.current && multiSel.length === 1 && guideSel.length === 0) {
       setSelectedIdRaw(multiSel[0])
@@ -1520,6 +1558,7 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    setSnapShown((cur) => (cur.length ? [] : cur))
     shapeStart.current = null
     shapeBoxRef.current = null
     setShapeBox(null)
@@ -1934,6 +1973,13 @@ export function Workspace({
                       )
                     })()}
                 </>
+              )}
+              {snapShown.map((l, i) =>
+                l.axis === 'v' ? (
+                  <div key={`snap${i}`} className="guide-align v" style={{ left: tx + l.at * zoom - 1, top: ty + l.from * zoom, width: 2, height: (l.to - l.from) * zoom }} />
+                ) : (
+                  <div key={`snap${i}`} className="guide-align h" style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
+                ),
               )}
               {marquee && (
                 <div

@@ -48,7 +48,6 @@ export function SpreadView({ doc, spread, zoom, tx, ty, showGuides }: Props) {
 
     return (
       <g key={'g' + p.index}>
-        {doc.primaryTextFrame && <rect x={left} y={mTop} width={mW} height={mH} className="guide guide-frame" />}
         {columnLines.map((x, i) => (
           <line key={i} x1={x} x2={x} y1={mTop} y2={mTop + mH} className="guide guide-column" />
         ))}

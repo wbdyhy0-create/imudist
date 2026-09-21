@@ -16,6 +16,7 @@ import {
 } from './fileio'
 import { COALESCE_MS, changeHistory, newHistory, redoHistory, replaceHistory, undoHistory, type History } from './history'
 import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
+import { withPrimaryFrames } from './placeText'
 import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
 
 const NO_FRAMES: TextFrame[] = []
@@ -165,10 +166,20 @@ export function useDocumentSession() {
   const changeGuides = (next: Guide[], key?: string) => change((s) => (next !== s.guides ? { ...s, guides: next } : s), key)
 
   const pages: PageOps = {
-    insert: (at, count) => change((s) => insertPages(s, at, count) || s),
+    insert: (at, count) =>
+      change((s) => {
+        const r = insertPages(s, at, count)
+        return r ? (r.doc.primaryTextFrame ? withPrimaryFrames(r, Array.from({ length: r.doc.pages - s.doc.pages }, (_, i) => at + i)) : r) : s
+      }),
     remove: (indices) => change((s) => deletePages(s, indices) || s),
     move: (from, to) => change((s) => movePage(s, from, to) || s),
-    setup: (next, key) => change((s) => applySettings(s, next), key),
+    setup: (next, key) =>
+      change((s) => {
+        const r = applySettings(s, next)
+        if (!next.primaryTextFrame) return r
+        // turning the option on gives every page without a text frame one; otherwise only pages that were added
+        return withPrimaryFrames(r, s.doc.primaryTextFrame ? Array.from({ length: Math.max(0, next.pages - s.doc.pages) }, (_, i) => s.doc.pages + i) : 'all')
+      }, key),
     commit: (patch) => change((s) => ({ ...s, ...patch })),
   }
 
@@ -290,7 +301,9 @@ export function useDocumentSession() {
 
   /** New documents open in a new tab; the ones already open stay as they are. */
   const createDocument = (d: DocSettings, onDone?: () => void) => {
-    addDoc({ doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES, shapes: NO_SHAPES }, null)
+    const blank: DocContent = { doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES, shapes: NO_SHAPES }
+    // a new document starts with a text frame on the margins of every page
+    addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
     onDone?.()
   }
 

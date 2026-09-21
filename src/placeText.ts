@@ -1,8 +1,8 @@
-import { MAX_PAGES, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_TEXT_STYLE, MAX_PAGES, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { chainOf, styleOf, type Box } from './frames'
 import type { PlacedText } from './importText'
 import { computeLayout, pageMargins, type PageSide } from './layout'
-import { ownerPage, pageRects, type PageRect } from './pages'
+import { ownerPage, pageRects, type DocContent, type PageRect } from './pages'
 import { nextZ } from './stacking'
 import { normalizeRuns, sliceRuns } from './story'
 import { fitStoryEnd, flowFrames } from './textLayout'
@@ -77,6 +77,38 @@ export interface PourResult {
 
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
 
+/** The text frames of some pages: one exactly on the margins, or — when the page has columns — one exactly on each column. */
+export function primaryFrames(doc: DocSettings, pageIndices: number[]): TextFrame[] {
+  const rects = pageRects(doc)
+  const sides = pageSides(doc)
+  return pageIndices.flatMap((i) =>
+    rects[i]
+      ? columnBoxes(doc, rects[i], sides[i], i).map(
+          (b): TextFrame => ({ ...DEFAULT_TEXT_STYLE, id: newId(), x: b.x, y: b.y, w: b.w, h: b.h, text: '', runs: [], next: null }),
+        )
+      : [],
+  )
+}
+
+/**
+ * The content with margin text frames added to `pages` (or all pages) that have no text frame at all yet, so a page
+ * that already has its own frames is never given a second one.
+ */
+export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocContent {
+  if (pages !== 'all' && pages.length === 0) return c
+  const rects = pageRects(c.doc)
+  const occupied = new Set(c.frames.map((f) => ownerPage(rects, f.x + f.w / 2, f.y + f.h / 2)))
+  const targets = (pages === 'all' ? rects.map((_, i) => i) : pages).filter((i) => !occupied.has(i))
+  return targets.length === 0 ? c : { ...c, frames: [...c.frames, ...primaryFrames(c.doc, targets)] }
+}
+
+/** An empty, unlinked text frame that sits exactly on `box` (a primary frame waiting for text), if there is one. */
+function emptyFrameAt(frames: TextFrame[], box: Box, taken: Set<string>): TextFrame | undefined {
+  const linked = new Set(frames.map((f) => f.next).filter((n): n is string => !!n))
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+  return frames.find((f) => !taken.has(f.id) && !f.text && !f.next && !linked.has(f.id) && near(f.x, box.x) && near(f.y, box.y) && near(f.w, box.w) && near(f.h, box.h))
+}
+
 /**
  * Semi-automatic flow: each click adds one frame to the same story. The first click creates the story in a frame;
  * later clicks link a new frame after the last one (`placed.continueFrom`). The text stays loaded while some is left over.
@@ -139,8 +171,11 @@ export function pourText(
     sides = pageSides(curDoc)
   }
 
-  const existing = target.frameId ? frames.find((f) => f.id === target.frameId) : undefined
+  const existing = target.frameId ? frames.find((f) => f.id === target.frameId) : emptyFrameAt(frames, target.box, new Set())
   const first: Box = existing ? { x: existing.x, y: existing.y, w: existing.w, h: existing.h } : target.box
+  /** empty frames of the document that the text flows into instead of new ones being made on top of them */
+  const reused = new Set<string>(existing ? [existing.id] : [])
+  const reuse: (string | null)[] = [existing?.id ?? null]
 
   const boxes: Box[] = [first]
   const ends: number[] = []
@@ -167,16 +202,19 @@ export function pourText(
       const box = columnBoxes(curDoc, rects[page], sides[page], page)[col]
       col++
       if (box.w < 8 || box.h < 8) break
+      const found = emptyFrameAt(frames, box, reused)
       const end = fitStoryEnd(story, runs, style, start, box, wrapFloatsFor(box, images), Math.max(1, lastLen))
       if (end <= start) break // the frame is smaller than one line
       boxes.push(box)
+      reuse.push(found?.id ?? null)
+      if (found) reused.add(found.id)
       ends.push(end)
       lastLen = end - start
       start = end
     }
   }
 
-  const ids = boxes.map((_, i) => (i === 0 && existing ? existing.id : newId()))
+  const ids = boxes.map((_, i) => reuse[i] ?? newId())
   const z = nextZ(frames, images, shapes)
   const made: TextFrame[] = boxes.map((b, i) => ({
     ...style,
@@ -194,7 +232,7 @@ export function pourText(
   }))
 
   return {
-    content: { doc: curDoc, frames: [...frames.filter((f) => f.id !== existing?.id), ...made] },
+    content: { doc: curDoc, frames: [...frames.filter((f) => !reused.has(f.id)), ...made] },
     headId: ids[0],
     remaining: null,
     overflow: start < story.length,
