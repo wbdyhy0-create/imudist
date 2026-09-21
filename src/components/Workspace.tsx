@@ -60,6 +60,7 @@ import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDial
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
+import { MultiSelectionPanel } from './MultiSelectionPanel'
 import { CORNER_HANDLE_OFFSET, ShapeFrameView } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
@@ -248,9 +249,14 @@ export function Workspace({
   /** the selected text frame or picture (guides have their own, multiple, selection) */
   const [selectedId, setSelectedIdRaw] = useState<string | null>(null)
   const [guideSel, setGuideSel] = useState<string[]>([])
+  /** several selected text frames / pictures / shapes (then `selectedId` is null) */
+  const [multiSel, setMultiSel] = useState<string[]>([])
   const setSelectedId = (id: string | null) => {
     setSelectedIdRaw(id)
-    if (id) setGuideSel([])
+    if (id) {
+      setGuideSel([])
+      setMultiSel([])
+    }
   }
   const selectGuides = (ids: string[]) => {
     setGuideSel(ids)
@@ -258,7 +264,9 @@ export function Workspace({
   }
   /** rubber band (world pt) while dragging over the canvas with the Selection tool: it selects the guides it touches */
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
-  const marqueeBase = useRef<string[] | null>(null)
+  const marqueeBase = useRef<{ guides: string[]; objects: string[] } | null>(null)
+  /** moving several selected objects together: where each one was, and where the pointer started */
+  const groupDrag = useRef<{ origins: Map<string, { x: number; y: number }>; start: { x: number; y: number }; key: string } | null>(null)
   /** the right-click menu of the rulers (units), at a screen position */
   const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -490,7 +498,19 @@ export function Workspace({
   }
 
   const selectAllText = () => {
-    if (!editingId) return
+    if (!editingId) {
+      // not editing text: select every object of the document
+      const ids = [...frames, ...images, ...shapes].map((o) => o.id)
+      setGuideSel([])
+      if (ids.length > 1) {
+        setMultiSel(ids)
+        setSelectedIdRaw(null)
+      } else {
+        setMultiSel([])
+        setSelectedIdRaw(ids[0] ?? null)
+      }
+      return
+    }
     const fl = flow.get(editingId)
     if (!fl) return
     setTextSel({ headId: fl.headId, a: 0, b: fl.story.length })
@@ -586,6 +606,7 @@ export function Workspace({
     if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
     const im = images.find((x) => x.id === id)
     if (!im) return
+    if (handleMultiPointer(id, e)) return
     e.stopPropagation()
     e.preventDefault()
     setSelectedPage(ownerPage(rects, im.x + im.w / 2, im.y + im.h / 2))
@@ -712,6 +733,79 @@ export function Workspace({
       return
     }
     beginGuideDrag(g.axis, g.id, e)
+  }
+
+  /** the ids of the text frames, pictures and shapes that touch a world rectangle */
+  const objectsInRect = (x0: number, y0: number, x1: number, y1: number): string[] => {
+    const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)]
+    const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)]
+    return [...frames, ...images, ...shapes].filter((o) => o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay).map((o) => o.id)
+  }
+
+  /** the selected objects (several selected: `multiSel`; one: `selectedId`) that still exist */
+  const chosenObjects = () => {
+    const ids = new Set(selectedId ? [selectedId] : multiSel)
+    return [...frames, ...images, ...shapes].filter((o) => ids.has(o.id))
+  }
+
+  /** move objects (by id → where each was) by an offset; the three kinds change together and share one undo step per key */
+  const offsetObjects = (origins: Map<string, { x: number; y: number }>, dx: number, dy: number, key: string) => {
+    const shift = <T extends { id: string; x: number; y: number }>(list: T[]): T[] =>
+      list.some((o) => origins.has(o.id)) ? list.map((o) => (origins.has(o.id) ? { ...o, x: origins.get(o.id)!.x + dx, y: origins.get(o.id)!.y + dy } : o)) : list
+    const f = shift(frames)
+    const i = shift(images)
+    const s = shift(shapes)
+    if (f !== frames) onFramesChange(f, key)
+    if (i !== images) onImagesChange(i, key)
+    if (s !== shapes) onShapesChange(s, key)
+  }
+
+  /** delete text frames, pictures, shapes and guides in one undo step */
+  const deleteSelection = (ids: string[], guideIds: string[]) => {
+    const gone = new Set(ids)
+    const goneGuides = new Set(guideIds)
+    pageOps.commit({
+      frames: ids.reduce((acc, id) => (acc.some((f) => f.id === id) ? removeFrame(acc, id) : acc), frames),
+      images: images.filter((im) => !gone.has(im.id)),
+      shapes: shapes.filter((sh) => !gone.has(sh.id)),
+      guides: goneGuides.size ? guides.filter((g) => !goneGuides.has(g.id)) : guides,
+    })
+    setMultiSel([])
+    setGuideSel([])
+    setSelectedIdRaw(null)
+  }
+
+  /**
+   * Shift / Ctrl + click adds an object to the selection or removes it; dragging one of several selected objects moves
+   * them all. Returns true when this took the click.
+   */
+  const handleMultiPointer = (id: string, e: ReactPointerEvent<Element>): boolean => {
+    const current = selectedId ? [selectedId] : multiSel
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      e.stopPropagation()
+      e.preventDefault()
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id]
+      setGuideSel([])
+      setEditingId(null)
+      if (next.length > 1) {
+        setMultiSel(next)
+        setSelectedIdRaw(null)
+      } else {
+        setMultiSel([])
+        setSelectedIdRaw(next[0] ?? null)
+      }
+      return true
+    }
+    if (multiSel.length > 1 && multiSel.includes(id)) {
+      e.stopPropagation()
+      e.preventDefault()
+      const origins = new Map(chosenObjects().map((o) => [o.id, { x: o.x, y: o.y }]))
+      dragSeq.current += 1
+      groupDrag.current = { origins, start: toWorld(e.clientX, e.clientY), key: `group:${dragSeq.current}` }
+      vpRef.current!.setPointerCapture(e.pointerId)
+      return true
+    }
+    return false
   }
 
   /** the guides that touch a world rectangle (a guide is a thin line, so it gets a few pixels of reach) */
@@ -849,7 +943,7 @@ export function Workspace({
   // Delete removes the selected frame or guides, arrows nudge them (Shift = 10 pt), Escape deselects / cancels linking
   useEffect(() => {
     const guidesSelected = guidesVisible && guideSel.length > 0
-    if (!selectedId && !linkFrom && !guidesSelected) return
+    if (!selectedId && !linkFrom && !guidesSelected && multiSel.length === 0) return
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'Escape') {
@@ -857,12 +951,18 @@ export function Workspace({
         else {
           setSelectedId(null)
           setGuideSel([])
+          setMultiSel([])
         }
-      } else if (guidesSelected && (e.key === 'Delete' || e.key === 'Backspace')) {
+      } else if ((guidesSelected || multiSel.length > 0) && (e.key === 'Delete' || e.key === 'Backspace')) {
+        // everything that is selected — objects and guides — goes in one step
         e.preventDefault()
-        const chosen = new Set(guideSel)
-        onGuidesChange(guides.filter((g) => !chosen.has(g.id)))
-        setGuideSel([])
+        deleteSelection(multiSel, guidesSelected ? guideSel : [])
+      } else if (multiSel.length > 0 && e.key.startsWith('Arrow')) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0
+        const dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0
+        if (dx || dy) offsetObjects(new Map(chosenObjects().map((o) => [o.id, { x: o.x, y: o.y }])), dx, dy, 'nudge:group')
       } else if (guidesSelected && e.key.startsWith('Arrow')) {
         // a guide moves along its own axis only
         e.preventDefault()
@@ -901,7 +1001,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange])
+  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange])
 
 
   // while a shape is being drawn, Shift / Alt / Ctrl / Enter change it at once, even if the mouse does not move
@@ -1012,6 +1112,7 @@ export function Workspace({
     if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
+    if (handleMultiPointer(id, e)) return
     e.stopPropagation()
     e.preventDefault()
     setSelectedPage(ownerPage(rects, sh.x + sh.w / 2, sh.y + sh.h / 2))
@@ -1231,16 +1332,19 @@ export function Workspace({
       e.preventDefault()
       e.currentTarget.setPointerCapture(e.pointerId)
     } else if (tool === 'select' && e.button === 0) {
-      setSelectedId(null)
-      // dragging over empty canvas draws a rubber band that selects the guides it touches (Shift / Ctrl adds to the selection)
+      // dragging over empty canvas draws a rubber band that selects everything it touches: text frames, pictures, shapes and
+      // guides (Shift / Ctrl adds to the selection that was there)
       const additive = e.shiftKey || e.ctrlKey || e.metaKey
-      if (!additive) setGuideSel([])
-      if (guidesVisible) {
-        const p = toWorld(e.clientX, e.clientY)
-        marqueeBase.current = additive ? guideSel : []
-        setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
-        e.currentTarget.setPointerCapture(e.pointerId)
-      }
+      const before = selectedId ? [selectedId] : multiSel
+      setSelectedId(null)
+      if (!additive) {
+        setGuideSel([])
+        setMultiSel([])
+      } else if (before.length > 0) setMultiSel(before)
+      const p = toWorld(e.clientX, e.clientY)
+      marqueeBase.current = { guides: additive ? guideSel : [], objects: additive ? before : [] }
+      setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+      e.currentTarget.setPointerCapture(e.pointerId)
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1252,11 +1356,18 @@ export function Workspace({
       moveCorner(cornerDrag.current, e)
       return
     }
+    if (groupDrag.current) {
+      const d = groupDrag.current
+      const p = toWorld(e.clientX, e.clientY)
+      offsetObjects(d.origins, p.x - d.start.x, p.y - d.start.y, d.key)
+      return
+    }
     if (marqueeBase.current && marquee) {
       const p = toWorld(e.clientX, e.clientY)
       setMarquee({ ...marquee, x1: p.x, y1: p.y })
-      const hits = guidesInRect(marquee.x0, marquee.y0, p.x, p.y)
-      setGuideSel([...new Set([...marqueeBase.current, ...hits])])
+      const hits = guidesVisible ? guidesInRect(marquee.x0, marquee.y0, p.x, p.y) : []
+      setGuideSel([...new Set([...marqueeBase.current.guides, ...hits])])
+      setMultiSel([...new Set([...marqueeBase.current.objects, ...objectsInRect(marquee.x0, marquee.y0, p.x, p.y)])])
       return
     }
     if (marginDrag.current) {
@@ -1360,6 +1471,12 @@ export function Workspace({
   const endDrag = () => {
     finishShape()
     finishDraft()
+    // a rubber band that caught a single object leaves it selected the ordinary way (with its panel and handles)
+    if (marqueeBase.current && multiSel.length === 1 && guideSel.length === 0) {
+      setSelectedIdRaw(multiSel[0])
+      setMultiSel([])
+    }
+    groupDrag.current = null
     frameDrag.current = null
     pageDrag.current = null
     setPageSnap(null)
@@ -1373,6 +1490,7 @@ export function Workspace({
     shapeStart.current = null
     shapeBoxRef.current = null
     setShapeBox(null)
+    groupDrag.current = null
     cornerDrag.current = null
     setHotCorners([])
     createStart.current = null
@@ -1422,6 +1540,7 @@ export function Workspace({
       setSelectedId(id)
       setEditingId(id)
     } else {
+      if (handleMultiPointer(id, e)) return
       e.preventDefault()
       setSelectedId(id)
       setEditingId(null)
@@ -1652,6 +1771,7 @@ export function Workspace({
                   ty={ty}
                   z={rank.get(im.id) ?? 0}
                   selected={im.id === selectedId}
+                  marked={!previewMode && multiSel.includes(im.id)}
                   showEdge={!previewMode}
                   onPointerDown={onImagePointerDown(im.id)}
                   onHandleDown={onHandleDown(im.id)}
@@ -1666,6 +1786,7 @@ export function Workspace({
                   ty={ty}
                   z={rank.get(sh.id) ?? 0}
                   selected={sh.id === selectedId}
+                  marked={!previewMode && multiSel.includes(sh.id)}
                   showEdge={!previewMode}
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
@@ -1713,6 +1834,7 @@ export function Workspace({
                     tx={tx}
                     ty={ty}
                     selected={f.id === selectedId}
+                    marked={!previewMode && multiSel.includes(f.id)}
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
                     showEdge={!previewMode}
@@ -1906,6 +2028,9 @@ export function Workspace({
                 }}
               />
             )}
+            {showProps && multiSel.length > 1 && (
+              <MultiSelectionPanel count={multiSel.length} onDelete={() => deleteSelection(multiSel, [])} />
+            )}
             {showProps && selShape && (
               <ShapeProperties
                 shape={selShape}
@@ -1939,7 +2064,7 @@ export function Workspace({
                 }}
               />
             )}
-            {showProps && !selImage && !selShape && selGuides.length === 0 && (
+            {showProps && !selImage && !selShape && selGuides.length === 0 && multiSel.length < 2 && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}

@@ -17,6 +17,8 @@ interface Props {
   /** stacking rank (higher = in front) */
   z: number
   selected: boolean
+  /** part of a selection of several objects: outlined, without handles */
+  marked?: boolean
   /** outlines and handles are non-printing: hidden in Preview mode */
   showEdge: boolean
   /** the rounding handles that are part of the current rounding gesture */
@@ -29,7 +31,7 @@ interface Props {
 }
 
 /** A drawn shape: the outline is an SVG path (so only the shape itself catches the pointer), plus handles when selected. */
-export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, showEdge, hotCorners = [], ghost, onPointerDown, onHandleDown, onCornerDown }: Props) {
+export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showEdge, hotCorners = [], ghost, onPointerDown, onHandleDown, onCornerDown }: Props) {
   const w = shape.w * zoom
   const h = shape.h * zoom
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
@@ -38,7 +40,7 @@ export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, showEdge, hot
 
   return (
     <div
-      className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (ghost ? ' ghost' : '')}
+      className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '')}
       style={{ left: tx + shape.x * zoom, top: ty + shape.y * zoom, width: w, height: h, zIndex: z }}
     >
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">

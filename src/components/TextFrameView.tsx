@@ -25,6 +25,8 @@ interface Props {
   tx: number
   ty: number
   selected: boolean
+  /** part of a selection of several objects: outlined, without handles */
+  marked?: boolean
   editing: boolean
   /** an out-port was clicked and this frame is waiting for a target */
   armed: boolean
@@ -88,14 +90,14 @@ function RichText({ text, runs, scale, highlight, floats }: { text: string; runs
 
 /** A right-to-left text frame with its handles and thread ports. */
 export function TextFrameView(p: Props) {
-  const { frame, style, slice, selected, editing, showEdge } = p
+  const { frame, style, slice, selected, editing, showEdge, marked } = p
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
 
   return (
     <div
-      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '')}
+      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '')}
       style={{
         zIndex: p.z,
         left: p.tx + frame.x * p.zoom,

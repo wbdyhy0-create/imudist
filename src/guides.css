@@ -86,3 +86,7 @@
 .shape-dialog .row-card svg { stroke: currentColor; stroke-width: 1.5; fill: none; }
 .shape-dialog { gap: 14px; }
 .dlg-hint { margin: 0; color: var(--text-dim); line-height: 1.5; }
+
+/* objects that are part of a selection of several */
+.text-frame.marked, .image-frame.marked { outline: 2px solid var(--accent-line); }
+.shape-frame.marked::after { content: ''; position: absolute; inset: 0; outline: 2px solid var(--accent-line); pointer-events: none; }
