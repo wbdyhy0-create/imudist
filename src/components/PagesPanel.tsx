@@ -133,6 +133,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                           transform={`translate(${sh.x - r.x} ${sh.y - r.y})`}
                           d={shapePath(sh)}
                           fill={sh.fill ?? 'none'}
+                          fillRule="evenodd"
                           stroke={sh.stroke ?? 'none'}
                           strokeWidth={Math.max(sh.strokeWidth, p.w * 0.004)}
                         />

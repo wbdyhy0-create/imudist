@@ -1,0 +1,93 @@
+import polygonClipping from 'polygon-clipping'
+import type { Pair, Polygon, MultiPolygon } from 'polygon-clipping'
+import type { PathGeom, ShapeFrame } from './document'
+import { fitRadii, polygonPoints } from './shapes'
+
+/** Combining shapes: unite, subtract, intersect, exclude. The result is one new shape whose outline is a polygon. */
+
+export type BoolOp = 'unite' | 'subtract' | 'intersect' | 'exclude'
+
+export const BOOL_OP_NAMES: Record<BoolOp, string> = { unite: 'איחוד', subtract: 'חיסור', intersect: 'חיתוך', exclude: 'החרגה' }
+
+/** Points per full circle when a curve is turned into a polygon: fine enough that the straight pieces cannot be seen. */
+const ARC_STEPS = 160
+
+const arc = (cx: number, cy: number, r: number, a0: number, a1: number, steps: number): Pair[] =>
+  Array.from({ length: steps + 1 }, (_, i) => {
+    const a = a0 + ((a1 - a0) * i) / steps
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)]
+  })
+
+/** A shape as polygons in world coordinates. */
+export function shapeToPolygons(s: ShapeFrame): MultiPolygon {
+  const { x, y, w, h } = s
+  let ring: Pair[]
+  if (s.kind === 'path') {
+    return (s.geom ?? []).map((poly) => poly.map((r) => r.map(([px, py]): Pair => [x + px * w, y + py * h])))
+  } else if (s.kind === 'ellipse') {
+    ring = Array.from({ length: ARC_STEPS }, (_, i): Pair => {
+      const a = (2 * Math.PI * i) / ARC_STEPS
+      return [x + w / 2 + (w / 2) * Math.cos(a), y + h / 2 + (h / 2) * Math.sin(a)]
+    })
+  } else if (s.kind === 'polygon') {
+    ring = polygonPoints(s.sides ?? 6, w, h).map(([px, py]) => [x + px, y + py])
+  } else {
+    const [tl, tr, br, bl] = fitRadii(s.radii, w, h)
+    const steps = 24
+    const q = Math.PI / 2
+    ring = [
+      ...(tl ? arc(x + tl, y + tl, tl, Math.PI, Math.PI + q, steps) : [[x, y] as Pair]),
+      ...(tr ? arc(x + w - tr, y + tr, tr, -q, 0, steps) : [[x + w, y] as Pair]),
+      ...(br ? arc(x + w - br, y + h - br, br, 0, q, steps) : [[x + w, y + h] as Pair]),
+      ...(bl ? arc(x + bl, y + h - bl, bl, q, Math.PI, steps) : [[x, y + h] as Pair]),
+    ]
+  }
+  return [[ring]]
+}
+
+/** Polygons back into a shape's own box: the new position and size, and the outline relative to it. Null when nothing is left. */
+function toGeometry(polys: MultiPolygon): { x: number; y: number; w: number; h: number; geom: PathGeom } | null {
+  const pts = polys.flatMap((p) => p.flatMap((r) => r))
+  if (pts.length < 3) return null
+  const xs = pts.map((p) => p[0])
+  const ys = pts.map((p) => p[1])
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  const w = Math.max(...xs) - x
+  const h = Math.max(...ys) - y
+  if (w < 0.01 || h < 0.01) return null
+  const round = (v: number) => Math.round(v * 1e6) / 1e6
+  const geom: PathGeom = polys.map((poly) =>
+    poly.map((ring) => {
+      // the library closes every ring by repeating its first point: the path closes itself
+      const open = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] ? ring.slice(0, -1) : ring
+      return open.map(([px, py]): [number, number] => [round((px - x) / w), round((py - y) / h)])
+    }),
+  )
+  return { x, y, w, h, geom }
+}
+
+/**
+ * Combine shapes given from the back to the front.
+ * unite: everything as one shape. subtract: the back shape minus all the shapes in front of it (they disappear).
+ * intersect: only where all overlap. exclude: where an odd number of them cover.
+ * The result takes the look (fill, line) of the BACK shape. Null when nothing remains.
+ */
+export function combineShapes(backToFront: ShapeFrame[], op: BoolOp): ({ x: number; y: number; w: number; h: number; geom: PathGeom } & Pick<ShapeFrame, 'fill' | 'stroke' | 'strokeWidth'>) | null {
+  if (backToFront.length < 2) return null
+  const [first, ...rest] = backToFront.map(shapeToPolygons)
+  const result: MultiPolygon =
+    op === 'unite'
+      ? polygonClipping.union(first, ...rest)
+      : op === 'subtract'
+        ? polygonClipping.difference(first, ...rest)
+        : op === 'intersect'
+          ? polygonClipping.intersection(first, ...rest)
+          : polygonClipping.xor(first, ...rest)
+  const g = toGeometry(result as MultiPolygon)
+  if (!g) return null
+  const back = backToFront[0]
+  return { ...g, fill: back.fill, stroke: back.stroke, strokeWidth: back.strokeWidth }
+}
+
+export type { Polygon }

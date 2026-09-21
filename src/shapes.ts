@@ -1,8 +1,9 @@
-import { MAX_SIDES, MIN_SIDES, type ShapeFrame, type ShapeKind } from './document'
+import { MAX_SIDES, MIN_SIDES, type DrawKind, type ShapeFrame, type ShapeKind } from './document'
 
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
-export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע' }
+export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע', path: 'צורה מורכבת' }
+export const DRAW_KINDS: DrawKind[] = ['rect', 'ellipse', 'polygon']
 export const SIDE_NAMES: Record<number, string> = { 3: 'משולש', 4: 'מרובע', 5: 'מחומש', 6: 'משושה' }
 
 /** What a click without dragging creates (points), and the last settings of each tool. */
@@ -76,6 +77,10 @@ export function shapePath(s: ShapeFrame, k = 1): string {
   const w = s.w * k
   const h = s.h * k
   if (s.kind === 'rect') return roundedRectPath(w, h, s.radii?.map((r) => r * k) as [number, number, number, number] | undefined)
+  if (s.kind === 'path') {
+    // every ring of every polygon is a closed sub-path; holes come out right with the even-odd fill rule
+    return (s.geom ?? []).flatMap((poly) => poly.map((ring) => 'M' + ring.map(([x, y]) => `${x * w} ${y * h}`).join('L') + 'Z')).join('')
+  }
   if (s.kind === 'ellipse') return `M0 ${h / 2}A${w / 2} ${h / 2} 0 1 1 ${w} ${h / 2}A${w / 2} ${h / 2} 0 1 1 0 ${h / 2}Z`
   return 'M' + polygonPoints(s.sides ?? 6, w, h).map(([x, y]) => `${x} ${y}`).join('L') + 'Z'
 }

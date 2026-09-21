@@ -31,8 +31,8 @@ import {
   type DocSettings,
   type Guide,
   type GuideAxis,
+  type DrawKind,
   type ShapeFrame,
-  type ShapeKind,
   type Sides,
   type ImageFit,
   type ImageFrame,
@@ -51,6 +51,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
+import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
@@ -113,6 +114,8 @@ export interface WorkspaceHandle {
   deletePage: () => void
   /** move the selected object in the stacking order */
   arrange: (op: ArrangeOp) => void
+  /** combine the selected shapes (unite, subtract, intersect, exclude) */
+  shapeOp: (op: BoolOp) => void
   /** open the dialog that creates several guides at once */
   createGuides: () => void
   /** delete the guides of the selected page */
@@ -284,7 +287,7 @@ export function Workspace({
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
   const dragSeq = useRef(0)
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
-  const shapeStart = useRef<{ kind: ShapeKind; x: number; y: number } | null>(null)
+  const shapeStart = useRef<{ kind: DrawKind; x: number; y: number } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
   /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
   const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
@@ -294,7 +297,7 @@ export function Workspace({
   const cornerDrag = useRef<{ id: string; corners: number[]; grab: number; key: string } | null>(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** the settings window of a shape tool (double click on the tool) */
-  const [toolDialog, setToolDialog] = useState<ShapeKind | null>(null)
+  const [toolDialog, setToolDialog] = useState<DrawKind | null>(null)
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
   /** the dragged page has the same height as the pages beside it: where the dashed line goes (world y) and how far it reaches */
   const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
@@ -760,6 +763,35 @@ export function Workspace({
     if (s !== shapes) onShapesChange(s, key)
   }
 
+  /**
+   * Combine the selected shapes into one (a single undo step). The shapes are taken from the back to the front, so
+   * "subtract" cuts the back shape with the ones on top of it, and the result has the back shape's colors.
+   */
+  const combineSelectedShapes = (op: BoolOp) => {
+    const chosen = new Set(selectedId ? [selectedId] : multiSel)
+    const picked = shapes.filter((sh) => chosen.has(sh.id))
+    if (picked.length < 2) return
+    const rankOf = new Map(stackOrder(frames, images, shapes).map((o, i) => [o.id, i]))
+    const ordered = [...picked].sort((a, b) => (rankOf.get(a.id) ?? 0) - (rankOf.get(b.id) ?? 0))
+    const merged = combineShapes(ordered, op)
+    const rest = shapes.filter((sh) => !chosen.has(sh.id))
+    if (!merged) {
+      // nothing is left of them (for example a shape completely covered by the one that subtracts it)
+      pageOps.commit({ shapes: rest })
+      setMultiSel([])
+      setSelectedIdRaw(null)
+      return
+    }
+    // subtracting leaves the back shape where it was; the other operations take the place of the front-most shape
+    const z = op === 'subtract' ? ordered[0].z : ordered[ordered.length - 1].z
+    const shape: ShapeFrame = { id: newFrameId(), kind: 'path', x: merged.x, y: merged.y, w: merged.w, h: merged.h, geom: merged.geom, fill: merged.fill, stroke: merged.stroke, strokeWidth: merged.strokeWidth, z }
+    pageOps.commit({ shapes: [...rest, shape] })
+    setMultiSel([])
+    setGuideSel([])
+    setSelectedIdRaw(shape.id)
+    setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
+  }
+
   /** delete text frames, pictures, shapes and guides in one undo step */
   const deleteSelection = (ids: string[], guideIds: string[]) => {
     const gone = new Set(ids)
@@ -849,6 +881,7 @@ export function Workspace({
     addPage: () => insertPages(1, 'after'),
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
+    shapeOp: (op) => combineSelectedShapes(op),
     createGuides: () => setGuidesDialog(true),
     clearGuides: () => {
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
@@ -1092,7 +1125,7 @@ export function Workspace({
   }
 
   /** a new shape of a kind, with the tool's settings */
-  const newShape = (kind: ShapeKind, box: Box): ShapeFrame => {
+  const newShape = (kind: DrawKind, box: Box): ShapeFrame => {
     const r = kind === 'rect' ? shapePrefs.rect.radius : 0
     return {
       id: newFrameId(),
@@ -2029,7 +2062,12 @@ export function Workspace({
               />
             )}
             {showProps && multiSel.length > 1 && (
-              <MultiSelectionPanel count={multiSel.length} onDelete={() => deleteSelection(multiSel, [])} />
+              <MultiSelectionPanel
+                count={multiSel.length}
+                shapeCount={shapes.filter((sh) => multiSel.includes(sh.id)).length}
+                onShapeOp={combineSelectedShapes}
+                onDelete={() => deleteSelection(multiSel, [])}
+              />
             )}
             {showProps && selShape && (
               <ShapeProperties

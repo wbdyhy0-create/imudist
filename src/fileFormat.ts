@@ -24,6 +24,7 @@ import {
   type ImageFit,
   type ImageFrame,
   type PageSize,
+  type PathGeom,
   type ShapeFrame,
   type ShapeKind,
   type Run,
@@ -240,13 +241,36 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
 const HEX = /^#[0-9a-fA-F]{6}$/
 const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null : typeof v === 'string' && HEX.test(v) ? v : fallback)
 
+/** the outline of a combined shape: polygons of rings of points, all numbers checked and the amount limited */
+function parseGeom(v: unknown): PathGeom | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out: PathGeom = []
+  let points = 0
+  for (const poly of v.slice(0, 500)) {
+    if (!Array.isArray(poly)) continue
+    const rings: [number, number][][] = []
+    for (const ring of poly.slice(0, 500)) {
+      if (!Array.isArray(ring)) continue
+      const pts = ring
+        .slice(0, 20000)
+        .filter((p): p is [number, number] => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number' && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+        .map((p): [number, number] => [Math.min(10, Math.max(-10, p[0])), Math.min(10, Math.max(-10, p[1]))])
+      points += pts.length
+      if (pts.length >= 3) rings.push(pts)
+    }
+    if (rings.length) out.push(rings)
+  }
+  return out.length > 0 && points <= 100000 ? out : undefined
+}
+
 function parseShapes(v: unknown): ShapeFrame[] {
   if (!Array.isArray(v)) return []
   const out: ShapeFrame[] = []
   const used = new Set<string>()
   for (const raw of v) {
     if (!isObj(raw)) continue
-    const kind = oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon'], 'rect')
+    const geom = raw.kind === 'path' ? parseGeom(raw.geom) : undefined
+    const kind = oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path'], 'rect') === 'path' && !geom ? 'rect' : oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path'], 'rect')
     let id = str(raw.id, '')
     if (!id || used.has(id)) id = `s${out.length}-${Math.random().toString(36).slice(2, 8)}`
     used.add(id)
@@ -259,6 +283,7 @@ function parseShapes(v: unknown): ShapeFrame[] {
       w: num(raw.w, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
+      ...(kind === 'path' && geom ? { geom } : {}),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),

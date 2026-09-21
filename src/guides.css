@@ -90,3 +90,9 @@
 /* objects that are part of a selection of several */
 .text-frame.marked, .image-frame.marked { outline: 2px solid var(--accent-line); }
 .shape-frame.marked::after { content: ''; position: absolute; inset: 0; outline: 2px solid var(--accent-line); pointer-events: none; }
+
+/* combining shapes */
+.shape-ops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shape-op { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-field); color: var(--text); }
+.shape-op:hover { border-color: var(--accent-line); background: rgba(61, 139, 255, 0.12); color: #fff; }
+.shape-op svg { width: 18px; height: 18px; flex: none; stroke: currentColor; stroke-width: 1.2; }

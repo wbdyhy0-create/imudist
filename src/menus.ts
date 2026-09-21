@@ -140,6 +140,15 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             doc('שלח לרקע', 'Ctrl+Shift+[', (ws) => ws.arrange('back')),
           ],
         },
+        {
+          label: 'בניית צורות',
+          submenu: [
+            doc('איחוד', 'Ctrl+Alt+U', (ws) => ws.shapeOp('unite')),
+            doc('חיסור', 'Ctrl+Alt+M', (ws) => ws.shapeOp('subtract')),
+            doc('חיתוך', 'Ctrl+Alt+I', (ws) => ws.shapeOp('intersect')),
+            doc('החרגה', 'Ctrl+Alt+E', (ws) => ws.shapeOp('exclude')),
+          ],
+        },
         sep,
         off('קבץ', 'Ctrl+G'),
         off('בטל קיבוץ', 'Ctrl+Shift+G'),

@@ -47,6 +47,7 @@ export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showE
         <path
           d={shapePath(shape, zoom)}
           fill={shape.fill ?? 'none'}
+          fillRule="evenodd"
           stroke={shape.stroke ?? 'none'}
           strokeWidth={shape.strokeWidth * zoom}
           strokeLinejoin="round"

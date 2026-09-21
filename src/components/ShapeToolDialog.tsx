@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type ShapeKind } from '../document'
+import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type DrawKind } from '../document'
 import { SHAPE_NAMES, SIDE_NAMES, polygonPoints, type ShapePrefs } from '../shapes'
 import type { Unit } from '../units'
 import { NumberField } from './NumberField'
 
 interface Props {
-  kind: ShapeKind
+  kind: DrawKind
   prefs: ShapePrefs
   unit: Unit
   onApply: (next: ShapePrefs) => void

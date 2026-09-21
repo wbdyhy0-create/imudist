@@ -153,7 +153,11 @@ export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[0].value
 export const MAX_GUIDES = 5000
 
 /** The drawn shapes: a rectangle (with optionally rounded corners), an ellipse, or a regular polygon of 3 to 6 corners. */
-export type ShapeKind = 'rect' | 'ellipse' | 'polygon'
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path'
+/** The kinds a shape tool draws (a 'path' only comes out of combining shapes). */
+export type DrawKind = 'rect' | 'ellipse' | 'polygon'
+/** The outline of a combined shape: polygons, each an outer ring followed by holes; points in 0…1 of the shape's box. */
+export type PathGeom = [number, number][][][]
 export const MIN_SIDES = 3
 export const MAX_SIDES = 6
 export const DEFAULT_SHAPE_FILL = '#c8d6ea'
@@ -169,6 +173,8 @@ export interface ShapeFrame {
   h: number
   /** polygon: number of corners (MIN_SIDES … MAX_SIDES) */
   sides?: number
+  /** path: the outline, relative to the box, so it scales with the shape */
+  geom?: PathGeom
   /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
   radii?: [number, number, number, number]
   /** #rrggbb, or null for no fill */
