@@ -249,6 +249,8 @@ export function Workspace({
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
   const dragSeq = useRef(0)
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
+  /** the dragged page has the same height as the pages beside it: where the dashed line goes (world y) and how far it reaches */
+  const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
   const marginDrag = useRef<{ edge: keyof Sides; page: number; key: string } | null>(null)
   /** a guide being dragged out of a ruler or moved (not yet stored); `remove` = it is over a ruler / panel, so letting go deletes it */
   const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean; snap: GuideSnap | null } | null>(null)
@@ -958,7 +960,22 @@ export function Workspace({
       const edge = (s: number) => pageEdges(sizedDoc(d.w, s))[south ? 'bottom' : 'top']
       d.h = solve(d.h, min.h, MAX_PAGE_PT, dy, edge) ?? Math.min(MAX_PAGE_PT, Math.max(min.h, d.h + (south ? dy : -dy) / zoom))
     }
-    setPageSize(d.w, d.h, d.key)
+    // the page grows or shrinks to the exact height of the pages beside it when it gets close (Alt = no snapping)
+    let height = d.h
+    let snap: { world: number; span: [number, number]; height: number } | null = null
+    if (!sizeAll && !e.altKey && (d.mode.includes('s') || d.mode.includes('n'))) {
+      const row = spreads[spreadOfPage(selPage)]
+      const tol = SNAP_PX / zoom
+      const beside = row.pages.filter((p) => p.index !== selPage)
+      const near = beside.filter((p) => Math.abs(p.h - d.h) <= tol).sort((a, b) => Math.abs(a.h - d.h) - Math.abs(b.h - d.h))[0]
+      if (near) {
+        height = near.h
+        const same = [...beside.filter((p) => Math.abs(p.h - near.h) < 0.01), ...row.pages.filter((p) => p.index === selPage)]
+        snap = { world: row.y + near.h, span: [Math.min(...same.map((p) => p.x)), Math.max(...same.map((p) => p.x + p.w))], height }
+      }
+    }
+    setPageSnap(snap)
+    setPageSize(d.w, height, d.key)
   }
 
   /** the margin lines of the selected page can be dragged with the Page tool: they change the margins of the whole document */
@@ -1117,6 +1134,7 @@ export function Workspace({
     finishDraft()
     frameDrag.current = null
     pageDrag.current = null
+    setPageSnap(null)
     marginDrag.current = null
     marqueeBase.current = null
     setMarquee(null)
@@ -1127,6 +1145,8 @@ export function Workspace({
     createStart.current = null
     frameDrag.current = null
     pageDrag.current = null
+    setPageSnap(null)
+    marginDrag.current = null
     marqueeBase.current = null
     setMarquee(null)
     setDraft(null)
@@ -1487,6 +1507,17 @@ export function Workspace({
                     height: Math.abs(marquee.y1 - marquee.y0) * zoom,
                   }}
                 />
+              )}
+              {pageSnap && (
+                <>
+                  <div
+                    className="guide-align h"
+                    style={{ left: tx + pageSnap.span[0] * zoom - 18, top: ty + pageSnap.world * zoom - 1, width: (pageSnap.span[1] - pageSnap.span[0]) * zoom + 36, height: 2 }}
+                  />
+                  <div className="guide-tip aligned" style={{ left: tx + pageSnap.span[0] * zoom + 8, top: ty + pageSnap.world * zoom + 8 }}>
+                    {formatLength(pageSnap.height, doc.unit)} · אותו גובה כמו העמודים שבצד
+                  </div>
+                </>
               )}
               {tool === 'page' && !previewMode && !space && rects[selPage] && (
                 <div
