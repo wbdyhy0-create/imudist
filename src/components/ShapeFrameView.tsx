@@ -25,6 +25,10 @@ interface Props {
   showEdge: boolean
   /** the rounding handles that are part of the current rounding gesture */
   hotCorners?: number[]
+  /** the corners that have a rounding handle (all four when not given) */
+  activeCorners?: number[]
+  /** all four corners are rounded together: the handles say so */
+  together?: boolean
   /** a preview while the shape is being drawn: no handles, and clicks go through */
   ghost?: boolean
   onPointerDown?: (e: ReactPointerEvent<SVGPathElement>) => void
@@ -39,7 +43,7 @@ interface Props {
 export type PathPeg = 'anchor' | 'end' | 'flip'
 
 /** A drawn shape: the outline is an SVG path (so only the shape itself catches the pointer), plus handles when selected. */
-export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showEdge, hotCorners = [], ghost, onPointerDown, onHandleDown, onCornerDown, onDoubleClick, onPegDown }: Props) {
+export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showEdge, hotCorners = [], activeCorners, together, ghost, onPointerDown, onHandleDown, onCornerDown, onDoubleClick, onPegDown }: Props) {
   const w = shape.w * zoom
   const h = shape.h * zoom
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
@@ -119,13 +123,14 @@ export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showE
 
       {showCorners &&
         CORNERS.map((c, i) => {
+          if (activeCorners && !activeCorners.includes(i)) return null
           const r = radii![i] * zoom
           const at = r + CORNER_HANDLE_OFFSET
           return (
             <div
               key={i}
               className={'corner-handle' + (hotCorners.includes(i) ? ' hot' : '')}
-              title={`עגל פינה: ${c.name} (גרור, ועבור על פינות נוספות כדי לעגל גם אותן)`}
+              title={together ? 'עגל את כל הפינות (גרור)' : `עגל פינה: ${c.name} (גרור, ועבור על פינות נוספות כדי לבחור גם אותן)`}
               style={{ left: c.fx * w + c.sx * at, top: c.fy * h + c.sy * at }}
               onPointerDown={(e) => onCornerDown?.(i, e)}
             />

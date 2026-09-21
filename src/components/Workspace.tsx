@@ -318,8 +318,17 @@ export function Workspace({
   const enterHeld = useRef(false)
   const shapeBoxRef = useRef<Box | null>(null)
   /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
-  const cornerDrag = useRef<{ id: string; corners: number[]; grab: number; key: string } | null>(null)
+  const cornerDrag = useRef<{ id: string; corners: number[]; origin: number; sweep: boolean; grab: number; key: string } | null>(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
+  /** "change all corners together": a drag on any rounding handle rounds all four corners */
+  const [roundTogether, setRoundTogether] = useState(true)
+  /** with it off: the corners picked by the last rounding gesture; only their handles stay, and they are rounded together */
+  const [cornerPick, setCornerPick] = useState<{ id: string; corners: number[] } | null>(null)
+  const activeCornersOf = (id: string): number[] => (!roundTogether && cornerPick?.id === id ? cornerPick.corners : [0, 1, 2, 3])
+  // another object (or none): the corner pick is over
+  useEffect(() => {
+    setCornerPick(null)
+  }, [selectedId])
   /** the settings window of a shape tool (double click on the tool) */
   const [toolDialog, setToolDialog] = useState<DrawKind | null>(null)
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
@@ -1481,20 +1490,26 @@ export function Workspace({
     beginFrameDrag(e as unknown as ReactPointerEvent<HTMLElement>, id, 'move')
   }
 
-  /** grabbing a rounding handle: only that corner is rounded until the pointer passes over another corner's handle */
+  /**
+   * Grabbing a rounding handle. With "all corners together" that rounds all four. Without it: the corners picked before
+   * are rounded together, or (nothing picked yet) only this one until the pointer passes over another corner's handle,
+   * which picks that corner too. What is picked stays after the button is released.
+   */
   const onCornerDown = (id: string) => (corner: number, e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
     e.stopPropagation()
     e.preventDefault()
+    const active = activeCornersOf(id)
+    const corners = roundTogether ? [0, 1, 2, 3] : active.length < 4 ? active : [corner]
     setSelectedId(id)
     const c = CORNERS[corner]
     const p = toWorld(e.clientX, e.clientY)
     const inward = ((p.x - (sh.x + c.fx * sh.w)) * c.sx + (p.y - (sh.y + c.fy * sh.h)) * c.sy) / 2
     dragSeq.current += 1
-    cornerDrag.current = { id, corners: [corner], grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], key: `round:${dragSeq.current}` }
-    setHotCorners([corner])
+    cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether && active.length === 4, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], key: `round:${dragSeq.current}` }
+    setHotCorners(corners)
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   const moveCorner = (d: NonNullable<typeof cornerDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1506,15 +1521,15 @@ export function Workspace({
     // passing over the rounding handle of another corner while the button is held adds that corner
     const reach = 12 / live.current.zoom
     CORNERS.forEach((c, k) => {
-      if (d.corners.includes(k)) return
+      if (!d.sweep || d.corners.includes(k)) return
       const at = shown[k] + CORNER_HANDLE_OFFSET / live.current.zoom
       const hx = sh.x + c.fx * sh.w + c.sx * at
       const hy = sh.y + c.fy * sh.h + c.sy * at
       if (Math.hypot(p.x - hx, p.y - hy) <= reach) d.corners = [...d.corners, k]
     })
     setHotCorners(d.corners)
-    // the radius follows the pointer's distance in from the first corner that was grabbed
-    const c0 = CORNERS[d.corners[0]]
+    // the radius follows the pointer's distance in from the corner that was grabbed
+    const c0 = CORNERS[d.origin]
     const inward = ((p.x - (sh.x + c0.fx * sh.w)) * c0.sx + (p.y - (sh.y + c0.fy * sh.h)) * c0.sy) / 2
     const r = Math.round(Math.min(maxR, Math.max(0, inward - d.grab)) * 100) / 100
     const radii = [...(sh.radii ?? [0, 0, 0, 0])] as [number, number, number, number]
@@ -1795,8 +1810,11 @@ export function Workspace({
   const finishShape = () => {
     const s0 = shapeStart.current
     if (cornerDrag.current) {
+      const d = cornerDrag.current
       cornerDrag.current = null
       setHotCorners([])
+      // without "all corners together" the corners that took part are what stays picked
+      if (!roundTogether) setCornerPick(d.corners.length < 4 ? { id: d.id, corners: [...d.corners].sort() } : null)
     }
     if (!s0) return
     const box = shapeBoxRef.current
@@ -2184,6 +2202,8 @@ export function Workspace({
                   marked={!previewMode && multiSel.includes(sh.id)}
                   showEdge={!previewMode}
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
+                  activeCorners={sh.id === selectedId ? activeCornersOf(sh.id) : undefined}
+                  together={roundTogether}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
@@ -2461,6 +2481,13 @@ export function Workspace({
                   onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
                   setSelectedId(null)
                 }}
+                linked={roundTogether}
+                onLinkedChange={(v) => {
+                  setRoundTogether(v)
+                  setCornerPick(null)
+                }}
+                cornersPicked={activeCornersOf(selShape.id).length < 4}
+                onPickAllCorners={() => setCornerPick(null)}
                 pathStyle={selShape.pathText ? pathStyleShown(selShape) : null}
                 pathScope={selShape.pathText && pathSel && pathSel.id === selShape.id && pathSel.a !== pathSel.b && pathSel.b <= selShape.pathText.text.length ? 'selection' : 'all'}
                 onPathChar={(patch) => applyPathChar(selShape.id, patch)}

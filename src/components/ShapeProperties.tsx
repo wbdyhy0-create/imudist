@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type PathSide, type PathText, type ShapeFrame } from '../document'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
@@ -16,6 +15,12 @@ interface Props {
   onChange: (patch: Partial<ShapeFrame>) => void
   onArrange: (op: ArrangeOp) => void
   onDelete: () => void
+  /** "change all corners together": one setting for all shapes, kept by the workspace because the rounding handles follow it too */
+  linked: boolean
+  onLinkedChange: (linked: boolean) => void
+  /** only some of the corners are picked (by a sweep over their rounding handles) */
+  cornersPicked: boolean
+  onPickAllCorners: () => void
   /** the style the text-on-outline controls show: of the selected text, or the text's own */
   pathStyle: CharStyle | null
   /** does a change apply to the selected text only, or to all of it? */
@@ -29,10 +34,9 @@ interface Props {
 type Radii = [number, number, number, number]
 
 /** The properties panel of a selected shape. */
-export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, onDelete, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
+export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, onDelete, linked, onLinkedChange, cornersPicked, onPickAllCorners, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
   const radii: Radii = shape.radii ?? [0, 0, 0, 0]
   const shown = fitRadii(radii, shape.w, shape.h)
-  const [linked, setLinked] = useState(radii.every((r) => r === radii[0]))
   const setRadius = (corner: number, v: number) => {
     const next: Radii = linked ? [v, v, v, v] : (radii.map((r, i) => (i === corner ? v : r)) as Radii)
     onChange({ radii: next })
@@ -98,10 +102,19 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
             ))}
           </div>
           <label className="page-bar-check">
-            <input type="checkbox" checked={linked} onChange={(e) => setLinked(e.target.checked)} />
+            <input type="checkbox" checked={linked} onChange={(e) => onLinkedChange(e.target.checked)} />
             שנה את כל הפינות יחד
           </label>
-          <p className="muted">אפשר גם לגרור את הריבועים המסובבים שבפינות. גרירה שעוברת מעל פינה נוספת מעגלת גם אותה.</p>
+          <p className="muted">
+            {linked
+              ? 'גרירת אחד הריבועים המסובבים שבפינות מעגלת את כל הפינות. בטל את הסימון כדי לעגל פינות בנפרד.'
+              : 'לחץ על ריבוע פינה וגרור אותו מעל ריבועי פינות נוספים כדי לבחור אותם. אחרי הבחירה נשארים רק הריבועים של הפינות שנבחרו, וגרירה מעגלת אותן יחד.'}
+          </p>
+          {!linked && cornersPicked && (
+            <button type="button" className="btn small" onClick={onPickAllCorners}>
+              הצג את כל הפינות
+            </button>
+          )}
         </Group>
       )}
 
