@@ -20,6 +20,19 @@ export const DEFAULT_SHAPE_PREFS: ShapePrefs = {
 
 export const clampSides = (n: number) => Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(n)))
 
+/**
+ * The width / height ratio of a shape that is exactly regular: 1 for a square or a circle, and for a polygon the ratio of the
+ * box around a regular polygon with its apex up (a hexagon is about 0.87, a pentagon about 1.05, a triangle about 1.15).
+ */
+export function regularRatio(kind: ShapeKind, sides: number): number {
+  if (kind !== 'polygon') return 1
+  const n = clampSides(sides)
+  const pts = Array.from({ length: n }, (_, i) => [Math.cos(-Math.PI / 2 + (2 * Math.PI * i) / n), Math.sin(-Math.PI / 2 + (2 * Math.PI * i) / n)])
+  const xs = pts.map((p) => p[0])
+  const ys = pts.map((p) => p[1])
+  return (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys))
+}
+
 /** The corner points of a regular polygon (apex up), stretched so it fills the w × h box exactly. */
 export function polygonPoints(sides: number, w: number, h: number): [number, number][] {
   const n = clampSides(sides)

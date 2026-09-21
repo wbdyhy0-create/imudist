@@ -50,7 +50,7 @@ import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
-import { CORNERS, fitRadii, type ShapePrefs } from '../shapes'
+import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
@@ -278,6 +278,9 @@ export function Workspace({
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: ShapeKind; x: number; y: number } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
+  /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
+  const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
+  const enterHeld = useRef(false)
   const shapeBoxRef = useRef<Box | null>(null)
   /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
   const cornerDrag = useRef<{ id: string; corners: number[]; grab: number; key: string } | null>(null)
@@ -901,6 +904,28 @@ export function Workspace({
   }, [selectedId, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange])
 
 
+  // while a shape is being drawn, Shift / Alt / Ctrl / Enter change it at once, even if the mouse does not move
+  useEffect(() => {
+    const sync = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') enterHeld.current = e.type === 'keydown'
+      const at = lastShapePointer.current
+      if (!shapeStart.current || !at) return
+      if (e.key === 'Enter') e.preventDefault()
+      updateShapeDraft(at.x, at.y, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
+    }
+    const release = () => {
+      enterHeld.current = false
+    }
+    window.addEventListener('keydown', sync)
+    window.addEventListener('keyup', sync)
+    window.addEventListener('blur', release)
+    return () => {
+      window.removeEventListener('keydown', sync)
+      window.removeEventListener('keyup', sync)
+      window.removeEventListener('blur', release)
+    }
+  }, [])
+
   // Escape drops the loaded pictures
   useEffect(() => {
     if (placingImages.length === 0) return
@@ -937,6 +962,33 @@ export function Workspace({
       x: (clientX - rect.left - L.sb + getScrollX(el) - L.tx) / L.zoom,
       y: (clientY - rect.top + el.scrollTop - L.ty) / L.zoom,
     }
+  }
+
+  /**
+   * The box of the shape being drawn for a pointer position. Free by default, from the starting corner towards the
+   * pointer in any direction. Shift (or Enter) keeps it exactly regular — a square, a circle, a hexagon with equal sides —
+   * so only the size follows the pointer. Alt (or Ctrl) grows it from its middle out to all sides.
+   */
+  const updateShapeDraft = (clientX: number, clientY: number, m: { shift: boolean; alt: boolean; ctrl: boolean }) => {
+    const s0 = shapeStart.current
+    if (!s0) return
+    lastShapePointer.current = { x: clientX, y: clientY }
+    const p = toWorld(clientX, clientY)
+    let dx = p.x - s0.x
+    let dy = p.y - s0.y
+    if (m.shift || enterHeld.current) {
+      const ratio = regularRatio(s0.kind, shapePrefs.polygon.sides)
+      // the size follows the pointer's larger reach, in the shape's own proportions
+      const h = Math.max(Math.abs(dy), Math.abs(dx) / ratio)
+      dy = Math.sign(dy || 1) * h
+      dx = Math.sign(dx || 1) * h * ratio
+    }
+    const box: Box =
+      m.alt || m.ctrl
+        ? { x: s0.x - Math.abs(dx), y: s0.y - Math.abs(dy), w: 2 * Math.abs(dx), h: 2 * Math.abs(dy) }
+        : { x: Math.min(s0.x, s0.x + dx), y: Math.min(s0.y, s0.y + dy), w: Math.abs(dx), h: Math.abs(dy) }
+    shapeBoxRef.current = box
+    setShapeBox(box)
   }
 
   /** a new shape of a kind, with the tool's settings */
@@ -1193,20 +1245,7 @@ export function Workspace({
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (shapeStart.current) {
-      const s0 = shapeStart.current
-      const p = toWorld(e.clientX, e.clientY)
-      let dx = p.x - s0.x
-      let dy = p.y - s0.y
-      // Shift: equal width and height (a square, a circle)
-      if (e.shiftKey) {
-        const m = Math.max(Math.abs(dx), Math.abs(dy))
-        dx = Math.sign(dx || 1) * m
-        dy = Math.sign(dy || 1) * m
-      }
-      // Ctrl: grows from the middle to all sides; otherwise from the starting corner towards the pointer, whichever way it goes
-      const box: Box = e.ctrlKey || e.metaKey ? { x: s0.x - Math.abs(dx), y: s0.y - Math.abs(dy), w: 2 * Math.abs(dx), h: 2 * Math.abs(dy) } : { x: Math.min(s0.x, s0.x + dx), y: Math.min(s0.y, s0.y + dy), w: Math.abs(dx), h: Math.abs(dy) }
-      shapeBoxRef.current = box
-      setShapeBox(box)
+      updateShapeDraft(e.clientX, e.clientY, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
       return
     }
     if (cornerDrag.current) {

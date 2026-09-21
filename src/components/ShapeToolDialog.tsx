@@ -37,6 +37,10 @@ export function ShapeToolDialog({ kind, prefs, unit, onApply, onClose }: Props) 
           לחיצה על הקנבס, בלי לגרור, תיצור {kind === 'rect' ? 'מלבן' : kind === 'ellipse' ? 'אליפסה' : 'מצולע'} בגודל הזה סביב נקודת הלחיצה. גרירה יוצרת צורה בכל גודל אחר.
         </p>
 
+        <p className="dlg-hint">
+          בזמן הגרירה: <b>Shift</b> (או Enter) שומר על צורה מדויקת במידות שוות — ריבוע, עיגול או משושה — וגרירת העכבר רק מגדילה או מקטינה אותה. <b>Alt</b> מגדיל את הצורה מנקודת האמצע שלה לכל הצדדים.
+        </p>
+
         <div className="dlg-cols">
           <div className="field">
             <div className="field-label">רוחב</div>
