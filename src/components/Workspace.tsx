@@ -1230,8 +1230,8 @@ export function Workspace({
   const snapPoint = (p: { x: number; y: number }, off: boolean) => {
     if (off) return { p, lines: [] as SnapLine[] }
     const tol = SNAP_PX / live.current.zoom
-    const sx = snapEdges([p.x], snapLinesRef.current.v, tol)
-    const sy = snapEdges([p.y], snapLinesRef.current.h, tol)
+    const sx = snapEdges([p.x], [...snapLinesRef.current.v, ...snapLinesRef.current.cv], tol)
+    const sy = snapEdges([p.y], [...snapLinesRef.current.h, ...snapLinesRef.current.ch], tol)
     return { p: { x: p.x + (sx?.delta ?? 0), y: p.y + (sy?.delta ?? 0) }, lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
   }
 
@@ -1244,8 +1244,15 @@ export function Workspace({
     const move = mode === 'move'
     const xs = move ? [orig.x + dx, orig.x + orig.w + dx] : [...(mode.includes('w') ? [orig.x + dx] : []), ...(mode.includes('e') ? [orig.x + orig.w + dx] : [])]
     const ys = move ? [orig.y + dy, orig.y + orig.h + dy] : [...(mode.includes('n') ? [orig.y + dy] : []), ...(mode.includes('s') ? [orig.y + orig.h + dy] : [])]
-    const sx = xs.length ? snapEdges(xs, snapLinesRef.current.v, tol) : null
-    const sy = ys.length ? snapEdges(ys, snapLinesRef.current.h, tol) : null
+    let sx = xs.length ? snapEdges(xs, snapLinesRef.current.v, tol) : null
+    let sy = ys.length ? snapEdges(ys, snapLinesRef.current.h, tol) : null
+    if (move) {
+      // the middle of the moved object on the middle of the page: a guide line shows it (both lines when it is right in the middle)
+      const mx = snapEdges([orig.x + orig.w / 2 + dx], snapLinesRef.current.cv, tol)
+      const my = snapEdges([orig.y + orig.h / 2 + dy], snapLinesRef.current.ch, tol)
+      if (mx && (!sx || Math.abs(mx.delta) <= Math.abs(sx.delta))) sx = mx
+      if (my && (!sy || Math.abs(my.delta) <= Math.abs(sy.delta))) sy = my
+    }
     return { dx: dx + (sx?.delta ?? 0), dy: dy + (sy?.delta ?? 0), lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
   }
 
@@ -2133,9 +2140,9 @@ export function Workspace({
               )}
               {snapShown.map((l, i) =>
                 l.axis === 'v' ? (
-                  <div key={`snap${i}`} className="guide-align v" style={{ left: tx + l.at * zoom - 1, top: ty + l.from * zoom, width: 2, height: (l.to - l.from) * zoom }} />
+                  <div key={`snap${i}`} className={'guide-align v' + (l.kind === 'center' ? ' center' : '')} style={{ left: tx + l.at * zoom - 1, top: ty + l.from * zoom, width: 2, height: (l.to - l.from) * zoom }} />
                 ) : (
-                  <div key={`snap${i}`} className="guide-align h" style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
+                  <div key={`snap${i}`} className={'guide-align h' + (l.kind === 'center' ? ' center' : '')} style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
                 ),
               )}
               {marquee && (
