@@ -13,7 +13,7 @@ export interface SnapLine {
   /** the stretch the line covers (the height of its page for a vertical line, the width for a horizontal one) */
   from: number
   to: number
-  kind: 'page' | 'margin' | 'column' | 'guide' | 'center'
+  kind: 'page' | 'margin' | 'column' | 'guide' | 'center' | 'object'
 }
 
 export interface SnapLines {
@@ -61,6 +61,21 @@ export function snapLinesOf(doc: DocSettings, guides: Guide[]): SnapLines {
     else h.push({ axis: 'h', at: r.y + g.pos, from: r.x, to: r.x + r.w, kind: 'guide' })
   }
   return { v, h, cv, ch }
+}
+
+/**
+ * The edges and the middles of other objects: a moved object is held on them, and the line that shows it runs along the
+ * objects that are in line (the line itself only covers the object it belongs to; the caller stretches it).
+ */
+export function objectLines(objs: { x: number; y: number; w: number; h: number }[]): SnapLines {
+  const out: SnapLines = { v: [], h: [], cv: [], ch: [] }
+  for (const o of objs) {
+    for (const at of [o.x, o.x + o.w]) out.v.push({ axis: 'v', at, from: o.y, to: o.y + o.h, kind: 'object' })
+    for (const at of [o.y, o.y + o.h]) out.h.push({ axis: 'h', at, from: o.x, to: o.x + o.w, kind: 'object' })
+    out.cv.push({ axis: 'v', at: o.x + o.w / 2, from: o.y, to: o.y + o.h, kind: 'object' })
+    out.ch.push({ axis: 'h', at: o.y + o.h / 2, from: o.x, to: o.x + o.w, kind: 'object' })
+  }
+  return out
 }
 
 /**

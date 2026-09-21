@@ -136,3 +136,7 @@
 .gap-mark.equal polygon { fill: #35d07f; }
 .gap-mark.equal rect { stroke: #35d07f; }
 .gap-mark.equal text { fill: #b9f5d4; }
+
+/* in line with another object (edge or middle) */
+.guide-align.object.h { background: repeating-linear-gradient(90deg, #ff5c8a 0 9px, transparent 9px 14px); filter: drop-shadow(0 0 3px #ff5c8a); }
+.guide-align.object.v { background: repeating-linear-gradient(180deg, #ff5c8a 0 9px, transparent 9px 14px); filter: drop-shadow(0 0 3px #ff5c8a); }

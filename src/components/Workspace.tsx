@@ -55,6 +55,7 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
+import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
@@ -1425,9 +1426,11 @@ export function Workspace({
    * A moved or resized object: the edges that move are held exactly on a line when one is near. The move / resize gets
    * corrected offsets, and the lines to show.
    */
-  const snapDrag = (orig: Box, mode: 'move' | HandleId, dx: number, dy: number, fromCenter = false) => {
+  const snapDrag = (orig: Box, mode: 'move' | HandleId, dx: number, dy: number, fromCenter = false, objs?: ReturnType<typeof objectLines>) => {
     const tol = SNAP_PX / live.current.zoom
     const move = mode === 'move'
+    // the document's lines, then the edges and middles of the other objects (which lose a tie)
+    const L = { v: [...snapLinesRef.current.v, ...(objs?.v ?? [])], h: [...snapLinesRef.current.h, ...(objs?.h ?? [])], cv: [...snapLinesRef.current.cv, ...(objs?.cv ?? [])], ch: [...snapLinesRef.current.ch, ...(objs?.ch ?? [])] }
     if (fromCenter && !move) {
       // stretching to both sides: the edge under the pointer and the opposite edge, which moves the other way, can each catch a line
       const axis = (lo: boolean, hi: boolean, at: number, size: number, d: number, lines: SnapLine[]) => {
@@ -1438,18 +1441,18 @@ export function Workspace({
         if (mirror) return { d: d - mirror.delta, line: mirror.line }
         return { d, line: undefined }
       }
-      const cx = axis(mode.includes('w'), mode.includes('e'), orig.x, orig.w, dx, snapLinesRef.current.v)
-      const cy = axis(mode.includes('n'), mode.includes('s'), orig.y, orig.h, dy, snapLinesRef.current.h)
+      const cx = axis(mode.includes('w'), mode.includes('e'), orig.x, orig.w, dx, L.v)
+      const cy = axis(mode.includes('n'), mode.includes('s'), orig.y, orig.h, dy, L.h)
       return { dx: cx.d, dy: cy.d, lines: [cx.line, cy.line].filter((l): l is SnapLine => !!l) }
     }
     const xs = move ? [orig.x + dx, orig.x + orig.w + dx] : [...(mode.includes('w') ? [orig.x + dx] : []), ...(mode.includes('e') ? [orig.x + orig.w + dx] : [])]
     const ys = move ? [orig.y + dy, orig.y + orig.h + dy] : [...(mode.includes('n') ? [orig.y + dy] : []), ...(mode.includes('s') ? [orig.y + orig.h + dy] : [])]
-    let sx = xs.length ? snapEdges(xs, snapLinesRef.current.v, tol) : null
-    let sy = ys.length ? snapEdges(ys, snapLinesRef.current.h, tol) : null
+    let sx = xs.length ? snapEdges(xs, L.v, tol) : null
+    let sy = ys.length ? snapEdges(ys, L.h, tol) : null
     if (move) {
       // the middle of the moved object on the middle of the page: a guide line shows it (both lines when it is right in the middle)
-      const mx = snapEdges([orig.x + orig.w / 2 + dx], snapLinesRef.current.cv, tol)
-      const my = snapEdges([orig.y + orig.h / 2 + dy], snapLinesRef.current.ch, tol)
+      const mx = snapEdges([orig.x + orig.w / 2 + dx], L.cv, tol)
+      const my = snapEdges([orig.y + orig.h / 2 + dy], L.ch, tol)
       if (mx && (!sx || Math.abs(mx.delta) <= Math.abs(sx.delta))) sx = mx
       if (my && (!sy || Math.abs(my.delta) <= Math.abs(sy.delta))) sy = my
     }
@@ -1838,24 +1841,30 @@ export function Workspace({
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
-      // the edges that move are held on the margins, column edges, page edges and guides (Ctrl = free)
+      const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
+      const free = !(e.ctrlKey || e.metaKey)
+      // the other objects on the page the dragged one is over
+      const page = ownerPage(rects, d.orig.x + raw.x + d.orig.w / 2, d.orig.y + raw.y + d.orig.h / 2)
+      const near = [...frames, ...images, ...shapes].filter((o) => o.id !== d.id && ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2) === page)
+      // the edges that move are held on the margins, column edges, page edges, guides and the edges and middles of the other objects (Ctrl = free)
       // Alt stretches to both sides at once, around the middle
-      const snapped = e.ctrlKey || e.metaKey ? null : snapDrag(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, e.altKey)
-      let dx = snapped ? snapped.dx : p.x - d.start.x
-      let dy = snapped ? snapped.dy : p.y - d.start.y
-      setSnapShown((cur) => (snapped && snapped.lines.length > 0 ? snapped.lines : cur.length ? [] : cur))
+      const snapped = free ? snapDrag(d.orig, d.mode, raw.x, raw.y, e.altKey, objectLines(near)) : null
+      let dx = snapped ? snapped.dx : raw.x
+      let dy = snapped ? snapped.dy : raw.y
       if (d.mode === 'move') {
-        // the gaps to the neighbours: shown as numbers, and held equal to another gap when close to one (not where a guide or margin already holds the object)
-        const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
-        const free = !(e.ctrlKey || e.metaKey)
+        // the gaps to the neighbours: shown as numbers, and held equal to another gap when close to one (not where a line already holds the object)
         const box = { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy }
-        const page = ownerPage(rects, box.x + box.w / 2, box.y + box.h / 2)
-        const near = [...frames, ...images, ...shapes].filter((o) => o.id !== d.id && ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2) === page)
         const sp = spacing(box, near, SNAP_PX / live.current.zoom, { x: free && dx === raw.x, y: free && dy === raw.y })
         dx += sp.dx
         dy += sp.dy
         setSpacingShown(sp.marks)
       } else setSpacingShown((cur) => (cur.length ? [] : cur))
+      // the lines that hold the object; one along other objects runs across them and the dragged object, to show they are in line
+      const now = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
+      setSnapShown((cur) => {
+        if (!snapped || snapped.lines.length === 0) return cur.length ? [] : cur
+        return snapped.lines.map((l) => (l.kind !== 'object' ? l : l.axis === 'v' ? { ...l, from: Math.min(l.from, now.y), to: Math.max(l.to, now.y + now.h) } : { ...l, from: Math.min(l.from, now.x), to: Math.max(l.to, now.x + now.w) }))
+      })
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
@@ -2407,9 +2416,9 @@ export function Workspace({
               )}
               {snapShown.map((l, i) =>
                 l.axis === 'v' ? (
-                  <div key={`snap${i}`} className={'guide-align v' + (l.kind === 'center' ? ' center' : '')} style={{ left: tx + l.at * zoom - 1, top: ty + l.from * zoom, width: 2, height: (l.to - l.from) * zoom }} />
+                  <div key={`snap${i}`} className={'guide-align v' + (l.kind === 'center' ? ' center' : l.kind === 'object' ? ' object' : '')} style={{ left: tx + l.at * zoom - 1, top: ty + l.from * zoom, width: 2, height: (l.to - l.from) * zoom }} />
                 ) : (
-                  <div key={`snap${i}`} className={'guide-align h' + (l.kind === 'center' ? ' center' : '')} style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
+                  <div key={`snap${i}`} className={'guide-align h' + (l.kind === 'center' ? ' center' : l.kind === 'object' ? ' object' : '')} style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
                 ),
               )}
               {spacingShown.length > 0 && (
