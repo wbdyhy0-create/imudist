@@ -40,7 +40,7 @@ import { isTyping } from '../dom'
 import { HANDLES, chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
-import { applyGuideSpec } from '../guides'
+import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
@@ -72,6 +72,8 @@ const RULER = 20
 const FIT_MARGIN = 40
 /** how far a guide sticks out beyond its page, screen px */
 const GUIDE_OVER = 14
+/** a dragged guide is held on another guide when it is this close, screen px */
+const SNAP_PX = 6
 /** thickness of the area that grabs a margin line, screen px */
 const MARGIN_HIT = 9
 const ZOOM_MIN = 0.05
@@ -249,7 +251,7 @@ export function Workspace({
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
   const marginDrag = useRef<{ edge: keyof Sides; page: number; key: string } | null>(null)
   /** a guide being dragged out of a ruler or moved (not yet stored); `remove` = it is over a ruler / panel, so letting go deletes it */
-  const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean } | null>(null)
+  const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean; snap: GuideSnap | null } | null>(null)
   /** the color new guides get: the last one the user chose */
   const [guideColor, setGuideColor] = useState(DEFAULT_GUIDE_COLOR)
   const [guidesDialog, setGuidesDialog] = useState(false)
@@ -575,7 +577,7 @@ export function Workspace({
     const orig = id ? guides.find((g) => g.id === id) : undefined
     if (id && !orig) return
     const color = orig?.color ?? guideColor
-    let last: { page: number; pos: number; remove: boolean } | null = orig ? { page: orig.page, pos: orig.pos, remove: false } : null
+    let last: { page: number; pos: number; remove: boolean; snap: GuideSnap | null } | null = orig ? { page: orig.page, pos: orig.pos, remove: false, snap: null } : null
     if (orig) {
       selectGuides([orig.id])
       setEditingId(null)
@@ -588,7 +590,11 @@ export function Workspace({
       const p = toWorld(ev.clientX, ev.clientY)
       const page = ownerPage(rects, p.x, p.y)
       const r = rects[page]
-      last = { page, pos: Math.round((axis === 'h' ? p.y - r.y : p.x - r.x) * 100) / 100, remove: !inside }
+      let pos = Math.round((axis === 'h' ? p.y - r.y : p.x - r.x) * 100) / 100
+      // lining up with a guide on another page: hold the exact same coordinate and show it (Alt = no snapping)
+      const snap = ev.altKey || !inside ? null : snapGuide(axis, axis === 'h' ? r.y + pos : r.x + pos, page, id, latestGuides.current, rects, SNAP_PX / live.current.zoom)
+      if (snap) pos = Math.round((snap.world - (axis === 'h' ? r.y : r.x)) * 1000) / 1000
+      last = { page, pos, remove: !inside, snap }
       setGuideDrag({ id, axis, color, ...last })
     }
     const finish = (commit: boolean) => {
@@ -1434,7 +1440,7 @@ export function Workspace({
                     return st ? (
                       <div
                         key={g.id}
-                        className={`guide ${g.axis}${guideSel.includes(g.id) ? ' selected' : ''}${guidesLive ? ' live' : ''}`}
+                        className={`guide ${g.axis}${guideSel.includes(g.id) ? ' selected' : ''}${guidesLive ? ' live' : ''}${guideDrag?.snap?.ids.includes(g.id) ? ' aligned' : ''}`}
                         style={st}
                         onPointerDown={(e) => onGuidePointerDown(g, e)}
                       />
@@ -1449,12 +1455,21 @@ export function Workspace({
                         guideDrag.axis === 'h'
                           ? { left: tx + r.x * zoom + 8, top: ty + (r.y + guideDrag.pos) * zoom - 24 }
                           : { left: tx + (r.x + guideDrag.pos) * zoom + 8, top: ty + r.y * zoom + 8 }
+                      const snap = guideDrag.snap
+                      // the alignment line: across every page the guides line up on, a little beyond both ends
+                      const align: CSSProperties | null = snap
+                        ? guideDrag.axis === 'h'
+                          ? { left: tx + snap.span[0] * zoom - 18, top: ty + snap.world * zoom - 1, width: (snap.span[1] - snap.span[0]) * zoom + 36, height: 2 }
+                          : { left: tx + snap.world * zoom - 1, top: ty + snap.span[0] * zoom - 18, width: 2, height: (snap.span[1] - snap.span[0]) * zoom + 36 }
+                        : null
                       return (
                         <>
-                          <div className={`guide ${guideDrag.axis} selected${guideDrag.remove ? ' removing' : ''}`} style={st} />
+                          {align && <div className={`guide-align ${guideDrag.axis}`} style={align} />}
+                          <div className={`guide ${guideDrag.axis} selected${guideDrag.remove ? ' removing' : ''}${snap ? ' aligned' : ''}`} style={st} />
                           {!guideDrag.remove && (
-                            <div className="guide-tip" style={tip}>
+                            <div className={'guide-tip' + (snap ? ' aligned' : '')} style={tip}>
                               {formatLength(guideDrag.pos, doc.unit)}
+                              {snap && ' · מיושר עם קו עזר אחר'}
                             </div>
                           )}
                         </>

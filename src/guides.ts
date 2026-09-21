@@ -1,5 +1,55 @@
-import { MAX_GUIDES, pageSize, type DocSettings, type Guide, type PageSize } from './document'
+import { MAX_GUIDES, pageSize, type DocSettings, type Guide, type GuideAxis, type PageSize } from './document'
 import { pageMargins, type PageSide } from './layout'
+
+/** The guides another guide lines up with while it is dragged. */
+export interface GuideSnap {
+  /** world coordinate (y for a horizontal guide, x for a vertical one) that the dragged guide is held on */
+  world: number
+  /** the guides on that coordinate */
+  ids: string[]
+  /** the stretch along the guide that the alignment line covers (x range for h, y range for v), world points */
+  span: [number, number]
+}
+
+/**
+ * If the dragged guide (at `world`, on `page`) is within `tol` of a guide of the same direction on ANOTHER page, the
+ * exact coordinate of that guide and everything that lines up there; otherwise null. Guides on different pages of a
+ * row have equal world coordinates when they are the same distance from the same top edge.
+ */
+export function snapGuide(
+  axis: GuideAxis,
+  world: number,
+  page: number,
+  dragId: string | null,
+  guides: Guide[],
+  rects: { x: number; y: number; w: number; h: number }[],
+  tol: number,
+): GuideSnap | null {
+  const at = (g: Guide) => (axis === 'h' ? rects[g.page].y + g.pos : rects[g.page].x + g.pos)
+  const others = guides.filter((g) => g.axis === axis && g.id !== dragId && g.page !== page && rects[g.page])
+  let target: number | null = null
+  for (const g of others) {
+    const d = Math.abs(at(g) - world)
+    if (d <= tol && (target === null || d < Math.abs(target - world))) target = at(g)
+  }
+  if (target === null) return null
+
+  const ids: string[] = []
+  let lo = Infinity
+  let hi = -Infinity
+  const cover = (r: { x: number; y: number; w: number; h: number }) => {
+    lo = Math.min(lo, axis === 'h' ? r.x : r.y)
+    hi = Math.max(hi, axis === 'h' ? r.x + r.w : r.y + r.h)
+  }
+  cover(rects[page])
+  for (const g of others) {
+    if (Math.abs(at(g) - target) < 0.01) {
+      ids.push(g.id)
+      cover(rects[g.page])
+    }
+  }
+  return { world: target, ids, span: [lo, hi] }
+}
 
 /** Making many guides at once: an equal division of the page, or lines at a fixed distance. */
 
