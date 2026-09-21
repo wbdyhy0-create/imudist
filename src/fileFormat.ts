@@ -106,6 +106,8 @@ function parseSettings(v: unknown, name: string): DocSettings {
     height: num(v.height, d.height, MIN_PAGE_PT, MAX_PAGE_PT),
     // files from before "pages per row": facing pages meant two per row
     perRow: int(v.perRow, bool(v.facingPages, false) ? 2 : 1, 1, MAX_PER_ROW),
+    rowsCustom: bool(v.rowsCustom, false),
+    pageJoins: Array.isArray(v.pageJoins) ? v.pageJoins.slice(0, MAX_PAGES).map((j) => (j === true ? (true as const) : null)) : [],
     pageSizes: parsePageSizes(v.pageSizes),
     pageMargins: Array.isArray(v.pageMargins) ? v.pageMargins.slice(0, MAX_PAGES).map((m) => (isObj(m) ? sidesOf(m, d.margins) : null)) : [],
     unit: oneOf<Unit>(v.unit, ['px', 'cm', 'mm', 'in'], d.unit),

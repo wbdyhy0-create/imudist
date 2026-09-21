@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ShapeFrame } from '../document'
 import { HANDLES, type HandleId } from '../frames'
-import { arcPoints, pointAtFraction, ringInfo, textPlacement } from '../pathText'
+import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, fitRadii, shapePath } from '../shapes'
 import { normalizeRuns } from '../story'
 
@@ -49,7 +49,7 @@ export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showE
   // text along the outline
   const pt = shape.pathText
   const info = pt ? ringInfo(shape) : null
-  const place = pt ? textPlacement(pt) : null
+  const place = pt && info ? textPlacement(pt, usedSpan(pt, info)) : null
   const line = pt && info && place ? arcPoints(info, place.startFrac, pt.span, place.dir).map(([x, y]) => [x * zoom, y * zoom] as const) : null
   const lineLength = line ? line.reduce((sum, p, i) => (i ? sum + Math.hypot(p[0] - line[i - 1][0], p[1] - line[i - 1][1]) : 0), 0) : 0
   const runs = pt && pt.text ? normalizeRuns(pt.text, pt.runs, pt.style) : []

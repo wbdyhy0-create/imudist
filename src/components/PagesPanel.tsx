@@ -5,7 +5,7 @@ import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
 import { NumberField } from './NumberField'
 
-export type InsertWhere = 'after' | 'before' | 'end'
+export type InsertWhere = 'after' | 'before' | 'end' | 'beside'
 
 interface Props {
   doc: DocSettings
@@ -22,13 +22,15 @@ interface Props {
   onInsert: (count: number, where: InsertWhere) => void
   onDelete: () => void
   onMove: (from: number, to: number) => void
+  /** show the pages one to a row, or in pairs (1-2, 3-4 …) */
+  onView: (perRow: 1 | 2) => void
 }
 
 const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove, onView }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
 
@@ -56,9 +58,37 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
   return (
     <section className="pages-panel" aria-label="עמודים">
-      <h2 className="props-title">
-        עמודים <span className="muted">({doc.pages})</span>
-      </h2>
+      <div className="pages-head">
+        <h2 className="props-title">
+          עמודים <span className="muted">({doc.pages})</span>
+        </h2>
+        <div className="pages-view" role="group" aria-label="תצוגת העמודים">
+          <button
+            className={!doc.rowsCustom && doc.perRow === 1 ? 'on' : ''}
+            aria-pressed={!doc.rowsCustom && doc.perRow === 1}
+            title="עמוד אחד בכל שורה — העמודים זה מתחת לזה"
+            onClick={() => onView(1)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="5" y="1.500" width="6" height="5" rx="0.700" />
+              <rect x="5" y="9.500" width="6" height="5" rx="0.700" />
+            </svg>
+          </button>
+          <button
+            className={!doc.rowsCustom && doc.perRow === 2 ? 'on' : ''}
+            aria-pressed={!doc.rowsCustom && doc.perRow === 2}
+            title="עמודים זוגיים — שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה"
+            onClick={() => onView(2)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="1.500" y="1.500" width="5.500" height="5" rx="0.700" />
+              <rect x="9" y="1.500" width="5.500" height="5" rx="0.700" />
+              <rect x="1.500" y="9.500" width="5.500" height="5" rx="0.700" />
+              <rect x="9" y="9.500" width="5.500" height="5" rx="0.700" />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       <div className="pages-controls">
         <div className="grid2">
@@ -71,6 +101,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
             <select className="select" value={where} onChange={(e) => setWhere(e.target.value as InsertWhere)}>
               <option value="after">אחרי העמוד הנבחר</option>
               <option value="before">לפני העמוד הנבחר</option>
+              <option value="beside">בצד העמוד הנבחר (באותה שורה)</option>
               <option value="end">בסוף המסמך</option>
             </select>
           </div>

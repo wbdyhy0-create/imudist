@@ -162,7 +162,7 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                   </div>
 
                   <div className="setup-group">
-                    <div className="setup-label">כמה עמודים בכל שורה</div>
+                    <div className="setup-label">אופן הצגת העמודים</div>
                     <div className="row-cards" role="radiogroup" aria-label="עמודים בשורה">
                       {rowChoices.map((n) => (
                         <button
@@ -171,17 +171,21 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                           aria-checked={d.perRow === n}
                           className={'row-card' + (d.perRow === n ? ' on' : '')}
                           title={n === 1 ? 'כל עמוד בשורה משלו' : `${n} עמודים זה לצד זה`}
-                          onClick={() => patch({ perRow: n, facingPages: n >= 2 ? d.facingPages : false })}
+                          onClick={() => patch({ perRow: n, rowsCustom: false, pageJoins: [], facingPages: n >= 2 ? d.facingPages : false })}
                         >
                           <RowGlyph n={n} />
-                          <span>{n}</span>
+                          <span>{n === 1 ? 'עמוד בשורה' : n === 2 ? 'זוגות' : `${n} בשורה`}</span>
                         </button>
                       ))}
                       <div className="row-other">
-                        <NumberField value={d.perRow} min={1} max={MAX_PER_ROW} ariaLabel="מספר עמודים בשורה" onChange={(v) => patch({ perRow: v, facingPages: v >= 2 ? d.facingPages : false })} />
+                        <NumberField value={d.perRow} min={1} max={MAX_PER_ROW} ariaLabel="מספר עמודים בשורה" onChange={(v) => patch({ perRow: v, rowsCustom: false, pageJoins: [], facingPages: v >= 2 ? d.facingPages : false })} />
                       </div>
                     </div>
-                    <p className="setup-hint">עמודים באותה שורה עומדים זה ליד זה ואפשר לתת לכל אחד גודל משלו (בלשונית ״גודל עמוד״).</p>
+                    <p className="setup-hint">
+                      {d.rowsCustom
+                        ? 'העמודים מסודרים ידנית (הוספת עמוד בצד עמוד אחר). בחירה כאן מסדרת את כולם מחדש בשורות שוות.'
+                        : 'עמוד בשורה: כל העמודים זה מתחת לזה. זוגות: שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה. עמודים באותה שורה עומדים זה ליד זה, ואפשר לתת לכל אחד גודל משלו (בלשונית ״גודל״).'}
+                    </p>
                   </div>
 
                   <Switch

@@ -147,7 +147,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
               value={d.perRow}
               min={1}
               max={MAX_PER_ROW}
-              onChange={(v) => patch({ perRow: v, facingPages: v >= 2 ? d.facingPages : false })}
+              onChange={(v) => patch({ perRow: v, rowsCustom: false, pageJoins: [], facingPages: v >= 2 ? d.facingPages : false })}
             />
           </Field>
           <Field label="דף כפול (עמודים צמודים)">

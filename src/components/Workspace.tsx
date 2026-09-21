@@ -16,6 +16,7 @@ import {
   DEFAULT_SHAPE_FILL,
   DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
+  isFacing,
   MAX_GUIDES,
   MAX_PAGE_PT,
   MIN_FRAME_PT,
@@ -51,7 +52,7 @@ import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
-import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, textPlacement, type Pt } from '../pathText'
+import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { combineShapes, type BoolOp } from '../shapeOps'
@@ -411,10 +412,11 @@ export function Workspace({
   }
   const insertPages = (count: number, where: InsertWhere) => {
     if (doc.pages >= 9999) return
+    // "beside": the new page stands in the row of the selected page (to its left in a right-to-left document)
     const at = where === 'end' ? doc.pages : where === 'before' ? selPage : selPage + 1
     pendingNav.current = at
     setSelectedPage(at)
-    pageOps.insert(at, count)
+    pageOps.insert(at, count, where === 'beside')
   }
   const deleteSelectedPage = () => {
     if (doc.pages <= 1) return
@@ -1196,7 +1198,24 @@ export function Workspace({
     const near = nearestOnRing(info, local)
     const { rtl, dir } = textPlacement(pt)
     const mod1 = (v: number) => ((v % 1) + 1) % 1
-    if (d.peg === 'anchor') updatePathText(d.id, { anchor: near.fraction }, d.key)
+    if (d.peg === 'anchor') {
+      // when the middle of the text reaches the center line of the shape it is held there and a guide line shows it (Ctrl = free)
+      let anchor = near.fraction
+      let guide: SnapLine | null = null
+      if (!(e.ctrlKey || e.metaKey)) {
+        const s = snapTextToCenter(sh, info, pt, anchor, SNAP_PX / live.current.zoom)
+        if (s) {
+          anchor = s.anchor
+          const over = 24 / live.current.zoom
+          guide =
+            s.axis === 'x'
+              ? { axis: 'v', at: sh.x + sh.w / 2, from: sh.y - over, to: sh.y + sh.h + over, kind: 'guide' }
+              : { axis: 'h', at: sh.y + sh.h / 2, from: sh.x - over, to: sh.x + sh.w + over, kind: 'guide' }
+        }
+      }
+      setSnapShown(guide ? [guide] : (cur) => (cur.length ? [] : cur))
+      updatePathText(d.id, { anchor }, d.key)
+    }
     else if (d.peg === 'end') {
       // the text runs from the anchor along the outline: the peg sets how far
       const span = mod1(rtl ? dir * (pt.anchor - near.fraction) : dir * (near.fraction - pt.anchor))
@@ -1449,7 +1468,7 @@ export function Workspace({
     // distance of the pointer from the page edge the margin belongs to
     const value = d.edge === 'top' ? p.y - r.y : d.edge === 'bottom' ? r.y + r.h - p.y : d.edge === 'left' ? p.x - r.x : r.x + r.w - p.x
     // on left-hand pages of facing pages the physical left margin is the "outside" one, stored on the right
-    const swapped = doc.facingPages && doc.perRow >= 2 && side === 'left'
+    const swapped = isFacing(doc) && side === 'left'
     const key: keyof Sides = d.edge === 'left' || d.edge === 'right' ? (swapped ? (d.edge === 'left' ? 'right' : 'left') : d.edge) : d.edge
     const target = sizeAll ? 'all' : d.page
     const cur = marginsOf(doc, d.page)
@@ -2225,6 +2244,11 @@ export function Workspace({
                 onInsert={insertPages}
                 onDelete={deleteSelectedPage}
                 onMove={movePage}
+                onView={(perRow) => {
+                  // a way to look at the pages: the arrangement is reset to rows of that many pages
+                  pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] })
+                  window.setTimeout(() => fitSpread(), 80)
+                }}
               />
             )}
             {showProps && selGuides.length > 0 && (

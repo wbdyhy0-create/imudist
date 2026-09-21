@@ -1,6 +1,6 @@
 import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
-import { computeLayout } from './layout'
+import { computeLayout, rowGroups } from './layout'
 
 /** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
@@ -103,16 +103,37 @@ const remapDoc = (doc: DocSettings, pages: number, map: (i: number) => number | 
   pages,
   pageSizes: remapList(doc.pageSizes, pages, map),
   pageMargins: remapList(doc.pageMargins, pages, map),
+  pageJoins: remapList(doc.pageJoins, pages, map),
 })
 
-/** Insert `count` blank pages so the first new one gets index `at` (0 … pages). */
-export function insertPages(c: DocContent, at: number, count: number): DocContent | null {
+/** The document with its rows written down page by page, so a page can be added into one row without moving the others. */
+function withCustomRows(doc: DocSettings): DocSettings {
+  if (doc.rowsCustom) return doc
+  const joins: (true | null)[] = new Array(doc.pages).fill(null)
+  for (const row of rowGroups(doc)) for (const i of row.slice(1)) joins[i] = true
+  return { ...doc, rowsCustom: true, pageJoins: joins }
+}
+
+/**
+ * Insert `count` blank pages so the first new one gets index `at` (0 … pages).
+ * `beside`: the new pages join the row of the page before them (the row grows), instead of starting rows of their own.
+ */
+export function insertPages(c: DocContent, at: number, count: number, beside = false): DocContent | null {
   count = Math.min(count, MAX_PAGES - c.doc.pages)
   if (count < 1) return null
   at = Math.max(0, Math.min(at, c.doc.pages))
   const map = (i: number) => (i >= at ? i + count : i)
   const pages = c.doc.pages + count
-  return remapContent(c, remapDoc(c.doc, pages, map), map)
+  let doc = remapDoc(beside && at > 0 ? withCustomRows(c.doc) : c.doc, pages, map)
+  if (doc.rowsCustom) {
+    const joins = [...doc.pageJoins]
+    while (joins.length < pages) joins.push(null)
+    for (let k = 0; k < count; k++) joins[at + k] = beside && at > 0 ? true : null
+    // a page that was joined to the one before it, and now follows the new pages, starts its own row
+    if (!(beside && at > 0) && at + count < pages) joins[at + count] = null
+    doc = { ...doc, pageJoins: joins }
+  }
+  return remapContent(c, doc, map)
 }
 
 /** Delete pages (and what is on them). A document keeps at least one page. */

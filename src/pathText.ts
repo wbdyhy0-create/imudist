@@ -1,5 +1,6 @@
 import type { PathText, ShapeFrame } from './document'
 import { shapeToPolygons } from './shapeOps'
+import { normalizeRuns } from './story'
 
 /** Text on a path: the outline of a shape as a polyline with lengths, and the parts of it the text runs along. */
 
@@ -131,12 +132,61 @@ export function isRtlText(text: string): boolean {
  * reads left to right starts at the anchor and runs along it, text that reads right to left ends at the anchor (its
  * first letter is on the right) and the path leads up to it.
  */
-export function textPlacement(pt: PathText) {
+export function textPlacement(pt: PathText, used: number = pt.span) {
   const rtl = isRtlText(pt.text)
   const dir: 1 | -1 = pt.side === 'inside' ? -1 : 1
   const startFrac = rtl ? pt.anchor - dir * pt.span : pt.anchor
   /** the other end of the text: where it is cut off */
   const endFrac = rtl ? startFrac : pt.anchor + dir * pt.span
-  const middleFrac = rtl ? pt.anchor - (dir * pt.span) / 2 : pt.anchor + (dir * pt.span) / 2
+  // the middle of the letters themselves (`used` = the part of the outline they really take), not of the room they may use
+  const middleFrac = rtl ? pt.anchor - (dir * used) / 2 : pt.anchor + (dir * used) / 2
   return { rtl, dir, startFrac, endFrac, middleFrac }
+}
+
+let measureContext: CanvasRenderingContext2D | null | undefined
+
+/** How long the text is when set on one line, points. */
+export function textLength(pt: PathText): number {
+  if (measureContext === undefined) measureContext = document.createElement('canvas').getContext('2d')
+  if (!measureContext || !pt.text) return 0
+  let at = 0
+  let sum = 0
+  for (const r of normalizeRuns(pt.text, pt.runs, pt.style)) {
+    measureContext.font = `${r.style.italic ? 'italic ' : ''}${r.style.weight} ${r.style.fontSize}px "${r.style.fontFamily}", "Segoe UI", Arial, sans-serif`
+    sum += measureContext.measureText(pt.text.slice(at, at + r.len).replace(/\n/g, ' ')).width
+    at += r.len
+  }
+  return sum
+}
+
+/** How much of the outline the letters really take (0 … 1): their length, but never more than the room `span` gives them. */
+export const usedSpan = (pt: PathText, info: RingInfo) => (pt.text ? Math.min(pt.span, textLength(pt) / info.total) : pt.span)
+
+/**
+ * While the text is dragged along the outline: if its middle gets within `tol` (points) of the shape's vertical or
+ * horizontal center line, the position where the middle is exactly on that line, and which line it is; otherwise null.
+ */
+export function snapTextToCenter(shape: ShapeFrame, info: RingInfo, pt: PathText, anchor: number, tol: number): { anchor: number; axis: 'x' | 'y' } | null {
+  const centers = { x: shape.w / 2, y: shape.h / 2 }
+  const used = usedSpan(pt, info)
+  const middle = (a: number) => pointAtFraction(info, textPlacement({ ...pt, anchor: a }, used).middleFrac)
+  let best: { anchor: number; axis: 'x' | 'y'; moved: number } | null = null
+  for (const axis of ['x', 'y'] as const) {
+    const i = axis === 'x' ? 0 : 1
+    const diff = (a: number) => middle(a)[i] - centers[axis]
+    // Newton steps on the position of the middle relative to the line
+    let a = anchor
+    for (let k = 0; k < 8; k++) {
+      const g = diff(a)
+      const h = 1e-3
+      const slope = (diff(a + h) - g) / h
+      if (Math.abs(g) < 1e-4 || Math.abs(slope) < 1e-6) break
+      a -= g / slope
+    }
+    if (Math.abs(diff(a)) > 0.05) continue
+    // how far along the outline that is (the shortest way round)
+    const delta = Math.abs(((a - anchor + 1.5) % 1) - 0.5) * info.total
+    if (delta <= tol && (!best || delta < best.moved)) best = { anchor: mod1(a), axis, moved: delta }
+  }
+  return best ? { anchor: best.anchor, axis: best.axis } : null
 }

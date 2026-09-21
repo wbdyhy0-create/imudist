@@ -1,4 +1,4 @@
-import { marginsOf, pageSize, type DocSettings, type Sides } from './document'
+import { isFacing, marginsOf, pageSize, type DocSettings, type Sides } from './document'
 
 export type PageSide = 'left' | 'right' | 'single'
 
@@ -54,15 +54,18 @@ export const ROW_GAP = 28
  * all the spines line up. Other rows start at x = 0 (left-to-right) or end at the right edge of the widest row
  * (right-to-left, where the first page of a row is the rightmost).
  */
-export function computeLayout(doc: DocSettings): DocLayout {
-  const { pages, startPage, binding } = doc
-  const rtl = binding === 'rtl'
+/** The pages of every row, in page order. */
+export function rowGroups(doc: DocSettings): number[][] {
+  const { pages, startPage } = doc
   const perRow = Math.max(1, Math.floor(doc.perRow))
-  const facing = doc.facingPages && perRow >= 2
-  const pairing = facing && perRow === 2
-
   const groups: number[][] = []
-  if (pairing) {
+  if (doc.rowsCustom) {
+    // the user arranged the rows page by page: a page starts a row unless it is joined to the one before it
+    for (let i = 0; i < pages; i++) {
+      if (i > 0 && doc.pageJoins[i]) groups[groups.length - 1].push(i)
+      else groups.push([i])
+    }
+  } else if (doc.facingPages && perRow === 2) {
     for (let i = 0; i < pages; ) {
       const isVerso = (startPage + i) % 2 === 0
       if (isVerso && i + 1 < pages) {
@@ -76,6 +79,17 @@ export function computeLayout(doc: DocSettings): DocLayout {
   } else {
     for (let i = 0; i < pages; i += perRow) groups.push(Array.from({ length: Math.min(perRow, pages - i) }, (_, k) => i + k))
   }
+  return groups
+}
+
+export function computeLayout(doc: DocSettings): DocLayout {
+  const { pages, startPage, binding } = doc
+  const rtl = binding === 'rtl'
+  const perRow = Math.max(1, Math.floor(doc.perRow))
+  const facing = isFacing(doc)
+  const pairing = facing && perRow === 2 && !doc.rowsCustom
+
+  const groups = rowGroups(doc)
 
   /** the side of a facing pair's page (odd pages sit on the left in right-to-left binding) */
   const pairSide = (number: number): PageSide => ((number % 2 === 1) === rtl ? 'left' : 'right')

@@ -25,6 +25,10 @@ export interface DocSettings {
   height: number
   /** pages next to each other in one row (1 = every page has its own row) */
   perRow: number
+  /** rows are arranged page by page (a page added beside another one) instead of `perRow` pages in every row */
+  rowsCustom: boolean
+  /** with custom rows: the pages (by index) that stand in the same row as the page before them */
+  pageJoins: (true | null)[]
   /** sizes of the pages that differ from width × height, by page index (null / missing = the document's size) */
   pageSizes: (PageSize | null)[]
   /** margins of the pages that differ from `margins`, by page index (null / missing = the document's margins) */
@@ -242,6 +246,8 @@ export function defaultDocSettings(name: string): DocSettings {
     width: PAGE_PRESETS[0].width,
     height: PAGE_PRESETS[0].height,
     perRow: 1,
+    rowsCustom: false,
+    pageJoins: [],
     pageSizes: [],
     pageMargins: [],
     unit: 'mm',
@@ -257,6 +263,9 @@ export function defaultDocSettings(name: string): DocSettings {
     slug: sides(0),
   }
 }
+
+/** Do the pages of a row touch each other (a spread with inside / outside margins)? */
+export const isFacing = (d: DocSettings) => d.facingPages && (d.rowsCustom || d.perRow >= 2)
 
 /** The size of a page: its own if it has one, otherwise the document's. */
 export function pageSize(d: DocSettings, index: number): PageSize {
@@ -281,9 +290,12 @@ export function normalizeSizes(d: DocSettings): DocSettings {
   while (sizes.length > 0 && sizes[sizes.length - 1] === null) sizes.pop()
   const margins: (Sides | null)[] = d.pageMargins.slice(0, d.pages).map((m) => (m && !sameSides(m, d.margins) ? m : null))
   while (margins.length > 0 && margins[margins.length - 1] === null) margins.pop()
+  const joins: (true | null)[] = d.pageJoins.slice(0, d.pages).map((j, i) => (j && i > 0 ? true : null))
+  while (joins.length > 0 && joins[joins.length - 1] === null) joins.pop()
   const sameSizes = sizes.length === d.pageSizes.length && sizes.every((z, i) => z === d.pageSizes[i])
   const sameMargins = margins.length === d.pageMargins.length && margins.every((m, i) => m === d.pageMargins[i])
-  return sameSizes && sameMargins ? d : { ...d, pageSizes: sizes, pageMargins: margins }
+  const sameJoins = joins.length === d.pageJoins.length && joins.every((j, i) => j === d.pageJoins[i])
+  return sameSizes && sameMargins && sameJoins ? d : { ...d, pageSizes: sizes, pageMargins: margins, pageJoins: joins }
 }
 
 /** The settings with one page (`index`) or every page (`'all'`) set to a new size. */

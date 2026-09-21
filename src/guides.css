@@ -112,3 +112,12 @@
 .pathtext-editor-head .muted { font-weight: 400; }
 .pathtext-editor-body { background: #fff; color: #111; padding: 8px 12px; min-height: 64px; max-height: 160px; overflow: auto; font-size: 18px; }
 .pathtext-editor-body .rich-editor { height: auto; min-height: 44px; }
+
+/* Pages panel: how the pages are shown */
+.pages-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.pages-head .props-title { margin: 0; }
+.pages-view { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-field); }
+.pages-view button { width: 28px; height: 24px; display: grid; place-items: center; border-radius: 6px; color: var(--text-dim); }
+.pages-view button:hover { color: #fff; background: var(--hover); }
+.pages-view button.on { background: var(--accent); color: #fff; }
+.pages-view svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3; }

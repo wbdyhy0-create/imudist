@@ -1,4 +1,4 @@
-import { MAX_PAGE_PT, customMarginCount, customSizeCount, marginsOf, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
+import { MAX_PAGE_PT, isFacing, customMarginCount, customSizeCount, marginsOf, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
 import { PAGE_PRESETS, matchPreset } from '../units'
 import { NumberField } from './NumberField'
 
@@ -25,7 +25,7 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
   const custom = customSizeCount(doc)
   const customMargins = customMarginCount(doc)
   const margins = marginsOf(doc, page)
-  const facing = doc.facingPages && doc.perRow >= 2
+  const facing = isFacing(doc)
   // the interface is right-to-left, so the first field of the row is on the right
   const marginFields: { key: keyof Sides; label: string }[] = [
     { key: 'top', label: 'עליון' },
