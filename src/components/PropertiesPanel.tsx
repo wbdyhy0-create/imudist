@@ -32,55 +32,19 @@ const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'justify', label: 'יישור דו-צדדי', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
 ]
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onArrange, onLink, onUnlink }: Props) {
+
+/** Font, weight, size and bold / italic of a piece of text: the same controls for text frames and text on a path. */
+export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharStyle: (patch: Partial<CharStyle>) => void }) {
   const catalog = useFontCatalog()
-
-  // The panel's buttons must not take the focus away from the text being edited.
-  const keepFocus = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) e.preventDefault()
-  }
-
-  const family = style ? catalog.families.find((f) => f.family === style.fontFamily) : undefined
-  const faceKey = style ? `${style.weight}|${style.italic ? 1 : 0}` : ''
+  const family = catalog.families.find((f) => f.family === style.fontFamily)
+  const faceKey = `${style.weight}|${style.italic ? 1 : 0}`
   const hasFace = !!family?.faces.some((f) => `${f.weight}|${f.italic ? 1 : 0}` === faceKey)
-
   // Only the family changes: every piece of text keeps its own weight / italic, and the browser
   // picks the closest face of the new family for it.
   const pickFamily = (name: string) => onCharStyle({ fontFamily: name })
 
   return (
-    <aside className="props-panel" aria-label="מאפיינים" onMouseDown={keepFocus}>
-      <h2 className="props-title">מאפיינים</h2>
-      {!frame || !style ? (
-        <p className="muted">בחר תיבת טקסט כדי לערוך את המאפיינים שלה.</p>
-      ) : (
-        <>
-          <Group title="מיקום וגודל">
-            <div className="grid2">
-              <Labeled label="מיקום X">
-                <NumberField value={frame.x} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ x: v })} />
-              </Labeled>
-              <Labeled label="מיקום Y">
-                <NumberField value={frame.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ y: v })} />
-              </Labeled>
-              <Labeled label="רוחב">
-                <NumberField value={frame.w} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
-              </Labeled>
-              <Labeled label="גובה">
-                <NumberField value={frame.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
-              </Labeled>
-            </div>
-          </Group>
-
-          <Group title="סדר שכבות">
-            <ArrangeButtons onArrange={onArrange} />
-          </Group>
-
-          <Group title="טקסט">
-            <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
-              {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
-            </p>
-
+    <>
             <Labeled label="גופן">
               <FontPicker value={style.fontFamily} families={catalog.families} onChange={pickFamily} />
             </Labeled>
@@ -130,6 +94,52 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
                 </div>
               </Labeled>
             </div>
+    </>
+  )
+}
+
+export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onArrange, onLink, onUnlink }: Props) {
+  const catalog = useFontCatalog()
+
+  // The panel's buttons must not take the focus away from the text being edited.
+  const keepFocus = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) e.preventDefault()
+  }
+
+  return (
+    <aside className="props-panel" aria-label="מאפיינים" onMouseDown={keepFocus}>
+      <h2 className="props-title">מאפיינים</h2>
+      {!frame || !style ? (
+        <p className="muted">בחר תיבת טקסט כדי לערוך את המאפיינים שלה.</p>
+      ) : (
+        <>
+          <Group title="מיקום וגודל">
+            <div className="grid2">
+              <Labeled label="מיקום X">
+                <NumberField value={frame.x} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ x: v })} />
+              </Labeled>
+              <Labeled label="מיקום Y">
+                <NumberField value={frame.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ y: v })} />
+              </Labeled>
+              <Labeled label="רוחב">
+                <NumberField value={frame.w} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
+              </Labeled>
+              <Labeled label="גובה">
+                <NumberField value={frame.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
+              </Labeled>
+            </div>
+          </Group>
+
+          <Group title="סדר שכבות">
+            <ArrangeButtons onArrange={onArrange} />
+          </Group>
+
+          <Group title="טקסט">
+            <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
+              {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
+            </p>
+
+            <CharControls style={style} onCharStyle={onCharStyle} />
 
             <Labeled label="יישור">
               <div className="toggle-group">

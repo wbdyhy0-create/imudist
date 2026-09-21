@@ -32,6 +32,7 @@ import {
   type Guide,
   type GuideAxis,
   type DrawKind,
+  type PathText,
   type ShapeFrame,
   type Sides,
   type ImageFit,
@@ -50,6 +51,7 @@ import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
+import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, textPlacement, type Pt } from '../pathText'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { combineShapes, type BoolOp } from '../shapeOps'
@@ -63,7 +65,8 @@ import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
-import { CORNER_HANDLE_OFFSET, ShapeFrameView } from './ShapeFrameView'
+import { PathTextEditor } from './PathTextEditor'
+import { CORNER_HANDLE_OFFSET, ShapeFrameView, type PathPeg } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
@@ -273,6 +276,14 @@ export function Workspace({
   const snapLinesRef = useRef(snapLines)
   snapLinesRef.current = snapLines
   const [snapShown, setSnapShown] = useState<SnapLine[]>([])
+  /** text on the outline of a shape: the shape being edited, the selected range of its text, the caret request, and whether the pointer is over an outline (for the cursor) */
+  const [pathEdit, setPathEdit] = useState<string | null>(null)
+  const [pathSel, setPathSel] = useState<{ id: string; a: number; b: number } | null>(null)
+  const [pathRequest, setPathRequest] = useState<(SelRequest & { id: string }) | null>(null)
+  const pathRequestToken = useRef(0)
+  const [pathHover, setPathHover] = useState(false)
+  /** dragging a peg of the text on an outline */
+  const pegDrag = useRef<{ id: string; peg: PathPeg; key: string } | null>(null)
   const marqueeBase = useRef<{ guides: string[]; objects: string[] } | null>(null)
   /** moving several selected objects together: where each one was, and where the pointer started */
   const groupDrag = useRef<{ origins: Map<string, { x: number; y: number }>; start: { x: number; y: number }; key: string } | null>(null)
@@ -1103,6 +1114,99 @@ export function Workspace({
     }
   }
 
+  // ── text on the outline of a shape ────────────────────────────────────────────
+  /** the outline nearest to a world point, if one is within reach (the topmost shape wins a tie) */
+  const nearestOutline = (p: { x: number; y: number }) => {
+    const reach = 9 / live.current.zoom
+    let best: { shape: ShapeFrame; fraction: number; dist: number } | null = null
+    for (const sh of shapes) {
+      if (p.x < sh.x - reach || p.x > sh.x + sh.w + reach || p.y < sh.y - reach || p.y > sh.y + sh.h + reach) continue
+      const info = ringInfo(sh)
+      if (!info) continue
+      const n = nearestOnRing(info, [p.x - sh.x, p.y - sh.y])
+      if (n.dist <= reach && (!best || n.dist <= best.dist)) best = { shape: sh, fraction: n.fraction, dist: n.dist }
+    }
+    return best
+  }
+
+  const updatePathText = (id: string, patch: Partial<PathText>, key?: string) =>
+    onShapesChange(shapes.map((sh) => (sh.id === id && sh.pathText ? { ...sh, pathText: { ...sh.pathText, ...patch } } : sh)), key)
+
+  /** ask the text box to put the caret at [a, b] of the text of shape `id` */
+  const askPathSelection = (id: string, a: number, b: number) => {
+    pathRequestToken.current += 1
+    setPathRequest({ id, a, b, token: pathRequestToken.current })
+  }
+
+  /** a click with the text-on-a-path tool: the shape gets a place for text at that point of its outline, and the text box opens */
+  const startPathText = (hit: { shape: ShapeFrame; fraction: number }) => {
+    const sh = hit.shape
+    if (!sh.pathText) {
+      const pt: PathText = { text: '', runs: [], style: { ...DEFAULT_PATH_TEXT_STYLE }, anchor: hit.fraction, span: 0.98, side: 'outside', color: DEFAULT_PATH_TEXT_COLOR }
+      onShapesChange(shapes.map((x) => (x.id === sh.id ? { ...x, pathText: pt } : x)))
+    }
+    setSelectedId(sh.id)
+    setEditingId(null)
+    setPathEdit(sh.id)
+    setPathSel(null)
+  }
+
+  /** the text box lost the focus: editing ends, and a text that was never typed is dropped */
+  const stopPathEdit = (id: string) => {
+    setPathEdit((cur) => (cur === id ? null : cur))
+    const sh = shapes.find((x) => x.id === id)
+    if (sh?.pathText && sh.pathText.text === '') onShapesChange(shapes.map((x) => (x.id === id ? { ...x, pathText: undefined } : x)))
+  }
+
+  const applyPathEdit = (id: string, from: number, to: number, insert: string) => {
+    const pt = shapes.find((x) => x.id === id)?.pathText
+    if (!pt) return
+    const r = editStory(pt.text, pt.runs, from, to, insert, pt.style)
+    updatePathText(id, { text: r.text, runs: r.runs }, `pathtext:${id}`)
+    askPathSelection(id, from + insert.length, from + insert.length)
+  }
+
+  /** a change of font, size, weight or style: the selected part of the text, or all of it */
+  const applyPathChar = (id: string, patch: Partial<CharStyle>) => {
+    const pt = shapes.find((x) => x.id === id)?.pathText
+    if (!pt) return
+    const runs = normalizeRuns(pt.text, pt.runs, pt.style)
+    const sel = pathSel && pathSel.id === id && pathSel.a !== pathSel.b && pathSel.b <= pt.text.length ? pathSel : null
+    const key = `pathstyle:${id}:${Object.keys(patch).join(',')}`
+    updatePathText(id, sel ? { runs: styleRange(runs, sel.a, sel.b, patch) } : { style: { ...pt.style, ...patch }, runs: styleRange(runs, 0, pt.text.length, patch) }, key)
+  }
+
+  /** grabbing a peg of the text on an outline */
+  const onPegDown = (id: string) => (peg: PathPeg, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    dragSeq.current += 1
+    pegDrag.current = { id, peg, key: `peg:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const movePeg = (d: NonNullable<typeof pegDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const sh = shapes.find((x) => x.id === d.id)
+    const pt = sh?.pathText
+    const info = sh ? ringInfo(sh) : null
+    if (!sh || !pt || !info) return
+    const p = toWorld(e.clientX, e.clientY)
+    const local: Pt = [p.x - sh.x, p.y - sh.y]
+    const near = nearestOnRing(info, local)
+    const { rtl, dir } = textPlacement(pt)
+    const mod1 = (v: number) => ((v % 1) + 1) % 1
+    if (d.peg === 'anchor') updatePathText(d.id, { anchor: near.fraction }, d.key)
+    else if (d.peg === 'end') {
+      // the text runs from the anchor along the outline: the peg sets how far
+      const span = mod1(rtl ? dir * (pt.anchor - near.fraction) : dir * (near.fraction - pt.anchor))
+      updatePathText(d.id, { span: Math.min(1, Math.max(MIN_SPAN, span)) }, d.key)
+    } else {
+      // pulling the middle peg into the shape puts the text inside it, pulling it out puts the text outside
+      updatePathText(d.id, { side: pointInRing(info, local) ? 'inside' : 'outside' }, d.key)
+    }
+  }
+
   /** a dragged point held on the page edges, margins, column edges and guides (each coordinate on its own); `off` skips it */
   const snapPoint = (p: { x: number; y: number }, off: boolean) => {
     if (off) return { p, lines: [] as SnapLine[] }
@@ -1387,6 +1491,15 @@ export function Workspace({
       setEditingId(null)
       e.preventDefault()
       e.currentTarget.setPointerCapture(e.pointerId)
+    } else if (tool === 'pathtype' && e.button === 0) {
+      const hit = nearestOutline(toWorld(e.clientX, e.clientY))
+      if (hit) {
+        e.preventDefault()
+        startPathText(hit)
+      } else {
+        setSelectedId(null)
+        setPathEdit(null)
+      }
     } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && e.button === 0) {
       const p = snapPoint(toWorld(e.clientX, e.clientY), false).p
       shapeStart.current = { kind: tool, x: p.x, y: p.y }
@@ -1412,6 +1525,15 @@ export function Workspace({
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (pegDrag.current) {
+      movePeg(pegDrag.current, e)
+      return
+    }
+    if (tool === 'pathtype') {
+      // over an outline the cursor says that text can be typed there
+      const over = !!nearestOutline(toWorld(e.clientX, e.clientY))
+      setPathHover((cur) => (cur === over ? cur : over))
+    }
     if (shapeStart.current) {
       updateShapeDraft(e.clientX, e.clientY, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
       return
@@ -1539,6 +1661,7 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = () => {
+    pegDrag.current = null
     finishShape()
     finishDraft()
     setSnapShown((cur) => (cur.length ? [] : cur))
@@ -1558,6 +1681,7 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    pegDrag.current = null
     setSnapShown((cur) => (cur.length ? [] : cur))
     shapeStart.current = null
     shapeBoxRef.current = null
@@ -1665,6 +1789,8 @@ export function Workspace({
               ? ' pagetool'
               : tool === 'rect' || tool === 'ellipse' || tool === 'polygon'
                 ? ' shapetool'
+                : tool === 'pathtype'
+                  ? ' pathtool' + (pathHover ? ' overpath' : '')
             : tool === 'type'
               ? ' texttool'
               : tool === 'select'
@@ -1675,6 +1801,11 @@ export function Workspace({
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
   const selShape = selectedId ? (shapes.find((sh) => sh.id === selectedId) ?? null) : null
+  /** what the text-on-outline controls show: the style of the selected text, else the text's own */
+  const pathStyleShown = (sh: ShapeFrame): CharStyle => {
+    const pt = sh.pathText!
+    return pathSel && pathSel.id === sh.id && pathSel.a !== pathSel.b && pathSel.b <= pt.text.length ? styleAtChar(normalizeRuns(pt.text, pt.runs, pt.style), pathSel.a, pt.style) : pt.style
+  }
   const selGuides = guidesVisible ? guides.filter((g) => guideSel.includes(g.id)) : []
   const selChain = selFrame ? chainOf(frames, selFrame.id) : []
   const threadInfo = selFrame
@@ -1864,6 +1995,13 @@ export function Workspace({
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
+                  onDoubleClick={() => {
+                    if (sh.pathText && tool === 'select') {
+                      setSelectedId(sh.id)
+                      setPathEdit(sh.id)
+                    }
+                  }}
+                  onPegDown={onPegDown(sh.id)}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (
@@ -2126,6 +2264,15 @@ export function Workspace({
                   onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
                   setSelectedId(null)
                 }}
+                pathStyle={selShape.pathText ? pathStyleShown(selShape) : null}
+                pathScope={selShape.pathText && pathSel && pathSel.id === selShape.id && pathSel.a !== pathSel.b && pathSel.b <= selShape.pathText.text.length ? 'selection' : 'all'}
+                onPathChar={(patch) => applyPathChar(selShape.id, patch)}
+                onPathChange={(patch) => updatePathText(selShape.id, patch, `path:${selShape.id}`)}
+                onEditPath={() => setPathEdit(selShape.id)}
+                onRemovePath={() => {
+                  onShapesChange(shapes.map((sh) => (sh.id === selShape.id ? { ...sh, pathText: undefined } : sh)))
+                  setPathEdit(null)
+                }}
               />
             )}
             {showProps && selImage && (
@@ -2167,6 +2314,22 @@ export function Workspace({
         )}
       </div>
 
+      {pathEdit &&
+        (() => {
+          const sh = shapes.find((x) => x.id === pathEdit)
+          const pt = sh?.pathText
+          if (!sh || !pt) return null
+          return (
+            <PathTextEditor
+              text={pt.text}
+              runs={normalizeRuns(pt.text, pt.runs, pt.style)}
+              request={pathRequest && pathRequest.id === sh.id ? pathRequest : null}
+              onEdit={(from, to, insert) => applyPathEdit(sh.id, from, to, insert)}
+              onSelect={(a, b) => setPathSel((cur) => (cur && cur.id === sh.id && cur.a === a && cur.b === b ? cur : { id: sh.id, a, b }))}
+              onStop={() => stopPathEdit(sh.id)}
+            />
+          )
+        })()}
       {toolDialog && (
         <ShapeToolDialog
           kind={toolDialog}

@@ -25,6 +25,8 @@ import {
   type ImageFrame,
   type PageSize,
   type PathGeom,
+  type PathSide,
+  type PathText,
   type ShapeFrame,
   type ShapeKind,
   type Run,
@@ -241,6 +243,25 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
 const HEX = /^#[0-9a-fA-F]{6}$/
 const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null : typeof v === 'string' && HEX.test(v) ? v : fallback)
 
+/** the optional text on a shape's outline */
+function parsePathText(v: unknown): { pathText?: PathText } {
+  if (!isObj(v)) return {}
+  const text = typeof v.text === 'string' ? v.text.slice(0, 20000) : ''
+  const style = parseCharStyle(v.style, { fontFamily: 'Segoe UI', fontSize: 18, weight: 400, italic: false })
+  const runs: Run[] | undefined = Array.isArray(v.runs) ? v.runs.filter(isObj).map((r) => ({ len: int(r.len, 0, 0, 1e9), style: parseCharStyle(r.style, style) })) : undefined
+  return {
+    pathText: {
+      text,
+      runs: normalizeRuns(text, runs, style),
+      style,
+      anchor: num(v.anchor, 0, 0, 1),
+      span: num(v.span, 0.98, 0.02, 1),
+      side: oneOf<PathSide>(v.side, ['outside', 'inside'], 'outside'),
+      color: typeof v.color === 'string' && HEX.test(v.color) ? v.color : '#111111',
+    },
+  }
+}
+
 /** the outline of a combined shape: polygons of rings of points, all numbers checked and the amount limited */
 function parseGeom(v: unknown): PathGeom | undefined {
   if (!Array.isArray(v)) return undefined
@@ -284,6 +305,7 @@ function parseShapes(v: unknown): ShapeFrame[] {
       h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
       ...(kind === 'path' && geom ? { geom } : {}),
+      ...parsePathText(raw.pathText),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),

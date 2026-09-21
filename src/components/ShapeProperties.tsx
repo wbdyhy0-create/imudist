@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type ShapeFrame } from '../document'
+import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type PathSide, type PathText, type ShapeFrame } from '../document'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
 import type { ArrangeOp } from '../stacking'
@@ -7,7 +7,7 @@ import type { Unit } from '../units'
 import { ArrangeButtons } from './ArrangeButtons'
 import { FillPicker } from './FillPicker'
 import { NumberField } from './NumberField'
-import { Group, Labeled } from './PropertiesPanel'
+import { CharControls, Group, Labeled } from './PropertiesPanel'
 
 interface Props {
   shape: ShapeFrame
@@ -16,12 +16,20 @@ interface Props {
   onChange: (patch: Partial<ShapeFrame>) => void
   onArrange: (op: ArrangeOp) => void
   onDelete: () => void
+  /** the style the text-on-outline controls show: of the selected text, or the text's own */
+  pathStyle: CharStyle | null
+  /** does a change apply to the selected text only, or to all of it? */
+  pathScope: 'selection' | 'all'
+  onPathChar: (patch: Partial<CharStyle>) => void
+  onPathChange: (patch: Partial<PathText>) => void
+  onEditPath: () => void
+  onRemovePath: () => void
 }
 
 type Radii = [number, number, number, number]
 
 /** The properties panel of a selected shape. */
-export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, onDelete }: Props) {
+export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, onDelete, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
   const radii: Radii = shape.radii ?? [0, 0, 0, 0]
   const shown = fitRadii(radii, shape.w, shape.h)
   const [linked, setLinked] = useState(radii.every((r) => r === radii[0]))
@@ -40,7 +48,14 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
   const title = shape.kind === 'polygon' ? SIDE_NAMES[shape.sides ?? 6] : SHAPE_NAMES[shape.kind]
 
   return (
-    <aside className="props-panel" aria-label="מאפייני צורה">
+    <aside
+      className="props-panel"
+      aria-label="מאפייני צורה"
+      // buttons must not take the focus away from the text being typed on the outline
+      onMouseDown={(e) => {
+        if ((e.target as HTMLElement).closest('button')) e.preventDefault()
+      }}
+    >
       <h2 className="props-title">{title}</h2>
 
       <Group title="מיקום וגודל">
@@ -87,6 +102,36 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
             שנה את כל הפינות יחד
           </label>
           <p className="muted">אפשר גם לגרור את הריבועים המסובבים שבפינות. גרירה שעוברת מעל פינה נוספת מעגלת גם אותה.</p>
+        </Group>
+      )}
+
+      {shape.pathText && pathStyle && (
+        <Group title="טקסט על הקו">
+          <p className={'scope-hint' + (pathScope === 'selection' ? ' on' : '')}>
+            {pathScope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט שעל הקו. סמן טקסט כדי לשנות רק חלק ממנו.'}
+          </p>
+          <CharControls style={pathStyle} onCharStyle={onPathChar} />
+          <Labeled label="צד הקו">
+            <div className="seg small" role="radiogroup" aria-label="צד הקו">
+              {(['outside', 'inside'] as PathSide[]).map((side) => (
+                <button key={side} role="radio" aria-checked={shape.pathText!.side === side} className={shape.pathText!.side === side ? 'on' : ''} onClick={() => onPathChange({ side })}>
+                  {side === 'outside' ? 'מחוץ לצורה' : 'בתוך הצורה'}
+                </button>
+              ))}
+            </div>
+          </Labeled>
+          <Labeled label="צבע הטקסט">
+            <FillPicker label="צבע הטקסט" value={shape.pathText.color} onChange={(color) => color && onPathChange({ color })} />
+          </Labeled>
+          <div className="props-buttons" style={{ marginTop: 8 }}>
+            <button className="btn small" onClick={onEditPath}>
+              ערוך את הטקסט
+            </button>
+            <button className="btn small" onClick={onRemovePath}>
+              הסר את הטקסט מהקו
+            </button>
+          </div>
+          <p className="muted">היתדות על הקו: הצהוב מזיז את הטקסט, הכחול מקצר או מאריך אותו, והעגול שבאמצע מכניס אותו פנימה או מוציא אותו החוצה.</p>
         </Group>
       )}
 

@@ -164,6 +164,24 @@ export const MAX_SIDES = 6
 export const DEFAULT_SHAPE_FILL = '#c8d6ea'
 export const DEFAULT_SHAPE_STROKE = '#33415c'
 
+/** Which side of the outline text on a path sits: outside the shape, or inside it. */
+export type PathSide = 'outside' | 'inside'
+
+/** Text that runs along the outline of a shape. It belongs to the shape: it moves, scales and is deleted with it. */
+export interface PathText {
+  text: string
+  runs: Run[]
+  /** the default character style of the text */
+  style: CharStyle
+  /** where the text starts: a position on the outline, 0 … 1 of its length (clockwise from its first point) */
+  anchor: number
+  /** how much of the outline the text may use, 0.02 … 1; what does not fit is not shown */
+  span: number
+  side: PathSide
+  /** #rrggbb */
+  color: string
+}
+
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
@@ -176,6 +194,8 @@ export interface ShapeFrame {
   sides?: number
   /** path: the outline, relative to the box, so it scales with the shape */
   geom?: PathGeom
+  /** text along the outline */
+  pathText?: PathText
   /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
   radii?: [number, number, number, number]
   /** #rrggbb, or null for no fill */
