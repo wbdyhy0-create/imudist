@@ -1,4 +1,4 @@
-import { MAX_PAGE_PT, customSizeCount, minPageSize, pageSize, type DocSettings } from '../document'
+import { MAX_PAGE_PT, customSizeCount, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
 import { PAGE_PRESETS, matchPreset } from '../units'
 import { NumberField } from './NumberField'
 
@@ -10,17 +10,27 @@ interface Props {
   all: boolean
   onAll: (all: boolean) => void
   onSize: (width: number, height: number) => void
+  /** the margins of the whole document */
+  onMargins: (margins: Sides) => void
 }
 
 const CUSTOM = 'custom'
 
 /** The control bar of the Page tool: the size of the selected page, a size preset and the orientation. */
-export function PageToolBar({ doc, page, all, onAll, onSize }: Props) {
+export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props) {
   const { w: width, h: height } = pageSize(doc, page)
   const landscape = width > height
   const preset = matchPreset(width, height)
   const min = minPageSize(doc)
   const custom = customSizeCount(doc)
+  const facing = doc.facingPages && doc.perRow >= 2
+  // the interface is right-to-left, so the first field of the row is on the right
+  const marginFields: { key: keyof Sides; label: string }[] = [
+    { key: 'top', label: 'עליון' },
+    { key: 'bottom', label: 'תחתון' },
+    facing ? { key: 'left', label: 'פנימי' } : { key: 'right', label: 'ימין' },
+    facing ? { key: 'right', label: 'חיצוני' } : { key: 'left', label: 'שמאל' },
+  ]
 
   const orient = (toLandscape: boolean) => {
     if (toLandscape !== landscape && width !== height) onSize(height, width)
@@ -70,12 +80,27 @@ export function PageToolBar({ doc, page, all, onAll, onSize }: Props) {
           לרוחב
         </button>
       </div>
+      <div className="page-bar-margins" role="group" aria-label="שוליים">
+        <b>שוליים</b>
+        {marginFields.map((f) => (
+          <label key={f.key} className="page-bar-field">
+            <span>{f.label}</span>
+            <NumberField
+              value={doc.margins[f.key]}
+              unit={doc.unit}
+              min={0}
+              max={maxMargin(doc, f.key)}
+              onChange={(v) => onMargins({ ...doc.margins, [f.key]: v })}
+            />
+          </label>
+        ))}
+      </div>
       <label className="page-bar-check" title="כשהאפשרות פעילה, שינוי הגודל חל על כל עמודי המסמך">
         <input type="checkbox" checked={all} onChange={(e) => onAll(e.target.checked)} />
         החל על כל העמודים
       </label>
       <span className="muted">
-        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו.
+        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו. קווי השוליים הכחולים גם הם ניתנים לגרירה (Shift = כל הצדדים).
         {custom > 0 ? ` ${custom} עמודים בגודל אישי.` : ''}
       </span>
     </div>

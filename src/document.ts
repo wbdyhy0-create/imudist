@@ -233,6 +233,20 @@ export function withPageSize(d: DocSettings, index: number | 'all', w: number, h
 /** How many pages have a size of their own. */
 export const customSizeCount = (d: DocSettings) => d.pageSizes.filter((z, i) => z && i < d.pages).length
 
+/** The largest a margin may be: the smallest page must still hold the other margins and the columns. */
+export function maxMargin(d: DocSettings, key: keyof Sides): number {
+  let best = Infinity
+  for (let i = 0; i < d.pages; i++) {
+    const z = pageSize(d, i)
+    const room =
+      key === 'top' || key === 'bottom'
+        ? z.h - (d.margins.top + d.margins.bottom - d.margins[key]) - 12
+        : z.w - (d.margins.left + d.margins.right - d.margins[key]) - d.gutter * (d.columns - 1) - 12
+    best = Math.min(best, room)
+  }
+  return Math.max(0, Math.min(best, MAX_SIDE_PT))
+}
+
 export function validateDoc(d: DocSettings): string | null {
   for (let i = 0; i < d.pages; i++) {
     const z = pageSize(d, i)

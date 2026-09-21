@@ -16,14 +16,17 @@ import {
   MAX_GUIDES,
   MAX_PAGE_PT,
   MIN_FRAME_PT,
+  maxMargin,
   minPageSize,
   pageSize,
+  validateDoc,
   withPageSize,
   type Assets,
   type CharStyle,
   type DocSettings,
   type Guide,
   type GuideAxis,
+  type Sides,
   type ImageFit,
   type ImageFrame,
   type Run,
@@ -36,7 +39,7 @@ import { HANDLES, chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type 
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { applyGuideSpec } from '../guides'
-import { computeLayout, pageSidesOf } from '../layout'
+import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
@@ -67,6 +70,8 @@ const RULER = 20
 const FIT_MARGIN = 40
 /** how far a guide sticks out beyond its page, screen px */
 const GUIDE_OVER = 14
+/** thickness of the area that grabs a margin line, screen px */
+const MARGIN_HIT = 9
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 40
 const ZOOM_STEPS = [0.05, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 40]
@@ -239,6 +244,8 @@ export function Workspace({
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
   const dragSeq = useRef(0)
+  /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
+  const marginDrag = useRef<{ edge: keyof Sides; page: number; key: string } | null>(null)
   /** a guide being dragged out of a ruler or moved (not yet stored); `remove` = it is over a ruler / panel, so letting go deletes it */
   const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean } | null>(null)
   /** the color new guides get: the last one the user chose */
@@ -945,6 +952,32 @@ export function Workspace({
     setPageSize(d.w, d.h, d.key)
   }
 
+  /** the margin lines of the selected page can be dragged with the Page tool: they change the margins of the whole document */
+  const onMarginEdgeDown = (edge: keyof Sides, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    dragSeq.current += 1
+    marginDrag.current = { edge, page: selPage, key: `margin:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveMarginEdge = (d: NonNullable<typeof marginDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = rects[d.page]
+    const side = spreads[spreadOfPage(d.page)].pages.find((p) => p.index === d.page)?.side ?? 'single'
+    const p = toWorld(e.clientX, e.clientY)
+    // distance of the pointer from the page edge the margin belongs to
+    const value = d.edge === 'top' ? p.y - r.y : d.edge === 'bottom' ? r.y + r.h - p.y : d.edge === 'left' ? p.x - r.x : r.x + r.w - p.x
+    // on left-hand pages of facing pages the physical left margin is the "outside" one, stored on the right
+    const swapped = doc.facingPages && doc.perRow >= 2 && side === 'left'
+    const key: keyof Sides = d.edge === 'left' || d.edge === 'right' ? (swapped ? (d.edge === 'left' ? 'right' : 'left') : d.edge) : d.edge
+    const v = Math.round(Math.min(maxMargin(doc, key), Math.max(0, value)) * 100) / 100
+    const margins: Sides = e.shiftKey ? { top: v, bottom: v, left: v, right: v } : { ...doc.margins, [key]: v }
+    if (validateDoc({ ...doc, margins })) return
+    if (margins.top !== doc.margins.top || margins.bottom !== doc.margins.bottom || margins.left !== doc.margins.left || margins.right !== doc.margins.right) {
+      pageOps.setup({ ...doc, margins }, d.key)
+    }
+  }
+
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) return // scrollbars
@@ -993,6 +1026,10 @@ export function Workspace({
       setMarquee({ ...marquee, x1: p.x, y1: p.y })
       const hits = guidesInRect(marquee.x0, marquee.y0, p.x, p.y)
       setGuideSel([...new Set([...marqueeBase.current, ...hits])])
+      return
+    }
+    if (marginDrag.current) {
+      moveMarginEdge(marginDrag.current, e)
       return
     }
     if (pageDrag.current) {
@@ -1068,6 +1105,7 @@ export function Workspace({
     finishDraft()
     frameDrag.current = null
     pageDrag.current = null
+    marginDrag.current = null
     marqueeBase.current = null
     setMarquee(null)
     drag.current = null
@@ -1280,6 +1318,9 @@ export function Workspace({
           all={sizeAll}
           onAll={setSizeAll}
           onSize={(w, h) => setPageSize(w, h, 'pagesize:bar')}
+          onMargins={(margins) => {
+            if (!validateDoc({ ...doc, margins })) pageOps.setup({ ...doc, margins }, 'margins:bar')
+          }}
         />
       )}
       <div className="doc-tabs">
@@ -1433,6 +1474,31 @@ export function Workspace({
                   {HANDLES.map((h) => (
                     <div key={h} className={'handle ' + h} onPointerDown={(e) => onPageHandleDown(h, e)} />
                   ))}
+                  {(() => {
+                    const r = rects[selPage]
+                    const side = spreads[spreadOfPage(selPage)].pages.find((p) => p.index === selPage)?.side ?? 'single'
+                    const m = pageMargins(doc, side)
+                    const inner = { left: m.left * zoom, top: m.top * zoom, width: (r.w - m.left - m.right) * zoom, height: (r.h - m.top - m.bottom) * zoom }
+                    return (['top', 'bottom', 'left', 'right'] as const).map((edge) => {
+                      const style: CSSProperties =
+                        edge === 'top'
+                          ? { left: inner.left, top: inner.top - MARGIN_HIT / 2, width: inner.width, height: MARGIN_HIT }
+                          : edge === 'bottom'
+                            ? { left: inner.left, top: inner.top + inner.height - MARGIN_HIT / 2, width: inner.width, height: MARGIN_HIT }
+                            : edge === 'left'
+                              ? { left: inner.left - MARGIN_HIT / 2, top: inner.top, width: MARGIN_HIT, height: inner.height }
+                              : { left: inner.left + inner.width - MARGIN_HIT / 2, top: inner.top, width: MARGIN_HIT, height: inner.height }
+                      return (
+                        <div
+                          key={edge}
+                          className={'margin-edge ' + (edge === 'top' || edge === 'bottom' ? 'h' : 'v')}
+                          style={style}
+                          title="גרור כדי לשנות את השוליים (Shift = כל הצדדים יחד)"
+                          onPointerDown={(e) => onMarginEdgeDown(edge, e)}
+                        />
+                      )
+                    })
+                  })()}
                 </div>
               )}
               {!previewMode && threadPairs.length > 0 && (

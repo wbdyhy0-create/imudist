@@ -43,3 +43,14 @@
 .page-bar-badge { padding: 3px 12px; border-radius: 12px; background: var(--accent); color: #fff; font-weight: 600; white-space: nowrap; }
 .page-bar-check { display: flex; align-items: center; gap: 6px; color: var(--text); }
 .page-bar-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent-line); }
+
+/* page tool: the margin lines can be dragged */
+.page-bar-margins { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; padding: 4px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.page-bar-margins .page-bar-field .num-field { width: 96px; }
+.margin-edge { position: absolute; pointer-events: auto; z-index: 3; }
+.margin-edge::before { content: ''; position: absolute; background: var(--accent-line); opacity: 0; }
+.margin-edge.h { cursor: ns-resize; }
+.margin-edge.h::before { left: 0; right: 0; top: 4px; height: 2px; }
+.margin-edge.v { cursor: ew-resize; }
+.margin-edge.v::before { top: 0; bottom: 0; left: 4px; width: 2px; }
+.margin-edge:hover::before { opacity: 1; }
