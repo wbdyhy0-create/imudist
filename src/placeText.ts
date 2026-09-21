@@ -102,6 +102,21 @@ export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocCo
   return targets.length === 0 ? c : { ...c, frames: [...c.frames, ...primaryFrames(c.doc, targets)] }
 }
 
+/** The empty, unlinked text frames that sit exactly on the margins / columns of their page: the ones made automatically and never used. */
+export function emptyPrimaryFrameIds(doc: DocSettings, frames: TextFrame[]): string[] {
+  const rects = pageRects(doc)
+  const sides = pageSides(doc)
+  const linked = new Set(frames.map((f) => f.next).filter((n): n is string => !!n))
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+  return frames
+    .filter((f) => {
+      if (f.text || f.next || linked.has(f.id)) return false
+      const page = ownerPage(rects, f.x + f.w / 2, f.y + f.h / 2)
+      return columnBoxes(doc, rects[page], sides[page], page).some((b) => near(f.x, b.x) && near(f.y, b.y) && near(f.w, b.w) && near(f.h, b.h))
+    })
+    .map((f) => f.id)
+}
+
 /** An empty, unlinked text frame that sits exactly on `box` (a primary frame waiting for text), if there is one. */
 function emptyFrameAt(frames: TextFrame[], box: Box, taken: Set<string>): TextFrame | undefined {
   const linked = new Set(frames.map((f) => f.next).filter((n): n is string => !!n))

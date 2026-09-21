@@ -16,7 +16,7 @@ import {
 } from './fileio'
 import { COALESCE_MS, changeHistory, newHistory, redoHistory, replaceHistory, undoHistory, type History } from './history'
 import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
-import { withPrimaryFrames } from './placeText'
+import { emptyPrimaryFrameIds, withPrimaryFrames } from './placeText'
 import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
 
 const NO_FRAMES: TextFrame[] = []
@@ -27,13 +27,19 @@ const NO_SHAPES: ShapeFrame[] = []
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
+/** Extras of a settings change. */
+export interface SetupOptions {
+  /** also delete the empty text frames that were made on the margins automatically (when the user switches to manual frames) */
+  dropEmptyFrames?: boolean
+}
+
 /** Operations on the pages and content of the open document. Each one is a single undo step. */
 export interface PageOps {
   insert: (at: number, count: number) => void
   remove: (indices: number[]) => void
   move: (from: number, to: number) => void
   /** replace the document's settings (Document Setup); `coalesceKey`: repeated calls with it become one undo step */
-  setup: (next: DocSettings, coalesceKey?: string) => void
+  setup: (next: DocSettings, coalesceKey?: string, options?: SetupOptions) => void
   /** change several parts of the content at once (e.g. placing a long text that added pages and frames, or a picture) */
   commit: (patch: Partial<DocContent>) => void
 }
@@ -173,9 +179,12 @@ export function useDocumentSession() {
       }),
     remove: (indices) => change((s) => deletePages(s, indices) || s),
     move: (from, to) => change((s) => movePage(s, from, to) || s),
-    setup: (next, key) =>
+    setup: (next, key, options) =>
       change((s) => {
-        const r = applySettings(s, next)
+        // decided before the pages move: which empty margin frames there are now
+        const drop = options?.dropEmptyFrames ? new Set(emptyPrimaryFrameIds(s.doc, s.frames)) : null
+        const applied = applySettings(s, next)
+        const r = drop && drop.size > 0 ? { ...applied, frames: applied.frames.filter((f) => !drop.has(f.id)) } : applied
         if (!next.primaryTextFrame) return r
         // turning the option on gives every page without a text frame one; otherwise only pages that were added
         return withPrimaryFrames(r, s.doc.primaryTextFrame ? Array.from({ length: Math.max(0, next.pages - s.doc.pages) }, (_, i) => s.doc.pages + i) : 'all')

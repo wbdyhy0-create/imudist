@@ -8,6 +8,7 @@ import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
+import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { pickFiles } from './fileio'
@@ -247,6 +248,9 @@ export default function App() {
       closeDialog()
     })
 
+  // the empty frames made automatically on the margins, counted only while the settings window is open
+  const emptyFrames = useMemo(() => (dialog === 'setup' && doc ? emptyPrimaryFrameIds(doc, session.frames).length : 0), [dialog, doc, session.frames])
+
   const fitKey = preview
     ? [preview.width, preview.height, preview.perRow, JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
     : String(session.docId)
@@ -320,10 +324,11 @@ export default function App() {
         {dialog === 'setup' && doc && (
           <DocumentSetupDialog
             initial={doc}
-            onApply={(next) => {
+            removableFrames={emptyFrames}
+            onApply={(next, options) => {
               // nothing changed: nothing to undo or save
-              if (JSON.stringify(next) !== JSON.stringify(doc)) {
-                session.pages.setup(next)
+              if (JSON.stringify(next) !== JSON.stringify(doc) || options.dropEmptyFrames) {
+                session.pages.setup(next, undefined, options)
                 // bring the rearranged pages into view once the new layout is in place
                 window.setTimeout(() => ws.current?.fitSpread(), 60)
               }

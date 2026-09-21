@@ -24,7 +24,9 @@ import { SidesEditor } from './NewDocumentDialog'
 
 interface Props {
   initial: DocSettings
-  onApply: (next: DocSettings) => void
+  /** how many empty text frames made automatically on the margins the document has now */
+  removableFrames: number
+  onApply: (next: DocSettings, options: { dropEmptyFrames: boolean }) => void
   onClose: () => void
 }
 
@@ -44,13 +46,15 @@ const BOARD_LIMIT = 48
 const rowChoices = [1, 2, 3, 4, 5, 6]
 
 /** The document settings window: controls on one side, a live board of all the pages on the other. */
-export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
+export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose }: Props) {
   const [d, setD] = useState<DocSettings>(initial)
   const [tab, setTab] = useState<TabId>('pages')
   /** the page the board has selected (the target of "this page only") */
   const [sel, setSel] = useState(0)
   const [scope, setScope] = useState<'all' | 'page'>('all')
   const [linked, setLinked] = useState<Record<SidesKey, boolean>>({ margins: true, bleed: true, slug: false })
+  /** when switching to manual text frames: also delete the empty ones that already exist */
+  const [removeEmpty, setRemoveEmpty] = useState(true)
 
   const error = validateDoc(d)
   const patch = (p: Partial<DocSettings>) => setD((s) => ({ ...s, ...p }))
@@ -87,7 +91,7 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
   const preset = matchPreset(shown.w, shown.h)
 
   const apply = () => {
-    if (!error) onApply(normalizeSizes(d))
+    if (!error) onApply(normalizeSizes(d), { dropEmptyFrames: !d.primaryTextFrame && removeEmpty && removableFrames > 0 })
   }
 
   return (
@@ -132,6 +136,29 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
                     <Labeled label="מספור מתחיל מ">
                       <NumberField value={d.startPage} min={1} max={MAX_PAGES} onChange={(v) => patch({ startPage: v })} />
                     </Labeled>
+                  </div>
+
+                  <div className="setup-group">
+                    <div className="setup-label">תיבות טקסט בעמודים</div>
+                    <div className="seg" role="radiogroup" aria-label="יצירת תיבות טקסט">
+                      <button role="radio" aria-checked={d.primaryTextFrame} className={d.primaryTextFrame ? 'on' : ''} onClick={() => patch({ primaryTextFrame: true })}>
+                        אוטומטית
+                      </button>
+                      <button role="radio" aria-checked={!d.primaryTextFrame} className={!d.primaryTextFrame ? 'on' : ''} onClick={() => patch({ primaryTextFrame: false })}>
+                        ידנית
+                      </button>
+                    </div>
+                    <p className="setup-hint">
+                      {d.primaryTextFrame
+                        ? 'כל עמוד מקבל תיבת טקסט שיושבת בדיוק על השוליים (או תיבה לכל עמודה), גם עמודים שיתווספו אחר כך.'
+                        : 'העמודים נשארים ריקים, ואתה יוצר תיבות טקסט בעצמך בכלי הטקסט או בהצבת קובץ.'}
+                    </p>
+                    {!d.primaryTextFrame && removableFrames > 0 && (
+                      <label className="dlg-check">
+                        <input type="checkbox" checked={removeEmpty} onChange={(e) => setRemoveEmpty(e.target.checked)} />
+                        מחק גם את {removableFrames === 1 ? 'תיבת הטקסט הריקה' : `${removableFrames} תיבות הטקסט הריקות`} שכבר נוצרו
+                      </label>
+                    )}
                   </div>
 
                   <div className="setup-group">
@@ -183,12 +210,6 @@ export function DocumentSetupDialog({ initial, onApply, onClose }: Props) {
                     </div>
                   </div>
 
-                  <Switch
-                    checked={d.primaryTextFrame}
-                    onChange={(v) => patch({ primaryTextFrame: v })}
-                    title="תיבת טקסט בכל עמוד"
-                    hint="כל עמוד מקבל תיבת טקסט שיושבת בדיוק על השוליים (או תיבה לכל עמודה), גם עמודים שיתווספו אחר כך"
-                  />
                 </>
               )}
 
