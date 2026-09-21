@@ -54,6 +54,7 @@ import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
+import { spacing, type SpacingMark } from '../spacing'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
@@ -283,6 +284,8 @@ export function Workspace({
   const snapLinesRef = useRef(snapLines)
   snapLinesRef.current = snapLines
   const [snapShown, setSnapShown] = useState<SnapLine[]>([])
+  /** the gaps between the moved object and its neighbours (measured, and marked when equal) */
+  const [spacingShown, setSpacingShown] = useState<SpacingMark[]>([])
   /** text on the outline of a shape: the shape being edited, the selected range of its text, the caret request, and whether the pointer is over an outline (for the cursor) */
   const [pathEdit, setPathEdit] = useState<string | null>(null)
   const [pathSel, setPathSel] = useState<{ id: string; a: number; b: number } | null>(null)
@@ -1838,9 +1841,21 @@ export function Workspace({
       // the edges that move are held on the margins, column edges, page edges and guides (Ctrl = free)
       // Alt stretches to both sides at once, around the middle
       const snapped = e.ctrlKey || e.metaKey ? null : snapDrag(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, e.altKey)
-      const dx = snapped ? snapped.dx : p.x - d.start.x
-      const dy = snapped ? snapped.dy : p.y - d.start.y
+      let dx = snapped ? snapped.dx : p.x - d.start.x
+      let dy = snapped ? snapped.dy : p.y - d.start.y
       setSnapShown((cur) => (snapped && snapped.lines.length > 0 ? snapped.lines : cur.length ? [] : cur))
+      if (d.mode === 'move') {
+        // the gaps to the neighbours: shown as numbers, and held equal to another gap when close to one (not where a guide or margin already holds the object)
+        const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
+        const free = !(e.ctrlKey || e.metaKey)
+        const box = { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy }
+        const page = ownerPage(rects, box.x + box.w / 2, box.y + box.h / 2)
+        const near = [...frames, ...images, ...shapes].filter((o) => o.id !== d.id && ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2) === page)
+        const sp = spacing(box, near, SNAP_PX / live.current.zoom, { x: free && dx === raw.x, y: free && dy === raw.y })
+        dx += sp.dx
+        dy += sp.dy
+        setSpacingShown(sp.marks)
+      } else setSpacingShown((cur) => (cur.length ? [] : cur))
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
@@ -1937,6 +1952,7 @@ export function Workspace({
     finishShape()
     finishDraft()
     setSnapShown((cur) => (cur.length ? [] : cur))
+    setSpacingShown((cur) => (cur.length ? [] : cur))
     // a rubber band that caught a single object leaves it selected the ordinary way (with its panel and handles)
     if (marqueeBase.current && multiSel.length === 1 && guideSel.length === 0) {
       setSelectedIdRaw(multiSel[0])
@@ -1956,6 +1972,7 @@ export function Workspace({
   const cancelDrag = () => {
     pegDrag.current = null
     setSnapShown((cur) => (cur.length ? [] : cur))
+    setSpacingShown((cur) => (cur.length ? [] : cur))
     shapeStart.current = null
     shapeBoxRef.current = null
     setShapeBox(null)
@@ -2394,6 +2411,38 @@ export function Workspace({
                 ) : (
                   <div key={`snap${i}`} className={'guide-align h' + (l.kind === 'center' ? ' center' : '')} style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
                 ),
+              )}
+              {spacingShown.length > 0 && (
+                <svg className="spacing-layer" aria-hidden="true">
+                  {spacingShown.map((m, i) => {
+                    const a = m.axis === 'v' ? { x: tx + m.at * zoom, y: ty + m.from * zoom } : { x: tx + m.from * zoom, y: ty + m.at * zoom }
+                    const b = m.axis === 'v' ? { x: a.x, y: ty + m.to * zoom } : { x: tx + m.to * zoom, y: a.y }
+                    const len = Math.hypot(b.x - a.x, b.y - a.y)
+                    const s = Math.max(2, Math.min(6, len / 3)) // arrowhead size
+                    const [ux, uy] = m.axis === 'v' ? [0, 1] : [1, 0] // along the stretch
+                    const [nx, ny] = [-uy, ux] // across it
+                    const head = (at: { x: number; y: number }, dir: 1 | -1) =>
+                      `${at.x},${at.y} ${at.x - dir * ux * s * 1.6 + nx * s},${at.y - dir * uy * s * 1.6 + ny * s} ${at.x - dir * ux * s * 1.6 - nx * s},${at.y - dir * uy * s * 1.6 - ny * s}`
+                    const text = formatLength(m.value, doc.unit)
+                    const w = text.length * 6.4 + 12
+                    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+                    // the number sits beside a vertical stretch and above a horizontal one
+                    const box = m.axis === 'v' ? { x: mid.x + 8, y: mid.y - 9 } : { x: mid.x - w / 2, y: mid.y - 24 }
+                    return (
+                      <g key={`gap${i}`} className={'gap-mark' + (m.equal ? ' equal' : '')}>
+                        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+                        <line x1={a.x - nx * 5} y1={a.y - ny * 5} x2={a.x + nx * 5} y2={a.y + ny * 5} />
+                        <line x1={b.x - nx * 5} y1={b.y - ny * 5} x2={b.x + nx * 5} y2={b.y + ny * 5} />
+                        <polygon points={head(a, -1)} />
+                        <polygon points={head(b, 1)} />
+                        <rect x={box.x} y={box.y} width={w} height={18} rx={4} />
+                        <text x={box.x + w / 2} y={box.y + 12.5} textAnchor="middle">
+                          {text}
+                        </text>
+                      </g>
+                    )
+                  })}
+                </svg>
               )}
               {marquee && (
                 <div

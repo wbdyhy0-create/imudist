@@ -125,3 +125,14 @@
 /* the middle of the page, shown while an object is moved onto it */
 .guide-align.center.h { background: repeating-linear-gradient(90deg, #00d1b2 0 9px, transparent 9px 14px); filter: drop-shadow(0 0 3px #00d1b2); }
 .guide-align.center.v { background: repeating-linear-gradient(180deg, #00d1b2 0 9px, transparent 9px 14px); filter: drop-shadow(0 0 3px #00d1b2); }
+
+/* ── gaps between objects while one is moved ───────────────── */
+.spacing-layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; z-index: 800003; }
+.gap-mark line { stroke: #7fb2ff; stroke-width: 1; }
+.gap-mark polygon { fill: #7fb2ff; }
+.gap-mark rect { fill: #17131f; stroke: #7fb2ff; stroke-width: 1; }
+.gap-mark text { fill: #cfe1ff; font: 600 11px 'Segoe UI', Arial, sans-serif; direction: rtl; }
+.gap-mark.equal line { stroke: #35d07f; }
+.gap-mark.equal polygon { fill: #35d07f; }
+.gap-mark.equal rect { stroke: #35d07f; }
+.gap-mark.equal text { fill: #b9f5d4; }
