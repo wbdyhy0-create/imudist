@@ -13,6 +13,8 @@ import {
 } from 'react'
 import {
   DEFAULT_GUIDE_COLOR,
+  DEFAULT_SHAPE_FILL,
+  DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
   MAX_GUIDES,
   MAX_PAGE_PT,
@@ -29,6 +31,8 @@ import {
   type DocSettings,
   type Guide,
   type GuideAxis,
+  type ShapeFrame,
+  type ShapeKind,
   type Sides,
   type ImageFit,
   type ImageFrame,
@@ -46,6 +50,7 @@ import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
+import { CORNERS, fitRadii, type ShapePrefs } from '../shapes'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
@@ -55,6 +60,9 @@ import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDial
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
+import { CORNER_HANDLE_OFFSET, ShapeFrameView } from './ShapeFrameView'
+import { ShapeProperties } from './ShapeProperties'
+import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
@@ -141,6 +149,11 @@ interface Props {
   onPlacingImagesChange: (images: PlacedImage[]) => void
   guides: Guide[]
   onGuidesChange: (guides: Guide[], coalesceKey?: string) => void
+  shapes: ShapeFrame[]
+  onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string) => void
+  /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
+  shapePrefs: ShapePrefs
+  onShapePrefs: (prefs: ShapePrefs) => void
   /** guides are hidden by the View menu: show them again (when the user makes one) */
   onShowGuides: () => void
   /** the document has changes that are not saved yet */
@@ -200,6 +213,10 @@ export function Workspace({
   onPlacingImagesChange,
   guides,
   onGuidesChange,
+  shapes,
+  onShapesChange,
+  shapePrefs,
+  onShapePrefs,
   onShowGuides,
   dirty,
   onClose,
@@ -211,7 +228,7 @@ export function Workspace({
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
   const flow = useMemo(() => flowFrames(frames, images), [frames, images])
   /** stacking rank of every object (1 = the back) */
-  const rank = useMemo(() => new Map(stackOrder(frames, images).map((o, i) => [o.id, i + 1])), [frames, images])
+  const rank = useMemo(() => new Map(stackOrder(frames, images, shapes).map((o, i) => [o.id, i + 1])), [frames, images, shapes])
   const rects = useMemo(() => pageRects(doc), [doc])
   /** the page that Insert / Delete act on (the last one clicked) */
   const [selectedPage, setSelectedPage] = useState(0)
@@ -256,8 +273,17 @@ export function Workspace({
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
   const dragSeq = useRef(0)
+  /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
+  const shapeStart = useRef<{ kind: ShapeKind; x: number; y: number } | null>(null)
+  const [shapeBox, setShapeBox] = useState<Box | null>(null)
+  const shapeBoxRef = useRef<Box | null>(null)
+  /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
+  const cornerDrag = useRef<{ id: string; corners: number[]; grab: number; key: string } | null>(null)
+  const [hotCorners, setHotCorners] = useState<number[]>([])
+  /** the settings window of a shape tool (double click on the tool) */
+  const [toolDialog, setToolDialog] = useState<ShapeKind | null>(null)
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
   /** the dragged page has the same height as the pages beside it: where the dashed line goes (world y) and how far it reaches */
   const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
@@ -512,7 +538,7 @@ export function Workspace({
   const doPlace = (target: { box: Box; frameId?: string }, mods: { shift: boolean; alt: boolean }) => {
     if (!placing) return
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
-    const result = pourText(doc, frames, images, placing, target, mode)
+    const result = pourText(doc, frames, images, placing, target, mode, shapes)
     pageOps.commit(result.content)
     setSelectedId(result.headId)
     setEditingId(null)
@@ -545,7 +571,7 @@ export function Workspace({
       x = Math.min(Math.max(at.x, page.x), page.x + page.w - w)
       y = Math.min(Math.max(at.y, page.y), page.y + page.h - h)
     }
-    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images) }
+    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images, shapes) }
     pageOps.commit({ images: [...images, frame], assets: assets[assetId] ? assets : { ...assets, [assetId]: asset } })
     setSelectedId(frame.id)
     setEditingId(null)
@@ -565,13 +591,16 @@ export function Workspace({
     beginFrameDrag(e, id, 'move')
   }
 
+  const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) =>
+    onShapesChange(shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh)), key)
+
   const updateImage = (id: string, patch: Partial<ImageFrame>, key?: string) =>
     onImagesChange(images.map((im) => (im.id === id ? { ...im, ...patch } : im)), key)
 
   /** move an object in the stacking order (frames and pictures together): one undo step */
   const arrangeObject = (id: string | null, op: ArrangeOp) => {
     if (!id) return
-    const r = arrange(frames, images, id, op)
+    const r = arrange(frames, images, id, op, shapes)
     if (r) pageOps.commit(r)
   }
 
@@ -843,17 +872,22 @@ export function Workspace({
         }
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
-        if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
+        if (shapes.some((sh) => sh.id === selectedId)) onShapesChange(shapes.filter((sh) => sh.id !== selectedId))
+        else if (images.some((im) => im.id === selectedId)) onImagesChange(images.filter((im) => im.id !== selectedId))
         else onFramesChange(removeFrame(frames, selectedId))
         setSelectedId(null)
       } else if (selectedId && e.key.startsWith('Arrow')) {
-        const f = frames.find((x) => x.id === selectedId) ?? images.find((x) => x.id === selectedId)
+        const f = frames.find((x) => x.id === selectedId) ?? images.find((x) => x.id === selectedId) ?? shapes.find((x) => x.id === selectedId)
         if (!f) return
         e.preventDefault()
         const step = e.shiftKey ? 10 : 1
         const moved = {
           x: f.x + (e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0),
           y: f.y + (e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0),
+        }
+        if (shapes.some((sh) => sh.id === f.id)) {
+          onShapesChange(shapes.map((sh) => (sh.id === f.id ? { ...sh, ...moved } : sh)), `nudge:${f.id}`)
+          return
         }
         if (images.some((im) => im.id === f.id)) {
           onImagesChange(images.map((im) => (im.id === f.id ? { ...im, ...moved } : im)), `nudge:${f.id}`)
@@ -864,7 +898,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, guideSel, guidesVisible, linkFrom, frames, images, guides, onFramesChange, onImagesChange, onGuidesChange])
+  }, [selectedId, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange])
 
 
   // Escape drops the loaded pictures
@@ -905,9 +939,80 @@ export function Workspace({
     }
   }
 
+  /** a new shape of a kind, with the tool's settings */
+  const newShape = (kind: ShapeKind, box: Box): ShapeFrame => {
+    const r = kind === 'rect' ? shapePrefs.rect.radius : 0
+    return {
+      id: newFrameId(),
+      kind,
+      ...box,
+      ...(kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
+      ...(r > 0 ? { radii: [r, r, r, r] as [number, number, number, number] } : {}),
+      fill: DEFAULT_SHAPE_FILL,
+      stroke: DEFAULT_SHAPE_STROKE,
+      strokeWidth: 1,
+      z: nextZ(frames, images, shapes),
+    }
+  }
+
+  /** clicking a shape with the Selection tool selects it and starts moving it (the shape tools draw a new one instead) */
+  const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedPage(ownerPage(rects, sh.x + sh.w / 2, sh.y + sh.h / 2))
+    setSelectedId(id)
+    setEditingId(null)
+    beginFrameDrag(e as unknown as ReactPointerEvent<HTMLElement>, id, 'move')
+  }
+
+  /** grabbing a rounding handle: only that corner is rounded until the pointer passes over another corner's handle */
+  const onCornerDown = (id: string) => (corner: number, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    const c = CORNERS[corner]
+    const p = toWorld(e.clientX, e.clientY)
+    const inward = ((p.x - (sh.x + c.fx * sh.w)) * c.sx + (p.y - (sh.y + c.fy * sh.h)) * c.sy) / 2
+    dragSeq.current += 1
+    cornerDrag.current = { id, corners: [corner], grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], key: `round:${dragSeq.current}` }
+    setHotCorners([corner])
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveCorner = (d: NonNullable<typeof cornerDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const sh = shapes.find((x) => x.id === d.id)
+    if (!sh) return
+    const p = toWorld(e.clientX, e.clientY)
+    const maxR = Math.min(sh.w, sh.h) / 2
+    const shown = fitRadii(sh.radii, sh.w, sh.h)
+    // passing over the rounding handle of another corner while the button is held adds that corner
+    const reach = 12 / live.current.zoom
+    CORNERS.forEach((c, k) => {
+      if (d.corners.includes(k)) return
+      const at = shown[k] + CORNER_HANDLE_OFFSET / live.current.zoom
+      const hx = sh.x + c.fx * sh.w + c.sx * at
+      const hy = sh.y + c.fy * sh.h + c.sy * at
+      if (Math.hypot(p.x - hx, p.y - hy) <= reach) d.corners = [...d.corners, k]
+    })
+    setHotCorners(d.corners)
+    // the radius follows the pointer's distance in from the first corner that was grabbed
+    const c0 = CORNERS[d.corners[0]]
+    const inward = ((p.x - (sh.x + c0.fx * sh.w)) * c0.sx + (p.y - (sh.y + c0.fy * sh.h)) * c0.sy) / 2
+    const r = Math.round(Math.min(maxR, Math.max(0, inward - d.grab)) * 100) / 100
+    const radii = [...(sh.radii ?? [0, 0, 0, 0])] as [number, number, number, number]
+    for (const k of d.corners) radii[k] = r
+    onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, radii } : x)), d.key)
+  }
+
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const isImage = images.some((x) => x.id === id)
-    const f = isImage ? images.find((x) => x.id === id) : frames.find((x) => x.id === id)
+    const isShape = shapes.some((x) => x.id === id)
+    const f = isImage ? images.find((x) => x.id === id) : isShape ? shapes.find((x) => x.id === id) : frames.find((x) => x.id === id)
     if (!f) return
     dragSeq.current += 1
     frameDrag.current = {
@@ -916,7 +1021,7 @@ export function Workspace({
       start: toWorld(e.clientX, e.clientY),
       orig: { x: f.x, y: f.y, w: f.w, h: f.h },
       key: `drag:${dragSeq.current}`,
-      kind: isImage ? 'image' : 'frame',
+      kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -1065,6 +1170,14 @@ export function Workspace({
       setEditingId(null)
       e.preventDefault()
       e.currentTarget.setPointerCapture(e.pointerId)
+    } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && e.button === 0) {
+      const p = toWorld(e.clientX, e.clientY)
+      shapeStart.current = { kind: tool, x: p.x, y: p.y }
+      shapeBoxRef.current = null
+      setSelectedId(null)
+      setEditingId(null)
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
     } else if (tool === 'select' && e.button === 0) {
       setSelectedId(null)
       // dragging over empty canvas draws a rubber band that selects the guides it touches (Shift / Ctrl adds to the selection)
@@ -1079,6 +1192,27 @@ export function Workspace({
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (shapeStart.current) {
+      const s0 = shapeStart.current
+      const p = toWorld(e.clientX, e.clientY)
+      let dx = p.x - s0.x
+      let dy = p.y - s0.y
+      // Shift: equal width and height (a square, a circle)
+      if (e.shiftKey) {
+        const m = Math.max(Math.abs(dx), Math.abs(dy))
+        dx = Math.sign(dx || 1) * m
+        dy = Math.sign(dy || 1) * m
+      }
+      // Ctrl: grows from the middle to all sides; otherwise from the starting corner towards the pointer, whichever way it goes
+      const box: Box = e.ctrlKey || e.metaKey ? { x: s0.x - Math.abs(dx), y: s0.y - Math.abs(dy), w: 2 * Math.abs(dx), h: 2 * Math.abs(dy) } : { x: Math.min(s0.x, s0.x + dx), y: Math.min(s0.y, s0.y + dy), w: Math.abs(dx), h: Math.abs(dy) }
+      shapeBoxRef.current = box
+      setShapeBox(box)
+      return
+    }
+    if (cornerDrag.current) {
+      moveCorner(cornerDrag.current, e)
+      return
+    }
     if (marqueeBase.current && marquee) {
       const p = toWorld(e.clientX, e.clientY)
       setMarquee({ ...marquee, x1: p.x, y1: p.y })
@@ -1097,6 +1231,12 @@ export function Workspace({
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
+      if (d.kind === 'shape') {
+        // Shift keeps the shape's proportions
+        const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined)
+        onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
+        return
+      }
       if (d.kind === 'image') {
         // corners keep the picture's proportions unless Alt is held
         const box = dragBox(d.orig, d.mode, p.x - d.start.x, p.y - d.start.y, MIN_FRAME_PT, e.altKey ? undefined : d.orig.w / d.orig.h)
@@ -1116,6 +1256,25 @@ export function Workspace({
     e.currentTarget.scrollLeft -= e.clientX - drag.current.x
     e.currentTarget.scrollTop -= e.clientY - drag.current.y
     drag.current = { x: e.clientX, y: e.clientY }
+  }
+  /** a shape tool's drag ended: a drag makes a shape of that size; a plain click makes one of the tool's own size around the point */
+  const finishShape = () => {
+    const s0 = shapeStart.current
+    if (cornerDrag.current) {
+      cornerDrag.current = null
+      setHotCorners([])
+    }
+    if (!s0) return
+    const box = shapeBoxRef.current
+    shapeStart.current = null
+    shapeBoxRef.current = null
+    setShapeBox(null)
+    const pref = shapePrefs[s0.kind]
+    const size = box && box.w >= MIN_FRAME_PT && box.h >= MIN_FRAME_PT ? box : { x: s0.x - pref.w / 2, y: s0.y - pref.h / 2, w: pref.w, h: pref.h }
+    const shape = newShape(s0.kind, size)
+    onShapesChange([...shapes, shape])
+    setSelectedId(shape.id)
+    setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
   }
   const finishDraft = () => {
     if (draft && createStart.current && placingImages.length > 0) {
@@ -1149,7 +1308,7 @@ export function Workspace({
           text: '',
           runs: [],
           next: null,
-          z: nextZ(frames, images),
+          z: nextZ(frames, images, shapes),
         }
         onFramesChange([...frames, frame])
         setSelectedId(frame.id)
@@ -1160,6 +1319,7 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = () => {
+    finishShape()
     finishDraft()
     frameDrag.current = null
     pageDrag.current = null
@@ -1171,6 +1331,11 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    shapeStart.current = null
+    shapeBoxRef.current = null
+    setShapeBox(null)
+    cornerDrag.current = null
+    setHotCorners([])
     createStart.current = null
     frameDrag.current = null
     pageDrag.current = null
@@ -1268,6 +1433,8 @@ export function Workspace({
             ? ' zoomtool'
             : tool === 'page'
               ? ' pagetool'
+              : tool === 'rect' || tool === 'ellipse' || tool === 'polygon'
+                ? ' shapetool'
             : tool === 'type'
               ? ' texttool'
               : tool === 'select'
@@ -1277,6 +1444,7 @@ export function Workspace({
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
+  const selShape = selectedId ? (shapes.find((sh) => sh.id === selectedId) ?? null) : null
   const selGuides = guidesVisible ? guides.filter((g) => guideSel.includes(g.id)) : []
   const selChain = selFrame ? chainOf(frames, selFrame.id) : []
   const threadInfo = selFrame
@@ -1403,7 +1571,13 @@ export function Workspace({
       </div>
 
       <div className="ws-main">
-        <Toolbox tool={space ? 'hand' : tool} onSelect={setTool} previewMode={previewMode} onPreviewMode={onPreviewMode} />
+        <Toolbox
+          tool={space ? 'hand' : tool}
+          onSelect={setTool}
+          onSettings={(id) => (id === 'rect' || id === 'ellipse' || id === 'polygon') && setToolDialog(id)}
+          previewMode={previewMode}
+          onPreviewMode={onPreviewMode}
+        />
         <div
           className="ws-center"
           style={{
@@ -1444,6 +1618,43 @@ export function Workspace({
                   onHandleDown={onHandleDown(im.id)}
                 />
               ))}
+              {shapes.map((sh) => (
+                <ShapeFrameView
+                  key={sh.id}
+                  shape={sh}
+                  zoom={zoom}
+                  tx={tx}
+                  ty={ty}
+                  z={rank.get(sh.id) ?? 0}
+                  selected={sh.id === selectedId}
+                  showEdge={!previewMode}
+                  hotCorners={sh.id === selectedId ? hotCorners : undefined}
+                  onPointerDown={onShapePointerDown(sh.id)}
+                  onHandleDown={onHandleDown(sh.id)}
+                  onCornerDown={onCornerDown(sh.id)}
+                />
+              ))}
+              {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (
+                <ShapeFrameView
+                  ghost
+                  shape={{
+                    id: 'draft',
+                    kind: shapeStart.current.kind,
+                    ...shapeBox,
+                    ...(shapeStart.current.kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
+                    ...(shapeStart.current.kind === 'rect' && shapePrefs.rect.radius > 0 ? { radii: [shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius] as [number, number, number, number] } : {}),
+                    fill: DEFAULT_SHAPE_FILL,
+                    stroke: DEFAULT_SHAPE_STROKE,
+                    strokeWidth: 1,
+                  }}
+                  zoom={zoom}
+                  tx={tx}
+                  ty={ty}
+                  z={900001}
+                  selected={false}
+                  showEdge
+                />
+              )}
               {frames.map((f) => {
                 const fl = flow.get(f.id)
                 if (!fl) return null
@@ -1628,6 +1839,7 @@ export function Workspace({
                 doc={doc}
                 frames={frames}
                 images={images}
+                shapes={shapes}
                 spreads={spreads}
                 currentSpread={cur}
                 selected={selPage}
@@ -1655,6 +1867,19 @@ export function Workspace({
                 }}
               />
             )}
+            {showProps && selShape && (
+              <ShapeProperties
+                shape={selShape}
+                unit={doc.unit}
+                onGeometry={(patch) => updateShape(selShape.id, patch, `geo:${selShape.id}`)}
+                onChange={(patch) => updateShape(selShape.id, patch, patch.radii || patch.strokeWidth !== undefined ? `shape:${selShape.id}` : undefined)}
+                onArrange={(op) => arrangeObject(selShape.id, op)}
+                onDelete={() => {
+                  onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
+                  setSelectedId(null)
+                }}
+              />
+            )}
             {showProps && selImage && (
               <ImageProperties
                 image={selImage}
@@ -1675,7 +1900,7 @@ export function Workspace({
                 }}
               />
             )}
-            {showProps && !selImage && selGuides.length === 0 && (
+            {showProps && !selImage && !selShape && selGuides.length === 0 && (
           <PropertiesPanel
             frame={selFrame}
             style={panelStyle}
@@ -1694,6 +1919,18 @@ export function Workspace({
         )}
       </div>
 
+      {toolDialog && (
+        <ShapeToolDialog
+          kind={toolDialog}
+          prefs={shapePrefs}
+          unit={doc.unit}
+          onApply={(next) => {
+            onShapePrefs(next)
+            setToolDialog(null)
+          }}
+          onClose={() => setToolDialog(null)}
+        />
+      )}
       {rulerMenu && (
         <ContextMenu
           x={rulerMenu.x}

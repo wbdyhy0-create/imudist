@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { DocSettings, ImageFrame, TextFrame } from '../document'
+import type { DocSettings, ImageFrame, ShapeFrame, TextFrame } from '../document'
+import { shapePath } from '../shapes'
 import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
 import { NumberField } from './NumberField'
@@ -10,6 +11,7 @@ interface Props {
   doc: DocSettings
   frames: TextFrame[]
   images: ImageFrame[]
+  shapes: ShapeFrame[]
   spreads: SpreadLayout[]
   /** the spread in the middle of the view */
   currentSpread: number
@@ -26,7 +28,7 @@ const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
 
@@ -43,6 +45,12 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
     for (const im of images) byPage[ownerPage(rs, im.x + im.w / 2, im.y + im.h / 2)].push(im)
     return byPage
   }, [doc, images])
+  const shapesByPage = useMemo(() => {
+    const rs = pageRects(doc)
+    const byPage: ShapeFrame[][] = rs.map(() => [])
+    for (const sh of shapes) byPage[ownerPage(rs, sh.x + sh.w / 2, sh.y + sh.h / 2)].push(sh)
+    return byPage
+  }, [doc, shapes])
   const rects = useMemo(() => pageRects(doc), [doc])
 
 
@@ -118,6 +126,16 @@ export function PagesPanel({ doc, frames, images, spreads, currentSpread, select
                       />
                       {imagesByPage[p.index].map((im) => (
                         <rect key={im.id} x={im.x - r.x} y={im.y - r.y} width={im.w} height={im.h} fill="#9cc3ff" stroke="#ffb02e" strokeWidth={p.w * 0.008} />
+                      ))}
+                      {shapesByPage[p.index].map((sh) => (
+                        <path
+                          key={sh.id}
+                          transform={`translate(${sh.x - r.x} ${sh.y - r.y})`}
+                          d={shapePath(sh)}
+                          fill={sh.fill ?? 'none'}
+                          stroke={sh.stroke ?? 'none'}
+                          strokeWidth={Math.max(sh.strokeWidth, p.w * 0.004)}
+                        />
                       ))}
                       {framesByPage[p.index].map((f) => (
                         <rect

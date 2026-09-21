@@ -1,4 +1,4 @@
-import { MAX_PAGES, type DocSettings, type ImageFrame, type TextFrame } from './document'
+import { MAX_PAGES, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { chainOf, styleOf, type Box } from './frames'
 import type { PlacedText } from './importText'
 import { computeLayout, pageMargins, type PageSide } from './layout'
@@ -81,14 +81,14 @@ const newId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.r
  * Semi-automatic flow: each click adds one frame to the same story. The first click creates the story in a frame;
  * later clicks link a new frame after the last one (`placed.continueFrom`). The text stays loaded while some is left over.
  */
-function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], placed: PlacedText, target: PourTarget): PourResult {
+function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], shapes: ShapeFrame[], placed: PlacedText, target: PourTarget): PourResult {
   const existing = target.frameId ? frames.find((f) => f.id === target.frameId) : undefined
   const box: Box = existing ? { x: existing.x, y: existing.y, w: existing.w, h: existing.h } : target.box
   const id = existing?.id ?? newId()
   const others = frames.filter((f) => f.id !== existing?.id)
   // the frame the new one continues from (it may have been deleted since the last click)
   const tail = placed.continueFrom ? others.find((f) => f.id === placed.continueFrom && !f.next) : undefined
-  const z = nextZ(frames, images)
+  const z = nextZ(frames, images, shapes)
 
   let next: TextFrame[]
   let headId: string
@@ -124,8 +124,9 @@ export function pourText(
   placed: PlacedText,
   target: PourTarget,
   mode: FlowMode,
+  shapes: ShapeFrame[] = [],
 ): PourResult {
-  if (mode === 'semi') return pourSemi(doc, frames, images, placed, target)
+  if (mode === 'semi') return pourSemi(doc, frames, images, shapes, placed, target)
   const story = placed.text
   const style = placed.style
   const runs = normalizeRuns(story, placed.runs, style)
@@ -176,7 +177,7 @@ export function pourText(
   }
 
   const ids = boxes.map((_, i) => (i === 0 && existing ? existing.id : newId()))
-  const z = nextZ(frames, images)
+  const z = nextZ(frames, images, shapes)
   const made: TextFrame[] = boxes.map((b, i) => ({
     ...style,
     id: ids[i],

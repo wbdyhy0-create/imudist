@@ -1,7 +1,11 @@
 import {
   DEFAULT_TEXT_STYLE,
   DEFAULT_WRAP_OFFSET,
+  DEFAULT_SHAPE_FILL,
+  DEFAULT_SHAPE_STROKE,
   MAX_GUIDES,
+  MAX_SIDES,
+  MIN_SIDES,
   MAX_PER_ROW,
   MAX_COLUMNS,
   MAX_PAGES,
@@ -20,6 +24,8 @@ import {
   type ImageFit,
   type ImageFrame,
   type PageSize,
+  type ShapeFrame,
+  type ShapeKind,
   type Run,
   type Sides,
   type TextAlign,
@@ -46,6 +52,7 @@ export interface DocumentFile {
   images: ImageFrame[]
   assets: Assets
   guides: Guide[]
+  shapes: ShapeFrame[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
@@ -53,7 +60,7 @@ export function serializeDocument(c: DocContent): string {
   const used = new Set(c.images.map((i) => i.assetId))
   const assets: Assets = {}
   for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
-  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets, guides: c.guides }
+  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets, guides: c.guides, shapes: c.shapes }
   return JSON.stringify(file)
 }
 
@@ -230,6 +237,38 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
   return out
 }
 
+const HEX = /^#[0-9a-fA-F]{6}$/
+const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null : typeof v === 'string' && HEX.test(v) ? v : fallback)
+
+function parseShapes(v: unknown): ShapeFrame[] {
+  if (!Array.isArray(v)) return []
+  const out: ShapeFrame[] = []
+  const used = new Set<string>()
+  for (const raw of v) {
+    if (!isObj(raw)) continue
+    const kind = oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon'], 'rect')
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `s${out.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    const r = Array.isArray(raw.radii) ? raw.radii : []
+    out.push({
+      id,
+      kind,
+      x: num(raw.x, 0, -1e6, 1e6),
+      y: num(raw.y, 0, -1e6, 1e6),
+      w: num(raw.w, 100, MIN_FRAME_PT, MAX_PAGE_PT),
+      h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
+      ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
+      ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
+      fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
+      stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
+      strokeWidth: num(raw.strokeWidth, 1, 0, 200),
+      ...zOf(raw),
+    })
+  }
+  return out
+}
+
 function parseGuides(v: unknown, pages: number): Guide[] {
   if (!Array.isArray(v)) return []
   const out: Guide[] = []
@@ -270,5 +309,5 @@ export function parseDocument(text: string, name: string): DocContent {
   }
   const assets = parseAssets(data.assets)
   const doc = parseSettings(data.settings, name)
-  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages) }
+  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages), shapes: parseShapes(data.shapes) }
 }

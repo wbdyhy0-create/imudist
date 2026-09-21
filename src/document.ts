@@ -152,6 +152,35 @@ export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[0].value
 /** No document may hold more guides than this. */
 export const MAX_GUIDES = 5000
 
+/** The drawn shapes: a rectangle (with optionally rounded corners), an ellipse, or a regular polygon of 3 to 6 corners. */
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon'
+export const MIN_SIDES = 3
+export const MAX_SIDES = 6
+export const DEFAULT_SHAPE_FILL = '#c8d6ea'
+export const DEFAULT_SHAPE_STROKE = '#33415c'
+
+/** A shape on a page. Position and size are in world points, like text frames. */
+export interface ShapeFrame {
+  id: string
+  kind: ShapeKind
+  x: number
+  y: number
+  w: number
+  h: number
+  /** polygon: number of corners (MIN_SIDES … MAX_SIDES) */
+  sides?: number
+  /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
+  radii?: [number, number, number, number]
+  /** #rrggbb, or null for no fill */
+  fill: string | null
+  /** #rrggbb, or null for no line */
+  stroke: string | null
+  /** line thickness, points */
+  strokeWidth: number
+  /** stacking order (see stacking.ts) */
+  z?: number
+}
+
 /** The data of an imported picture. Several frames can show the same asset. */
 export interface Asset {
   /** the file's name, for the user */

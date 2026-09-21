@@ -1,4 +1,4 @@
-import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
+import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout } from './layout'
 
@@ -20,6 +20,8 @@ export interface DocContent {
   assets: Assets
   /** ruler guides, each on one page */
   guides: Guide[]
+  /** drawn shapes */
+  shapes: ShapeFrame[]
 }
 
 /** World rectangle of every page, indexed by page index. */
@@ -72,12 +74,16 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     const p = follow(im)
     return p ? [{ ...im, ...p }] : []
   })
+  const shapes = c.shapes.flatMap((sh) => {
+    const p = follow(sh)
+    return p ? [{ ...sh, ...p }] : []
+  })
   // a guide follows its page; the guides of a deleted page are gone
   const guides = c.guides.flatMap((g) => {
     const n = map(g.page)
     return n === null || n >= newDoc.pages ? [] : [n === g.page ? g : { ...g, page: n }]
   })
-  return { doc: newDoc, frames, images, assets: c.assets, guides }
+  return { doc: newDoc, frames, images, assets: c.assets, guides, shapes }
 }
 
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */

@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react'
 
 export type ToolId =
   | 'select' | 'direct' | 'page' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil'
-  | 'frame' | 'ellipse' | 'scissors' | 'transform' | 'gradient' | 'feather' | 'note' | 'eyedropper'
+  | 'rect' | 'ellipse' | 'polygon' | 'scissors' | 'transform' | 'gradient' | 'feather' | 'note' | 'eyedropper'
   | 'hand' | 'zoom'
 
 interface ToolDef {
@@ -31,8 +31,9 @@ export const TOOLS: ToolDef[] = [
   { id: 'page', label: 'עמוד', group: 2, key: 'Shift+P', code: 'KeyP', shift: true, enabled: true, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
   { id: 'collector', label: 'אוסף תוכן', group: 2, key: 'B', enabled: false, icon: <path d="M4 4h10v10H4zM10 10h10v10H10z" /> },
 
-  { id: 'frame', label: 'מסגרת מלבנית', group: 3, key: 'F', enabled: false, icon: <path d="M4 5h16v14H4zM4 5l16 14M20 5 4 19" /> },
-  { id: 'ellipse', label: 'אליפסה', group: 3, key: 'L', enabled: false, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
+  { id: 'rect', label: 'מלבן', group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="6" width="16" height="12" rx="1.500" /> },
+  { id: 'ellipse', label: 'אליפסה', group: 3, key: 'L', code: 'KeyL', enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
+  { id: 'polygon', label: 'מצולע', group: 3, key: 'Y', code: 'KeyY', enabled: true, icon: <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" /> },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: false, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', enabled: false, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', enabled: false, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
@@ -47,14 +48,19 @@ export const TOOLS: ToolDef[] = [
   { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
 ]
 
+/** tools that have a settings window (double click) */
+const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon']
+
 interface ToolboxProps {
   tool: ToolId
   onSelect: (id: ToolId) => void
+  /** double click on a tool: its settings */
+  onSettings?: (id: ToolId) => void
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
 }
 
-export function Toolbox({ tool, onSelect, previewMode, onPreviewMode }: ToolboxProps) {
+export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode }: ToolboxProps) {
   return (
     <div className="toolbox" role="toolbar" aria-orientation="vertical" aria-label="כלים">
       {TOOLS.map((t, i) => (
@@ -62,10 +68,11 @@ export function Toolbox({ tool, onSelect, previewMode, onPreviewMode }: ToolboxP
           {i > 0 && TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
           <button
             className={'tool' + (tool === t.id ? ' active' : '') + (t.enabled ? '' : ' off')}
-            title={t.enabled ? `${t.label}${t.key ? ` (${t.key})` : ''}` : `${t.label} — עדיין לא זמין`}
+            title={t.enabled ? `${t.label}${t.key ? ` (${t.key})` : ''}${SETTINGS_TOOLS.includes(t.id) ? ' · לחיצה כפולה להגדרות' : ''}` : `${t.label} — עדיין לא זמין`}
             aria-disabled={!t.enabled}
             aria-pressed={tool === t.id}
             onClick={() => t.enabled && onSelect(t.id)}
+            onDoubleClick={() => t.enabled && SETTINGS_TOOLS.includes(t.id) && onSettings?.(t.id)}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
               {t.icon}

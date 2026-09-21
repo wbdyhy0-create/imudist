@@ -72,3 +72,17 @@
 .doc-tab-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #ffb02e; }
 .doc-tab-new { flex: none; width: 26px; height: 24px; border-radius: 4px 4px 0 0; font-size: 18px; line-height: 20px; color: var(--text-dim); }
 .doc-tab-new:hover { background: var(--hover); color: #fff; }
+
+/* ── drawn shapes ─────────────────────────────────────────── */
+.viewport.shapetool, .viewport.shapetool .text-frame, .viewport.shapetool .image-frame { cursor: crosshair; }
+.shape-frame { position: absolute; pointer-events: none; }
+.shape-frame svg { display: block; overflow: visible; }
+.shape-frame.ghost { opacity: 0.75; }
+.shape-frame.selected::after { content: ''; position: absolute; inset: 0; outline: 1px solid var(--accent-line); pointer-events: none; }
+.shape-frame .handle { pointer-events: auto; border-color: var(--accent-line); }
+.corner-handle { position: absolute; z-index: 3; width: 10px; height: 10px; margin: -5px 0 0 -5px; transform: rotate(45deg); background: #fff; border: 1.5px solid #ffb02e; pointer-events: auto; cursor: pointer; }
+.corner-handle:hover, .corner-handle.hot { background: #ffb02e; border-color: #fff; }
+.swatch-chip.none { background: linear-gradient(135deg, transparent 45%, #ff5c5c 45% 55%, transparent 55%), #fff; }
+.shape-dialog .row-card svg { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.shape-dialog { gap: 14px; }
+.dlg-hint { margin: 0; color: var(--text-dim); line-height: 1.5; }

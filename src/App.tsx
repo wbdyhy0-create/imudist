@@ -6,7 +6,8 @@ import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
+import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { pickFiles } from './fileio'
@@ -20,6 +21,7 @@ const NO_FRAMES: TextFrame[] = []
 const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
+const NO_SHAPES: ShapeFrame[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -44,6 +46,8 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
   const [showPages, setShowPages] = useState(true)
+  /** what the shape tools make by a click, and the number of corners of the polygon tool */
+  const [shapePrefs, setShapePrefs] = useState<ShapePrefs>(DEFAULT_SHAPE_PREFS)
   /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
   const [placing, setPlacing] = useState<PlacedText | null>(null)
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
@@ -277,6 +281,10 @@ export default function App() {
               guides={preview ? NO_GUIDES : session.guides}
               onGuidesChange={preview ? noop : session.changeGuides}
               onShowGuides={() => setShowGuides(true)}
+              shapes={preview ? NO_SHAPES : session.shapes}
+              onShapesChange={preview ? noop : session.changeShapes}
+              shapePrefs={shapePrefs}
+              onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}
               onClose={preview ? undefined : () => session.closeDocument()}
               renderTabs={
