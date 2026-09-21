@@ -14,7 +14,7 @@ import {
   writeToHandle,
   type FileRef,
 } from './fileio'
-import { useHistory } from './history'
+import { COALESCE_MS, changeHistory, newHistory, redoHistory, replaceHistory, undoHistory, type History } from './history'
 import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
 import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
 
@@ -30,41 +30,76 @@ export interface PageOps {
   insert: (at: number, count: number) => void
   remove: (indices: number[]) => void
   move: (from: number, to: number) => void
-  /** replace the document's settings (Document Setup) */
+  /** replace the document's settings (Document Setup); `coalesceKey`: repeated calls with it become one undo step */
   setup: (next: DocSettings, coalesceKey?: string) => void
   /** change several parts of the content at once (e.g. placing a long text that added pages and frames, or a picture) */
   commit: (patch: Partial<DocContent>) => void
 }
 
+/** What the workspace remembers of a document while another one is shown. */
+export interface TabView {
+  zoom: number
+  /** the world point in the middle of the window */
+  cx: number
+  cy: number
+}
+
+/** One open document: its content with undo history, the file it lives in and what was last written to disk. */
+interface OpenDoc {
+  id: number
+  h: History<DocContent>
+  file: FileRef | null
+  /** the content that was last written to disk: the document is "modified" while it is a different object */
+  saved: DocContent
+  /** bumps when the document is reloaded in place (revert), so its view starts fresh */
+  rev: number
+  /** the key and time of the last change, to merge quick repeated changes into one undo step */
+  last: { key: string; at: number } | null
+  /** where the view was when the document was left */
+  view: TabView | null
+}
+
+/** A tab of the open documents. */
+export interface DocTab {
+  id: number
+  name: string
+  dirty: boolean
+}
+
 /**
- * Everything about the open document as a whole: its settings and content with one undo history, the file it lives
- * in, whether it has unsaved changes, and the open / save / close actions (with the "save changes?" questions).
+ * Everything about the open documents: for each its settings and content with an undo history, the file it lives in,
+ * whether it has unsaved changes; plus the open / save / close actions (with the "save changes?" questions).
+ * Several documents can be open at once (tabs); every action works on the active one unless it is given an id.
  */
 export function useDocumentSession() {
-  /** the open document; null on the home screen */
-  const history = useHistory<DocContent | null>(null)
-  const state = history.value
-  const doc = state?.doc ?? null
-  const frames = state?.frames ?? NO_FRAMES
-  const images = state?.images ?? NO_IMAGES
-  const assets = state?.assets ?? NO_ASSETS
-  const guides = state?.guides ?? NO_GUIDES
-  /** changes for every newly created or opened document, so views can start fresh */
-  const [docId, setDocId] = useState(0)
-  const [file, setFile] = useState<FileRef | null>(null)
-  /** the content that was last written to disk: the document is "modified" while it is a different object */
-  const [saved, setSaved] = useState<DocContent | null>(null)
+  const [docs, setDocs] = useState<OpenDoc[]>([])
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const nextId = useRef(1)
   const [modal, setModal] = useState<ModalSpec | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [recent, setRecent] = useState<RecentEntry[]>([])
   const toastTimer = useRef<number | undefined>(undefined)
 
-  const dirty = !!state && saved !== state
+  const active = docs.find((d) => d.id === activeId) ?? null
+  const state = active?.h.present ?? null
+  const doc = state?.doc ?? null
+  const frames = state?.frames ?? NO_FRAMES
+  const images = state?.images ?? NO_IMAGES
+  const assets = state?.assets ?? NO_ASSETS
+  const guides = state?.guides ?? NO_GUIDES
+  const file = active?.file ?? null
+  const dirty = !!active && active.saved !== active.h.present
+  const anyDirty = docs.some((d) => d.saved !== d.h.present)
 
   // The newest values, for actions that finish after an await (a file dialog) or were created by an older render
   // (menus are memoized): they must never act on, or write back, an outdated document.
-  const latest = useRef({ state, file, dirty })
-  latest.current = { state, file, dirty }
+  const latest = useRef({ docs, activeId })
+  latest.current = { docs, activeId }
+  const entryOf = (id: number | null) => (id === null ? undefined : latest.current.docs.find((d) => d.id === id))
+  const isDirty = (d: OpenDoc | undefined) => !!d && d.saved !== d.h.present
+
+  /** change one open document (by id) */
+  const update = (id: number, fn: (d: OpenDoc) => OpenDoc) => setDocs((list) => list.map((d) => (d.id === id ? fn(d) : d)))
 
   useEffect(() => {
     void listRecent().then(setRecent)
@@ -72,14 +107,14 @@ export function useDocumentSession() {
 
   // the browser asks before the tab is closed while there is unsaved work
   useEffect(() => {
-    if (!dirty) return
+    if (!anyDirty) return
     const onUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', onUnload)
     return () => window.removeEventListener('beforeunload', onUnload)
-  }, [dirty])
+  }, [anyDirty])
 
   const notify = (text: string) => {
     setToast(text)
@@ -90,48 +125,81 @@ export function useDocumentSession() {
   const fail = (title: string, e: unknown) =>
     setModal({ title, message: messageOf(e), buttons: [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }] })
 
+  // ── the active document's history ──────────────────────────────────────────────
+  /** apply a change to the active document; changes with the same key in quick succession merge into one undo step */
+  const change = (next: (prev: DocContent) => DocContent | null, key?: string) => {
+    const id = latest.current.activeId
+    if (id === null) return
+    const now = Date.now()
+    update(id, (d) => {
+      // decided from the state (not from a ref) so React may safely run the updater more than once
+      const merge = !!key && d.last?.key === key && now - d.last.at < COALESCE_MS
+      const h = changeHistory(d.h, (prev) => next(prev) ?? prev, merge)
+      return { ...d, h, last: key ? { key, at: now } : null }
+    })
+  }
+  const undo = () => {
+    const id = latest.current.activeId
+    if (id !== null) update(id, (d) => ({ ...d, h: undoHistory(d.h), last: null }))
+  }
+  const redo = () => {
+    const id = latest.current.activeId
+    if (id !== null) update(id, (d) => ({ ...d, h: redoHistory(d.h), last: null }))
+  }
+  const history = {
+    value: state,
+    canUndo: !!active && active.h.past.length > 0,
+    canRedo: !!active && active.h.future.length > 0,
+    undo,
+    redo,
+  }
+
   // ── editing ────────────────────────────────────────────────────────────────────
   // Every change is a function of the newest content, so two changes in the same moment can't overwrite each other.
   /** the text frames changed (typing, dragging …); changes with the same key merge into one undo step */
-  const changeFrames = (next: TextFrame[], key?: string) =>
-    history.change((s) => (s && next !== s.frames ? { ...s, frames: next } : s), key)
-  const changeImages = (next: ImageFrame[], key?: string) =>
-    history.change((s) => (s && next !== s.images ? { ...s, images: next } : s), key)
-  const changeGuides = (next: Guide[], key?: string) =>
-    history.change((s) => (s && next !== s.guides ? { ...s, guides: next } : s), key)
+  const changeFrames = (next: TextFrame[], key?: string) => change((s) => (next !== s.frames ? { ...s, frames: next } : s), key)
+  const changeImages = (next: ImageFrame[], key?: string) => change((s) => (next !== s.images ? { ...s, images: next } : s), key)
+  const changeGuides = (next: Guide[], key?: string) => change((s) => (next !== s.guides ? { ...s, guides: next } : s), key)
 
   const pages: PageOps = {
-    insert: (at, count) => history.change((s) => (s && insertPages(s, at, count)) || s),
-    remove: (indices) => history.change((s) => (s && deletePages(s, indices)) || s),
-    move: (from, to) => history.change((s) => (s && movePage(s, from, to)) || s),
-    setup: (next, key) => history.change((s) => (s ? applySettings(s, next) : s), key),
-    commit: (patch) => history.change((s) => (s ? { ...s, ...patch } : s)),
+    insert: (at, count) => change((s) => insertPages(s, at, count) || s),
+    remove: (indices) => change((s) => deletePages(s, indices) || s),
+    move: (from, to) => change((s) => movePage(s, from, to) || s),
+    setup: (next, key) => change((s) => applySettings(s, next), key),
+    commit: (patch) => change((s) => ({ ...s, ...patch })),
   }
-  const install = (content: DocContent, ref: FileRef | null) => {
-    history.reset(content)
-    setDocId((n) => n + 1)
-    setFile(ref)
-    setSaved(content)
+
+  // ── tabs ───────────────────────────────────────────────────────────────────────
+  /** a document becomes a new tab and the active one */
+  const addDoc = (content: DocContent, ref: FileRef | null) => {
+    const id = nextId.current++
+    setDocs((list) => [...list, { id, h: newHistory(content), file: ref, saved: content, rev: 0, last: null, view: null }])
+    setActiveId(id)
   }
+  const switchTo = (id: number) => {
+    if (latest.current.docs.some((d) => d.id === id)) setActiveId(id)
+  }
+  /** the workspace tells where the view is, so it can be restored when the document is shown again */
+  const rememberView = (id: number, view: TabView) => update(id, (d) => ({ ...d, view }))
+
+  const tabs: DocTab[] = docs.map((d) => ({ id: d.id, name: d.h.present.doc.name, dirty: d.saved !== d.h.present }))
 
   const remember = (handle: FileSystemFileHandle | null) => {
     if (handle) void addRecent(handle).then(setRecent)
   }
 
   // ── saving ─────────────────────────────────────────────────────────────────────
-  /** Save the document to a file of the user's choice. `copy`: write a copy and keep working on the original. */
-  const saveAs = async (copy = false): Promise<boolean> => {
-    const start = latest.current.state // exactly what is written; edits made while the dialog is open stay "unsaved"
-    if (!start) return false
+  /** Save a document (the active one by default) to a file of the user's choice. `copy`: write a copy and keep working on the original. */
+  const saveAs = async (copy = false, id: number | null = latest.current.activeId): Promise<boolean> => {
+    const entry = entryOf(id)
+    if (!entry || id === null) return false
+    const start = entry.h.present // exactly what is written; edits made while the dialog is open stay "unsaved"
     const text = serializeDocument(start)
     try {
       if (!hasFilePicker) {
         const name = fileNameFor(start.doc.name)
         downloadText(name, text)
-        if (!copy) {
-          setFile({ name, handle: null })
-          setSaved(start)
-        }
+        if (!copy) update(id, (d) => ({ ...d, file: { name, handle: null }, saved: start }))
         notify(`הקובץ ${name} הורד לתיקיית ההורדות`)
         return true
       }
@@ -145,13 +213,12 @@ export function useDocumentSession() {
       const name = baseName(ref.name)
       const rename = (s: DocContent): DocContent => (name && name !== s.doc.name ? { ...s, doc: { ...s.doc, name } } : s)
       const savedContent = rename(start)
-      const now = latest.current.state
+      const now = entryOf(id)?.h.present
       if (now && savedContent !== start) {
         // renaming isn't an undoable edit: give earlier steps the new name as well
-        history.replace(now === start ? savedContent : rename(now), (s) => (s ? rename(s) : s))
+        update(id, (d) => ({ ...d, h: replaceHistory(d.h, now === start ? savedContent : rename(now), rename) }))
       }
-      setFile(ref)
-      setSaved(savedContent)
+      update(id, (d) => ({ ...d, file: ref, saved: savedContent }))
       remember(ref.handle)
       notify(`נשמר: ${ref.name}`)
       return true
@@ -161,13 +228,15 @@ export function useDocumentSession() {
     }
   }
   /** Save in place; asks for a file the first time. Resolves to false if it was cancelled or failed. */
-  const save = async (): Promise<boolean> => {
-    const { state: start, file: target } = latest.current
-    if (!start) return false
-    if (!target?.handle) return saveAs()
+  const save = async (id: number | null = latest.current.activeId): Promise<boolean> => {
+    const entry = entryOf(id)
+    if (!entry || id === null) return false
+    const start = entry.h.present
+    const target = entry.file
+    if (!target?.handle) return saveAs(false, id)
     try {
       await writeToHandle(target.handle, serializeDocument(start))
-      setSaved(start)
+      update(id, (d) => ({ ...d, saved: start }))
       remember(target.handle)
       notify(`נשמר: ${target.name}`)
       return true
@@ -176,21 +245,22 @@ export function useDocumentSession() {
       return false
     }
   }
-  // ── replacing the open document ────────────────────────────────────────────────
-  /** Run `next` now, or after asking what to do with unsaved changes. */
-  const guard = (next: () => void) => {
-    const current = latest.current
-    if (!current.dirty || !current.state) return next()
+
+  // ── closing ────────────────────────────────────────────────────────────────────
+  /** Run `next` now, or after asking what to do with the unsaved changes of document `id`. */
+  const guard = (id: number, next: () => void) => {
+    const entry = entryOf(id)
+    if (!entry || !isDirty(entry)) return next()
     setModal({
       title: 'לשמור את השינויים?',
-      message: `במסמך "${current.state.doc.name}" יש שינויים שלא נשמרו. מה לעשות?`,
+      message: `במסמך "${entry.h.present.doc.name}" יש שינויים שלא נשמרו. מה לעשות?`,
       buttons: [
         {
           label: 'שמור',
           kind: 'primary',
           run: async () => {
             setModal(null)
-            if (await save()) next()
+            if (await save(id)) next()
           },
         },
         {
@@ -205,27 +275,34 @@ export function useDocumentSession() {
     })
   }
 
-  const createDocument = (d: DocSettings, onDone?: () => void) =>
-    guard(() => {
-      install({ doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES }, null)
-      onDone?.()
-    })
+  /** remove a document from the open ones; the tab next to it (or none) becomes active */
+  const removeDoc = (id: number) => {
+    const list = latest.current.docs
+    const at = list.findIndex((d) => d.id === id)
+    if (at < 0) return
+    const rest = list.filter((d) => d.id !== id)
+    setDocs(rest)
+    if (latest.current.activeId === id) setActiveId(rest.length ? rest[Math.min(at, rest.length - 1)].id : null)
+  }
 
-  const closeDocument = () =>
-    guard(() => {
-      history.reset(null)
-      setFile(null)
-      setSaved(null)
-    })
+  /** New documents open in a new tab; the ones already open stay as they are. */
+  const createDocument = (d: DocSettings, onDone?: () => void) => {
+    addDoc({ doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES }, null)
+    onDone?.()
+  }
 
+  /** Close a document (the active one by default), asking about unsaved changes first. */
+  const closeDocument = (id: number | null = latest.current.activeId) => {
+    if (id !== null) guard(id, () => removeDoc(id))
+  }
+
+  // ── opening files ──────────────────────────────────────────────────────────────
   const loadText = (text: string, ref: FileRef) => {
     try {
       const parsed = parseDocument(text, baseName(ref.name))
-      guard(() => {
-        install(parsed, ref)
-        remember(ref.handle)
-        notify(`נפתח: ${ref.name}`)
-      })
+      addDoc(parsed, ref)
+      remember(ref.handle)
+      notify(`נפתח: ${ref.name}`)
     } catch (e) {
       fail('לא ניתן לפתוח את הקובץ', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
@@ -253,11 +330,13 @@ export function useDocumentSession() {
 
   /** Throw away the changes made since the last save and reload the file. */
   const revert = () => {
-    const handle = file?.handle
-    if (!handle || !doc) return
+    const id = latest.current.activeId
+    const current = entryOf(id)
+    const handle = current?.file?.handle
+    if (id === null || !handle || !current) return
     setModal({
       title: 'לחזור לגרסה השמורה?',
-      message: `כל השינויים ב-"${doc.name}" מאז השמירה האחרונה יאבדו.`,
+      message: `כל השינויים ב-"${current.h.present.doc.name}" מאז השמירה האחרונה יאבדו.`,
       buttons: [
         {
           label: 'חזור לגרסה השמורה',
@@ -265,7 +344,8 @@ export function useDocumentSession() {
           run: async () => {
             setModal(null)
             try {
-              install(parseDocument(await (await handle.getFile()).text(), baseName(handle.name)), file)
+              const parsed = parseDocument(await (await handle.getFile()).text(), baseName(handle.name))
+              update(id, (d) => ({ ...d, h: newHistory(parsed), saved: parsed, last: null, rev: d.rev + 1, view: null }))
               notify('המסמך הוחזר לגרסה השמורה')
             } catch (e) {
               fail('לא ניתן לחזור לגרסה השמורה', e)
@@ -279,7 +359,8 @@ export function useDocumentSession() {
 
   return {
     doc,
-    docId,
+    /** changes for every newly shown, created, opened or reloaded document, so views can start fresh */
+    docId: active ? `${active.id}.${active.rev}` : '',
     frames,
     images,
     assets,
@@ -294,6 +375,11 @@ export function useDocumentSession() {
     modal,
     toast,
     recent,
+    tabs,
+    activeId,
+    switchTo,
+    view: active?.view ?? null,
+    rememberView,
     createDocument,
     closeDocument,
     openFile,

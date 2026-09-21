@@ -4,6 +4,7 @@ import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
 import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
+import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type TextFrame } from './document'
 import { isTextEditor, isTyping } from './dom'
@@ -117,11 +118,13 @@ export default function App() {
 
         newDocument: () => setDialog('new'),
         closeDocument: () => sessionRef.current.closeDocument(),
+        openDocs: session.tabs.map((t) => ({ id: t.id, name: t.name, active: t.id === session.activeId })),
+        switchDoc: (id) => sessionRef.current.switchTo(id),
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value],
+    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
   )
 
   useEffect(() => {
@@ -245,7 +248,25 @@ export default function App() {
               onGuidesChange={preview ? noop : session.changeGuides}
               onShowGuides={() => setShowGuides(true)}
               dirty={!preview && session.dirty}
-              onClose={preview ? undefined : session.closeDocument}
+              onClose={preview ? undefined : () => session.closeDocument()}
+              renderTabs={
+                preview
+                  ? undefined
+                  : (zoomText) => (
+                      <DocTabs
+                        tabs={session.tabs}
+                        activeId={session.activeId}
+                        zoomText={zoomText}
+                        onSelect={session.switchTo}
+                        onClose={(id) => session.closeDocument(id)}
+                        onNew={() => setDialog('new')}
+                      />
+                    )
+              }
+              initialView={preview ? null : session.view}
+              onLeaveView={(v) => {
+                if (!preview && session.activeId !== null) session.rememberView(session.activeId, v)
+              }}
             />
           ) : (
             <Home

@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
@@ -64,7 +65,7 @@ import { StatusBar, formatZoom } from './StatusBar'
 import { UNIT_OPTIONS, formatLength, type Unit } from '../units'
 import { TextFrameView } from './TextFrameView'
 import { TOOLS, Toolbox, type ToolId } from './Toolbox'
-import type { PageOps } from '../useDocumentSession'
+import type { PageOps, TabView } from '../useDocumentSession'
 
 /** pasteboard around the pages, screen px */
 const PAD = 120
@@ -145,6 +146,12 @@ interface Props {
   /** the document has changes that are not saved yet */
   dirty?: boolean
   onClose?: () => void
+  /** the tab strip of the open documents; it gets the zoom text of this view to show on the active tab */
+  renderTabs?: (zoomText: string) => ReactNode
+  /** where the view was when this document was left: shown again instead of fitting the first spread */
+  initialView?: TabView | null
+  /** called when the workspace goes away (another document is shown) with the view it had */
+  onLeaveView?: (view: TabView) => void
   ref?: Ref<WorkspaceHandle>
 }
 
@@ -196,6 +203,9 @@ export function Workspace({
   onShowGuides,
   dirty,
   onClose,
+  renderTabs,
+  initialView,
+  onLeaveView,
   ref,
 }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
@@ -741,9 +751,28 @@ export function Workspace({
 
   const ready = vp.w > 0 && vp.h > 0
   // layout effect: the fit lands before the first paint, so there is no flash at 100%
+  const startView = useRef(initialView ?? null)
   useLayoutEffect(() => {
-    if (ready) fitSpread(0)
+    if (!ready) return
+    const back = startView.current
+    if (back) {
+      // coming back to a document: the view is where it was left
+      startView.current = null
+      applyView(back.zoom, back.cx, back.cy, vp.w / 2, vp.h / 2)
+    } else fitSpread(0)
   }, [fitKey, ready])
+
+  // when this document goes out of view, tell where the view was
+  const leaveView = useRef(onLeaveView)
+  leaveView.current = onLeaveView
+  const lastView = useRef<TabView | null>(null)
+  if (ready) lastView.current = { zoom, cx: (scroll.x + vp.w / 2 - tx) / zoom, cy: (scroll.y + vp.h / 2 - ty) / zoom }
+  useEffect(
+    () => () => {
+      if (lastView.current) leaveView.current?.(lastView.current)
+    },
+    [],
+  )
 
   // Ctrl/Alt + wheel (also trackpad pinch) zooms towards the pointer; must be non-passive
   useEffect(() => {
@@ -1357,16 +1386,20 @@ export function Workspace({
         />
       )}
       <div className="doc-tabs">
-        <div className="doc-tab">
-          <span>
-            {doc.name}{dirty ? ' *' : ''} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
-          </span>
-          {onClose && (
-            <button className="doc-tab-close" aria-label="סגור מסמך" onClick={onClose}>
-              ×
-            </button>
-          )}
-        </div>
+        {renderTabs ? (
+          renderTabs(formatZoom(zoom))
+        ) : (
+          <div className="doc-tab active">
+            <span>
+              {doc.name}{dirty ? ' *' : ''} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
+            </span>
+            {onClose && (
+              <button className="doc-tab-close" aria-label="סגור מסמך" onClick={onClose}>
+                ×
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="ws-main">

@@ -34,6 +34,9 @@ export interface MenuContext {
   closeDocument: () => void
   toggleRulers: () => void
   toggleGuides: () => void
+  /** the open documents, for the Window menu */
+  openDocs: { id: number; name: string; active: boolean }[]
+  switchDoc: (id: number) => void
 }
 
 const off = (label: string, shortcut?: string): MenuItem => ({ label, shortcut, disabled: true })
@@ -165,7 +168,17 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
       ],
     },
-    { label: 'חלון', items: [off('כלים'), { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages }, { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps }] },
+    {
+      label: 'חלון',
+      items: [
+        off('כלים'),
+        { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages },
+        { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps },
+        ...(c.openDocs.length > 0
+          ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
+          : []),
+      ],
+    },
     { label: 'עזרה', items: [off('אודות')] },
   ]
 }
