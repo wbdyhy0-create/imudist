@@ -317,6 +317,16 @@ export function useDocumentSession() {
     }
   }
 
+  /** open a file the user dropped or double-clicked; with its handle the document can be saved back in place */
+  const openTextFile = async (file: File, handle: FileSystemFileHandle | null = null) => {
+    try {
+      loadText(await file.text(), { name: file.name, handle })
+    } catch (e) {
+      fail('לא ניתן לפתוח את הקובץ', e)
+    }
+  }
+  const openHandle = async (handle: FileSystemFileHandle) => openTextFile(await handle.getFile(), handle)
+
   const openRecent = async (entry: RecentEntry) => {
     try {
       if (!(await ensureReadPermission(entry.handle))) return
@@ -383,6 +393,8 @@ export function useDocumentSession() {
     createDocument,
     closeDocument,
     openFile,
+    openTextFile,
+    openHandle,
     openRecent,
     save,
     saveAs,

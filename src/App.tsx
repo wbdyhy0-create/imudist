@@ -10,6 +10,7 @@ import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { pickFiles } from './fileio'
+import { FILE_EXT } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
@@ -22,6 +23,7 @@ const NO_GUIDES: Guide[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
+const isDocumentFile = (f: File) => f.name.toLowerCase().endsWith(FILE_EXT)
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
@@ -54,7 +56,10 @@ export default function App() {
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
    * the text cursor. Only one kind is loaded at a time.
    */
-  const placeFiles = async (files: File[]) => {
+  const placeFiles = async (all: File[]) => {
+    // an Imudist document is opened, not placed
+    for (const f of all.filter(isDocumentFile)) await sessionRef.current.openTextFile(f)
+    const files = all.filter((f) => !isDocumentFile(f))
     const pictures = files.filter(isImageFile)
     try {
       if (pictures.length > 0) {
@@ -83,7 +88,7 @@ export default function App() {
   }
   const importFiles = async () => {
     const files = await pickFiles(
-      '.docx,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      `${FILE_EXT},.docx,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -184,10 +189,27 @@ export default function App() {
     const onDrop = (e: DragEvent) => {
       if (!hasFiles(e)) return
       e.preventDefault()
-      const files = Array.from(e.dataTransfer?.files ?? [])
+      // the items are only valid during the event: ask for the handles (they let a dropped document be saved in place) now
+      const items = Array.from(e.dataTransfer?.items ?? []).filter((it) => it.kind === 'file')
+      const dropped = items.map((it) => {
+        const file = it.getAsFile()
+        const handle = file && isDocumentFile(file) ? (it as DataTransferItem & { getAsFileSystemHandle?: () => Promise<FileSystemHandle | null> }).getAsFileSystemHandle?.() : undefined
+        return { file, handle }
+      })
+      const files = dropped.map((d) => d.file).filter((f): f is File => !!f)
       if (files.length === 0) return
-      if (!doc) session.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
-      else void placeFiles(files)
+      void (async () => {
+        // Imudist documents open anywhere, even on the start screen
+        for (const d of dropped) {
+          if (!d.file || !isDocumentFile(d.file)) continue
+          const h = await d.handle?.catch(() => null)
+          await sessionRef.current.openTextFile(d.file, h && h.kind === 'file' ? (h as FileSystemFileHandle) : null)
+        }
+        const rest = files.filter((f) => !isDocumentFile(f))
+        if (rest.length === 0) return
+        if (!doc) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+        else void placeFiles(rest)
+      })()
     }
     window.addEventListener('dragover', onOver)
     window.addEventListener('drop', onDrop)
@@ -196,6 +218,14 @@ export default function App() {
       window.removeEventListener('drop', onDrop)
     }
   }, [doc])
+  // double-clicking a .imudist file in Windows (when the app is installed) hands the file to the running app
+  useEffect(() => {
+    const queue = (window as unknown as { launchQueue?: { setConsumer: (fn: (p: { files: FileSystemFileHandle[] }) => void) => void } }).launchQueue
+    queue?.setConsumer((params) => {
+      for (const handle of params.files) void sessionRef.current.openHandle(handle)
+    })
+  }, [])
+
   // the browser tab shows the document's name, with a dot while it has unsaved changes
   useEffect(() => {
     document.title = doc ? `${session.dirty ? '• ' : ''}${doc.name} — ${APP_NAME}` : APP_NAME
