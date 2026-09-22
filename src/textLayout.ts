@@ -5,6 +5,7 @@ import {
   LINE_HEIGHT,
   paraGaps as paraGapsOf,
   paraLineHeightOf,
+  wordSpacingPt,
   type ImageFrame,
   type Run,
   type TextFrame,
@@ -79,6 +80,10 @@ function configure(m: HTMLDivElement, style: TextStyle) {
   m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   m.style.fontSize = `${style.fontSize}px`
   m.style.lineHeight = `${style.leading ?? defaultLeading(style)}px`
+  // must match TextFrameView.tsx's real render exactly: word-spacing changes where lines wrap, not just how they
+  // look, so a justified paragraph whose extra spacing this measurer ignored would wrap shorter than it truly can,
+  // under-reporting height and letting text quietly overflow the frame it was "measured" to fit
+  m.style.wordSpacing = wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : ''
 }
 
 const isSpace = (c: string) => /\s/.test(c)
@@ -198,6 +203,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
     // and the id, size and wrap areas of every frame in the thread
     const sig =
       `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
+      `${style.wordSpacingMin}|${style.wordSpacingMax}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')

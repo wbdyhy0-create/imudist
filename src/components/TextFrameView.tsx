@@ -1,5 +1,5 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
+import { defaultLeading, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -47,22 +47,6 @@ function withMarks(
     }
   }
   return nodes
-}
-
-/**
- * Extra space to add between words while a paragraph is justified, so it can lean on `wordSpacingMin` / `wordSpacingMax`
- * a little instead of only on the browser's own (unbounded) stretching. Plain (non-justified) text never gets this: it
- * always keeps the normal 100% spacing. This nudges the WHOLE frame by one fixed amount, in world points — a real
- * per-line minimum/maximum, chosen line by line the way a proper justification engine would, is a much bigger feature
- * this does not attempt.
- */
-function wordSpacingPt(style: TextStyle): number {
-  if (style.align !== 'justify') return 0
-  const min = style.wordSpacingMin ?? 90
-  const max = style.wordSpacingMax ?? 120
-  const percent = (min + max) / 2
-  // a typical space is about a quarter of an em; word-spacing is an amount ADDED to it, not a multiplier
-  return ((percent - 100) / 100) * 0.25 * style.fontSize
 }
 
 interface Props {

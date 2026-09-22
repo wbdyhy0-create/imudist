@@ -130,6 +130,22 @@ export function paraLineHeightOf(style: TextStyle): number | undefined {
 }
 
 /**
+ * Extra space (points, unscaled) to add between words while a paragraph is justified, so it can lean on
+ * `wordSpacingMin` / `wordSpacingMax` a little instead of only on the browser's own (unbounded) stretching. Plain
+ * (non-justified) text never gets this: it always keeps the normal 100% spacing. Shared by TextFrameView.tsx (the
+ * real render's CSS `word-spacing`) and textLayout.ts (the hidden measurer) — they MUST agree, or the measurer
+ * wraps lines shorter/longer than the real render actually can, silently mis-measuring a frame's fit.
+ */
+export function wordSpacingPt(style: TextStyle): number {
+  if (style.align !== 'justify') return 0
+  const min = style.wordSpacingMin ?? 90
+  const max = style.wordSpacingMax ?? 120
+  const percent = (min + max) / 2
+  // a typical space is about a quarter of an em; word-spacing is an amount ADDED to it, not a multiplier
+  return ((percent - 100) / 100) * 0.25 * style.fontSize
+}
+
+/**
  * The gap after the "\n" ending each paragraph of `text` (one entry per paragraph, so `paraGaps(...)[i]` is the
  * gap after paragraph `i` — the last paragraph has no entry, since there's nothing after it to gap from; its own
  * trailing space, if any, is the frame's own padding-bottom, same as the story-wide spaceAfter always was).
