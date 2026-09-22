@@ -44,7 +44,7 @@ function getMeasurer(): HTMLDivElement {
       padding: '0',
       whiteSpace: 'pre-wrap',
       overflowWrap: 'anywhere',
-      unicodeBidi: 'plaintext',
+      // matches .rich-editor / .text-frame-body: base direction is always RTL (dir='rtl' above), not guessed per-text
       textRendering: 'geometricPrecision',
       lineHeight: String(LINE_HEIGHT),
     })

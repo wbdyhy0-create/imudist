@@ -237,10 +237,14 @@ svg { display: block; }
 .text-frame { position: absolute; box-sizing: border-box; color: #111; line-height: 1.25; text-rendering: geometricPrecision; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
-.text-frame-body { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+/* unicode-bidi stays "normal" (not "plaintext"): the frame's own base direction is always RTL, fixed by dir="rtl", never
+   guessed from whichever language happens to be typed first (that guess is what "plaintext" does, and a frame that starts
+   with an English word would then read as a whole LTR paragraph). Mixed text (Hebrew, English, digits, punctuation) still
+   reorders correctly within that — that part is the browser's ordinary bidi algorithm, not tied to this setting. */
+.text-frame-body { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wrap-float { pointer-events: none; user-select: none; }
 .rich-editor {
-  display: block; width: 100%; height: 100%; overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext;
+  display: block; width: 100%; height: 100%; overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere;
   user-select: text; cursor: text; caret-color: #111; text-rendering: inherit;
 }
 .text-frame-body .sel { background: #b3d4ff; }
