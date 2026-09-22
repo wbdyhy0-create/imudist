@@ -101,6 +101,37 @@ export function editStory(
   }
 }
 
+/** [from, to) ranges of `text` that are "extra" whitespace: every space or paragraph break beyond the first of a run. */
+function extraSpacingRanges(text: string, from: number, to: number): [number, number][] {
+  const ranges: [number, number][] = []
+  let i = Math.max(from, 1) // a run can never start at 0: there is no character before it to repeat
+  while (i < to) {
+    const c = text[i]
+    if ((c === ' ' || c === '\n') && text[i - 1] === c) {
+      let j = i + 1
+      while (j < to && text[j] === c) j++
+      ranges.push([i, j])
+      i = j
+    } else i++
+  }
+  return ranges
+}
+
+/**
+ * Removes repeated spaces and empty paragraphs (2+ spaces → 1, 2+ consecutive paragraph breaks → 1) from [from, to)
+ * of the story (the whole story by default). One story-wide edit, reusing `editStory` per run so styling and run
+ * merging stay correct; ranges are applied back to front so earlier offsets stay valid.
+ */
+export function cleanSpacing(text: string, runs: Run[], base: CharStyle, from = 0, to = text.length): { text: string; runs: Run[] } {
+  const ranges = extraSpacingRanges(text, from, to)
+  let out = { text, runs }
+  for (let k = ranges.length - 1; k >= 0; k--) {
+    const [a, b] = ranges[k]
+    out = editStory(out.text, out.runs, a, b, '', base)
+  }
+  return out
+}
+
 /** The smallest edit that turns `oldText` into `newText` (common prefix / suffix removed). */
 export function diffEdit(oldText: string, newText: string): { from: number; to: number; insert: string } {
   let p = 0

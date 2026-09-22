@@ -130,7 +130,17 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('עמוד אחרון', 'Ctrl+Shift+PageDown', (ws) => ws.lastPage()),
       ],
     },
-    { label: 'טיפוגרפיה', items: [off('גופן'), off('גודל'), sep, off('יצירת קווי מתאר', 'Ctrl+Shift+O')] },
+    {
+      label: 'טיפוגרפיה',
+      items: [
+        off('גופן'),
+        off('גודל'),
+        sep,
+        off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
+        sep,
+        doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
+      ],
+    },
     {
       label: 'אובייקט',
       items: [

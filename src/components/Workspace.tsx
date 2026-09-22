@@ -47,7 +47,7 @@ import {
   type TextStyle,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, linkFrames, normalizeDeg, removeFrame, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -63,7 +63,7 @@ import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
+import { charStyleOf, cleanSpacing, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { wrapFloatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
@@ -136,6 +136,8 @@ export interface WorkspaceHandle {
   createGuides: () => void
   /** delete the guides of the selected page */
   clearGuides: () => void
+  /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
+  cleanSpacing: () => void
 }
 
 /**
@@ -628,6 +630,25 @@ export function Workspace({
   const applyParagraphStyle = (id: string, patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => {
     const ids = new Set(chainOf(frames, id).map((f) => f.id))
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `paragraph:${id}:${Object.keys(patch).join(',')}`)
+  }
+
+  /**
+   * Removes repeated spaces and empty paragraphs: from the selected text if there is one (Ctrl+A first selects the
+   * whole story, so that also works), otherwise from every story in the document. One undo step either way.
+   */
+  const cleanSpacingCmd = () => {
+    if (textSel && textSel.a !== textSel.b) {
+      const head = frames.find((f) => f.id === textSel.headId)
+      if (!head) return
+      const runs = normalizeRuns(head.text, head.runs, head)
+      const { text, runs: newRuns } = cleanSpacing(head.text, runs, head, textSel.a, Math.min(textSel.b, head.text.length))
+      onFramesChange(frames.map((f) => (f.id === head.id ? { ...f, text, runs: newRuns } : f)))
+      setTextSel(null)
+      return
+    }
+    const cleaned = new Map(headFrames(frames).map((h) => [h.id, cleanSpacing(h.text, normalizeRuns(h.text, h.runs, h), h)]))
+    if (cleaned.size === 0) return
+    onFramesChange(frames.map((f) => { const c = cleaned.get(f.id); return c ? { ...f, text: c.text, runs: c.runs } : f }))
   }
 
   const completeLink = (toId: string) => {
@@ -1137,6 +1158,7 @@ export function Workspace({
     clearGuides: () => {
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
     },
+    cleanSpacing: cleanSpacingCmd,
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────

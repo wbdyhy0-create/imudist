@@ -13,6 +13,12 @@ export const styleOf = (f: TextFrame): TextStyle => ({
   wordSpacingMax: f.wordSpacingMax,
 })
 
+/** The first frame of every story in the document (one per thread, in no particular order). */
+export function headFrames(frames: TextFrame[]): TextFrame[] {
+  const hasPrev = new Set(frames.map((f) => f.next).filter((n): n is string => !!n))
+  return frames.filter((f) => !hasPrev.has(f.id))
+}
+
 /** The frames of the story that `id` belongs to, first frame first (empty if `id` is unknown). */
 export function chainOf(frames: TextFrame[], id: string): TextFrame[] {
   const byId = new Map(frames.map((f) => [f.id, f]))
