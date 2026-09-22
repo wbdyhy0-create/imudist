@@ -85,7 +85,7 @@ import { SpreadView } from './SpreadView'
 import { StatusBar, formatZoom } from './StatusBar'
 import { UNIT_OPTIONS, formatLength, type Unit } from '../units'
 import { TextFrameView } from './TextFrameView'
-import { TOOLS, Toolbox, type ToolId } from './Toolbox'
+import { FRAME_TOOL_KIND, TOOLS, Toolbox, type ToolId } from './Toolbox'
 import type { PageOps, TabView } from '../useDocumentSession'
 
 /** pasteboard around the pages, screen px */
@@ -318,7 +318,7 @@ export function Workspace({
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
   const dragSeq = useRef(0)
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
-  const shapeStart = useRef<{ kind: DrawKind; x: number; y: number } | null>(null)
+  const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
   /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
   const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
@@ -1326,7 +1326,7 @@ export function Workspace({
   // straight into it, clipped to its outline, with no click needed
   useEffect(() => {
     const sh = selectedId ? shapes.find((x) => x.id === selectedId) : undefined
-    if (placingImages.length === 0 || !sh || sh.image) return
+    if (placingImages.length === 0 || !sh || !sh.frame || sh.image) return
     const { asset, assetId } = placingImages[0]
     pageOps.commit({
       shapes: shapes.map((x) => (x.id === sh.id ? { ...x, image: { assetId, fit: 'fill' as const } } : x)),
@@ -1394,7 +1394,7 @@ export function Workspace({
     let best: ShapeFrame | undefined
     let bestRank = -1
     for (const sh of shapes) {
-      if (sh.image) continue
+      if (!sh.frame || sh.image) continue
       if (x < sh.x || x > sh.x + sh.w || y < sh.y || y > sh.y + sh.h) continue
       const info = ringInfo(sh)
       if (!info || !pointInRing(info, [x - sh.x, y - sh.y])) continue
@@ -1578,7 +1578,7 @@ export function Workspace({
   }
 
   /** a new shape of a kind, with the tool's settings */
-  const newShape = (kind: DrawKind, box: Box): ShapeFrame => {
+  const newShape = (kind: DrawKind, box: Box, frame: boolean): ShapeFrame => {
     const r = kind === 'rect' ? shapePrefs.rect.radius : 0
     return {
       id: newFrameId(),
@@ -1586,6 +1586,7 @@ export function Workspace({
       ...box,
       ...(kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
       ...(r > 0 ? { radii: [r, r, r, r] as [number, number, number, number] } : {}),
+      ...(frame ? { frame: true as const } : {}),
       fill: DEFAULT_SHAPE_FILL,
       stroke: DEFAULT_SHAPE_STROKE,
       strokeWidth: 1,
@@ -2035,9 +2036,10 @@ export function Workspace({
         setSelectedId(null)
         setPathEdit(null)
       }
-    } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && e.button === 0) {
+    } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || FRAME_TOOL_KIND[tool]) && e.button === 0) {
+      const frameKind = FRAME_TOOL_KIND[tool]
       const p = snapPoint(toWorld(e.clientX, e.clientY), false).p
-      shapeStart.current = { kind: tool, x: p.x, y: p.y }
+      shapeStart.current = { kind: frameKind ?? (tool as DrawKind), x: p.x, y: p.y, frame: !!frameKind }
       shapeBoxRef.current = null
       setSelectedId(null)
       setEditingId(null)
@@ -2201,7 +2203,7 @@ export function Workspace({
     setShapeBox(null)
     const pref = shapePrefs[s0.kind]
     const size = box && box.w >= MIN_FRAME_PT && box.h >= MIN_FRAME_PT ? box : { x: s0.x - pref.w / 2, y: s0.y - pref.h / 2, w: pref.w, h: pref.h }
-    const shape = newShape(s0.kind, size)
+    const shape = newShape(s0.kind, size, s0.frame)
     onShapesChange([...shapes, shape])
     setSelectedId(shape.id)
     setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
@@ -2383,7 +2385,7 @@ export function Workspace({
             ? ' zoomtool'
             : tool === 'page'
               ? ' pagetool'
-              : tool === 'rect' || tool === 'ellipse' || tool === 'polygon'
+              : tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || FRAME_TOOL_KIND[tool]
                 ? ' shapetool'
                 : tool === 'pathtype'
                   ? ' pathtool' + (pathHover ? ' overpath' : '')
@@ -2531,7 +2533,7 @@ export function Workspace({
         <Toolbox
           tool={space ? 'hand' : tool}
           onSelect={setTool}
-          onSettings={(id) => (id === 'rect' || id === 'ellipse' || id === 'polygon') && setToolDialog(id)}
+          onSettings={(id) => setToolDialog(id === 'rect' || id === 'ellipse' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
           previewMode={previewMode}
           onPreviewMode={onPreviewMode}
         />

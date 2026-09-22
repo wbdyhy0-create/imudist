@@ -345,6 +345,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...parsePathText(raw.pathText),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       ...(image ? { image } : {}),
+      ...(raw.frame === true ? { frame: true as const } : {}),
       fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
       strokeWidth: num(raw.strokeWidth, 1, 0, 200),

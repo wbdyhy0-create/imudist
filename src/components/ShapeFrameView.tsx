@@ -165,7 +165,7 @@ export function ShapeFrameView({
             <path d={shapePath(shape, zoom)} fill="none" fillRule="evenodd" stroke={shape.stroke ?? 'none'} strokeWidth={shape.strokeWidth * zoom} strokeLinejoin="round" pointerEvents="none" />
           </>
         )}
-        {!shape.image && !ghost && showEdge && Math.min(w, h) >= 20 && (
+        {shape.frame && !shape.image && !ghost && showEdge && Math.min(w, h) >= 20 && (
           <g className="empty-frame-icon" pointerEvents="none" transform={`translate(${w / 2} ${h / 2}) scale(${Math.min(1, Math.min(w, h) / 70)})`}>
             <rect x="-15" y="-11" width="30" height="22" rx="2" />
             <circle cx="-7" cy="-4" r="3" />

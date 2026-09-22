@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 
 export type ToolId =
   | 'select' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil'
-  | 'rect' | 'ellipse' | 'polygon' | 'scissors' | 'transform' | 'gradient' | 'feather' | 'note' | 'eyedropper'
+  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'feather' | 'note' | 'eyedropper'
   | 'hand' | 'zoom'
 
 interface ToolDef {
@@ -35,6 +35,50 @@ export const TOOLS: ToolDef[] = [
   { id: 'rect', label: 'מלבן', group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="6" width="16" height="12" rx="1.500" /> },
   { id: 'ellipse', label: 'אליפסה', group: 3, key: 'L', code: 'KeyL', enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
   { id: 'polygon', label: 'מצולע', group: 3, key: 'Y', code: 'KeyY', enabled: true, icon: <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" /> },
+  {
+    id: 'framerect',
+    label: 'מסגרת גרפית — מלבן',
+    group: 3,
+    key: 'F',
+    code: 'KeyF',
+    enabled: true,
+    icon: (
+      <>
+        <rect x="4" y="6" width="16" height="12" rx="1.500" />
+        <circle cx="9" cy="10.500" r="1.200" fill="currentColor" stroke="none" />
+        <path d="M6 15.500 10 11.500 13 14 18 9.500" />
+      </>
+    ),
+  },
+  {
+    id: 'frameellipse',
+    label: 'מסגרת גרפית — אליפסה',
+    group: 3,
+    key: 'Shift+F',
+    code: 'KeyF',
+    shift: true,
+    enabled: true,
+    icon: (
+      <>
+        <ellipse cx="12" cy="12" rx="8" ry="6" />
+        <circle cx="9.500" cy="10.500" r="1.100" fill="currentColor" stroke="none" />
+        <path d="M6.700 14 10 11 13 13.500 17.300 9.700" />
+      </>
+    ),
+  },
+  {
+    id: 'framepolygon',
+    label: 'מסגרת גרפית — מצולע',
+    group: 3,
+    enabled: true,
+    icon: (
+      <>
+        <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" />
+        <circle cx="10.200" cy="10.500" r="1.100" fill="currentColor" stroke="none" />
+        <path d="M7.500 14.500 10.500 11 13.500 13.500 16.300 10.200" />
+      </>
+    ),
+  },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: false, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', enabled: false, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', enabled: false, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
@@ -50,7 +94,10 @@ export const TOOLS: ToolDef[] = [
 ]
 
 /** tools that have a settings window (double click) */
-const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon']
+const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon', 'framerect', 'frameellipse', 'framepolygon']
+
+/** the plain shape each graphic-frame tool draws (they share its settings and its keyboard-drawing behaviour) */
+export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polygon'>> = { framerect: 'rect', frameellipse: 'ellipse', framepolygon: 'polygon' }
 
 /**
  * Tools that share one slot in the toolbox, like the shape and type tools in InDesign: the slot shows and uses whichever
@@ -59,6 +106,7 @@ const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon']
 const FOLD_GROUPS: ToolId[][] = [
   ['rect', 'ellipse', 'polygon'],
   ['type', 'pathtype'],
+  ['framerect', 'frameellipse', 'framepolygon'],
 ]
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!

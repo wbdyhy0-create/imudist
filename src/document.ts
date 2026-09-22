@@ -225,6 +225,9 @@ export interface ShapeFrame {
   pathText?: PathText
   /** a picture placed inside the shape, clipped to its outline */
   image?: ShapeImage
+  /** made with a graphic-frame tool: an empty one shows a placeholder icon, and only this kind of shape takes a placed
+   * picture into itself — an ordinary shape stays a plain shape even when a picture is placed on top of it */
+  frame?: true
   /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
   radii?: [number, number, number, number]
   /** #rrggbb, or null for no fill */
