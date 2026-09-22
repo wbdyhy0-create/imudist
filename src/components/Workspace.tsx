@@ -2838,6 +2838,7 @@ export function Workspace({
                     floats={floatsFor(f, images, fl.style, fl.prevId === null)}
                     paraGaps={fl.paraGaps}
                     startParaIndex={fl.startParaIndex}
+                    atParaStart={fl.atParaStart}
                     spaceBeforeFirst={fl.spaceBeforeFirst}
                     spaceAfterLast={fl.spaceAfterLast}
                     z={rank.get(f.id) ?? 0}

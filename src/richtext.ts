@@ -62,6 +62,10 @@ export interface RunNodeOpts {
    * first character. See the long comment on `buildRunNodes` below.
    */
   firstLineIndent?: number
+  /** true when `text`'s first character is itself a paragraph's first character (`story.ts`'s `atParaStart`) —
+   *  gates the leading `.para-indent` so a frame that only continues a wrapped (unfinished) paragraph doesn't get
+   *  one of its own. */
+  atParaStart?: boolean
 }
 
 /** A zero-width `display: inline-block` sibling right after a "\n", `height` tall — see `buildRunNodes`. */
@@ -116,8 +120,9 @@ function paraIndent(widthPx: number): HTMLElement {
 export function buildRunNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}): DocumentFragment {
   const frag = document.createDocumentFragment()
   let pos = 0
+  let seen = 0
   let paraIndex = opts.startParaIndex ?? 0
-  if (opts.firstLineIndent && paraIndex === 0) frag.appendChild(paraIndent(opts.firstLineIndent * scale))
+  if (opts.firstLineIndent && opts.atParaStart) frag.appendChild(paraIndent(opts.firstLineIndent * scale))
   for (const r of runs) {
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale)
@@ -135,8 +140,12 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
           } else {
             span.appendChild(document.createTextNode(piece.text))
           }
+          // a paragraph break right at the end of `text` (a frame boundary) has no next paragraph in THIS call to
+          // space away from — that gap belongs to whichever frame actually shows the next paragraph, which adds
+          // its own leading indent via `atParaStart` above and gets this same gap fresh next time it's its turn
+          const atEnd = seen + piece.text.length === text.length
           const gap = opts.paraGaps ? opts.paraGaps[paraIndex] : opts.paraLineHeight
-          if (gap) span.appendChild(paraGap(gap * scale))
+          if (gap && !atEnd) span.appendChild(paraGap(gap * scale))
           if (opts.firstLineIndent) span.appendChild(paraIndent(opts.firstLineIndent * scale))
           paraIndex++
         } else if (opts.showMarks) {
@@ -147,9 +156,11 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
         } else {
           span.appendChild(document.createTextNode(piece.text))
         }
+        seen += piece.text.length
       }
     } else {
       span.textContent = runText
+      seen += runText.length
     }
     frag.appendChild(span)
     pos += r.len

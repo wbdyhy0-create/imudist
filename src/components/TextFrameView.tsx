@@ -19,23 +19,30 @@ function withMarks(
   showMarks: boolean,
   paraGaps: (number | undefined)[],
   startParaIndex: number,
+  atStart: boolean,
+  isLastPart: boolean,
   firstLineIndent: number,
   scale: number,
 ): ReactNode {
   if (!showMarks && paraGaps.length === 0 && !firstLineIndent) return text
   let idx = startParaIndex
   const nodes: ReactNode[] = []
-  if (firstLineIndent && idx === 0) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
-  for (const [i, piece] of splitMarks(text).entries()) {
+  if (firstLineIndent && atStart) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+  const pieces = splitMarks(text)
+  for (const [i, piece] of pieces.entries()) {
     if (piece.kind === 'text') {
       nodes.push(piece.text)
     } else if (piece.kind === 'space') {
       nodes.push(showMarks ? <span key={i} className="mark-space">{piece.text}</span> : piece.text)
     } else {
       nodes.push(showMarks ? <span key={`${i}p`} className="mark-para">{piece.text}</span> : piece.text)
+      // a paragraph break at the very end of this frame's WHOLE text (last piece of its last part) has no next
+      // paragraph here to space away from — see richtext.ts's buildRunNodes (the live editor's vanilla-DOM twin
+      // of this same function) for why
+      const atEnd = isLastPart && i === pieces.length - 1
       const gapValue = paraGaps[idx]
       idx++
-      if (gapValue) nodes.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
+      if (gapValue && !atEnd) nodes.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
       if (firstLineIndent) nodes.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
     }
   }
@@ -91,6 +98,8 @@ interface Props {
   /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `slice` begins in it */
   paraGaps: (number | undefined)[]
   startParaIndex: number
+  /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
+  atParaStart: boolean
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
@@ -118,6 +127,7 @@ function RichText({
   showMarks,
   paraGaps,
   startParaIndex,
+  atParaStart,
   firstLineIndent,
 }: {
   text: string
@@ -128,6 +138,7 @@ function RichText({
   showMarks: boolean
   paraGaps: (number | undefined)[]
   startParaIndex: number
+  atParaStart: boolean
   firstLineIndent: number
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
@@ -156,8 +167,8 @@ function RichText({
           style={{ float: f.side, width: f.width * scale, height: f.height * scale, shapeOutside: shapeOf(f, scale) }}
         />
       ))}
-      {parts.map((p) => {
-        const rendered = withMarks(p.text, showMarks, paraGaps, paraIndex, firstLineIndent, scale)
+      {parts.map((p, i) => {
+        const rendered = withMarks(p.text, showMarks, paraGaps, paraIndex, i === 0 && atParaStart, i === parts.length - 1, firstLineIndent, scale)
         paraIndex += (p.text.match(/\n/g) ?? []).length
         return (
           <span
@@ -222,6 +233,7 @@ export function TextFrameView(p: Props) {
           showMarks={p.showHidden}
           paraGaps={p.paraGaps}
           startParaIndex={p.startParaIndex}
+          atParaStart={p.atParaStart}
           firstLineIndent={style.firstLineIndent ?? 0}
           hasPrev={p.hasPrev}
           request={p.request}
@@ -242,6 +254,7 @@ export function TextFrameView(p: Props) {
             showMarks={p.showHidden}
             paraGaps={p.paraGaps}
             startParaIndex={p.startParaIndex}
+            atParaStart={p.atParaStart}
             firstLineIndent={style.firstLineIndent ?? 0}
           />
         </div>

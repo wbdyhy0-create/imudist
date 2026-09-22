@@ -24,6 +24,8 @@ interface Props {
   /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `text` begins in it */
   paraGaps?: (number | undefined)[]
   startParaIndex?: number
+  /** true when `text`'s first character is itself a paragraph's first character, not a wrapped continuation */
+  atParaStart?: boolean
   /** indents the first line of EVERY paragraph (not just the story's very first) by this many points, unscaled */
   firstLineIndent?: number
   hasPrev: boolean
@@ -53,7 +55,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.firstLineIndent}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${p.text}|${JSON.stringify(p.runs)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
@@ -63,6 +65,7 @@ export function RichEditor(p: Props) {
           showMarks: p.showMarks,
           paraGaps: p.paraGaps,
           startParaIndex: p.startParaIndex,
+          atParaStart: p.atParaStart,
           firstLineIndent: p.firstLineIndent,
         }),
       )

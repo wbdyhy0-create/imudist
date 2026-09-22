@@ -12,7 +12,7 @@ import {
 } from './document'
 import { chainOf, insetBox, styleOf } from './frames'
 import { buildRunNodes, buildWrapFloats, type RunNodeOpts } from './richtext'
-import { normalizeRuns, paraIndexAt, sliceRuns } from './story'
+import { atParaStart, normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 
 /** What one frame shows of its story. */
@@ -33,6 +33,9 @@ export interface FrameFlow {
   /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `slice` begins in it */
   paraGaps: (number | undefined)[]
   startParaIndex: number
+  /** true when `slice`'s first character is itself the first character of a paragraph (the story's own start, or
+   *  right after a "\n") — as opposed to a wrapped continuation of the previous frame's last (unfinished) paragraph */
+  atParaStart: boolean
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter);
    *  the same for every frame of the chain — TextFrameView only actually applies whichever one is itself first/last */
   spaceBeforeFirst: number
@@ -98,7 +101,7 @@ function fitEnd(
   fontSize: number,
   floats: WrapFloat[],
   hint?: number,
-  paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent'>,
+  paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart'>,
 ): number {
   const len = story.length
   if (start >= len) return len
@@ -131,13 +134,11 @@ function fitEnd(
 
   let end = lo
   if (end > start) {
-    if (story[end] === '\n') {
-      // a line break normally has no visible height of its own, but when it also carries a spaceAfter .para-gap
-      // (document.ts's paraGaps), extending past it can add real height that `lo` was never verified to fit —
-      // re-check before keeping it, instead of just assuming a trailing break is always free
-      if (fits(end + 1)) end += 1
-    } else if (isSpace(story[end])) {
-      end += 1 // a plain trailing space has no extra height either way, still safe to assume
+    if (isSpace(story[end])) {
+      // the space / line break stays at the end of this frame; a "\n" right at this boundary never carries its
+      // own .para-gap height here — buildRunNodes (richtext.ts) only ever renders that gap when another paragraph
+      // actually follows within the SAME call, which a trailing "\n" by definition never has
+      end += 1
     } else if (!isSpace(story[end - 1])) {
       // avoid splitting a word: go back to the last space, unless the word is longer than the whole part
       for (let k = end - 1; k > start; k--) {
@@ -171,6 +172,7 @@ export function fitStoryEnd(
     paraLineHeight: paraLineHeightOf(style),
     firstLineIndent: style.firstLineIndent,
     startParaIndex: paraIndexAt(story, start),
+    atParaStart: atParaStart(story, start),
   })
 }
 
@@ -218,10 +220,12 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
         const isLast = i === chain.length - 1
         const box = insetBox(f, style, isFirst ? spaceBeforeFirst : 0, isLast ? spaceAfterLast : 0)
         const startParaIndex = paraIndexAt(story, start)
+        const atStart = atParaStart(story, start)
         const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), {
           paraGaps: gaps,
           startParaIndex,
           firstLineIndent: style.firstLineIndent,
+          atParaStart: atStart,
         })
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
@@ -236,6 +240,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
           overflow: i === chain.length - 1 && end < story.length,
           paraGaps: gaps,
           startParaIndex,
+          atParaStart: atStart,
           spaceBeforeFirst,
           spaceAfterLast,
         })
