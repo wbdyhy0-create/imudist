@@ -2498,6 +2498,10 @@ export function Workspace({
           ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelHead)
           : charStyleOf(panelHead)),
         align: panelHead.align,
+        // leading and word-spacing bounds belong to the whole story, like align — never to a selected range
+        leading: panelHead.leading,
+        wordSpacingMin: panelHead.wordSpacingMin,
+        wordSpacingMax: panelHead.wordSpacingMax,
       }
     : null
 
