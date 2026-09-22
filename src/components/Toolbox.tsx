@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 export type ToolId =
   | 'select' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil'
@@ -52,6 +52,17 @@ export const TOOLS: ToolDef[] = [
 /** tools that have a settings window (double click) */
 const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon']
 
+/**
+ * Tools that share one slot in the toolbox, like the shape and type tools in InDesign: the slot shows and uses whichever
+ * one was picked last, and a small mark in its corner opens a flyout to pick a different one.
+ */
+const FOLD_GROUPS: ToolId[][] = [
+  ['rect', 'ellipse', 'polygon'],
+  ['type', 'pathtype'],
+]
+const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
+const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
+
 interface ToolboxProps {
   tool: ToolId
   onSelect: (id: ToolId) => void
@@ -62,25 +73,70 @@ interface ToolboxProps {
 }
 
 export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode }: ToolboxProps) {
+  // which tool of a fold group its slot shows, keyed by the group's first id; starts at that first tool, and follows
+  // `tool` whenever it becomes one of the group's own (a click on the slot, a pick from its flyout, or the tool's own
+  // keyboard shortcut, which changes `tool` from outside this component). Adjusted right in render, as React's docs say
+  // to for state derived from a prop, so the slot's icon is never one render behind.
+  const [current, setCurrent] = useState<Partial<Record<ToolId, ToolId>>>({})
+  const [prevTool, setPrevTool] = useState(tool)
+  if (tool !== prevTool) {
+    setPrevTool(tool)
+    const g = foldGroupOf.get(tool)
+    if (g) setCurrent((c) => ({ ...c, [g[0]]: tool }))
+  }
+
+  const [flyout, setFlyout] = useState<{ group: ToolId[]; rect: DOMRect } | null>(null)
+  const renderedGroups = new Set<ToolId>()
+
   return (
     <div className="toolbox" role="toolbar" aria-orientation="vertical" aria-label="כלים">
-      {TOOLS.map((t, i) => (
-        <Fragment key={t.id}>
-          {i > 0 && TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
-          <button
-            className={'tool' + (tool === t.id ? ' active' : '') + (t.enabled ? '' : ' off')}
-            title={t.enabled ? `${t.label}${t.key ? ` (${t.key})` : ''}${SETTINGS_TOOLS.includes(t.id) ? ' · לחיצה כפולה להגדרות' : ''}` : `${t.label} — עדיין לא זמין`}
-            aria-disabled={!t.enabled}
-            aria-pressed={tool === t.id}
-            onClick={() => t.enabled && onSelect(t.id)}
-            onDoubleClick={() => t.enabled && SETTINGS_TOOLS.includes(t.id) && onSettings?.(t.id)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
-              {t.icon}
-            </svg>
-          </button>
-        </Fragment>
-      ))}
+      {TOOLS.map((t, i) => {
+        const group = foldGroupOf.get(t.id)
+        if (group) {
+          if (renderedGroups.has(group[0])) return null
+          renderedGroups.add(group[0])
+        }
+        const active = toolDef(group ? (current[group[0]] ?? group[0]) : t.id)
+        const hasFlyout = !!group && group.length > 1
+        return (
+          <Fragment key={t.id}>
+            {i > 0 && TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
+            <div className="tool-slot">
+              <button
+                className={'tool' + (tool === active.id ? ' active' : '') + (active.enabled ? '' : ' off')}
+                title={
+                  active.enabled
+                    ? `${active.label}${active.key ? ` (${active.key})` : ''}${SETTINGS_TOOLS.includes(active.id) ? ' · לחיצה כפולה להגדרות' : ''}${hasFlyout ? ' · לחיצה על החץ לכלים נוספים' : ''}`
+                    : `${active.label} — עדיין לא זמין`
+                }
+                aria-disabled={!active.enabled}
+                aria-pressed={tool === active.id}
+                onClick={() => active.enabled && onSelect(active.id)}
+                onDoubleClick={() => active.enabled && SETTINGS_TOOLS.includes(active.id) && onSettings?.(active.id)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
+                  {active.icon}
+                </svg>
+              </button>
+              {hasFlyout && (
+                <button
+                  className="tool-flyout-mark"
+                  title="כלים נוספים"
+                  aria-label={`כלים נוספים בקבוצת ${active.label}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setFlyout({ group, rect: e.currentTarget.parentElement!.getBoundingClientRect() })
+                  }}
+                >
+                  <svg viewBox="0 0 6 6" aria-hidden="true">
+                    <path d="M0.5 5.5 5.5 5.5 5.5 0.5Z" fill="currentColor" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </Fragment>
+        )
+      })}
       <div className="swatches">
         <span className="swatch-fill" title="צבע מילוי" />
         <span className="swatch-stroke" title="צבע קו" />
@@ -112,6 +168,91 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
           </svg>
         </button>
       </div>
+      {flyout && (
+        <ToolFlyout
+          group={flyout.group}
+          anchor={flyout.rect}
+          current={tool}
+          onPick={(id) => {
+            onSelect(id)
+            setFlyout(null)
+          }}
+          onClose={() => setFlyout(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+interface FlyoutProps {
+  group: ToolId[]
+  /** the slot button's own position: the flyout opens beside it, toward the canvas */
+  anchor: DOMRect
+  current: ToolId
+  onPick: (id: ToolId) => void
+  onClose: () => void
+}
+
+/** The list of alternative tools for one toolbox slot, opened by its corner mark. Closes on a click elsewhere, Escape, scrolling or resizing. */
+function ToolFlyout({ group, anchor, current, onPick, onClose }: FlyoutProps) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: anchor.left, top: anchor.top })
+
+  // open toward the canvas (away from the toolbox, which sits against the window's edge); the other side if there is no room
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const left = anchor.left - r.width - 6 >= 4 ? anchor.left - r.width - 6 : Math.min(anchor.right + 6, window.innerWidth - r.width - 4)
+    const top = Math.max(4, Math.min(anchor.top, window.innerHeight - r.height - 4))
+    setPos({ left, top })
+  }, [anchor])
+
+  useEffect(() => {
+    const away = (e: Event) => {
+      if (!ref.current?.contains(e.target as Node)) onClose()
+    }
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('pointerdown', away, true)
+    window.addEventListener('keydown', key)
+    window.addEventListener('resize', onClose)
+    window.addEventListener('blur', onClose)
+    window.addEventListener('wheel', onClose, { passive: true })
+    return () => {
+      window.removeEventListener('pointerdown', away, true)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('resize', onClose)
+      window.removeEventListener('blur', onClose)
+      window.removeEventListener('wheel', onClose)
+    }
+  }, [onClose])
+
+  return (
+    <div ref={ref} className="menu-panel tool-flyout" role="menu" style={pos}>
+      {group.map((id) => {
+        const t = toolDef(id)
+        return (
+          <div
+            key={id}
+            role="menuitemradio"
+            aria-checked={id === current}
+            className={'menu-item tool-flyout-item' + (id === current ? ' on' : '')}
+            onClick={() => t.enabled && onPick(id)}
+          >
+            <svg className="tool-flyout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
+              {t.icon}
+            </svg>
+            <span className="menu-text">{t.label}</span>
+            {t.key && (
+              <span className="menu-shortcut" dir="ltr">
+                {t.key}
+              </span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

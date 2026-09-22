@@ -205,6 +205,19 @@ svg { display: block; }
 .tool.off { color: #808080; cursor: default; }
 .tool.off:hover { background: none; }
 .tool-sep { width: 22px; height: 1px; margin: 4px 0; background: var(--line); flex: none; }
+
+/* a toolbox slot that folds several tools together (shapes, type on a line …): a small corner mark opens the rest */
+.tool-slot { position: relative; }
+.tool-flyout-mark {
+  position: absolute; inset-inline-end: 1px; inset-block-end: 1px; width: 7px; height: 7px; padding: 0; color: #9a9a9a;
+}
+.tool-slot:hover .tool-flyout-mark, .tool-flyout-mark:hover { color: #fff; }
+.tool-flyout-mark svg { width: 6px; height: 6px; display: block; }
+.tool-flyout { position: fixed; z-index: 2000000; inset-inline-start: auto; top: auto; min-width: 190px; padding: 5px 0; }
+.tool-flyout-item { gap: 10px; height: 30px; }
+.tool-flyout-icon { width: 18px; height: 18px; flex: none; }
+.tool-flyout-item.on { color: var(--accent-line, #6ea8ff); }
+.tool-flyout-item.on .tool-flyout-icon { color: inherit; }
 .swatches { display: flex; flex-direction: column; align-items: center; gap: 7px; margin-top: 12px; flex: none; }
 .swatch-fill, .swatch-stroke { display: block; width: 18px; height: 18px; border-radius: 50%; }
 .swatch-fill { background: #fff; box-shadow: 0 0 0 1px var(--border-strong); }
