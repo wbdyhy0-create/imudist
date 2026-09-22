@@ -2527,10 +2527,18 @@ export function Workspace({
   }
 
   // only mount what is (nearly) on screen — documents can have thousands of pages
-  const visible = spreads.filter((s) => {
-    const y0 = ty + s.y * zoom
-    return y0 + s.h * zoom >= scroll.y - 300 && y0 <= scroll.y + vp.h + 300
-  })
+  const inViewY = (y: number, h: number) => {
+    const y0 = ty + y * zoom
+    return y0 + h * zoom >= scroll.y - 300 && y0 <= scroll.y + vp.h + 300
+  }
+  const visible = spreads.filter((s) => inViewY(s.y, s.h))
+  // text frames, pictures and shapes are virtualized the same way, EXCEPT whatever is actively selected/edited/
+  // linked-from — an import of a 100-page Word file otherwise creates 100+ live components that all re-render on
+  // every keystroke, even though at most a couple of pages are ever on screen at once
+  const alwaysMounted = new Set([selectedId, editingId, linkFrom, pathEdit, ...multiSel].filter((id): id is string => !!id))
+  const visibleFrames = frames.filter((f) => alwaysMounted.has(f.id) || inViewY(f.y, f.h))
+  const visibleImages = images.filter((im) => alwaysMounted.has(im.id) || inViewY(im.y, im.h))
+  const visibleShapes = shapes.filter((sh) => alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))
 
   const viewportClass =
     'viewport' +
@@ -2742,7 +2750,7 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
-              {images.map((im) => (
+              {visibleImages.map((im) => (
                 <ImageFrameView
                   key={im.id}
                   image={im}
@@ -2759,7 +2767,7 @@ export function Workspace({
                   onRotateDown={onRotateDown(im.id)}
                 />
               ))}
-              {shapes.map((sh) => (
+              {visibleShapes.map((sh) => (
                 <ShapeFrameView
                   key={sh.id}
                   shape={sh}
@@ -2816,7 +2824,7 @@ export function Workspace({
                   showEdge
                 />
               )}
-              {frames.map((f) => {
+              {visibleFrames.map((f) => {
                 const fl = flow.get(f.id)
                 if (!fl) return null
                 return (
