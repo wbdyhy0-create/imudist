@@ -38,6 +38,7 @@ import {
   type TextFrame,
   type WrapMode,
 } from './document'
+import { normalizeDeg } from './frames'
 import type { DocContent } from './pages'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
@@ -142,6 +143,8 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
 
 /** the optional stacking order of an object */
 const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 'number' && Number.isFinite(raw.z) ? { z: int(raw.z, 0, -1e9, 1e9) } : {})
+const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
+  typeof raw.rotation === 'number' && Number.isFinite(raw.rotation) && raw.rotation !== 0 ? { rotation: normalizeDeg(raw.rotation) } : {}
 
 function parseFrames(v: unknown): TextFrame[] {
   if (!Array.isArray(v)) return []
@@ -173,6 +176,7 @@ function parseFrames(v: unknown): TextFrame[] {
       runs: normalizeRuns(text, runs, base),
       next: typeof raw.next === 'string' ? raw.next : null,
       ...zOf(raw),
+      ...rotationOf(raw),
     })
   }
 
@@ -238,6 +242,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
       fit: oneOf<ImageFit>(raw.fit, ['fill', 'fit', 'stretch'], 'fill'),
       ...zOf(raw),
+      ...rotationOf(raw),
       ...(raw.wrap === 'around' || raw.wrap === 'jump' ? { wrap: raw.wrap as WrapMode } : {}),
       ...(typeof raw.wrapOffset === 'number' ? { wrapOffset: num(raw.wrapOffset, DEFAULT_WRAP_OFFSET, 0, 500) } : {}),
     })
@@ -350,6 +355,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
       strokeWidth: num(raw.strokeWidth, 1, 0, 200),
       ...zOf(raw),
+      ...rotationOf(raw),
     })
   }
   return out

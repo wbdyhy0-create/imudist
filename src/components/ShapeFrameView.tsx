@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Asset, PathVertex, ShapeFrame } from '../document'
-import { HANDLES, type HandleId } from '../frames'
+import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
@@ -43,6 +43,7 @@ interface Props {
   ghost?: boolean
   onPointerDown?: (e: ReactPointerEvent<SVGPathElement>) => void
   onHandleDown?: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
+  onRotateDown?: (corner: RotateCorner, e: ReactPointerEvent<HTMLDivElement>) => void
   onCornerDown?: (corner: number, e: ReactPointerEvent<HTMLDivElement>) => void
   /** double click on the shape (to edit its text on the outline) */
   onDoubleClick?: () => void
@@ -83,6 +84,7 @@ export function ShapeFrameView({
   ghost,
   onPointerDown,
   onHandleDown,
+  onRotateDown,
   onCornerDown,
   onDoubleClick,
   onPegDown,
@@ -121,7 +123,7 @@ export function ShapeFrameView({
   return (
     <div
       className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '')}
-      style={{ left: tx + shape.x * zoom, top: ty + shape.y * zoom, width: w, height: h, zIndex: z }}
+      style={{ left: tx + shape.x * zoom, top: ty + shape.y * zoom, width: w, height: h, zIndex: z, transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined }}
     >
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
         {!img ? (
@@ -199,6 +201,8 @@ export function ShapeFrameView({
       </svg>
 
       {showHandles && HANDLES.map((handle) => <div key={handle} className={'handle ' + handle} onPointerDown={(e) => onHandleDown?.(handle, e)} />)}
+      {showHandles &&
+        ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown?.(c, e)} />)}
 
       {showHandles && pt && info && place && (
         <>

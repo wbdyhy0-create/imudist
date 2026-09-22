@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from '../document'
-import { HANDLES, type HandleId } from '../frames'
+import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 
@@ -36,6 +36,7 @@ interface Props {
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
   onHandleDown: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
+  onRotateDown: (corner: RotateCorner, e: ReactPointerEvent<HTMLDivElement>) => void
   onOutPortDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onInPortDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onEdit: (from: number, to: number, insert: string) => void
@@ -108,6 +109,7 @@ export function TextFrameView(p: Props) {
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
         lineHeight: LINE_HEIGHT,
         textAlign: style.align,
+        transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}
@@ -152,6 +154,7 @@ export function TextFrameView(p: Props) {
       )}
 
       {selected && showEdge && HANDLES.map((h) => <div key={h} className={'handle ' + h} onPointerDown={(e) => p.onHandleDown(h, e)} />)}
+      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => p.onRotateDown(c, e)} />)}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Asset, ImageFrame } from '../document'
-import { HANDLES, type HandleId } from '../frames'
+import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 
 interface Props {
   image: ImageFrame
@@ -18,16 +18,24 @@ interface Props {
   showEdge: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onHandleDown: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
+  onRotateDown: (corner: RotateCorner, e: ReactPointerEvent<HTMLDivElement>) => void
 }
 
 const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' } as const
 
 /** A picture in its frame. The picture is drawn by the browser, scaled to the frame according to `image.fit`. */
-export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, marked, showEdge, onPointerDown, onHandleDown }: Props) {
+export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, marked, showEdge, onPointerDown, onHandleDown, onRotateDown }: Props) {
   return (
     <div
       className={'image-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '')}
-      style={{ zIndex: z, left: tx + image.x * zoom, top: ty + image.y * zoom, width: image.w * zoom, height: image.h * zoom }}
+      style={{
+        zIndex: z,
+        left: tx + image.x * zoom,
+        top: ty + image.y * zoom,
+        width: image.w * zoom,
+        height: image.h * zoom,
+        transform: image.rotation ? `rotate(${image.rotation}deg)` : undefined,
+      }}
       onPointerDown={onPointerDown}
     >
       {asset ? (
@@ -36,6 +44,7 @@ export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, marked
         <div className="image-missing">התמונה חסרה</div>
       )}
       {selected && showEdge && HANDLES.map((h) => <div key={h} className={'handle ' + h} onPointerDown={(e) => onHandleDown(h, e)} />)}
+      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown(c, e)} />)}
     </div>
   )
 }

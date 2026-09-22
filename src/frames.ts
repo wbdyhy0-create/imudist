@@ -90,6 +90,24 @@ export function removeFrame(frames: TextFrame[], id: string): TextFrame[] {
 export type HandleId = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw'
 export const HANDLES: HandleId[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
 
+/** the corners a selected object can be turned by (a ring around each corner handle, a little further out) */
+export type RotateCorner = 'nw' | 'ne' | 'se' | 'sw'
+export const ROTATE_CORNERS: RotateCorner[] = ['nw', 'ne', 'se', 'sw']
+
+/** A vector turned by `deg` clockwise degrees (world y grows downward, so a positive angle turns clockwise on screen, same as CSS `rotate()`). */
+export function rotateVec(dx: number, dy: number, deg: number): [number, number] {
+  const r = (deg * Math.PI) / 180
+  const cos = Math.cos(r)
+  const sin = Math.sin(r)
+  return [dx * cos - dy * sin, dx * sin + dy * cos]
+}
+
+/** `deg`, wrapped into 0…360. */
+export const normalizeDeg = (deg: number): number => ((deg % 360) + 360) % 360
+
+/** The clockwise angle (degrees, screen convention) from one world point to another. */
+export const angleOf = (from: { x: number; y: number }, to: { x: number; y: number }): number => (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI
+
 export interface Box {
   x: number
   y: number

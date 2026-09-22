@@ -47,7 +47,7 @@ import {
   type TextStyle,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, chainOf, dragBox, linkFrames, removeFrame, unlinkBefore, type Box, type HandleId } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, linkFrames, normalizeDeg, removeFrame, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -316,6 +316,8 @@ export function Workspace({
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
+  /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
+  const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
   const dragSeq = useRef(0)
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
@@ -1905,6 +1907,41 @@ export function Workspace({
     vpRef.current!.setPointerCapture(e.pointerId)
   }
 
+  /** grabbing the ring around one of an object's corners: it turns around its own centre from then on (any corner starts
+   * the same way — the turning angle always follows the pointer from wherever it grabbed) */
+  const onRotateDown = (id: string) => (_corner: RotateCorner, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    const isImage = images.some((x) => x.id === id)
+    const isShape = shapes.some((x) => x.id === id)
+    const f = isImage ? images.find((x) => x.id === id) : isShape ? shapes.find((x) => x.id === id) : frames.find((x) => x.id === id)
+    if (!f) return
+    const center = { x: f.x + f.w / 2, y: f.y + f.h / 2 }
+    dragSeq.current += 1
+    rotateDrag.current = {
+      id,
+      kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
+      center,
+      startAngle: angleOf(center, toWorld(e.clientX, e.clientY)),
+      startRotation: f.rotation ?? 0,
+      key: `rotate:${dragSeq.current}`,
+    }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** the object follows the pointer around its own centre; Shift holds it to 45° steps */
+  const moveRotate = (d: NonNullable<typeof rotateDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const angle = angleOf(d.center, toWorld(e.clientX, e.clientY))
+    let rotation = d.startRotation + (angle - d.startAngle)
+    if (e.shiftKey) rotation = Math.round(rotation / 45) * 45
+    rotation = normalizeDeg(rotation)
+    const patch = { rotation: rotation || undefined }
+    if (d.kind === 'shape') onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...patch } : sh)), d.key)
+    else if (d.kind === 'image') onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...patch } : im)), d.key)
+    else updateFrame(d.id, patch, d.key)
+  }
+
   /** the Page tool changes every page at once instead of only the selected one */
   const [sizeAll, setSizeAll] = useState(false)
   /** the settings with the selected page (or all pages) given a new size */
@@ -2154,6 +2191,10 @@ export function Workspace({
       movePageHandle(pageDrag.current, e)
       return
     }
+    if (rotateDrag.current) {
+      moveRotate(rotateDrag.current, e)
+      return
+    }
     if (frameDrag.current) {
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
@@ -2287,6 +2328,7 @@ export function Workspace({
     pointDrag.current = null
     contentDrag.current = null
     frameDrag.current = null
+    rotateDrag.current = null
     pageDrag.current = null
     setPageSnap(null)
     marginDrag.current = null
@@ -2310,6 +2352,7 @@ export function Workspace({
     contentDrag.current = null
     createStart.current = null
     frameDrag.current = null
+    rotateDrag.current = null
     pageDrag.current = null
     setPageSnap(null)
     marginDrag.current = null
@@ -2598,6 +2641,7 @@ export function Workspace({
                   showEdge={!previewMode}
                   onPointerDown={onImagePointerDown(im.id)}
                   onHandleDown={onHandleDown(im.id)}
+                  onRotateDown={onRotateDown(im.id)}
                 />
               ))}
               {shapes.map((sh) => (
@@ -2619,6 +2663,7 @@ export function Workspace({
                   asset={sh.image ? assets[sh.image.assetId] : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
+                  onRotateDown={onRotateDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
                   onDoubleClick={() => {
                     if (sh.pathText && tool === 'select') {
@@ -2688,6 +2733,7 @@ export function Workspace({
                       }
                     }}
                     onHandleDown={onHandleDown(f.id)}
+                    onRotateDown={onRotateDown(f.id)}
                     onOutPortDown={onOutPortDown(f.id)}
                     onInPortDown={onInPortDown(f.id)}
                     onEdit={(from, to, insert) => handleEdit(f.id, from, to, insert)}

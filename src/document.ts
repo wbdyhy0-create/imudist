@@ -99,6 +99,8 @@ export interface TextFrame extends TextStyle {
   next: string | null
   /** stacking order (higher = in front). Missing = the default layer: text frames in front of pictures */
   z?: number
+  /** turned around its own centre, clockwise degrees; missing = 0. `x`, `y`, `w`, `h` stay as if it were not turned. */
+  rotation?: number
 }
 /** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
@@ -127,6 +129,8 @@ export interface ImageFrame {
   wrap?: WrapMode
   /** distance kept between the picture and wrapped text (missing = DEFAULT_WRAP_OFFSET) */
   wrapOffset?: number
+  /** turned around its own centre, clockwise degrees; missing = 0. `x`, `y`, `w`, `h` stay as if it were not turned. */
+  rotation?: number
 }
 
 /** Ruler guides: horizontal ('h') lines run across a page, vertical ('v') ones from top to bottom. */
@@ -238,6 +242,8 @@ export interface ShapeFrame {
   strokeWidth: number
   /** stacking order (see stacking.ts) */
   z?: number
+  /** turned around its own centre, clockwise degrees; missing = 0. `x`, `y`, `w`, `h` stay as if it were not turned. */
+  rotation?: number
 }
 
 /** The data of an imported picture. Several frames can show the same asset. */
