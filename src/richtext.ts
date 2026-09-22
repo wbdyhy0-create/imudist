@@ -141,12 +141,15 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
             span.appendChild(document.createTextNode(piece.text))
           }
           // a paragraph break right at the end of `text` (a frame boundary) has no next paragraph in THIS call to
-          // space away from — that gap belongs to whichever frame actually shows the next paragraph, which adds
-          // its own leading indent via `atParaStart` above and gets this same gap fresh next time it's its turn
+          // space away from or indent — that belongs to whichever frame actually shows the next paragraph, which
+          // adds its own leading indent via `atParaStart` above and gets this same gap fresh next time it's its
+          // turn. This isn't just a wasted node: an empty trailing line that contains so much as one inline-level
+          // box — even a zero-height `.para-indent` — still gets the full line-height as its CSS line-box "strut",
+          // so leaving it in was silently costing one whole extra line at every frame boundary.
           const atEnd = seen + piece.text.length === text.length
           const gap = opts.paraGaps ? opts.paraGaps[paraIndex] : opts.paraLineHeight
           if (gap && !atEnd) span.appendChild(paraGap(gap * scale))
-          if (opts.firstLineIndent) span.appendChild(paraIndent(opts.firstLineIndent * scale))
+          if (opts.firstLineIndent && !atEnd) span.appendChild(paraIndent(opts.firstLineIndent * scale))
           paraIndex++
         } else if (opts.showMarks) {
           const mark = document.createElement('span')

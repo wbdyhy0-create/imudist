@@ -37,13 +37,13 @@ function withMarks(
     } else {
       nodes.push(showMarks ? <span key={`${i}p`} className="mark-para">{piece.text}</span> : piece.text)
       // a paragraph break at the very end of this frame's WHOLE text (last piece of its last part) has no next
-      // paragraph here to space away from — see richtext.ts's buildRunNodes (the live editor's vanilla-DOM twin
-      // of this same function) for why
+      // paragraph here to space away from or indent — see richtext.ts's buildRunNodes (the live editor's
+      // vanilla-DOM twin of this same function) for why that includes the indent, not just the gap
       const atEnd = isLastPart && i === pieces.length - 1
       const gapValue = paraGaps[idx]
       idx++
       if (gapValue && !atEnd) nodes.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
-      if (firstLineIndent) nodes.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+      if (firstLineIndent && !atEnd) nodes.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
     }
   }
   return nodes
