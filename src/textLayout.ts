@@ -131,8 +131,14 @@ function fitEnd(
 
   let end = lo
   if (end > start) {
-    if (isSpace(story[end])) end += 1 // the space / line break stays at the end of this frame
-    else if (!isSpace(story[end - 1])) {
+    if (story[end] === '\n') {
+      // a line break normally has no visible height of its own, but when it also carries a spaceAfter .para-gap
+      // (document.ts's paraGaps), extending past it can add real height that `lo` was never verified to fit —
+      // re-check before keeping it, instead of just assuming a trailing break is always free
+      if (fits(end + 1)) end += 1
+    } else if (isSpace(story[end])) {
+      end += 1 // a plain trailing space has no extra height either way, still safe to assume
+    } else if (!isSpace(story[end - 1])) {
       // avoid splitting a word: go back to the last space, unless the word is longer than the whole part
       for (let k = end - 1; k > start; k--) {
         if (isSpace(story[k])) {
