@@ -46,7 +46,6 @@ function getMeasurer(): HTMLDivElement {
       overflowWrap: 'anywhere',
       // matches .rich-editor / .text-frame-body: base direction is always RTL (dir='rtl' above), not guessed per-text
       textRendering: 'geometricPrecision',
-      lineHeight: String(LINE_HEIGHT),
     })
     m.appendChild(document.createElement('div'))
     document.body.appendChild(m)
@@ -58,6 +57,7 @@ function getMeasurer(): HTMLDivElement {
 function configure(m: HTMLDivElement, style: TextStyle) {
   m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   m.style.fontSize = `${style.fontSize}px`
+  m.style.lineHeight = `${style.leading ?? style.fontSize * LINE_HEIGHT}px`
 }
 
 const isSpace = (c: string) => /\s/.test(c)
@@ -161,7 +161,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
     const floats = chain.map((f) => wrapFloatsFor(f, images))
     // everything the layout depends on: default style, and the id, size and wrap areas of every frame in the thread
     const sig =
-      `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.align}|` +
+      `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
     const hit = cache.get(head.id)

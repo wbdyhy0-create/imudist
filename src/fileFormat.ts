@@ -138,6 +138,7 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
     fontSize: num(s.fontSize, fallback.fontSize, 1, 999),
     weight: num(s.weight, fallback.weight, 1, 1000),
     italic: bool(s.italic, fallback.italic),
+    tracking: num(s.tracking, fallback.tracking, -1000, 1000),
   }
 }
 
@@ -145,6 +146,12 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
 const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 'number' && Number.isFinite(raw.z) ? { z: int(raw.z, 0, -1e9, 1e9) } : {})
 const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
   typeof raw.rotation === 'number' && Number.isFinite(raw.rotation) && raw.rotation !== 0 ? { rotation: normalizeDeg(raw.rotation) } : {}
+/** leading and word-spacing bounds: optional, belong to the whole story (paragraph-level, not per-run) */
+const paragraphStyleOf = (raw: Record<string, unknown>): { leading?: number; wordSpacingMin?: number; wordSpacingMax?: number } => ({
+  ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 1, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.wordSpacingMin === 'number' && Number.isFinite(raw.wordSpacingMin) ? { wordSpacingMin: num(raw.wordSpacingMin, 90, 10, 100) } : {}),
+  ...(typeof raw.wordSpacingMax === 'number' && Number.isFinite(raw.wordSpacingMax) ? { wordSpacingMax: num(raw.wordSpacingMax, 120, 100, 500) } : {}),
+})
 
 function parseFrames(v: unknown): TextFrame[] {
   if (!Array.isArray(v)) return []
@@ -177,6 +184,7 @@ function parseFrames(v: unknown): TextFrame[] {
       next: typeof raw.next === 'string' ? raw.next : null,
       ...zOf(raw),
       ...rotationOf(raw),
+      ...paragraphStyleOf(raw),
     })
   }
 
@@ -257,7 +265,7 @@ const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null 
 function parsePathText(v: unknown): { pathText?: PathText } {
   if (!isObj(v)) return {}
   const text = typeof v.text === 'string' ? v.text.slice(0, 20000) : ''
-  const style = parseCharStyle(v.style, { fontFamily: 'Segoe UI', fontSize: 18, weight: 400, italic: false })
+  const style = parseCharStyle(v.style, { fontFamily: 'Segoe UI', fontSize: 18, weight: 400, italic: false, tracking: 0 })
   const runs: Run[] | undefined = Array.isArray(v.runs) ? v.runs.filter(isObj).map((r) => ({ len: int(r.len, 0, 0, 1e9), style: parseCharStyle(r.style, style) })) : undefined
   return {
     pathText: {

@@ -6,7 +6,11 @@ export const styleOf = (f: TextFrame): TextStyle => ({
   fontSize: f.fontSize,
   weight: f.weight,
   italic: f.italic,
+  tracking: f.tracking,
   align: f.align,
+  leading: f.leading,
+  wordSpacingMin: f.wordSpacingMin,
+  wordSpacingMax: f.wordSpacingMax,
 })
 
 /** The frames of the story that `id` belongs to, first frame first (empty if `id` is unknown). */

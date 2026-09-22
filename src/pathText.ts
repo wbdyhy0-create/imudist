@@ -15,7 +15,7 @@ export interface RingInfo {
 }
 
 /** The default look of new text on a path. */
-export const DEFAULT_PATH_TEXT_STYLE = { fontFamily: 'Segoe UI', fontSize: 18, weight: 400, italic: false }
+export const DEFAULT_PATH_TEXT_STYLE = { fontFamily: 'Segoe UI', fontSize: 18, weight: 400, italic: false, tracking: 0 }
 export const DEFAULT_PATH_TEXT_COLOR = '#111111'
 export const MIN_SPAN = 0.02
 

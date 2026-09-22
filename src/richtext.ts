@@ -7,6 +7,8 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) 
   el.style.fontSize = `${style.fontSize * scale}px`
   el.style.fontWeight = String(style.weight)
   el.style.fontStyle = style.italic ? 'italic' : 'normal'
+  // tracking is 1/1000 em (InDesign's own unit)
+  el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
 }
 
 /** DOM for a formatted text: one <span> per run. The text keeps its "\n" characters (white-space: pre-wrap). */

@@ -621,6 +621,12 @@ export function Workspace({
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align } : f)), `align:${id}`)
   }
 
+  /** leading and word-spacing bounds belong to the whole story, like alignment */
+  const applyParagraphStyle = (id: string, patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => {
+    const ids = new Set(chainOf(frames, id).map((f) => f.id))
+    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `paragraph:${id}:${Object.keys(patch).join(',')}`)
+  }
+
   const completeLink = (toId: string) => {
     if (linkFrom) {
       const linked = linkFrames(frames, linkFrom, toId)
@@ -3028,6 +3034,7 @@ export function Workspace({
             onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
             onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
             onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
+            onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
             onArrange={(op) => selFrame && arrangeObject(selFrame.id, op)}
             onLink={() => selFrame && setLinkFrom(selFrame.id)}
             onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}

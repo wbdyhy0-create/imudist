@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { LINE_HEIGHT, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
@@ -20,6 +20,8 @@ interface Props {
   onGeometry: (patch: Partial<Box>) => void
   onCharStyle: (patch: Partial<CharStyle>) => void
   onAlign: (align: TextAlign) => void
+  /** leading / word-spacing bounds: belong to the whole story, not to a piece of text */
+  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
   onArrange: (op: ArrangeOp) => void
   onLink: () => void
   onUnlink: () => void
@@ -94,11 +96,16 @@ export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharS
                 </div>
               </Labeled>
             </div>
+
+            <Labeled label="ריווח בין אותיות (Tracking)">
+              <NumberField value={style.tracking} step={5} min={-500} max={500} onChange={(v) => onCharStyle({ tracking: v })} />
+            </Labeled>
+            <p className="muted">0 לטקסט רגיל; ערך שלילי (בערך 5- עד 15-) מקרב את האותיות ונותן מראה צפוף לכותרות.</p>
     </>
   )
 }
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onArrange, onLink, onUnlink }: Props) {
+export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
   const catalog = useFontCatalog()
 
   // The panel's buttons must not take the focus away from the text being edited.
@@ -152,6 +159,25 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
                 ))}
               </div>
             </Labeled>
+
+            <Labeled label="מרווח בין שורות (Leading)">
+              <NumberField value={style.leading ?? style.fontSize * LINE_HEIGHT} unit={unit} min={1} max={MAX_PAGE_PT} onChange={(v) => onParagraphStyle({ leading: v })} />
+            </Labeled>
+            <p className="muted">שייך לכל התיבה. ברירת המחדל היא כ־125% מגודל הגופן.</p>
+
+            {style.align === 'justify' && (
+              <>
+                <div className="grid2">
+                  <Labeled label="ריווח מילים — מינימום">
+                    <NumberField value={style.wordSpacingMin ?? 90} step={5} min={10} max={100} onChange={(v) => onParagraphStyle({ wordSpacingMin: v })} />
+                  </Labeled>
+                  <Labeled label="ריווח מילים — מקסימום">
+                    <NumberField value={style.wordSpacingMax ?? 120} step={5} min={100} max={500} onChange={(v) => onParagraphStyle({ wordSpacingMax: v })} />
+                  </Labeled>
+                </div>
+                <p className="muted">אחוז מרוחב הרווח הרגיל; חל רק ביישור דו-צדדי. 100% הוא הרוחב הרגיל.</p>
+              </>
+            )}
 
             <FontSource status={catalog.status} count={catalog.families.length} />
           </Group>

@@ -58,15 +58,23 @@ export interface CharStyle {
   /** CSS weight, 100 (thin) … 900 (black) */
   weight: number
   italic: boolean
+  /** letter-spacing (tracking), 1/1000 em: 0 = normal; negative tightens (typical for headlines, about -5 to -15) */
+  tracking: number
 }
 
-/** Default character formatting of a story plus its paragraph alignment (which applies to the whole story). */
+/** Default character formatting of a story plus its paragraph-level settings (which apply to the whole story). */
 export interface TextStyle extends CharStyle {
   /** physical alignment; Hebrew text normally sits on the right */
   align: TextAlign
+  /** line spacing (leading), points; missing = automatic, `fontSize × LINE_HEIGHT` */
+  leading?: number
+  /** word spacing while `align` is 'justify', % of the normal space width the line may be stretched or squeezed to
+   * (missing = 90–120, the usual range); ordinary (non-justified) text always keeps the normal 100% */
+  wordSpacingMin?: number
+  wordSpacingMax?: number
 }
 
-export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, weight: 400, italic: false, align: 'right' }
+export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, weight: 400, italic: false, tracking: 0, align: 'right' }
 
 /** Fonts with Hebrew glyphs that ship with Windows: used until the real system fonts are loaded. */
 export const FONT_FAMILIES = [

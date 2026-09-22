@@ -48,7 +48,7 @@ export function placedFromPlainText(name: string, raw: string): PlacedText {
   const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
   if (!text.trim()) throw new ImportError('אין טקסט בקובץ.')
   const style = { ...DEFAULT_TEXT_STYLE, align: alignFor(text) }
-  return { name, text, runs: [{ len: text.length, style: { fontFamily: style.fontFamily, fontSize: style.fontSize, weight: style.weight, italic: style.italic } }], style }
+  return { name, text, runs: [{ len: text.length, style: { fontFamily: style.fontFamily, fontSize: style.fontSize, weight: style.weight, italic: style.italic, tracking: style.tracking } }], style }
 }
 
 // ── Word (.docx) ────────────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
   paragraphs.forEach((p, pi) => {
     const pStyle = attr(child(child(p, 'pPr'), 'pStyle'), 'val') ?? defaultParagraphStyle
     const paragraphProps = overlay(defaults, resolve(pStyle))
-    let last: CharStyle = { fontFamily: baseFont, fontSize: baseSize, weight: paragraphProps.bold ? 700 : 400, italic: !!paragraphProps.italic }
+    let last: CharStyle = { fontFamily: baseFont, fontSize: baseSize, weight: paragraphProps.bold ? 700 : 400, italic: !!paragraphProps.italic, tracking: 0 }
 
     for (const r of Array.from(p.getElementsByTagNameNS(W, 'r'))) {
       let text = ''
@@ -175,6 +175,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
         fontSize: (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
         weight: props.bold ? 700 : 400,
         italic: !!props.italic,
+        tracking: 0,
       }
       pieces.push({ text, style: last })
     }

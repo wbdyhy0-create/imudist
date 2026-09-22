@@ -30,7 +30,7 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
 
   const commit = (raw: string) => {
-    const parsed = unit ? parseLength(raw, unit) : /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : null
+    const parsed = unit ? parseLength(raw, unit) : /^\s*-?\d+\s*$/.test(raw) ? parseInt(raw, 10) : null
     if (parsed !== null) onChange(clamp(parsed))
   }
 

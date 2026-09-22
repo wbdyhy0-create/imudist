@@ -188,7 +188,14 @@ export function ShapeFrameView({
                     const piece = pt.text.slice(at, at + r.len).replace(/\n/g, ' ')
                     at += r.len
                     return (
-                      <tspan key={i} fontFamily={`"${r.style.fontFamily}", "Segoe UI", Arial, sans-serif`} fontSize={r.style.fontSize * zoom} fontWeight={r.style.weight} fontStyle={r.style.italic ? 'italic' : 'normal'}>
+                      <tspan
+                        key={i}
+                        fontFamily={`"${r.style.fontFamily}", "Segoe UI", Arial, sans-serif`}
+                        fontSize={r.style.fontSize * zoom}
+                        fontWeight={r.style.weight}
+                        fontStyle={r.style.italic ? 'italic' : 'normal'}
+                        style={r.style.tracking ? { letterSpacing: (r.style.tracking / 1000) * r.style.fontSize * zoom } : undefined}
+                      >
                         {piece}
                       </tspan>
                     )

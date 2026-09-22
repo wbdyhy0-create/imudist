@@ -10,10 +10,11 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
   fontSize: s.fontSize,
   weight: s.weight,
   italic: s.italic,
+  tracking: s.tracking,
 })
 
 const sameStyle = (a: CharStyle, b: CharStyle) =>
-  a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic
+  a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
 
 /** Drop empty runs and join neighbours that have the same style. */
 export function mergeRuns(runs: Run[]): Run[] {

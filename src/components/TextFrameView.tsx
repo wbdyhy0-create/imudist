@@ -4,6 +4,22 @@ import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../fr
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 
+/**
+ * Extra space to add between words while a paragraph is justified, so it can lean on `wordSpacingMin` / `wordSpacingMax`
+ * a little instead of only on the browser's own (unbounded) stretching. Plain (non-justified) text never gets this: it
+ * always keeps the normal 100% spacing. This nudges the WHOLE frame by one fixed amount, in world points — a real
+ * per-line minimum/maximum, chosen line by line the way a proper justification engine would, is a much bigger feature
+ * this does not attempt.
+ */
+function wordSpacingPt(style: TextStyle): number {
+  if (style.align !== 'justify') return 0
+  const min = style.wordSpacingMin ?? 90
+  const max = style.wordSpacingMax ?? 120
+  const percent = (min + max) / 2
+  // a typical space is about a quarter of an em; word-spacing is an amount ADDED to it, not a multiplier
+  return ((percent - 100) / 100) * 0.25 * style.fontSize
+}
+
 interface Props {
   frame: TextFrame
   /** default style + alignment of the whole story (the first frame's) */
@@ -80,6 +96,8 @@ function RichText({ text, runs, scale, highlight, floats }: { text: string; runs
             fontSize: p.run.style.fontSize * scale,
             fontWeight: p.run.style.weight,
             fontStyle: p.run.style.italic ? 'italic' : 'normal',
+            // tracking is 1/1000 em (InDesign's own unit), same formula as richtext.ts's applyRunStyle
+            letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
           }}
         >
           {p.text}
@@ -107,8 +125,9 @@ export function TextFrameView(p: Props) {
         height: frame.h * p.zoom,
         fontSize: style.fontSize * p.zoom,
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-        lineHeight: LINE_HEIGHT,
+        lineHeight: `${(style.leading ?? style.fontSize * LINE_HEIGHT) * p.zoom}px`,
         textAlign: style.align,
+        wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style) * p.zoom}px` : undefined,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
       }}
       onPointerDown={p.onPointerDown}
