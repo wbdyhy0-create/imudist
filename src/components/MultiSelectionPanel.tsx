@@ -7,6 +7,9 @@ interface Props {
   /** how many of the selected objects are shapes */
   shapeCount: number
   onShapeOp: (op: BoolOp) => void
+  /** exactly a picture and a shape are selected together */
+  canInsertImage: boolean
+  onInsertImage: () => void
   onDelete: () => void
 }
 
@@ -43,12 +46,23 @@ const OPS: { op: BoolOp; hint: string; icon: ReactNode }[] = [
   },
 ]
 
-/** The properties panel while several objects are selected: combining shapes, and deleting. */
-export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onDelete }: Props) {
+/** The properties panel while several objects are selected: combining shapes, putting a picture inside a shape, and deleting. */
+export function MultiSelectionPanel({ count, shapeCount, onShapeOp, canInsertImage, onInsertImage, onDelete }: Props) {
   return (
     <aside className="props-panel" aria-label="בחירה מרובה">
       <h2 className="props-title">{count} אובייקטים נבחרו</h2>
       <p className="muted">גרירה של אחד מהם מזיזה את כולם יחד, והחצים מזיזים אותם מעט. Delete מוחק את כולם בבת אחת. Shift וקליק מוסיף אובייקט לבחירה או מוריד אותו ממנה.</p>
+
+      {canInsertImage && (
+        <Group title="תמונה בתוך צורה">
+          <p className="muted">התמונה תיכנס לתוך הצורה ותסתדר לפי גודלה — גם תמונה ענקית תוקטן בהתאם. מסגרת התמונה הנפרדת תיעלם.</p>
+          <div className="props-buttons">
+            <button className="btn small" onClick={onInsertImage}>
+              הכנס את התמונה לתוך הצורה
+            </button>
+          </div>
+        </Group>
+      )}
 
       <Group title="בניית צורות">
         {shapeCount >= 2 ? (

@@ -1005,6 +1005,28 @@ export function Workspace({
     setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
   }
 
+  /** exactly one picture and one shape selected together: offered as "put the picture inside the shape" */
+  const imageShapeMerge: { image: ImageFrame; shape: ShapeFrame } | null =
+    multiSel.length === 2
+      ? (() => {
+          const image = images.find((im) => multiSel.includes(im.id))
+          const shape = shapes.find((sh) => multiSel.includes(sh.id))
+          return image && shape ? { image, shape } : null
+        })()
+      : null
+  /** the picture the user chose replaces the shape's own outline: it is put inside it, scaled to the shape (a huge picture
+   * shrinks to match), and the separate picture frame is gone — one undo step */
+  const insertImageIntoShape = () => {
+    if (!imageShapeMerge) return
+    const { image, shape } = imageShapeMerge
+    pageOps.commit({
+      shapes: shapes.map((sh) => (sh.id === shape.id ? { ...sh, image: { assetId: image.assetId, fit: 'fill' } } : sh)),
+      images: images.filter((im) => im.id !== image.id),
+    })
+    setMultiSel([])
+    setSelectedIdRaw(shape.id)
+  }
+
   /** delete text frames, pictures, shapes and guides in one undo step */
   const deleteSelection = (ids: string[], guideIds: string[]) => {
     const gone = new Set(ids)
@@ -2896,6 +2918,8 @@ export function Workspace({
                 count={multiSel.length}
                 shapeCount={shapes.filter((sh) => multiSel.includes(sh.id)).length}
                 onShapeOp={combineSelectedShapes}
+                canInsertImage={!!imageShapeMerge}
+                onInsertImage={insertImageIntoShape}
                 onDelete={() => deleteSelection(multiSel, [])}
               />
             )}

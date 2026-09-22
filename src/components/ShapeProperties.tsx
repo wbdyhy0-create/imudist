@@ -148,6 +148,30 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
         </Group>
       )}
 
+      {shape.image && (
+        <Group title="התמונה במסגרת">
+          <div className="seg small" role="radiogroup" aria-label="אופן ההתאמה">
+            <button role="radio" aria-checked={shape.image.fit !== 'fit'} className={shape.image.fit !== 'fit' ? 'on' : ''} onClick={() => onChange({ image: { assetId: shape.image!.assetId, fit: 'fill' } })}>
+              מלא את המסגרת
+            </button>
+            <button role="radio" aria-checked={shape.image.fit === 'fit'} className={shape.image.fit === 'fit' ? 'on' : ''} onClick={() => onChange({ image: { assetId: shape.image!.assetId, fit: 'fit' } })}>
+              התמונה כולה
+            </button>
+          </div>
+          <p className="muted">
+            {shape.image.fit === 'fit'
+              ? 'כל התמונה נכנסת בתוך המסגרת, גם אם נשאר רווח בצדדים.'
+              : 'התמונה ממלאת את המסגרת מכל צד; מה שלא נכנס נחתך על ידי המסגרת.'}{' '}
+            גרור את העיגול שבאמצע התמונה כדי להזיז אותה, ואת הפינות שלה כדי לשנות את גודלה — עם כלי עריכת הנקודות.
+          </p>
+          <div className="props-buttons" style={{ marginTop: 8 }}>
+            <button className="btn small" onClick={() => onChange({ image: undefined })}>
+              הסר את התמונה מהמסגרת
+            </button>
+          </div>
+        </Group>
+      )}
+
       <Group title="מילוי">
         <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill })} />
       </Group>
