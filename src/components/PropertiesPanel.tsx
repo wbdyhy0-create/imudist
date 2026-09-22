@@ -161,7 +161,8 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             </Labeled>
 
             <Labeled label="מרווח בין שורות (Leading)">
-              <NumberField value={style.leading ?? style.fontSize * LINE_HEIGHT} unit={unit} min={1} max={MAX_PAGE_PT} onChange={(v) => onParagraphStyle({ leading: v })} />
+              {/* leading, like font size, is always in points — not the document's ruler unit */}
+              <NumberField value={style.leading ?? style.fontSize * LINE_HEIGHT} unit="px" unitLabel="pt" min={1} max={MAX_PAGE_PT} onChange={(v) => onParagraphStyle({ leading: v })} />
             </Labeled>
             <p className="muted">שייך לכל התיבה. ברירת המחדל היא כ־125% מגודל הגופן.</p>
 
