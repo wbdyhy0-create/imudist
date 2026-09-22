@@ -48,6 +48,7 @@ export default function App() {
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
   const [showPages, setShowPages] = useState(true)
+  const [showParagraph, setShowParagraph] = useState(false)
   /** what the shape tools make by a click, and the number of corners of the polygon tool */
   const [shapePrefs, setShapePrefs] = useState<ShapePrefs>(DEFAULT_SHAPE_PREFS)
   /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
@@ -113,6 +114,8 @@ export default function App() {
         toggleProps: () => setShowProps((v) => !v),
         showPages,
         togglePages: () => setShowPages((v) => !v),
+        showParagraph,
+        toggleParagraph: () => setShowParagraph((v) => !v),
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
         canUndo: history.canUndo && !preview,
@@ -137,7 +140,7 @@ export default function App() {
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
+    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
   )
 
   useEffect(() => {
@@ -274,6 +277,7 @@ export default function App() {
               showHiddenChars={showHiddenChars}
               showProps={showProps}
               showPages={showPages}
+              showParagraph={showParagraph}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
               frames={preview ? NO_FRAMES : session.frames}

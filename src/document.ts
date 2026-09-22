@@ -72,9 +72,38 @@ export interface TextStyle extends CharStyle {
    * (missing = 90–120, the usual range); ordinary (non-justified) text always keeps the normal 100% */
   wordSpacingMin?: number
   wordSpacingMax?: number
+  /**
+   * Paragraph spacing and indents: these belong to the whole story (like `align`/`leading`), not to an individual
+   * paragraph within it — a story with several paragraphs (separated by "\n") applies one shared setting to all of
+   * them, the same simplification `leading`/`wordSpacing` already make. `spaceBefore` only adds space above the
+   * story's very first line (of its first frame); `spaceAfter` only adds space below its very last line (of its
+   * last frame) — not between every internal paragraph break.
+   */
+  spaceBefore?: number
+  /** missing = `DEFAULT_SPACE_AFTER`, so a new story always has some breathing room without the user setting it */
+  spaceAfter?: number
+  /** indent from the frame's own left/right edges (points); physical sides, not logical/RTL-relative */
+  indentLeft?: number
+  indentRight?: number
+  /** indents only the story's first line; missing/0 = none */
+  firstLineIndent?: number
+  /** InDesign has no equivalent: indents ONLY the story's second line (from the right, its normal reading-start
+   * side); the first line and every line from the third on stay at indentLeft/indentRight. Missing/0 = off. */
+  secondLineIndent?: number
 }
 
-export const DEFAULT_TEXT_STYLE: TextStyle = { fontFamily: 'Segoe UI', fontSize: 14, weight: 400, italic: false, tracking: 0, align: 'right' }
+/** `spaceAfter` when a story doesn't set its own (~2.5mm): every new story gets some paragraph spacing for free. */
+export const DEFAULT_SPACE_AFTER = 7
+
+export const DEFAULT_TEXT_STYLE: TextStyle = {
+  fontFamily: 'Segoe UI',
+  fontSize: 14,
+  weight: 400,
+  italic: false,
+  tracking: 0,
+  align: 'right',
+  spaceAfter: DEFAULT_SPACE_AFTER,
+}
 
 /** Fonts with Hebrew glyphs that ship with Windows: used until the real system fonts are loaded. */
 export const FONT_FAMILIES = [

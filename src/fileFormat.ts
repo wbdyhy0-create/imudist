@@ -36,6 +36,7 @@ import {
   type Sides,
   type TextAlign,
   type TextFrame,
+  type TextStyle,
   type WrapMode,
 } from './document'
 import { normalizeDeg } from './frames'
@@ -146,11 +147,18 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
 const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 'number' && Number.isFinite(raw.z) ? { z: int(raw.z, 0, -1e9, 1e9) } : {})
 const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
   typeof raw.rotation === 'number' && Number.isFinite(raw.rotation) && raw.rotation !== 0 ? { rotation: normalizeDeg(raw.rotation) } : {}
-/** leading and word-spacing bounds: optional, belong to the whole story (paragraph-level, not per-run) */
-const paragraphStyleOf = (raw: Record<string, unknown>): { leading?: number; wordSpacingMin?: number; wordSpacingMax?: number } => ({
+/** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
+type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
+const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields> => ({
   ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 1, MAX_PAGE_PT) } : {}),
   ...(typeof raw.wordSpacingMin === 'number' && Number.isFinite(raw.wordSpacingMin) ? { wordSpacingMin: num(raw.wordSpacingMin, 90, 10, 100) } : {}),
   ...(typeof raw.wordSpacingMax === 'number' && Number.isFinite(raw.wordSpacingMax) ? { wordSpacingMax: num(raw.wordSpacingMax, 120, 100, 500) } : {}),
+  ...(typeof raw.spaceBefore === 'number' && Number.isFinite(raw.spaceBefore) ? { spaceBefore: num(raw.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.spaceAfter === 'number' && Number.isFinite(raw.spaceAfter) ? { spaceAfter: num(raw.spaceAfter, 0, 0, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.indentLeft === 'number' && Number.isFinite(raw.indentLeft) ? { indentLeft: num(raw.indentLeft, 0, 0, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.indentRight === 'number' && Number.isFinite(raw.indentRight) ? { indentRight: num(raw.indentRight, 0, 0, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.firstLineIndent === 'number' && Number.isFinite(raw.firstLineIndent) ? { firstLineIndent: num(raw.firstLineIndent, 0, 0, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.secondLineIndent === 'number' && Number.isFinite(raw.secondLineIndent) ? { secondLineIndent: num(raw.secondLineIndent, 0, 0, MAX_PAGE_PT) } : {}),
 })
 
 function parseFrames(v: unknown): TextFrame[] {

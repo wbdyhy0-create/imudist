@@ -1,5 +1,5 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SPACE_AFTER, defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -157,6 +157,13 @@ export function TextFrameView(p: Props) {
         textAlign: style.align,
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style) * p.zoom}px` : undefined,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
+        // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore/firstLineIndent
+        // only on the frame holding the story's first line, spaceAfter only on the one holding its last
+        paddingTop: !p.hasPrev && style.spaceBefore ? style.spaceBefore * p.zoom : undefined,
+        paddingBottom: !hasNext ? (style.spaceAfter ?? DEFAULT_SPACE_AFTER) * p.zoom : undefined,
+        paddingLeft: style.indentLeft ? style.indentLeft * p.zoom : undefined,
+        paddingRight: style.indentRight ? style.indentRight * p.zoom : undefined,
+        textIndent: !p.hasPrev && style.firstLineIndent ? style.firstLineIndent * p.zoom : undefined,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}

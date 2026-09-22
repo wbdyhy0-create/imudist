@@ -1,4 +1,4 @@
-import type { TextFrame, TextStyle } from './document'
+import { DEFAULT_SPACE_AFTER, type TextFrame, type TextStyle } from './document'
 import { mergeRuns, normalizeRuns } from './story'
 
 export const styleOf = (f: TextFrame): TextStyle => ({
@@ -11,7 +11,27 @@ export const styleOf = (f: TextFrame): TextStyle => ({
   leading: f.leading,
   wordSpacingMin: f.wordSpacingMin,
   wordSpacingMax: f.wordSpacingMax,
+  spaceBefore: f.spaceBefore,
+  spaceAfter: f.spaceAfter,
+  indentLeft: f.indentLeft,
+  indentRight: f.indentRight,
+  firstLineIndent: f.firstLineIndent,
+  secondLineIndent: f.secondLineIndent,
 })
+
+/**
+ * The box actually available for text after paragraph spacing/indents (all story-wide, like `styleOf`'s other
+ * fields): the width always narrows by `indentLeft`+`indentRight` (every line of every frame); the height narrows
+ * by `spaceBefore` only for the frame holding the story's very first line, and by `spaceAfter` only for the frame
+ * holding its very last one — a frame in the middle of a thread is neither, so it gets the full box.
+ */
+export function insetBox(box: { w: number; h: number }, style: TextStyle, atStoryStart: boolean, atStoryEnd: boolean): { w: number; h: number } {
+  const before = atStoryStart ? (style.spaceBefore ?? 0) : 0
+  const after = atStoryEnd ? (style.spaceAfter ?? DEFAULT_SPACE_AFTER) : 0
+  const left = style.indentLeft ?? 0
+  const right = style.indentRight ?? 0
+  return { w: Math.max(1, box.w - left - right), h: Math.max(1, box.h - before - after) }
+}
 
 /** The first frame of every story in the document (one per thread, in no particular order). */
 export function headFrames(frames: TextFrame[]): TextFrame[] {

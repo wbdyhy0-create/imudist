@@ -1,4 +1,4 @@
-import { DEFAULT_WRAP_OFFSET, type ImageFrame } from './document'
+import { DEFAULT_WRAP_OFFSET, defaultLeading, type ImageFrame, type TextStyle } from './document'
 import type { Box } from './frames'
 
 /** Text wrap: how a text frame is cut into the areas where text may go, around the pictures that repel it. */
@@ -80,6 +80,39 @@ export function wrapFloatsFor(frame: Box, images: ImageFrame[]): WrapFloat[] {
     return { side, width, height: frame.h, points }
   }
   return [build('left'), build('right')].filter((f): f is WrapFloat => f !== null)
+}
+
+/**
+ * A synthetic float for the "second line indent" special effect (`TextStyle.secondLineIndent`): the first line is
+ * left alone, the float only starts blocking at the second line (band 1) and stops after it (band 2's height ends
+ * the float), so the third line and beyond are automatically free again — no separate "un-indent" needed.
+ */
+function secondLineFloat(side: 'left' | 'right', indent: number, leading: number): WrapFloat {
+  const width = indent
+  const edge = side === 'left' ? 0 : width
+  const inner = (b: number) => (side === 'left' ? b : width - b)
+  const bands = [
+    { y0: 0, y1: leading, blocked: 0 }, // first line: untouched
+    { y0: leading, y1: 2 * leading, blocked: width }, // second line: fully indented
+  ]
+  const points: [number, number][] = [[edge, 0]]
+  for (const b of bands) points.push([inner(b.blocked), b.y0], [inner(b.blocked), b.y1])
+  points.push([edge, 2 * leading])
+  return { side, width, height: 2 * leading, points }
+}
+
+/**
+ * `wrapFloatsFor` plus the synthetic float for `style.secondLineIndent`, when it applies. That effect belongs to
+ * the whole story (like `leading`/`align`), so it only ever appears on the frame holding the story's first line —
+ * `atStoryStart` (pass `true` only for that frame) is how every caller (the hidden measurer and the real display)
+ * agrees on which one that is, so they can never disagree about where the extra indent starts.
+ */
+export function floatsFor(frame: Box, images: ImageFrame[], style: TextStyle, atStoryStart: boolean): WrapFloat[] {
+  const floats = wrapFloatsFor(frame, images)
+  const indent = style.secondLineIndent ?? 0
+  if (!atStoryStart || indent <= 0) return floats
+  // the story's normal reading-start side: this app's text frames are always RTL regardless of `align`
+  return [...floats, secondLineFloat('right', indent, style.leading ?? defaultLeading(style))]
 }
 
 /**

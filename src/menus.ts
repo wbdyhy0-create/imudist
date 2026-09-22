@@ -19,6 +19,8 @@ export interface MenuContext {
   redo: () => void
   showPages: boolean
   togglePages: () => void
+  showParagraph: boolean
+  toggleParagraph: () => void
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
   importText: () => void
@@ -198,6 +200,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('כלים'),
         { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages },
         { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps },
+        { label: 'פסקה', shortcut: 'Ctrl+Alt+L', checked: c.showParagraph, onClick: c.toggleParagraph },
         ...(c.openDocs.length > 0
           ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
           : []),

@@ -1,8 +1,8 @@
 import { defaultLeading, LINE_HEIGHT, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
-import { chainOf, styleOf } from './frames'
+import { chainOf, insetBox, styleOf } from './frames'
 import { buildRunNodes, buildWrapFloats } from './richtext'
 import { normalizeRuns, sliceRuns } from './story'
-import { floatsKey, wrapFloatsFor, type WrapFloat } from './wrap'
+import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 
 /** What one frame shows of its story. */
 export interface FrameFlow {
@@ -138,7 +138,11 @@ export function fitStoryEnd(
 ): number {
   const m = getMeasurer()
   configure(m, style)
-  return fitEnd(m, story, runs, start, box, style.fontSize, floats, hint)
+  // width-only inset (indentLeft/indentRight): this single-box helper doesn't know its place in a chain, so it
+  // never applies spaceBefore/spaceAfter — flowFrames (the authoritative, always-recomputed layout) does that.
+  const inset = insetBox(box, style, false, false)
+  m.style.textIndent = `${start === 0 ? (style.firstLineIndent ?? 0) : 0}px`
+  return fitEnd(m, story, runs, start, inset, style.fontSize, floats, hint)
 }
 
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
@@ -158,10 +162,12 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
     const chain = chainOf(frames, head.id)
     const style = styleOf(head)
     const story = head.text
-    const floats = chain.map((f) => wrapFloatsFor(f, images))
-    // everything the layout depends on: default style, and the id, size and wrap areas of every frame in the thread
+    const floats = chain.map((f, i) => floatsFor(f, images, style, i === 0))
+    // everything the layout depends on: default style (incl. paragraph spacing/indents), and the id, size and wrap
+    // areas of every frame in the thread
     const sig =
       `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
+      `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
     const hit = cache.get(head.id)
@@ -175,7 +181,11 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
       flows = []
       let start = 0
       chain.forEach((f, i) => {
-        const end = fitEnd(m, story, runs, start, f, style.fontSize, floats[i], lengths.get(f.id))
+        const isFirst = i === 0
+        const isLast = i === chain.length - 1
+        const box = insetBox(f, style, isFirst, isLast)
+        m.style.textIndent = `${isFirst ? (style.firstLineIndent ?? 0) : 0}px`
+        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id))
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,

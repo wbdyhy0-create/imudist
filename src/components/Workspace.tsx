@@ -47,7 +47,7 @@ import {
   type TextStyle,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -65,13 +65,14 @@ import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, cleanSpacing, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
-import { wrapFloatsFor } from '../wrap'
+import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
+import { ParagraphPanel } from './ParagraphPanel'
 import { PathTextEditor } from './PathTextEditor'
 import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
@@ -156,6 +157,8 @@ interface Props {
   showHiddenChars: boolean
   showProps: boolean
   showPages: boolean
+  /** Window > פסקה: a dedicated side panel for paragraph spacing/indents */
+  showParagraph: boolean
   /** screen mode "Preview": no guides or frame edges, the page as it will print */
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
@@ -224,6 +227,7 @@ export function Workspace({
   showHiddenChars,
   showProps,
   showPages,
+  showParagraph,
   previewMode,
   onPreviewMode,
   frames,
@@ -626,8 +630,16 @@ export function Workspace({
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align } : f)), `align:${id}`)
   }
 
-  /** leading and word-spacing bounds belong to the whole story, like alignment */
-  const applyParagraphStyle = (id: string, patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => {
+  /** leading, word-spacing bounds, and paragraph spacing/indents all belong to the whole story, like alignment */
+  const applyParagraphStyle = (
+    id: string,
+    patch: Partial<
+      Pick<
+        TextStyle,
+        'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'
+      >
+    >,
+  ) => {
     const ids = new Set(chainOf(frames, id).map((f) => f.id))
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `paragraph:${id}:${Object.keys(patch).join(',')}`)
   }
@@ -2513,6 +2525,8 @@ export function Workspace({
 
   // what the panel's text controls show: the selected text's style, else the story's default
   const panelHead = selChain[0]
+  // the Paragraph panel: always the whole story's own settings, never selection-scoped (see document.ts's TextStyle)
+  const paragraphStyle: TextStyle | null = panelHead ? styleOf(panelHead) : null
   const panelSel =
     panelHead && textSel && textSel.headId === panelHead.id && textSel.a !== textSel.b && textSel.b <= panelHead.text.length
       ? textSel
@@ -2747,7 +2761,7 @@ export function Workspace({
                     slice={fl.slice}
                     runs={fl.runs}
                     highlight={highlightFor(fl)}
-                    floats={wrapFloatsFor(f, images)}
+                    floats={floatsFor(f, images, fl.style, fl.prevId === null)}
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
                     hasPrev={fl.prevId !== null}
@@ -2955,8 +2969,11 @@ export function Workspace({
             </div>
           </div>
         </div>
-        {(showPages || showProps) && (
+        {(showPages || showProps || showParagraph) && (
           <div className="side-panels">
+            {showParagraph && (
+              <ParagraphPanel frame={selFrame} style={paragraphStyle} unit={doc.unit} onChange={(patch) => panelHead && applyParagraphStyle(panelHead.id, patch)} />
+            )}
             {showPages && (
               <PagesPanel
                 doc={doc}
