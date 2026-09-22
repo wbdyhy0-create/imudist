@@ -198,6 +198,17 @@ export interface PathText {
   color: string
 }
 
+/** A picture placed inside a shape, clipped to its outline (a graphic frame). */
+export interface ShapeImage {
+  assetId: string
+  fit: ImageFit
+  /** the picture's own position inside the shape's box, world points from the shape's own top-left corner — set once the
+   * picture is moved or resized by hand; missing = centred automatically according to `fit` */
+  offset?: { x: number; y: number }
+  /** a uniform scale on top of the picture's natural size — set once it is resized by hand */
+  scale?: number
+}
+
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
@@ -212,6 +223,8 @@ export interface ShapeFrame {
   geom?: PathGeom
   /** text along the outline */
   pathText?: PathText
+  /** a picture placed inside the shape, clipped to its outline */
+  image?: ShapeImage
   /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
   radii?: [number, number, number, number]
   /** #rrggbb, or null for no fill */

@@ -30,6 +30,7 @@ import {
   type PathText,
   type PathVertex,
   type ShapeFrame,
+  type ShapeImage,
   type ShapeKind,
   type Run,
   type Sides,
@@ -309,7 +310,17 @@ function parseGeom(v: unknown): PathGeom | undefined {
   return out.length > 0 && points <= 100000 ? out : undefined
 }
 
-function parseShapes(v: unknown): ShapeFrame[] {
+/** a picture placed inside a shape: dropped if its asset is missing from the file */
+function parseShapeImage(v: unknown, assets: Assets): ShapeImage | undefined {
+  if (!isObj(v)) return undefined
+  const assetId = str(v.assetId, '')
+  if (!assetId || !assets[assetId]) return undefined
+  const offset = isObj(v.offset) && typeof v.offset.x === 'number' && typeof v.offset.y === 'number' ? { x: num(v.offset.x, 0, -1e6, 1e6), y: num(v.offset.y, 0, -1e6, 1e6) } : undefined
+  const scale = typeof v.scale === 'number' && Number.isFinite(v.scale) && v.scale > 0 ? Math.min(1000, v.scale) : undefined
+  return { assetId, fit: oneOf<ImageFit>(v.fit, ['fill', 'fit', 'stretch'], 'fill'), ...(offset ? { offset } : {}), ...(scale ? { scale } : {}) }
+}
+
+function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
   if (!Array.isArray(v)) return []
   const out: ShapeFrame[] = []
   const used = new Set<string>()
@@ -321,6 +332,7 @@ function parseShapes(v: unknown): ShapeFrame[] {
     if (!id || used.has(id)) id = `s${out.length}-${Math.random().toString(36).slice(2, 8)}`
     used.add(id)
     const r = Array.isArray(raw.radii) ? raw.radii : []
+    const image = parseShapeImage(raw.image, assets)
     out.push({
       id,
       kind,
@@ -332,6 +344,7 @@ function parseShapes(v: unknown): ShapeFrame[] {
       ...(kind === 'path' && geom ? { geom } : {}),
       ...parsePathText(raw.pathText),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
+      ...(image ? { image } : {}),
       fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
       strokeWidth: num(raw.strokeWidth, 1, 0, 200),
@@ -381,5 +394,5 @@ export function parseDocument(text: string, name: string): DocContent {
   }
   const assets = parseAssets(data.assets)
   const doc = parseSettings(data.settings, name)
-  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages), shapes: parseShapes(data.shapes) }
+  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages), shapes: parseShapes(data.shapes, assets) }
 }

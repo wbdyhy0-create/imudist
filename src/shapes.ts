@@ -1,5 +1,12 @@
 import { MAX_SIDES, MIN_SIDES, type DrawKind, type PathGeom, type PathVertex, type ShapeFrame, type ShapeKind } from './document'
 
+export interface ImageBox {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export type Pt = [number, number]
 
 /** A vertex's own position, whether it is a plain corner or a smooth point. */
@@ -134,6 +141,23 @@ export function editableRing(s: ShapeFrame): PathVertex[] | null {
  * polygons (holes, extra pieces) — unchanged. */
 export function replaceVertex(geom: PathGeom, index: number, v: PathVertex): PathGeom {
   return [[geom[0][0].map((old, i) => (i === index ? v : old)), ...geom[0].slice(1)], ...geom.slice(1)]
+}
+
+/**
+ * Where the picture inside a shape sits, relative to the shape's own top-left corner, in its own units: its manual
+ * position and size if it was moved or resized by hand, or otherwise the box its `fit` gives it, centred. ('stretch',
+ * which does not keep the picture's own proportions, only applies until the picture is moved or resized by hand — after
+ * that it keeps its proportions like the others, since a manual move only ever sets one uniform scale.)
+ */
+export function imageGeometry(shape: ShapeFrame, asset: { width: number; height: number }): ImageBox {
+  const img = shape.image
+  const fit = img?.fit ?? 'fill'
+  const scale = img?.scale ?? (fit === 'fit' ? Math.min(shape.w / asset.width, shape.h / asset.height) : Math.max(shape.w / asset.width, shape.h / asset.height))
+  const w = asset.width * scale
+  const h = asset.height * scale
+  const x = img?.offset?.x ?? (shape.w - w) / 2
+  const y = img?.offset?.y ?? (shape.h - h) / 2
+  return { x, y, w, h }
 }
 
 /** Where the four rounding handles of a rectangle sit, and which way is "inside" at each corner. */

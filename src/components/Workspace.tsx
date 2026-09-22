@@ -56,7 +56,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
-import { CORNERS, editableRing, fitRadii, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ShapePrefs } from '../shapes'
+import { CORNERS, editableRing, fitRadii, imageGeometry, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -345,6 +345,12 @@ export function Workspace({
   >(null)
   /** the shape's own points that are selected, while the point-editing tool has it open */
   const [pointSel, setPointSel] = useState<{ id: string; indices: number[] } | null>(null)
+  /** the point-editing tool, moving or resizing the picture inside a shape (not the shape itself) */
+  const contentDrag = useRef<
+    | { kind: 'move'; id: string; start: { x: number; y: number }; origBox: ImageBox }
+    | { kind: 'resize'; id: string; corner: 'nw' | 'ne' | 'se' | 'sw'; start: { x: number; y: number }; origBox: ImageBox; ratio: number }
+    | null
+  >(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** "change all corners together": a drag on any rounding handle rounds all four corners */
   const [roundTogether, setRoundTogether] = useState(true)
@@ -647,6 +653,21 @@ export function Workspace({
     const next = placingImages[0]
     if (!next) return
     const { asset, assetId } = next
+    // a plain click (not a dragged rectangle) on a shape that has no picture of its own yet: the picture goes inside it,
+    // clipped to its outline, instead of a new rectangular frame on top of it
+    if (!rect) {
+      const target = emptyShapeAt(at.x, at.y)
+      if (target) {
+        pageOps.commit({
+          shapes: shapes.map((sh) => (sh.id === target.id ? { ...sh, image: { assetId, fit: 'fill' as const } } : sh)),
+          ...(assets[assetId] ? {} : { assets: { ...assets, [assetId]: asset } }),
+        })
+        setSelectedId(target.id)
+        setEditingId(null)
+        onPlacingImagesChange(placingImages.slice(1))
+        return
+      }
+    }
     const page = rects[ownerPage(rects, at.x, at.y)]
     let w: number
     let h: number
@@ -1301,6 +1322,20 @@ export function Workspace({
     }
   }, [])
 
+  // a shape is selected and empty when pictures are loaded (File > Place with it already chosen): the first picture goes
+  // straight into it, clipped to its outline, with no click needed
+  useEffect(() => {
+    const sh = selectedId ? shapes.find((x) => x.id === selectedId) : undefined
+    if (placingImages.length === 0 || !sh || sh.image) return
+    const { asset, assetId } = placingImages[0]
+    pageOps.commit({
+      shapes: shapes.map((x) => (x.id === sh.id ? { ...x, image: { assetId, fit: 'fill' as const } } : x)),
+      ...(assets[assetId] ? {} : { assets: { ...assets, [assetId]: asset } }),
+    })
+    onPlacingImagesChange(placingImages.slice(1))
+    // only when a fresh batch of pictures is loaded, not on every selection change while some are still queued
+  }, [placingImages])
+
   // Escape drops the loaded pictures
   useEffect(() => {
     if (placingImages.length === 0) return
@@ -1350,6 +1385,24 @@ export function Workspace({
       if (!info) continue
       const n = nearestOnRing(info, [p.x - sh.x, p.y - sh.y])
       if (n.dist <= reach && (!best || n.dist <= best.dist)) best = { shape: sh, fraction: n.fraction, dist: n.dist }
+    }
+    return best
+  }
+
+  /** the topmost shape, without a picture of its own already, whose outline holds a world point — where a placed picture goes into the shape instead of a new frame of its own */
+  const emptyShapeAt = (x: number, y: number): ShapeFrame | undefined => {
+    let best: ShapeFrame | undefined
+    let bestRank = -1
+    for (const sh of shapes) {
+      if (sh.image) continue
+      if (x < sh.x || x > sh.x + sh.w || y < sh.y || y > sh.y + sh.h) continue
+      const info = ringInfo(sh)
+      if (!info || !pointInRing(info, [x - sh.x, y - sh.y])) continue
+      const r = rank.get(sh.id) ?? 0
+      if (r > bestRank) {
+        best = sh
+        bestRank = r
+      }
     }
     return best
   }
@@ -1774,6 +1827,44 @@ export function Workspace({
   }
   const movePoint = (d: NonNullable<typeof pointDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => (d.kind === 'handle' ? moveHandle(d, e) : moveAnchors(d, e))
 
+  /** grabbing the round handle at the middle of a shape's picture: it pans within the frame, which stays put */
+  const onContentGrab = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    const asset = sh?.image && assets[sh.image.assetId]
+    if (!sh || !asset) return
+    e.stopPropagation()
+    e.preventDefault()
+    contentDrag.current = { kind: 'move', id, start: toWorld(e.clientX, e.clientY), origBox: imageGeometry(sh, asset) }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** grabbing one of the picture's own corners: it resizes on its own, keeping its natural proportions */
+  const onContentResize = (id: string) => (corner: 'nw' | 'ne' | 'se' | 'sw', e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    const asset = sh?.image && assets[sh.image.assetId]
+    if (!sh || !asset) return
+    e.stopPropagation()
+    e.preventDefault()
+    contentDrag.current = { kind: 'resize', id, corner, start: toWorld(e.clientX, e.clientY), origBox: imageGeometry(sh, asset), ratio: asset.width / asset.height }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveContent = (d: NonNullable<typeof contentDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const p = toWorld(e.clientX, e.clientY)
+    const dx = p.x - d.start.x
+    const dy = p.y - d.start.y
+    const sh = shapes.find((x) => x.id === d.id)
+    if (!sh?.image) return
+    if (d.kind === 'move') {
+      onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, image: { ...x.image!, offset: { x: d.origBox.x + dx, y: d.origBox.y + dy } } } : x)), `content:${d.id}`)
+      return
+    }
+    const box = dragBox(d.origBox, d.corner, dx, dy, 8, d.ratio)
+    const asset = assets[sh.image.assetId]
+    const scale = asset ? box.w / asset.width : (sh.image.scale ?? 1)
+    onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, image: { ...x.image!, offset: { x: box.x, y: box.y }, scale } } : x)), `content:${d.id}`)
+  }
+
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const isImage = images.some((x) => x.id === id)
     const isShape = shapes.some((x) => x.id === id)
@@ -1995,6 +2086,10 @@ export function Workspace({
       movePoint(pointDrag.current, e)
       return
     }
+    if (contentDrag.current) {
+      moveContent(contentDrag.current, e)
+      return
+    }
     if (groupDrag.current) {
       const d = groupDrag.current
       const p = toWorld(e.clientX, e.clientY)
@@ -2166,6 +2261,7 @@ export function Workspace({
     }
     groupDrag.current = null
     pointDrag.current = null
+    contentDrag.current = null
     frameDrag.current = null
     pageDrag.current = null
     setPageSnap(null)
@@ -2187,6 +2283,7 @@ export function Workspace({
     cornerDrag.current = null
     setHotCorners([])
     pointDrag.current = null
+    contentDrag.current = null
     createStart.current = null
     frameDrag.current = null
     pageDrag.current = null
@@ -2495,6 +2592,7 @@ export function Workspace({
                   together={roundTogether}
                   directMode={tool === 'direct'}
                   selectedPoints={sh.id === pointSel?.id ? pointSel.indices : undefined}
+                  asset={sh.image ? assets[sh.image.assetId] : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
@@ -2509,6 +2607,8 @@ export function Workspace({
                   onPointDouble={onPointDouble(sh.id)}
                   onEdgeDown={onEdgeDown(sh.id)}
                   onHandleGrab={onHandleGrab(sh.id)}
+                  onContentGrab={onContentGrab(sh.id)}
+                  onContentResize={onContentResize(sh.id)}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (

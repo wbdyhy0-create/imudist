@@ -1,9 +1,13 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import type { PathVertex, ShapeFrame } from '../document'
+import type { Asset, PathVertex, ShapeFrame } from '../document'
 import { HANDLES, type HandleId } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
-import { CORNERS, editableRing, fitRadii, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
+import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
+
+/** the picture's corner handles, while its own content (not the frame) is being resized */
+const CONTENT_CORNERS = ['nw', 'ne', 'se', 'sw'] as const
+type ContentCorner = (typeof CONTENT_CORNERS)[number]
 
 /** Distance of a rounding handle from the arc of its corner, screen px. */
 export const CORNER_HANDLE_OFFSET = 14
@@ -33,6 +37,8 @@ interface Props {
   directMode?: boolean
   /** which of the shape's own points are selected: they show solid, and a selected point's own curve handles (if it has any) are shown too */
   selectedPoints?: number[]
+  /** the picture data of `shape.image`, when it has one and it is not missing */
+  asset?: Asset
   /** a preview while the shape is being drawn: no handles, and clicks go through */
   ghost?: boolean
   onPointerDown?: (e: ReactPointerEvent<SVGPathElement>) => void
@@ -50,6 +56,10 @@ interface Props {
   onEdgeDown?: (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of a point's own curve handles: it reshapes the curve on that side (and the other side too, unless Alt is held) */
   onHandleGrab?: (index: number, which: 'hi' | 'ho', e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing the round handle at the middle of the picture inside the shape: it moves on its own, the frame staying put */
+  onContentGrab?: (e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing one of the picture's own corner handles: it resizes on its own */
+  onContentResize?: (corner: ContentCorner, e: ReactPointerEvent<HTMLDivElement>) => void
 }
 
 export type PathPeg = 'anchor' | 'end' | 'flip'
@@ -69,6 +79,7 @@ export function ShapeFrameView({
   together,
   directMode,
   selectedPoints,
+  asset,
   ghost,
   onPointerDown,
   onHandleDown,
@@ -79,6 +90,8 @@ export function ShapeFrameView({
   onPointDouble,
   onEdgeDown,
   onHandleGrab,
+  onContentGrab,
+  onContentResize,
 }: Props) {
   const w = shape.w * zoom
   const h = shape.h * zoom
@@ -88,6 +101,9 @@ export function ShapeFrameView({
   const showHandles = selected && showEdge && !ghost && !ring
   const showCorners = showHandles && radii !== null && Math.min(w, h) >= MIN_CORNER_HANDLES
   const showPoints = !!ring && selected && showEdge && !ghost
+  const img = shape.image && asset ? { box: imageGeometry(shape, asset), asset } : null
+  const showContent = !!img && directMode && selected && showEdge && !ghost
+  const clipId = `clip-${shape.id}`
 
   // text along the outline
   const pt = shape.pathText
@@ -108,17 +124,54 @@ export function ShapeFrameView({
       style={{ left: tx + shape.x * zoom, top: ty + shape.y * zoom, width: w, height: h, zIndex: z }}
     >
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-        <path
-          d={shapePath(shape, zoom)}
-          fill={shape.fill ?? 'none'}
-          fillRule="evenodd"
-          stroke={shape.stroke ?? 'none'}
-          strokeWidth={shape.strokeWidth * zoom}
-          strokeLinejoin="round"
-          pointerEvents={ghost ? 'none' : 'all'}
-          onPointerDown={onPointerDown}
-          onDoubleClick={onDoubleClick}
-        />
+        {!img ? (
+          <path
+            d={shapePath(shape, zoom)}
+            fill={shape.fill ?? 'none'}
+            fillRule="evenodd"
+            stroke={shape.stroke ?? 'none'}
+            strokeWidth={shape.strokeWidth * zoom}
+            strokeLinejoin="round"
+            pointerEvents={ghost ? 'none' : 'all'}
+            onPointerDown={onPointerDown}
+            onDoubleClick={onDoubleClick}
+          />
+        ) : (
+          <>
+            <defs>
+              <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+                <path d={shapePath(shape, zoom)} />
+              </clipPath>
+            </defs>
+            {/* the fill (if any) is the click target, and shows through a picture with transparency */}
+            <path
+              d={shapePath(shape, zoom)}
+              fill={shape.fill ?? 'none'}
+              fillRule="evenodd"
+              pointerEvents={ghost ? 'none' : 'all'}
+              onPointerDown={onPointerDown}
+              onDoubleClick={onDoubleClick}
+            />
+            <image
+              href={img.asset.dataUrl}
+              x={img.box.x * zoom}
+              y={img.box.y * zoom}
+              width={img.box.w * zoom}
+              height={img.box.h * zoom}
+              clipPath={`url(#${clipId})`}
+              preserveAspectRatio="none"
+              pointerEvents="none"
+            />
+            <path d={shapePath(shape, zoom)} fill="none" fillRule="evenodd" stroke={shape.stroke ?? 'none'} strokeWidth={shape.strokeWidth * zoom} strokeLinejoin="round" pointerEvents="none" />
+          </>
+        )}
+        {!shape.image && !ghost && showEdge && Math.min(w, h) >= 20 && (
+          <g className="empty-frame-icon" pointerEvents="none" transform={`translate(${w / 2} ${h / 2}) scale(${Math.min(1, Math.min(w, h) / 70)})`}>
+            <rect x="-15" y="-11" width="30" height="22" rx="2" />
+            <circle cx="-7" cy="-4" r="3" />
+            <path d="M-15 7 -4 -3 4 3 10 -2 15 3V9H-15Z" />
+          </g>
+        )}
         {line && pt && place && runs.length > 0 && (
           <>
             <defs>
@@ -245,8 +298,34 @@ export function ShapeFrameView({
           })}
         </>
       )}
+
+      {showContent && (
+        <>
+          <div
+            className="content-grabber"
+            title="תוכן התמונה — גרור כדי להזיז את התמונה בתוך המסגרת, בלי להזיז את המסגרת עצמה"
+            style={{ left: (img!.box.x + img!.box.w / 2) * zoom, top: (img!.box.y + img!.box.h / 2) * zoom }}
+            onPointerDown={onContentGrab}
+          />
+          {CONTENT_CORNERS.map((c) => (
+            <div
+              key={c}
+              className={'content-handle ' + c}
+              title="גרור כדי לשנות את גודל התמונה בתוך המסגרת"
+              style={contentHandleAt(c, img!.box, zoom)}
+              onPointerDown={(e) => onContentResize?.(c, e)}
+            />
+          ))}
+        </>
+      )}
     </div>
   )
+}
+
+function contentHandleAt(corner: ContentCorner, box: { x: number; y: number; w: number; h: number }, zoom: number) {
+  const left = (corner.includes('w') ? box.x : box.x + box.w) * zoom
+  const top = (corner.includes('n') ? box.y : box.y + box.h) * zoom
+  return { left, top }
 }
 
 /** the screen position of the middle of the edge from point `i` to the next one (wrapping around) */
