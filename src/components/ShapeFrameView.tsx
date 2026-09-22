@@ -2,7 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ShapeFrame } from '../document'
 import { HANDLES, type HandleId } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
-import { CORNERS, fitRadii, shapePath } from '../shapes'
+import { CORNERS, editableRing, fitRadii, shapePath } from '../shapes'
 import { normalizeRuns } from '../story'
 
 /** Distance of a rounding handle from the arc of its corner, screen px. */
@@ -29,6 +29,8 @@ interface Props {
   activeCorners?: number[]
   /** all four corners are rounded together: the handles say so */
   together?: boolean
+  /** the point-editing tool is active: show the shape's own corner points instead of the usual resize handles (an ellipse has none of its own, so it keeps them) */
+  directMode?: boolean
   /** a preview while the shape is being drawn: no handles, and clicks go through */
   ghost?: boolean
   onPointerDown?: (e: ReactPointerEvent<SVGPathElement>) => void
@@ -38,17 +40,45 @@ interface Props {
   onDoubleClick?: () => void
   /** a peg of the text on the outline: where it starts, where it is cut off, or the middle one that turns it in / out */
   onPegDown?: (peg: PathPeg, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing one of the shape's own corner points: it moves on its own, reshaping the outline */
+  onPointDown?: (index: number, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing the middle of one of its edges: a new point is added there and dragged */
+  onEdgeDown?: (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => void
 }
 
 export type PathPeg = 'anchor' | 'end' | 'flip'
 
 /** A drawn shape: the outline is an SVG path (so only the shape itself catches the pointer), plus handles when selected. */
-export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showEdge, hotCorners = [], activeCorners, together, ghost, onPointerDown, onHandleDown, onCornerDown, onDoubleClick, onPegDown }: Props) {
+export function ShapeFrameView({
+  shape,
+  zoom,
+  tx,
+  ty,
+  z,
+  selected,
+  marked,
+  showEdge,
+  hotCorners = [],
+  activeCorners,
+  together,
+  directMode,
+  ghost,
+  onPointerDown,
+  onHandleDown,
+  onCornerDown,
+  onDoubleClick,
+  onPegDown,
+  onPointDown,
+  onEdgeDown,
+}: Props) {
   const w = shape.w * zoom
   const h = shape.h * zoom
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
-  const showHandles = selected && showEdge && !ghost
+  /** the shape's own corner points, while the point-editing tool has it selected */
+  const ring = directMode ? editableRing(shape) : null
+  const showHandles = selected && showEdge && !ghost && !ring
   const showCorners = showHandles && radii !== null && Math.min(w, h) >= MIN_CORNER_HANDLES
+  const showPoints = !!ring && selected && showEdge && !ghost
 
   // text along the outline
   const pt = shape.pathText
@@ -136,6 +166,24 @@ export function ShapeFrameView({ shape, zoom, tx, ty, z, selected, marked, showE
             />
           )
         })}
+
+      {showPoints && (
+        <>
+          {ring!.map((_, i) => (
+            <div key={`edge${i}`} className="edge-handle" title="גרור כדי להוסיף נקודה ולעצב את הקו" style={edgeAt(ring!, i, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
+          ))}
+          {ring!.map(([fx, fy], i) => (
+            <div key={`pt${i}`} className="point-handle" title="נקודת עיגון — גרור כדי להזיז ולעצב את הצורה" style={{ left: fx * w, top: fy * h }} onPointerDown={(e) => onPointDown?.(i, e)} />
+          ))}
+        </>
+      )}
     </div>
   )
+}
+
+/** the screen position of the middle of the edge from point `i` to the next one (wrapping around) */
+function edgeAt(ring: readonly [number, number][], i: number, w: number, h: number) {
+  const [ax, ay] = ring[i]
+  const [bx, by] = ring[(i + 1) % ring.length]
+  return { left: ((ax + bx) / 2) * w, top: ((ay + by) / 2) * h }
 }

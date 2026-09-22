@@ -33,6 +33,7 @@ import {
   type Guide,
   type GuideAxis,
   type DrawKind,
+  type PathGeom,
   type PathText,
   type ShapeFrame,
   type Sides,
@@ -53,7 +54,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
-import { CORNERS, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
+import { CORNERS, editableRing, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -327,6 +328,9 @@ export function Workspace({
   const cornerMarquee = useRef<{ id: string; picking: boolean } | null>(null)
   /** the shape whose corner pick must survive the selection change that is about to happen */
   const keepPick = useRef<string | null>(null)
+  /** the point-editing tool, dragging one of a shape's own corner points: its outline before this drag (a fresh copy for
+   * every drag, so the point index stays meaningful even while the shape is reshaped), which point, and its box then */
+  const pointDrag = useRef<{ id: string; geom: PathGeom; index: number; box: Box; key: string } | null>(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** "change all corners together": a drag on any rounding handle rounds all four corners */
   const [roundTogether, setRoundTogether] = useState(true)
@@ -1504,9 +1508,9 @@ export function Workspace({
     }
   }
 
-  /** clicking a shape with the Selection tool selects it and starts moving it (the shape tools draw a new one instead) */
+  /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'direct')) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
     if (handleMultiPointer(id, e)) return
@@ -1582,6 +1586,57 @@ export function Workspace({
     const radii = [...(sh.radii ?? [0, 0, 0, 0])] as [number, number, number, number]
     for (const k of d.corners) radii[k] = r
     onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, radii } : x)), d.key)
+  }
+
+  /** the shape's outline right now, as a path's own geometry (one polygon, one ring): its rounding or its regular corners turn into plain points */
+  const geomOf = (sh: ShapeFrame): PathGeom => (sh.kind === 'path' ? (sh.geom ?? [[[]]]) : [[editableRing(sh) ?? []]])
+
+  /** grabbing one of a shape's own corner points (the point-editing tool): it moves on its own, reshaping the outline */
+  const onPointDown = (id: string) => (index: number, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    dragSeq.current += 1
+    pointDrag.current = { id, geom: geomOf(sh), index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** grabbing the middle of one of a shape's edges: a new point goes in right there, and drags from then on like any other */
+  const onEdgeDown = (id: string) => (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    const base = geomOf(sh)
+    const ring = base[0][0]
+    const a = ring[edgeIndex]
+    const b = ring[(edgeIndex + 1) % ring.length]
+    const index = edgeIndex + 1
+    const geom: PathGeom = [[[...ring.slice(0, index), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], ...ring.slice(index)], ...base[0].slice(1)], ...base.slice(1)]
+    dragSeq.current += 1
+    pointDrag.current = { id, geom, index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** the point being dragged follows the pointer (snapped like anything else); the box grows or shrinks to keep holding every point, and the rest of the outline rides along with it */
+  const movePoint = (d: NonNullable<typeof pointDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
+    setSnapShown(snapped.lines)
+    const world = d.geom.map((poly, pi) =>
+      poly.map((ring, ri) =>
+        ring.map(([fx, fy], vi) => (pi === 0 && ri === 0 && vi === d.index ? snapped.p : { x: d.box.x + fx * d.box.w, y: d.box.y + fy * d.box.h })),
+      ),
+    )
+    const flat = world.flat(2)
+    const x = Math.min(...flat.map((p) => p.x))
+    const y = Math.min(...flat.map((p) => p.y))
+    const w = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.x)) - x)
+    const h = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.y)) - y)
+    const geom: PathGeom = world.map((poly) => poly.map((ring) => ring.map((p) => [(p.x - x) / w, (p.y - y) / h])))
+    onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, kind: 'path', x, y, w, h, geom, sides: undefined, radii: undefined } : sh)), d.key)
   }
 
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
@@ -1778,6 +1833,9 @@ export function Workspace({
       marqueeBase.current = { guides: additive ? guideSel : [], objects: additive ? before : [] }
       setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       e.currentTarget.setPointerCapture(e.pointerId)
+    } else if (tool === 'direct' && e.button === 0) {
+      // the point-editing tool only ever has one shape open at a time; clicking empty canvas closes it
+      setSelectedId(null)
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1796,6 +1854,10 @@ export function Workspace({
     }
     if (cornerDrag.current) {
       moveCorner(cornerDrag.current, e)
+      return
+    }
+    if (pointDrag.current) {
+      movePoint(pointDrag.current, e)
       return
     }
     if (groupDrag.current) {
@@ -1968,6 +2030,7 @@ export function Workspace({
       setMultiSel([])
     }
     groupDrag.current = null
+    pointDrag.current = null
     frameDrag.current = null
     pageDrag.current = null
     setPageSnap(null)
@@ -1988,6 +2051,7 @@ export function Workspace({
     groupDrag.current = null
     cornerDrag.current = null
     setHotCorners([])
+    pointDrag.current = null
     createStart.current = null
     frameDrag.current = null
     pageDrag.current = null
@@ -2294,6 +2358,7 @@ export function Workspace({
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
                   activeCorners={sh.id === selectedId ? activeCornersOf(sh.id) : undefined}
                   together={roundTogether}
+                  directMode={tool === 'direct'}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
@@ -2304,6 +2369,8 @@ export function Workspace({
                     }
                   }}
                   onPegDown={onPegDown(sh.id)}
+                  onPointDown={onPointDown(sh.id)}
+                  onEdgeDown={onEdgeDown(sh.id)}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (

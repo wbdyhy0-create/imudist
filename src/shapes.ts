@@ -1,5 +1,7 @@
 import { MAX_SIDES, MIN_SIDES, type DrawKind, type ShapeFrame, type ShapeKind } from './document'
 
+type Pt = [number, number]
+
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
 export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע', path: 'צורה מורכבת' }
@@ -83,6 +85,18 @@ export function shapePath(s: ShapeFrame, k = 1): string {
   }
   if (s.kind === 'ellipse') return `M0 ${h / 2}A${w / 2} ${h / 2} 0 1 1 ${w} ${h / 2}A${w / 2} ${h / 2} 0 1 1 0 ${h / 2}Z`
   return 'M' + polygonPoints(s.sides ?? 6, w, h).map(([x, y]) => `${x} ${y}`).join('L') + 'Z'
+}
+
+/**
+ * The corner points a shape can be edited by, 0…1 of its box (straight corners; no rounding, no curve) — what the
+ * point-editing tool shows and reshapes. A rectangle's corners regardless of any rounding, a regular polygon's corners, or
+ * a path's own outline (its first ring). An ellipse has no natural corners, so null: it keeps the ordinary resize handles.
+ */
+export function editableRing(s: ShapeFrame): Pt[] | null {
+  if (s.kind === 'path') return s.geom?.[0]?.[0] ?? null
+  if (s.kind === 'rect') return [[0, 0], [1, 0], [1, 1], [0, 1]]
+  if (s.kind === 'polygon') return polygonPoints(s.sides ?? 6, 1, 1)
+  return null
 }
 
 /** Where the four rounding handles of a rectangle sit, and which way is "inside" at each corner. */
