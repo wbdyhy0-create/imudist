@@ -132,6 +132,55 @@ export function cleanSpacing(text: string, runs: Run[], base: CharStyle, from = 
   return out
 }
 
+/** The 0-based index of the paragraph ("\n"-separated piece of `text`) that character offset `i` belongs to. */
+export const paraIndexAt = (text: string, i: number): number => {
+  let n = 0
+  for (let k = 0; k < i && k < text.length; k++) if (text[k] === '\n') n++
+  return n
+}
+
+/** The 0-based indices of every paragraph touched by [a, b) of `text` — always at least one, even for a === b. */
+export function paragraphsInRange(text: string, a: number, b: number): number[] {
+  const first = paraIndexAt(text, a)
+  const last = paraIndexAt(text, Math.max(a, b - 1))
+  const out: number[] = []
+  for (let i = first; i <= last; i++) out.push(i)
+  return out
+}
+
+/** A per-paragraph override array with `value` set at `index` (padded with `null` — "no override" — up to it). */
+export function withParaOverride(overrides: (number | null)[] | undefined, index: number, value: number): (number | null)[] {
+  const out = overrides ? overrides.slice() : []
+  while (out.length <= index) out.push(null)
+  out[index] = value
+  return out
+}
+
+/**
+ * Re-indexes a per-paragraph override array (`TextFrame.paraSpaceBefore` / `paraSpaceAfter`) after an edit that
+ * replaces [from, to) of `oldText` with `insert` — keeping each surviving paragraph's override lined up with its
+ * new index even when the edit adds or removes paragraph breaks. A paragraph entirely swallowed by the edit (two
+ * paragraphs merged by deleting the "\n" between them, or more) loses its own override — a reasonable default: a
+ * heavily-edited paragraph shouldn't keep carrying a stale spacing override — while a brand new paragraph (a "\n"
+ * that is part of `insert`) starts with none (`null`), falling back to the story's own default until the user sets
+ * one. Called wherever a story's text changes; returns the input unchanged when there is nothing to re-index.
+ */
+export function spliceParaOverrides(
+  overrides: (number | null)[] | undefined,
+  oldText: string,
+  from: number,
+  to: number,
+  insert: string,
+): (number | null)[] | undefined {
+  if (!overrides || overrides.length === 0) return overrides
+  const startPara = paraIndexAt(oldText, from)
+  const removedParas = paraIndexAt(oldText, to) - startPara
+  const addedParas = (insert.match(/\n/g) ?? []).length
+  const out = overrides.slice()
+  out.splice(startPara + 1, removedParas, ...Array<number | null>(addedParas).fill(null))
+  return out.some((v) => v !== null) ? out : undefined
+}
+
 /** The smallest edit that turns `oldText` into `newText` (common prefix / suffix removed). */
 export function diffEdit(oldText: string, newText: string): { from: number; to: number; insert: string } {
   let p = 0

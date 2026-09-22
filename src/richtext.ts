@@ -44,10 +44,24 @@ export interface RunNodeOpts {
   /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
   showMarks?: boolean
   /**
-   * points, unscaled: extra vertical space inserted right after every "\n" — how `spaceAfter` becomes real space
-   * between paragraphs, not just once at the edges of a frame. See the long comment on `buildRunNodes` below.
+   * points, unscaled, UNIFORM: every "\n" gets this same extra vertical space right after it. Ignored when
+   * `paraGaps` is given. See the long comment on `buildRunNodes` below.
    */
   paraLineHeight?: number
+  /**
+   * points, unscaled, PER PARAGRAPH: `paraGaps[startParaIndex]` is the gap after the first "\n" this call
+   * encounters, `paraGaps[startParaIndex + 1]` the next, and so on — `document.ts`'s `paraGaps()` builds this for
+   * a whole story; `startParaIndex` (default 0) is which paragraph `text`'s first character belongs to, since a
+   * call may cover only one frame's slice of a longer story. `undefined` at an index means no gap there.
+   */
+  paraGaps?: (number | undefined)[]
+  startParaIndex?: number
+  /**
+   * points, unscaled: indents the first line of EVERY paragraph by this much (not just the story's very first
+   * paragraph) — a `.para-indent` spacer, the width twin of `.para-gap`, placed right before each paragraph's own
+   * first character. See the long comment on `buildRunNodes` below.
+   */
+  firstLineIndent?: number
 }
 
 /** A zero-width `display: inline-block` sibling right after a "\n", `height` tall — see `buildRunNodes`. */
@@ -57,6 +71,15 @@ function paraGap(heightPx: number): HTMLElement {
   gap.contentEditable = 'false'
   gap.style.height = `${heightPx}px`
   return gap
+}
+
+/** A zero-height `display: inline-block` sibling right before a paragraph's first character, `width` wide. */
+function paraIndent(widthPx: number): HTMLElement {
+  const indent = document.createElement('span')
+  indent.className = 'para-indent'
+  indent.contentEditable = 'false'
+  indent.style.width = `${widthPx}px`
+  return indent
 }
 
 /**
@@ -77,18 +100,29 @@ function paraGap(heightPx: number): HTMLElement {
  * line of a block and every line after it; a plain baseline-aligned sibling spacer measured consistently in every
  * position tested, so that's what this uses.)
  *
- * The spacer holds no text, so it is invisible to anything that counts characters (`textOffsetIn`, `locate`,
+ * `firstLineIndent` is the width twin of `paraLineHeight`/`paraGaps`: a `.para-indent` spacer (zero HEIGHT this
+ * time, so it never touches line height, only takes up width on the line it sits on) placed right before every
+ * paragraph's own first character — the story's very first paragraph gets it at the very start of `text` (only
+ * when `startParaIndex` is 0, i.e. this call covers the story's own beginning), every other paragraph gets it
+ * right after its own "\n", the same insertion point `paraGap` already uses. Because it only ever sits on a
+ * paragraph's first line, wrapping to a second line leaves it behind with no further effect — no `text-indent`
+ * needed (which only indents a whole BLOCK's first line, not every paragraph's, without the rarely-supported
+ * `each-line` keyword).
+ *
+ * Both spacers hold no text, so they are invisible to anything that counts characters (`textOffsetIn`, `locate`,
  * `el.textContent`) — the same reasoning `.wrap-float` already relies on. Marked `contentEditable="false"` so the
- * live editor treats it as an atomic, unselectable unit, like `.wrap-float`.
+ * live editor treats them as atomic, unselectable units, like `.wrap-float`.
  */
 export function buildRunNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}): DocumentFragment {
   const frag = document.createDocumentFragment()
   let pos = 0
+  let paraIndex = opts.startParaIndex ?? 0
+  if (opts.firstLineIndent && paraIndex === 0) frag.appendChild(paraIndent(opts.firstLineIndent * scale))
   for (const r of runs) {
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale)
     const runText = text.slice(pos, pos + r.len)
-    if (opts.showMarks || opts.paraLineHeight) {
+    if (opts.showMarks || opts.paraLineHeight || opts.paraGaps || opts.firstLineIndent) {
       for (const piece of splitMarks(runText)) {
         if (piece.kind === 'text') {
           span.appendChild(document.createTextNode(piece.text))
@@ -101,7 +135,10 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
           } else {
             span.appendChild(document.createTextNode(piece.text))
           }
-          if (opts.paraLineHeight) span.appendChild(paraGap(opts.paraLineHeight * scale))
+          const gap = opts.paraGaps ? opts.paraGaps[paraIndex] : opts.paraLineHeight
+          if (gap) span.appendChild(paraGap(gap * scale))
+          if (opts.firstLineIndent) span.appendChild(paraIndent(opts.firstLineIndent * scale))
+          paraIndex++
         } else if (opts.showMarks) {
           const mark = document.createElement('span')
           mark.className = 'mark-space'

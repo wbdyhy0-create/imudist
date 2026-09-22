@@ -1,7 +1,18 @@
-import { defaultLeading, LINE_HEIGHT, paraLineHeightOf, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
+import {
+  defaultLeading,
+  frameSpaceAfter,
+  frameSpaceBefore,
+  LINE_HEIGHT,
+  paraGaps as paraGapsOf,
+  paraLineHeightOf,
+  type ImageFrame,
+  type Run,
+  type TextFrame,
+  type TextStyle,
+} from './document'
 import { chainOf, insetBox, styleOf } from './frames'
-import { buildRunNodes, buildWrapFloats } from './richtext'
-import { normalizeRuns, sliceRuns } from './story'
+import { buildRunNodes, buildWrapFloats, type RunNodeOpts } from './richtext'
+import { normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 
 /** What one frame shows of its story. */
@@ -19,6 +30,13 @@ export interface FrameFlow {
   runs: Run[]
   /** true on the last frame of a story when some text does not fit anywhere */
   overflow: boolean
+  /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `slice` begins in it */
+  paraGaps: (number | undefined)[]
+  startParaIndex: number
+  /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter);
+   *  the same for every frame of the chain — TextFrameView only actually applies whichever one is itself first/last */
+  spaceBeforeFirst: number
+  spaceAfterLast: number
 }
 
 let measurer: HTMLDivElement | null = null
@@ -80,14 +98,14 @@ function fitEnd(
   fontSize: number,
   floats: WrapFloat[],
   hint?: number,
-  paraLineHeight?: number,
+  paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent'>,
 ): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${box.w}px`
   const inner = m.firstElementChild as HTMLElement
   const fits = (end: number) => {
-    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, { paraLineHeight }))
+    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, paraOpts))
     return inner.getBoundingClientRect().height <= box.h + 0.5
   }
 
@@ -142,9 +160,12 @@ export function fitStoryEnd(
   // width-only inset (indentLeft/indentRight): this single-box helper doesn't know its place in a chain, so it
   // never applies spaceBefore — flowFrames (the authoritative, always-recomputed layout) does that. spaceAfter's
   // between-paragraph gaps are already baked into every "\n" via paraLineHeight below, so those come through fine.
-  const inset = insetBox(box, style, false, false)
-  m.style.textIndent = `${start === 0 ? (style.firstLineIndent ?? 0) : 0}px`
-  return fitEnd(m, story, runs, start, inset, style.fontSize, floats, hint, paraLineHeightOf(style))
+  const inset = insetBox(box, style, 0, 0)
+  return fitEnd(m, story, runs, start, inset, style.fontSize, floats, hint, {
+    paraLineHeight: paraLineHeightOf(style),
+    firstLineIndent: style.firstLineIndent,
+    startParaIndex: paraIndexAt(story, start),
+  })
 }
 
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
@@ -165,11 +186,12 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
     const style = styleOf(head)
     const story = head.text
     const floats = chain.map((f, i) => floatsFor(f, images, style, i === 0))
-    // everything the layout depends on: default style (incl. paragraph spacing/indents), and the id, size and wrap
-    // areas of every frame in the thread
+    // everything the layout depends on: default style (incl. paragraph spacing/indents), per-paragraph overrides,
+    // and the id, size and wrap areas of every frame in the thread
     const sig =
       `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
+      `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
     const hit = cache.get(head.id)
@@ -180,15 +202,21 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
       const runs = normalizeRuns(story, head.runs, style)
       const m = getMeasurer()
       configure(m, style)
-      const paraLineHeight = paraLineHeightOf(style)
+      const gaps = paraGapsOf(style, head, story)
+      const spaceBeforeFirst = frameSpaceBefore(style, head)
+      const spaceAfterLast = frameSpaceAfter(style, head, story)
       flows = []
       let start = 0
       chain.forEach((f, i) => {
         const isFirst = i === 0
         const isLast = i === chain.length - 1
-        const box = insetBox(f, style, isFirst, isLast)
-        m.style.textIndent = `${isFirst ? (style.firstLineIndent ?? 0) : 0}px`
-        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraLineHeight)
+        const box = insetBox(f, style, isFirst ? spaceBeforeFirst : 0, isLast ? spaceAfterLast : 0)
+        const startParaIndex = paraIndexAt(story, start)
+        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), {
+          paraGaps: gaps,
+          startParaIndex,
+          firstLineIndent: style.firstLineIndent,
+        })
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,
@@ -200,6 +228,10 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
           slice: story.slice(start, end),
           runs: sliceRuns(runs, start, end),
           overflow: i === chain.length - 1 && end < story.length,
+          paraGaps: gaps,
+          startParaIndex,
+          spaceBeforeFirst,
+          spaceAfterLast,
         })
         start = end
       })

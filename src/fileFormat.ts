@@ -161,6 +161,14 @@ const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields
   ...(typeof raw.secondLineIndent === 'number' && Number.isFinite(raw.secondLineIndent) ? { secondLineIndent: num(raw.secondLineIndent, 0, 0, MAX_PAGE_PT) } : {}),
 })
 
+/** per-paragraph spaceBefore/spaceAfter overrides: each entry is a clamped number or null ("no override") */
+const parseParaOverrides = (v: unknown): (number | null)[] | undefined =>
+  Array.isArray(v) ? v.map((e) => (typeof e === 'number' && Number.isFinite(e) ? num(e, 0, 0, MAX_PAGE_PT) : null)) : undefined
+const paraOverridesOf = (raw: Record<string, unknown>): { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] } => ({
+  ...(parseParaOverrides(raw.paraSpaceBefore) ? { paraSpaceBefore: parseParaOverrides(raw.paraSpaceBefore) } : {}),
+  ...(parseParaOverrides(raw.paraSpaceAfter) ? { paraSpaceAfter: parseParaOverrides(raw.paraSpaceAfter) } : {}),
+})
+
 function parseFrames(v: unknown): TextFrame[] {
   if (!Array.isArray(v)) return []
   const D = DEFAULT_TEXT_STYLE
@@ -193,6 +201,7 @@ function parseFrames(v: unknown): TextFrame[] {
       ...zOf(raw),
       ...rotationOf(raw),
       ...paragraphStyleOf(raw),
+      ...paraOverridesOf(raw),
     })
   }
 

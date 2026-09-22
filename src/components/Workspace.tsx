@@ -63,7 +63,7 @@ import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacing, editStory, normalizeRuns, styleAtChar, styleRange } from '../story'
+import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
@@ -510,9 +510,11 @@ export function Workspace({
   /**
    * Store a story's new text and runs. `abs` is where the caret goes, as an offset into the new story. The text may
    * have reflowed, so the caret (and the editing focus) moves to whichever frame now contains that offset.
+   * `paraOverrides`, when given, replaces the head frame's per-paragraph spaceBefore/spaceAfter overrides too (see
+   * `applyEdit`, the one caller that has them — spliced to stay lined up with the story's new paragraphs).
    */
-  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string) => {
-    const next = frames.map((f) => (f.id === headId ? { ...f, text, runs } : f))
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] }) => {
+    const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
     const nf = flowFrames(next, images)
     const chain = chainOf(next, headId)
     const target =
@@ -531,7 +533,10 @@ export function Workspace({
     const head = frames.find((f) => f.id === headId)
     if (!head) return
     const r = editStory(head.text, head.runs, from, to, insert, head)
-    commitStory(headId, r.text, r.runs, from + insert.length, `type:${headId}`)
+    commitStory(headId, r.text, r.runs, from + insert.length, `type:${headId}`, {
+      paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
+      paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
+    })
   }
 
   /** an edit reported by a frame's editor: offsets are inside that frame's part of the story */
@@ -630,18 +635,39 @@ export function Workspace({
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align } : f)), `align:${id}`)
   }
 
-  /** leading, word-spacing bounds, and paragraph spacing/indents all belong to the whole story, like alignment */
+  /** leading, word-spacing bounds, indents and the second-line effect all belong to the whole story, like alignment
+   *  (spaceBefore/spaceAfter are different — see applyParaSpacing right below, which can target one paragraph) */
   const applyParagraphStyle = (
     id: string,
-    patch: Partial<
-      Pick<
-        TextStyle,
-        'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'
-      >
-    >,
+    patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
   ) => {
     const ids = new Set(chainOf(frames, id).map((f) => f.id))
     onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `paragraph:${id}:${Object.keys(patch).join(',')}`)
+  }
+
+  /**
+   * spaceBefore/spaceAfter: applies to every paragraph touched by the current text selection, or the whole story
+   * when nothing is selected — the two independent controls asked for ("select the middle paragraph, spaceBefore
+   * pushes it away from the one above, spaceAfter pushes the one after it away"). See document.ts's `paraGaps` for
+   * how a paragraph's own override interacts with its neighbours' when both set one.
+   */
+  const applyParaSpacing = (id: string, patch: Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>) => {
+    const chain = chainOf(frames, id)
+    const head = chain[0]
+    if (!head) return
+    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    if (!sel) {
+      const ids = new Set(chain.map((f) => f.id))
+      onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `parastyle:${id}:${Object.keys(patch).join(',')}`)
+      return
+    }
+    let paraSpaceBefore = head.paraSpaceBefore
+    let paraSpaceAfter = head.paraSpaceAfter
+    for (const i of paragraphsInRange(head.text, sel.a, sel.b)) {
+      if (patch.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, i, patch.spaceBefore)
+      if (patch.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, i, patch.spaceAfter)
+    }
+    onFramesChange(frames.map((f) => (f.id === head.id ? { ...f, paraSpaceBefore, paraSpaceAfter } : f)), `parastyle:${id}:${Object.keys(patch).join(',')}`)
   }
 
   /**
@@ -649,18 +675,46 @@ export function Workspace({
    * whole story, so that also works), otherwise from every story in the document. One undo step either way.
    */
   const cleanSpacingCmd = () => {
+    // the paragraph overrides are re-indexed from the net {from,to,insert} of old→new text (diffEdit), even though
+    // cleanSpacing itself may have applied several small edits internally — the net effect is all that matters here
     if (textSel && textSel.a !== textSel.b) {
       const head = frames.find((f) => f.id === textSel.headId)
       if (!head) return
       const runs = normalizeRuns(head.text, head.runs, head)
       const { text, runs: newRuns } = cleanSpacing(head.text, runs, head, textSel.a, Math.min(textSel.b, head.text.length))
-      onFramesChange(frames.map((f) => (f.id === head.id ? { ...f, text, runs: newRuns } : f)))
+      const d = diffEdit(head.text, text)
+      onFramesChange(
+        frames.map((f) =>
+          f.id === head.id
+            ? {
+                ...f,
+                text,
+                runs: newRuns,
+                paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, head.text, d.from, d.to, d.insert),
+                paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, head.text, d.from, d.to, d.insert),
+              }
+            : f,
+        ),
+      )
       setTextSel(null)
       return
     }
     const cleaned = new Map(headFrames(frames).map((h) => [h.id, cleanSpacing(h.text, normalizeRuns(h.text, h.runs, h), h)]))
     if (cleaned.size === 0) return
-    onFramesChange(frames.map((f) => { const c = cleaned.get(f.id); return c ? { ...f, text: c.text, runs: c.runs } : f }))
+    onFramesChange(
+      frames.map((f) => {
+        const c = cleaned.get(f.id)
+        if (!c) return f
+        const d = diffEdit(f.text, c.text)
+        return {
+          ...f,
+          text: c.text,
+          runs: c.runs,
+          paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, f.text, d.from, d.to, d.insert),
+          paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, f.text, d.from, d.to, d.insert),
+        }
+      }),
+    )
   }
 
   const completeLink = (toId: string) => {
@@ -2525,12 +2579,24 @@ export function Workspace({
 
   // what the panel's text controls show: the selected text's style, else the story's default
   const panelHead = selChain[0]
-  // the Paragraph panel: always the whole story's own settings, never selection-scoped (see document.ts's TextStyle)
-  const paragraphStyle: TextStyle | null = panelHead ? styleOf(panelHead) : null
   const panelSel =
     panelHead && textSel && textSel.headId === panelHead.id && textSel.a !== textSel.b && textSel.b <= panelHead.text.length
       ? textSel
       : null
+  // the Paragraph panel: indents/leading/etc. are always the whole story's own settings (never selection-scoped);
+  // spaceBefore/spaceAfter show the FIRST paragraph the selection touches (own override if it has one, else the
+  // story's own default) when there is a selection, since that is what applyParaSpacing would actually change
+  const paragraphStyle: TextStyle | null = panelHead
+    ? {
+        ...styleOf(panelHead),
+        ...(panelSel
+          ? {
+              spaceBefore: panelHead.paraSpaceBefore?.[paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]] ?? panelHead.spaceBefore,
+              spaceAfter: panelHead.paraSpaceAfter?.[paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]] ?? panelHead.spaceAfter,
+            }
+          : {}),
+      }
+    : null
   const panelStyle: TextStyle | null = panelHead
     ? {
         ...(panelSel
@@ -2762,6 +2828,10 @@ export function Workspace({
                     runs={fl.runs}
                     highlight={highlightFor(fl)}
                     floats={floatsFor(f, images, fl.style, fl.prevId === null)}
+                    paraGaps={fl.paraGaps}
+                    startParaIndex={fl.startParaIndex}
+                    spaceBeforeFirst={fl.spaceBeforeFirst}
+                    spaceAfterLast={fl.spaceAfterLast}
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
                     hasPrev={fl.prevId !== null}
@@ -2972,7 +3042,14 @@ export function Workspace({
         {(showPages || showProps || showParagraph) && (
           <div className="side-panels">
             {showParagraph && (
-              <ParagraphPanel frame={selFrame} style={paragraphStyle} unit={doc.unit} onChange={(patch) => panelHead && applyParagraphStyle(panelHead.id, patch)} />
+              <ParagraphPanel
+                frame={selFrame}
+                style={paragraphStyle}
+                scope={panelSel ? 'selection' : 'all'}
+                unit={doc.unit}
+                onChange={(patch) => panelHead && applyParagraphStyle(panelHead.id, patch)}
+                onSpacingChange={(patch) => panelHead && applyParaSpacing(panelHead.id, patch)}
+              />
             )}
             {showPages && (
               <PagesPanel

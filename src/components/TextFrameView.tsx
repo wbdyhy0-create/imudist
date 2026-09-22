@@ -1,5 +1,5 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { DEFAULT_SPACE_AFTER, defaultLeading, paraLineHeightOf, type Run, type TextFrame, type TextStyle } from '../document'
+import { defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -7,18 +7,39 @@ import { RichEditor, type SelRequest } from './RichEditor'
 
 /**
  * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
- * `paraLineHeight` additionally inserts a `.para-gap` spacer (see richtext.ts's `buildRunNodes`) right after every
- * "\n" — how `spaceAfter` becomes real space between paragraphs, in world points scaled by `scale`.
+ * `paraGaps[startParaIndex]` is the gap (world points) to add right after the first "\n" this call encounters,
+ * `paraGaps[startParaIndex + 1]` the next, and so on (`document.ts`'s `paraGaps()` builds this for a whole story).
+ * `firstLineIndent`, when set, indents the first line of EVERY paragraph, not just the story's very first one — a
+ * `.para-indent` spacer right before each paragraph's own first character (`richtext.ts`'s `buildRunNodes` is the
+ * vanilla-DOM twin of this same idea, used by the live editor — see its doc comment for why this needs no
+ * `text-indent`, which only ever indents a whole BLOCK's first line, not every paragraph's).
  */
-function withMarks(text: string, showMarks: boolean, paraLineHeight: number | undefined, scale: number): ReactNode {
-  if (!showMarks && !paraLineHeight) return text
-  return splitMarks(text).flatMap((piece, i) => {
-    if (piece.kind === 'text') return [piece.text]
-    if (piece.kind === 'space') return [showMarks ? <span key={i} className="mark-space">{piece.text}</span> : piece.text]
-    const para = showMarks ? <span key={`${i}p`} className="mark-para">{piece.text}</span> : piece.text
-    const gap = paraLineHeight ? <span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: paraLineHeight * scale }} /> : null
-    return gap ? [para, gap] : [para]
-  })
+function withMarks(
+  text: string,
+  showMarks: boolean,
+  paraGaps: (number | undefined)[],
+  startParaIndex: number,
+  firstLineIndent: number,
+  scale: number,
+): ReactNode {
+  if (!showMarks && paraGaps.length === 0 && !firstLineIndent) return text
+  let idx = startParaIndex
+  const nodes: ReactNode[] = []
+  if (firstLineIndent && idx === 0) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+  for (const [i, piece] of splitMarks(text).entries()) {
+    if (piece.kind === 'text') {
+      nodes.push(piece.text)
+    } else if (piece.kind === 'space') {
+      nodes.push(showMarks ? <span key={i} className="mark-space">{piece.text}</span> : piece.text)
+    } else {
+      nodes.push(showMarks ? <span key={`${i}p`} className="mark-para">{piece.text}</span> : piece.text)
+      const gapValue = paraGaps[idx]
+      idx++
+      if (gapValue) nodes.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
+      if (firstLineIndent) nodes.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+    }
+  }
+  return nodes
 }
 
 /**
@@ -67,6 +88,12 @@ interface Props {
   showEdge: boolean
   /** show a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים); non-printing, like showEdge */
   showHidden: boolean
+  /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `slice` begins in it */
+  paraGaps: (number | undefined)[]
+  startParaIndex: number
+  /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
+  spaceBeforeFirst: number
+  spaceAfterLast: number
   request: SelRequest | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
@@ -89,7 +116,9 @@ function RichText({
   highlight,
   floats,
   showMarks,
-  paraLineHeight,
+  paraGaps,
+  startParaIndex,
+  firstLineIndent,
 }: {
   text: string
   runs: Run[]
@@ -97,7 +126,9 @@ function RichText({
   highlight: [number, number] | null
   floats: WrapFloat[]
   showMarks: boolean
-  paraLineHeight: number | undefined
+  paraGaps: (number | undefined)[]
+  startParaIndex: number
+  firstLineIndent: number
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -113,6 +144,9 @@ function RichText({
     }
     pos = end
   }
+  // a running paragraph counter across every part, in order, so a "\n" right at a run/highlight boundary is still
+  // only counted once and still gets the right entry of `paraGaps`
+  let paraIndex = startParaIndex
   return (
     <>
       {floats.map((f, i) => (
@@ -122,22 +156,26 @@ function RichText({
           style={{ float: f.side, width: f.width * scale, height: f.height * scale, shapeOutside: shapeOf(f, scale) }}
         />
       ))}
-      {parts.map((p) => (
-        <span
-          key={p.key}
-          className={p.hl ? 'sel' : undefined}
-          style={{
-            fontFamily: `"${p.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-            fontSize: p.run.style.fontSize * scale,
-            fontWeight: p.run.style.weight,
-            fontStyle: p.run.style.italic ? 'italic' : 'normal',
-            // tracking is 1/1000 em (InDesign's own unit), same formula as richtext.ts's applyRunStyle
-            letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
-          }}
-        >
-          {withMarks(p.text, showMarks, paraLineHeight, scale)}
-        </span>
-      ))}
+      {parts.map((p) => {
+        const rendered = withMarks(p.text, showMarks, paraGaps, paraIndex, firstLineIndent, scale)
+        paraIndex += (p.text.match(/\n/g) ?? []).length
+        return (
+          <span
+            key={p.key}
+            className={p.hl ? 'sel' : undefined}
+            style={{
+              fontFamily: `"${p.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+              fontSize: p.run.style.fontSize * scale,
+              fontWeight: p.run.style.weight,
+              fontStyle: p.run.style.italic ? 'italic' : 'normal',
+              // tracking is 1/1000 em (InDesign's own unit), same formula as richtext.ts's applyRunStyle
+              letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
+            }}
+          >
+            {rendered}
+          </span>
+        )
+      })}
     </>
   )
 }
@@ -148,7 +186,6 @@ export function TextFrameView(p: Props) {
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
-  const paraLineHeight = paraLineHeightOf(style)
 
   return (
     <div
@@ -165,13 +202,13 @@ export function TextFrameView(p: Props) {
         textAlign: style.align,
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style) * p.zoom}px` : undefined,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
-        // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore/firstLineIndent
-        // only on the frame holding the story's first line, spaceAfter only on the one holding its last
-        paddingTop: !p.hasPrev && style.spaceBefore ? style.spaceBefore * p.zoom : undefined,
-        paddingBottom: !hasNext ? (style.spaceAfter ?? DEFAULT_SPACE_AFTER) * p.zoom : undefined,
+        // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
+        // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
+        // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
+        paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst * p.zoom : undefined,
+        paddingBottom: !hasNext ? p.spaceAfterLast * p.zoom : undefined,
         paddingLeft: style.indentLeft ? style.indentLeft * p.zoom : undefined,
         paddingRight: style.indentRight ? style.indentRight * p.zoom : undefined,
-        textIndent: !p.hasPrev && style.firstLineIndent ? style.firstLineIndent * p.zoom : undefined,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}
@@ -183,7 +220,9 @@ export function TextFrameView(p: Props) {
           scale={p.zoom}
           floats={p.floats}
           showMarks={p.showHidden}
-          paraLineHeight={paraLineHeight}
+          paraGaps={p.paraGaps}
+          startParaIndex={p.startParaIndex}
+          firstLineIndent={style.firstLineIndent ?? 0}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -194,7 +233,17 @@ export function TextFrameView(p: Props) {
         />
       ) : (
         <div className="text-frame-body" dir="rtl">
-          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} showMarks={p.showHidden} paraLineHeight={paraLineHeight} />
+          <RichText
+            text={slice}
+            runs={p.runs}
+            scale={p.zoom}
+            highlight={p.highlight}
+            floats={p.floats}
+            showMarks={p.showHidden}
+            paraGaps={p.paraGaps}
+            startParaIndex={p.startParaIndex}
+            firstLineIndent={style.firstLineIndent ?? 0}
+          />
         </div>
       )}
 

@@ -116,15 +116,52 @@ export const LINE_HEIGHT = 1.25
 export const defaultLeading = (style: { fontSize: number }): number => Math.round(style.fontSize * LINE_HEIGHT)
 
 /**
- * The line-height every "\n" gets so `spaceAfter` shows up as real space between paragraphs, not just once at the
- * edges of a frame (see richtext.ts's `buildRunNodes` for why inflating just that character's line-height works).
- * `undefined` when there is no gap to add, so callers can tell "leave the inherited line-height alone" apart from
- * "explicitly set it to the normal value" (a real difference for a `"\n"` that is also the very last character of
- * a frame, which additionally sits inside the padding-bottom `spaceAfter` already adds there — see TextFrameView).
+ * The height of the `.para-gap` spacer every "\n" gets so `spaceAfter` shows up as real space between paragraphs,
+ * not just once at the edges of a frame (see richtext.ts's `buildRunNodes`). `undefined` means no spacer at all,
+ * so callers can tell "no gap" apart from "a gap of zero" (not that it visibly matters, but it avoids inserting a
+ * pointless zero-height element into the DOM on every "\n"). This is the UNIFORM version — every paragraph gets
+ * the same story-wide gap; used only by the rough autoflow estimate in placeText.ts (via `fitStoryEnd`), which
+ * doesn't have per-paragraph overrides in scope. The real, authoritative layout (`flowFrames`) uses `paraGaps`
+ * below instead, which can vary the gap per paragraph.
  */
 export function paraLineHeightOf(style: TextStyle): number | undefined {
   const gap = style.spaceAfter ?? DEFAULT_SPACE_AFTER
   return gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined
+}
+
+/**
+ * The gap after the "\n" ending each paragraph of `text` (one entry per paragraph, so `paraGaps(...)[i]` is the
+ * gap after paragraph `i` — the last paragraph has no entry, since there's nothing after it to gap from; its own
+ * trailing space, if any, is the frame's own padding-bottom, same as the story-wide spaceAfter always was).
+ * Resolves, per paragraph boundary: that paragraph's own `spaceAfter` override, else the NEXT paragraph's own
+ * `spaceBefore` override, else the story's own `spaceAfter` — so selecting one paragraph and setting its spaceAfter
+ * pushes the paragraph after it away, and setting a paragraph's spaceBefore pushes it away from the one before it,
+ * exactly the two independent controls asked for. (Paragraph 0's own spaceBefore, if set, has nowhere "before" it
+ * to attach to within this per-"\n" mechanism — same as the story-wide spaceBefore, it becomes the first frame's
+ * own padding-top instead; see frames.ts's `insetBox` / TextFrameView.tsx.)
+ */
+export function paraGaps(style: TextStyle, frame: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] }, text: string): (number | undefined)[] {
+  const count = (text.match(/\n/g) ?? []).length + 1
+  const out: (number | undefined)[] = []
+  for (let i = 0; i < count - 1; i++) {
+    const gap = frame.paraSpaceAfter?.[i] ?? frame.paraSpaceBefore?.[i + 1] ?? (style.spaceAfter ?? DEFAULT_SPACE_AFTER)
+    out.push(gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined)
+  }
+  return out
+}
+
+/** The story's own leading space: paragraph 0's own `spaceBefore` override if set, else the story-wide one. This
+ *  is the first frame's padding-top (see frames.ts's `insetBox` / TextFrameView.tsx) — paragraph 0 has no
+ *  paragraph before it for `paraGaps`' per-"\n" mechanism to attach a gap to. */
+export function frameSpaceBefore(style: TextStyle, frame: { paraSpaceBefore?: (number | null)[] }): number {
+  return frame.paraSpaceBefore?.[0] ?? style.spaceBefore ?? 0
+}
+
+/** The story's own trailing space: the LAST paragraph's own `spaceAfter` override if set, else the story-wide one.
+ *  This is the last frame's padding-bottom, same reasoning as `frameSpaceBefore` but at the other end. */
+export function frameSpaceAfter(style: TextStyle, frame: { paraSpaceAfter?: (number | null)[] }, text: string): number {
+  const lastPara = (text.match(/\n/g) ?? []).length
+  return frame.paraSpaceAfter?.[lastPara] ?? style.spaceAfter ?? DEFAULT_SPACE_AFTER
 }
 
 /** `len` consecutive characters of a story that share one character style. */
@@ -153,6 +190,15 @@ export interface TextFrame extends TextStyle {
   z?: number
   /** turned around its own centre, clockwise degrees; missing = 0. `x`, `y`, `w`, `h` stay as if it were not turned. */
   rotation?: number
+  /**
+   * Per-paragraph overrides of spaceBefore/spaceAfter, one entry per paragraph (paragraphs are "\n"-separated
+   * pieces of `text`; index 0 is the first paragraph), `null` = no override for that paragraph (falls back to the
+   * neighbouring paragraph's override, else the story's own spaceBefore/spaceAfter — see `paraGapOf`). Only
+   * meaningful on the story's head frame, like `text`/`runs`; kept in sync with edits by story.ts's
+   * `spliceParaOverrides`, called wherever the story's text changes.
+   */
+  paraSpaceBefore?: (number | null)[]
+  paraSpaceAfter?: (number | null)[]
 }
 /** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
