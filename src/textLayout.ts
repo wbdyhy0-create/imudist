@@ -1,4 +1,4 @@
-import { LINE_HEIGHT, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
+import { defaultLeading, LINE_HEIGHT, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
 import { chainOf, styleOf } from './frames'
 import { buildRunNodes, buildWrapFloats } from './richtext'
 import { normalizeRuns, sliceRuns } from './story'
@@ -57,7 +57,7 @@ function getMeasurer(): HTMLDivElement {
 function configure(m: HTMLDivElement, style: TextStyle) {
   m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   m.style.fontSize = `${style.fontSize}px`
-  m.style.lineHeight = `${style.leading ?? style.fontSize * LINE_HEIGHT}px`
+  m.style.lineHeight = `${style.leading ?? defaultLeading(style)}px`
 }
 
 const isSpace = (c: string) => /\s/.test(c)

@@ -83,6 +83,9 @@ export const FONT_FAMILIES = [
 
 export const LINE_HEIGHT = 1.25
 
+/** The automatic leading when none is set on the story: a whole point value, ~125% of the font size. */
+export const defaultLeading = (style: { fontSize: number }): number => Math.round(style.fontSize * LINE_HEIGHT)
+
 /** `len` consecutive characters of a story that share one character style. */
 export interface Run {
   len: number

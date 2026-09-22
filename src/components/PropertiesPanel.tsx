@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { LINE_HEIGHT, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { defaultLeading, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
@@ -161,8 +161,15 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             </Labeled>
 
             <Labeled label="מרווח בין שורות (Leading)">
-              {/* leading, like font size, is always in points — not the document's ruler unit */}
-              <NumberField value={style.leading ?? style.fontSize * LINE_HEIGHT} unit="px" unitLabel="pt" min={1} max={MAX_PAGE_PT} onChange={(v) => onParagraphStyle({ leading: v })} />
+              {/* leading, like font size, is always in points — not the document's ruler unit; whole points only */}
+              <NumberField
+                value={style.leading ?? defaultLeading(style)}
+                unit="px"
+                unitLabel="pt"
+                min={1}
+                max={MAX_PAGE_PT}
+                onChange={(v) => onParagraphStyle({ leading: Math.round(v) })}
+              />
             </Labeled>
             <p className="muted">שייך לכל התיבה. ברירת המחדל היא כ־125% מגודל הגופן.</p>
 

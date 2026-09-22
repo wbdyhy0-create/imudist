@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { LINE_HEIGHT, type Run, type TextFrame, type TextStyle } from '../document'
+import { defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
@@ -125,7 +125,7 @@ export function TextFrameView(p: Props) {
         height: frame.h * p.zoom,
         fontSize: style.fontSize * p.zoom,
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-        lineHeight: `${(style.leading ?? style.fontSize * LINE_HEIGHT) * p.zoom}px`,
+        lineHeight: `${(style.leading ?? defaultLeading(style)) * p.zoom}px`,
         textAlign: style.align,
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style) * p.zoom}px` : undefined,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
