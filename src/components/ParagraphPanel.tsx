@@ -31,7 +31,7 @@ export function ParagraphPanel({ frame, style, unit, onChange }: Props) {
                 <NumberField value={style.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ spaceAfter: v })} />
               </Labeled>
             </div>
-            <p className="muted">שייכים לכל התיבה: רווח לפני מעל השורה הראשונה שלה, רווח אחרי מתחת לשורה האחרונה שלה.</p>
+            <p className="muted">חלים על כל הפסקאות בתיבה (ובתיבות המחוברות אליה): רווח אחרי מתווסף אחרי כל פסקה ופסקה, רווח לפני מתווסף רק מעל הפסקה הראשונה של הסיפור כולו.</p>
           </Group>
 
           <Group title="הזחות">

@@ -261,6 +261,11 @@ svg { display: block; }
   color: var(--accent-line); opacity: 0.7; font-weight: 700; pointer-events: none; user-select: none;
 }
 .mark-para::before { content: '¶'; color: var(--accent-line); opacity: 0.7; user-select: none; }
+/* TextStyle.spaceAfter between paragraphs (richtext.ts's paraGap): an invisible, zero-width spacer sized purely by
+   its own `height`, baseline-aligned like ordinary text — this measured consistently on every line position tested
+   (an earlier version that set the "\n" character's own line-height did not: vertical-align: top-style alignment
+   measured a shorter gap specifically after a block's very first line than after any line following it). */
+.para-gap { display: inline-block; width: 0; pointer-events: none; user-select: none; }
 .text-frame ::selection { background: #b3d4ff; }
 .text-frame-draft { z-index: 1000000; position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }
 .handle { position: absolute; z-index: 2; width: 7px; height: 7px; box-sizing: border-box; background: #fff; border: 1px solid #ffb02e; }

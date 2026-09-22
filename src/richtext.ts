@@ -40,28 +40,75 @@ export function splitMarks(text: string): MarkPiece[] {
   return pieces
 }
 
+export interface RunNodeOpts {
+  /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
+  showMarks?: boolean
+  /**
+   * points, unscaled: extra vertical space inserted right after every "\n" — how `spaceAfter` becomes real space
+   * between paragraphs, not just once at the edges of a frame. See the long comment on `buildRunNodes` below.
+   */
+  paraLineHeight?: number
+}
+
+/** A zero-width `display: inline-block` sibling right after a "\n", `height` tall — see `buildRunNodes`. */
+function paraGap(heightPx: number): HTMLElement {
+  const gap = document.createElement('span')
+  gap.className = 'para-gap'
+  gap.contentEditable = 'false'
+  gap.style.height = `${heightPx}px`
+  return gap
+}
+
 /**
  * DOM for a formatted text: one <span> per run. The text keeps its "\n" characters (white-space: pre-wrap).
- * `showMarks` additionally wraps each space/paragraph-break character in its own inert span (`.mark-space` /
- * `.mark-para`, a pure CSS overlay via ::after — see styles.css) so hidden formatting characters can be shown
- * without changing the run's actual text content or character count.
+ *
+ * `showMarks` wraps each space/paragraph-break character in its own inert span (`.mark-space` / `.mark-para`, a
+ * pure CSS overlay via ::after — see styles.css) so hidden formatting characters can be shown without changing the
+ * run's actual text content or character count.
+ *
+ * `paraLineHeight` is how `TextStyle.spaceAfter` becomes real space BETWEEN paragraphs, not just once at the edges
+ * of a frame: a zero-width `.para-gap` spacer (`display: inline-block`, baseline-aligned like ordinary text) is
+ * inserted right after every "\n", tall enough to push the following line down by the wanted amount. This needs no
+ * separate "which frame is this" bookkeeping (unlike `spaceBefore`, still frame-edge-only — see frames.ts's
+ * `insetBox`): the extra height is part of the text's own measured size, so the hidden measurer picks it up
+ * automatically wherever the "\n" ends up, on any frame of a thread, without either place having to agree on
+ * anything beyond calling this the same way. (An earlier version set the "\n" character's own `line-height`
+ * instead — simpler, but `vertical-align: top`-style techniques measured inconsistently between the very first
+ * line of a block and every line after it; a plain baseline-aligned sibling spacer measured consistently in every
+ * position tested, so that's what this uses.)
+ *
+ * The spacer holds no text, so it is invisible to anything that counts characters (`textOffsetIn`, `locate`,
+ * `el.textContent`) — the same reasoning `.wrap-float` already relies on. Marked `contentEditable="false"` so the
+ * live editor treats it as an atomic, unselectable unit, like `.wrap-float`.
  */
-export function buildRunNodes(text: string, runs: Run[], scale: number, showMarks = false): DocumentFragment {
+export function buildRunNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}): DocumentFragment {
   const frag = document.createDocumentFragment()
   let pos = 0
   for (const r of runs) {
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale)
     const runText = text.slice(pos, pos + r.len)
-    if (showMarks) {
+    if (opts.showMarks || opts.paraLineHeight) {
       for (const piece of splitMarks(runText)) {
         if (piece.kind === 'text') {
           span.appendChild(document.createTextNode(piece.text))
-        } else {
+        } else if (piece.kind === 'para') {
+          if (opts.showMarks) {
+            const mark = document.createElement('span')
+            mark.className = 'mark-para'
+            mark.textContent = piece.text
+            span.appendChild(mark)
+          } else {
+            span.appendChild(document.createTextNode(piece.text))
+          }
+          if (opts.paraLineHeight) span.appendChild(paraGap(opts.paraLineHeight * scale))
+        } else if (opts.showMarks) {
           const mark = document.createElement('span')
-          mark.className = piece.kind === 'space' ? 'mark-space' : 'mark-para'
+          mark.className = 'mark-space'
           mark.textContent = piece.text
           span.appendChild(mark)
+        } else {
+          span.appendChild(document.createTextNode(piece.text))
         }
       }
     } else {

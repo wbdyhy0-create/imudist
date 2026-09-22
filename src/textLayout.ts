@@ -1,4 +1,4 @@
-import { defaultLeading, LINE_HEIGHT, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
+import { defaultLeading, LINE_HEIGHT, paraLineHeightOf, type ImageFrame, type Run, type TextFrame, type TextStyle } from './document'
 import { chainOf, insetBox, styleOf } from './frames'
 import { buildRunNodes, buildWrapFloats } from './richtext'
 import { normalizeRuns, sliceRuns } from './story'
@@ -80,13 +80,14 @@ function fitEnd(
   fontSize: number,
   floats: WrapFloat[],
   hint?: number,
+  paraLineHeight?: number,
 ): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${box.w}px`
   const inner = m.firstElementChild as HTMLElement
   const fits = (end: number) => {
-    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1))
+    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, { paraLineHeight }))
     return inner.getBoundingClientRect().height <= box.h + 0.5
   }
 
@@ -139,10 +140,11 @@ export function fitStoryEnd(
   const m = getMeasurer()
   configure(m, style)
   // width-only inset (indentLeft/indentRight): this single-box helper doesn't know its place in a chain, so it
-  // never applies spaceBefore/spaceAfter — flowFrames (the authoritative, always-recomputed layout) does that.
+  // never applies spaceBefore — flowFrames (the authoritative, always-recomputed layout) does that. spaceAfter's
+  // between-paragraph gaps are already baked into every "\n" via paraLineHeight below, so those come through fine.
   const inset = insetBox(box, style, false, false)
   m.style.textIndent = `${start === 0 ? (style.firstLineIndent ?? 0) : 0}px`
-  return fitEnd(m, story, runs, start, inset, style.fontSize, floats, hint)
+  return fitEnd(m, story, runs, start, inset, style.fontSize, floats, hint, paraLineHeightOf(style))
 }
 
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
@@ -178,6 +180,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
       const runs = normalizeRuns(story, head.runs, style)
       const m = getMeasurer()
       configure(m, style)
+      const paraLineHeight = paraLineHeightOf(style)
       flows = []
       let start = 0
       chain.forEach((f, i) => {
@@ -185,7 +188,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
         const isLast = i === chain.length - 1
         const box = insetBox(f, style, isFirst, isLast)
         m.style.textIndent = `${isFirst ? (style.firstLineIndent ?? 0) : 0}px`
-        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id))
+        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraLineHeight)
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,

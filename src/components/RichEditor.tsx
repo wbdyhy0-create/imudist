@@ -21,6 +21,8 @@ interface Props {
   floats: WrapFloat[]
   /** show a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים); never affects the text itself */
   showMarks?: boolean
+  /** points, unscaled: line-height given to every "\n", how spaceAfter shows up between paragraphs — see richtext.ts */
+  paraLineHeight?: number
   hasPrev: boolean
   request: SelRequest | null
   /** replace the characters [from, to) of `text` with `insert` */
@@ -48,11 +50,14 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${p.paraLineHeight}|${p.text}|${JSON.stringify(p.runs)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
-      el.replaceChildren(...buildWrapFloats(p.floats, p.scale), buildRunNodes(p.text, p.runs, p.scale, p.showMarks))
+      el.replaceChildren(
+        ...buildWrapFloats(p.floats, p.scale),
+        buildRunNodes(p.text, p.runs, p.scale, { showMarks: p.showMarks, paraLineHeight: p.paraLineHeight }),
+      )
       if (p.text.endsWith('\n')) el.appendChild(document.createElement('br')) // keeps the empty last line reachable
       shown.current = sig
     }

@@ -1,19 +1,24 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { DEFAULT_SPACE_AFTER, defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SPACE_AFTER, defaultLeading, paraLineHeightOf, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 
-/** Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css). */
-function withMarks(text: string): ReactNode {
-  return splitMarks(text).map((piece, i) =>
-    piece.kind === 'text' ? piece.text : (
-      <span key={i} className={piece.kind === 'space' ? 'mark-space' : 'mark-para'}>
-        {piece.text}
-      </span>
-    ),
-  )
+/**
+ * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
+ * `paraLineHeight` additionally inserts a `.para-gap` spacer (see richtext.ts's `buildRunNodes`) right after every
+ * "\n" — how `spaceAfter` becomes real space between paragraphs, in world points scaled by `scale`.
+ */
+function withMarks(text: string, showMarks: boolean, paraLineHeight: number | undefined, scale: number): ReactNode {
+  if (!showMarks && !paraLineHeight) return text
+  return splitMarks(text).flatMap((piece, i) => {
+    if (piece.kind === 'text') return [piece.text]
+    if (piece.kind === 'space') return [showMarks ? <span key={i} className="mark-space">{piece.text}</span> : piece.text]
+    const para = showMarks ? <span key={`${i}p`} className="mark-para">{piece.text}</span> : piece.text
+    const gap = paraLineHeight ? <span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: paraLineHeight * scale }} /> : null
+    return gap ? [para, gap] : [para]
+  })
 }
 
 /**
@@ -84,6 +89,7 @@ function RichText({
   highlight,
   floats,
   showMarks,
+  paraLineHeight,
 }: {
   text: string
   runs: Run[]
@@ -91,6 +97,7 @@ function RichText({
   highlight: [number, number] | null
   floats: WrapFloat[]
   showMarks: boolean
+  paraLineHeight: number | undefined
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -128,7 +135,7 @@ function RichText({
             letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
           }}
         >
-          {showMarks ? withMarks(p.text) : p.text}
+          {withMarks(p.text, showMarks, paraLineHeight, scale)}
         </span>
       ))}
     </>
@@ -141,6 +148,7 @@ export function TextFrameView(p: Props) {
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
+  const paraLineHeight = paraLineHeightOf(style)
 
   return (
     <div
@@ -175,6 +183,7 @@ export function TextFrameView(p: Props) {
           scale={p.zoom}
           floats={p.floats}
           showMarks={p.showHidden}
+          paraLineHeight={paraLineHeight}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -185,7 +194,7 @@ export function TextFrameView(p: Props) {
         />
       ) : (
         <div className="text-frame-body" dir="rtl">
-          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} showMarks={p.showHidden} />
+          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} showMarks={p.showHidden} paraLineHeight={paraLineHeight} />
         </div>
       )}
 

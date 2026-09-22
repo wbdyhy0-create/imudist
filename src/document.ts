@@ -115,6 +115,18 @@ export const LINE_HEIGHT = 1.25
 /** The automatic leading when none is set on the story: a whole point value, ~125% of the font size. */
 export const defaultLeading = (style: { fontSize: number }): number => Math.round(style.fontSize * LINE_HEIGHT)
 
+/**
+ * The line-height every "\n" gets so `spaceAfter` shows up as real space between paragraphs, not just once at the
+ * edges of a frame (see richtext.ts's `buildRunNodes` for why inflating just that character's line-height works).
+ * `undefined` when there is no gap to add, so callers can tell "leave the inherited line-height alone" apart from
+ * "explicitly set it to the normal value" (a real difference for a `"\n"` that is also the very last character of
+ * a frame, which additionally sits inside the padding-bottom `spaceAfter` already adds there — see TextFrameView).
+ */
+export function paraLineHeightOf(style: TextStyle): number | undefined {
+  const gap = style.spaceAfter ?? DEFAULT_SPACE_AFTER
+  return gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined
+}
+
 /** `len` consecutive characters of a story that share one character style. */
 export interface Run {
   len: number
