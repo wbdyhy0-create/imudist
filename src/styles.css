@@ -248,6 +248,19 @@ svg { display: block; }
   user-select: text; cursor: text; caret-color: #111; text-rendering: inherit;
 }
 .text-frame-body .sel { background: #b3d4ff; }
+/* View > תווים נסתרים: shows spaces and paragraph breaks. Both are pure CSS overlays (generated ::before/::after
+   content) rather than real characters, so they can never affect the story's actual text, its wrapping/pagination
+   measurement (the hidden measurer in textLayout.ts never turns them on), or caret/selection character offsets
+   (which only ever look at real text nodes — see richtext.ts's textOffsetIn/locate). .mark-space overlays a dot on
+   the space's own box without adding width, so lines wrap exactly the same with marks on or off; .mark-para's ¶
+   sits in normal inline flow right before the (zero-width) forced line break itself, so it lands at the end of the
+   visible line, like Word/InDesign — no RTL-aware positioning math needed since it just follows the text order. */
+.mark-space { position: relative; }
+.mark-space::after {
+  content: '·'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--accent-line); opacity: 0.7; font-weight: 700; pointer-events: none; user-select: none;
+}
+.mark-para::before { content: '¶'; color: var(--accent-line); opacity: 0.7; user-select: none; }
 .text-frame ::selection { background: #b3d4ff; }
 .text-frame-draft { z-index: 1000000; position: absolute; outline: 1px dashed #ffb02e; pointer-events: none; }
 .handle { position: absolute; z-index: 2; width: 7px; height: 7px; box-sizing: border-box; background: #fff; border: 1px solid #ffb02e; }

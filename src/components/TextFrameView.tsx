@@ -1,8 +1,20 @@
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { defaultLeading, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
+import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
+
+/** Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css). */
+function withMarks(text: string): ReactNode {
+  return splitMarks(text).map((piece, i) =>
+    piece.kind === 'text' ? piece.text : (
+      <span key={i} className={piece.kind === 'space' ? 'mark-space' : 'mark-para'}>
+        {piece.text}
+      </span>
+    ),
+  )
+}
 
 /**
  * Extra space to add between words while a paragraph is justified, so it can lean on `wordSpacingMin` / `wordSpacingMax`
@@ -48,6 +60,8 @@ interface Props {
   armed: boolean
   /** frame edges, handles and ports are non-printing: hidden in Preview mode */
   showEdge: boolean
+  /** show a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים); non-printing, like showEdge */
+  showHidden: boolean
   request: SelRequest | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
@@ -63,7 +77,21 @@ interface Props {
 }
 
 /** Text as read-only spans, with an optional highlighted range. */
-function RichText({ text, runs, scale, highlight, floats }: { text: string; runs: Run[]; scale: number; highlight: [number, number] | null; floats: WrapFloat[] }) {
+function RichText({
+  text,
+  runs,
+  scale,
+  highlight,
+  floats,
+  showMarks,
+}: {
+  text: string
+  runs: Run[]
+  scale: number
+  highlight: [number, number] | null
+  floats: WrapFloat[]
+  showMarks: boolean
+}) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
   for (const run of runs) {
@@ -100,7 +128,7 @@ function RichText({ text, runs, scale, highlight, floats }: { text: string; runs
             letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
           }}
         >
-          {p.text}
+          {showMarks ? withMarks(p.text) : p.text}
         </span>
       ))}
     </>
@@ -139,6 +167,7 @@ export function TextFrameView(p: Props) {
           runs={p.runs}
           scale={p.zoom}
           floats={p.floats}
+          showMarks={p.showHidden}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -149,7 +178,7 @@ export function TextFrameView(p: Props) {
         />
       ) : (
         <div className="text-frame-body" dir="rtl">
-          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} />
+          <RichText text={slice} runs={p.runs} scale={p.zoom} highlight={p.highlight} floats={p.floats} showMarks={p.showHidden} />
         </div>
       )}
 

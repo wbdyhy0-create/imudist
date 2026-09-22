@@ -8,6 +8,7 @@ export interface MenuContext {
   ws: RefObject<WorkspaceHandle | null>
   showRulers: boolean
   showGuides: boolean
+  showHiddenChars: boolean
   previewMode: boolean
   setPreviewMode: (on: boolean) => void
   showProps: boolean
@@ -34,6 +35,7 @@ export interface MenuContext {
   closeDocument: () => void
   toggleRulers: () => void
   toggleGuides: () => void
+  toggleHiddenChars: () => void
   /** the open documents, for the Window menu */
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
@@ -168,6 +170,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         { label: 'סרגלים', shortcut: 'Ctrl+R', checked: c.showRulers, onClick: c.toggleRulers },
         { label: 'קווי עזר', shortcut: 'Ctrl+;', checked: c.showGuides, onClick: c.toggleGuides },
+        { label: 'תווים נסתרים', shortcut: 'Ctrl+Shift+8', checked: c.showHiddenChars, onClick: c.toggleHiddenChars },
         sep,
         {
           label: 'מצב מסך',

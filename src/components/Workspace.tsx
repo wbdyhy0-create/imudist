@@ -150,6 +150,8 @@ interface Props {
   fitKey: string
   showRulers: boolean
   showGuides: boolean
+  /** show a dot over spaces and a ¶ at paragraph breaks, in every text frame */
+  showHiddenChars: boolean
   showProps: boolean
   showPages: boolean
   /** screen mode "Preview": no guides or frame edges, the page as it will print */
@@ -217,6 +219,7 @@ export function Workspace({
   fitKey,
   showRulers,
   showGuides,
+  showHiddenChars,
   showProps,
   showPages,
   previewMode,
@@ -2734,6 +2737,7 @@ export function Workspace({
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
                     showEdge={!previewMode}
+                    showHidden={showHiddenChars && !previewMode}
                     request={request && request.frameId === f.id ? request : null}
                     onPointerDown={onFramePointerDown(f.id)}
                     onDoubleClick={() => {

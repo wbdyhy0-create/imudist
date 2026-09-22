@@ -11,14 +11,62 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) 
   el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
 }
 
-/** DOM for a formatted text: one <span> per run. The text keeps its "\n" characters (white-space: pre-wrap). */
-export function buildRunNodes(text: string, runs: Run[], scale: number): DocumentFragment {
+/** One piece of a run's text for formatting-mark rendering: a run of plain characters, or a single space / paragraph break. */
+export interface MarkPiece {
+  text: string
+  kind: 'text' | 'space' | 'para'
+}
+
+/**
+ * Splits a run's text at every space and paragraph break (the story's "\n") into plain-text pieces plus single
+ * whitespace characters, so each one can carry its own formatting-mark overlay. The characters and their order are
+ * untouched — only where they are grouped into DOM nodes changes — so this is safe to use anywhere the un-split text
+ * would otherwise go (offsets, selection, `textContent` all read the same either way).
+ */
+export function splitMarks(text: string): MarkPiece[] {
+  const pieces: MarkPiece[] = []
+  let buf = ''
+  const flush = () => {
+    if (buf) pieces.push({ text: buf, kind: 'text' })
+    buf = ''
+  }
+  for (const ch of text) {
+    if (ch === ' ' || ch === '\n') {
+      flush()
+      pieces.push({ text: ch, kind: ch === ' ' ? 'space' : 'para' })
+    } else buf += ch
+  }
+  flush()
+  return pieces
+}
+
+/**
+ * DOM for a formatted text: one <span> per run. The text keeps its "\n" characters (white-space: pre-wrap).
+ * `showMarks` additionally wraps each space/paragraph-break character in its own inert span (`.mark-space` /
+ * `.mark-para`, a pure CSS overlay via ::after — see styles.css) so hidden formatting characters can be shown
+ * without changing the run's actual text content or character count.
+ */
+export function buildRunNodes(text: string, runs: Run[], scale: number, showMarks = false): DocumentFragment {
   const frag = document.createDocumentFragment()
   let pos = 0
   for (const r of runs) {
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale)
-    span.textContent = text.slice(pos, pos + r.len)
+    const runText = text.slice(pos, pos + r.len)
+    if (showMarks) {
+      for (const piece of splitMarks(runText)) {
+        if (piece.kind === 'text') {
+          span.appendChild(document.createTextNode(piece.text))
+        } else {
+          const mark = document.createElement('span')
+          mark.className = piece.kind === 'space' ? 'mark-space' : 'mark-para'
+          mark.textContent = piece.text
+          span.appendChild(mark)
+        }
+      }
+    } else {
+      span.textContent = runText
+    }
     frag.appendChild(span)
     pos += r.len
   }

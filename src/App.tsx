@@ -44,6 +44,7 @@ export default function App() {
   const [preview, setPreview] = useState<DocSettings | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
+  const [showHiddenChars, setShowHiddenChars] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
   const [showProps, setShowProps] = useState(true)
   const [showPages, setShowPages] = useState(true)
@@ -105,6 +106,7 @@ export default function App() {
         ws,
         showRulers,
         showGuides,
+        showHiddenChars,
         previewMode,
         setPreviewMode,
         showProps,
@@ -132,9 +134,10 @@ export default function App() {
         switchDoc: (id) => sessionRef.current.switchTo(id),
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
+        toggleHiddenChars: () => setShowHiddenChars((v) => !v),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
+    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
   )
 
   useEffect(() => {
@@ -268,6 +271,7 @@ export default function App() {
               fitKey={fitKey}
               showRulers={showRulers}
               showGuides={showGuides}
+              showHiddenChars={showHiddenChars}
               showProps={showProps}
               showPages={showPages}
               previewMode={previewMode}
