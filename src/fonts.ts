@@ -91,6 +91,32 @@ const set = (next: FontState) => {
   listeners.forEach((l) => l())
 }
 
+/**
+ * Rough but fast check: does this font draw Hebrew with glyphs of its own, or does the browser silently
+ * substitute a different font for those characters (i.e. this font has no Hebrew in it at all)? Reading each
+ * font's actual glyph table (`FontData.blob()` + parsing) would answer this exactly but is slow across hundreds
+ * of fonts; instead this measures the font's rendered width for a Hebrew probe string and compares it against
+ * the same string measured with a font name that cannot possibly exist (`NO_SUCH_FONT`), which forces the
+ * browser's own default per-character fallback with nothing else to blame it on. If the family's own width
+ * matches that "definitely-fell-back" width almost exactly, it (almost certainly) fell back the very same way —
+ * different fonts essentially never share the exact same advance width across a whole string of letters.
+ */
+const HEBREW_PROBE = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ' // the alphabet plus final forms, for the widest chance of a mismatch
+const NO_SUCH_FONT = 'no-such-font-8f3a1c'
+let probeCtx: CanvasRenderingContext2D | null = null
+let fallbackWidth: number | null = null
+function hasHebrewGlyphs(family: string): boolean {
+  if (!probeCtx) probeCtx = document.createElement('canvas').getContext('2d')
+  const ctx = probeCtx
+  if (!ctx) return true // can't probe (no canvas support) — don't drop fonts we can't actually check
+  const measure = (f: string) => {
+    ctx.font = `40px "${f}"`
+    return ctx.measureText(HEBREW_PROBE).width
+  }
+  fallbackWidth ??= measure(NO_SUCH_FONT)
+  return Math.abs(measure(family) - fallbackWidth) > 0.5
+}
+
 let loading: Promise<void> | null = null
 
 /** Read the fonts installed on this computer. The browser asks the user for permission the first time. */
@@ -118,6 +144,7 @@ export function loadSystemFonts(): Promise<void> {
           family,
           faces: [...faces.values()].sort((a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic)),
         }))
+        .filter((f) => hasHebrewGlyphs(f.family)) // this app is Hebrew-only: no point offering fonts that can't show it
         .sort((a, b) => a.family.localeCompare(b.family))
       set(families.length ? { families, status: 'system' } : { ...state, status: 'denied' })
     })
