@@ -1,7 +1,7 @@
 import polygonClipping from 'polygon-clipping'
 import type { Pair, Polygon, MultiPolygon } from 'polygon-clipping'
-import type { PathGeom, ShapeFrame } from './document'
-import { fitRadii, polygonPoints } from './shapes'
+import type { PathGeom, PathVertex, ShapeFrame } from './document'
+import { fitRadii, polygonPoints, vertexHi, vertexHo, vertexPoint, type Pt } from './shapes'
 
 /** Combining shapes: unite, subtract, intersect, exclude. The result is one new shape whose outline is a polygon. */
 
@@ -11,6 +11,8 @@ export const BOOL_OP_NAMES: Record<BoolOp, string> = { unite: 'איחוד', subt
 
 /** Points per full circle when a curve is turned into a polygon: fine enough that the straight pieces cannot be seen. */
 const ARC_STEPS = 160
+/** Points per curved segment of a path shape, its two ends not counted. */
+const BEZIER_STEPS = 16
 
 const arc = (cx: number, cy: number, r: number, a0: number, a1: number, steps: number): Pair[] =>
   Array.from({ length: steps + 1 }, (_, i) => {
@@ -18,12 +20,48 @@ const arc = (cx: number, cy: number, r: number, a0: number, a1: number, steps: n
     return [cx + r * Math.cos(a), cy + r * Math.sin(a)]
   })
 
+/** Points along the cubic curve from `a` to `b` (control points `c1`, `c2`), not counting either end. */
+function bezierInterior(a: Pt, c1: Pt, c2: Pt, b: Pt): Pt[] {
+  const pts: Pt[] = []
+  for (let i = 1; i < BEZIER_STEPS; i++) {
+    const t = i / BEZIER_STEPS
+    const mt = 1 - t
+    pts.push([
+      mt * mt * mt * a[0] + 3 * mt * mt * t * c1[0] + 3 * mt * t * t * c2[0] + t * t * t * b[0],
+      mt * mt * mt * a[1] + 3 * mt * mt * t * c1[1] + 3 * mt * t * t * c2[1] + t * t * t * b[1],
+    ])
+  }
+  return pts
+}
+
+/** One ring of a path shape, flattened to a polygon in world coordinates: a straight edge between two plain corners, a
+ * sampled curve wherever either end has a direction handle. */
+function ringToPolygon(ring: PathVertex[], x: number, y: number, w: number, h: number): Pair[] {
+  const out: Pair[] = []
+  const n = ring.length
+  for (let i = 0; i < n; i++) {
+    const a = ring[i]
+    const b = ring[(i + 1) % n]
+    const ap = vertexPoint(a)
+    const bp = vertexPoint(b)
+    out.push([x + ap[0] * w, y + ap[1] * h])
+    const ho = vertexHo(a)
+    const hi = vertexHi(b)
+    if (ho || hi) {
+      const c1: Pt = ho ? [ap[0] + ho[0], ap[1] + ho[1]] : ap
+      const c2: Pt = hi ? [bp[0] + hi[0], bp[1] + hi[1]] : bp
+      for (const [px, py] of bezierInterior(ap, c1, c2, bp)) out.push([x + px * w, y + py * h])
+    }
+  }
+  return out
+}
+
 /** A shape as polygons in world coordinates. */
 export function shapeToPolygons(s: ShapeFrame): MultiPolygon {
   const { x, y, w, h } = s
   let ring: Pair[]
   if (s.kind === 'path') {
-    return (s.geom ?? []).map((poly) => poly.map((r) => r.map(([px, py]): Pair => [x + px * w, y + py * h])))
+    return (s.geom ?? []).map((poly) => poly.map((r) => ringToPolygon(r, x, y, w, h)))
   } else if (s.kind === 'ellipse') {
     ring = Array.from({ length: ARC_STEPS }, (_, i): Pair => {
       const a = (2 * Math.PI * i) / ARC_STEPS

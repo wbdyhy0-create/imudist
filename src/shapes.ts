@@ -1,6 +1,13 @@
-import { MAX_SIDES, MIN_SIDES, type DrawKind, type ShapeFrame, type ShapeKind } from './document'
+import { MAX_SIDES, MIN_SIDES, type DrawKind, type PathGeom, type PathVertex, type ShapeFrame, type ShapeKind } from './document'
 
-type Pt = [number, number]
+export type Pt = [number, number]
+
+/** A vertex's own position, whether it is a plain corner or a smooth point. */
+export const vertexPoint = (v: PathVertex): Pt => (Array.isArray(v) ? v : v.p)
+/** Its handle toward the previous point, if it has one (an offset from the point, 0…1 of the box). */
+export const vertexHi = (v: PathVertex): Pt | undefined => (Array.isArray(v) ? undefined : v.hi)
+/** Its handle toward the next point, if it has one. */
+export const vertexHo = (v: PathVertex): Pt | undefined => (Array.isArray(v) ? undefined : v.ho)
 
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
@@ -74,6 +81,30 @@ export function roundedRectPath(w: number, h: number, radii?: [number, number, n
   ].join('')
 }
 
+/** One ring of a 'path' shape as an SVG sub-path: a straight line between two plain corners, a cubic curve wherever either
+ * end has a direction handle. */
+function ringPath(ring: PathVertex[], w: number, h: number): string {
+  if (ring.length === 0) return ''
+  const at = (p: Pt) => `${p[0] * w} ${p[1] * h}`
+  let d = 'M' + at(vertexPoint(ring[0]))
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]
+    const b = ring[(i + 1) % ring.length]
+    const ho = vertexHo(a)
+    const hi = vertexHi(b)
+    if (!ho && !hi) {
+      d += 'L' + at(vertexPoint(b))
+      continue
+    }
+    const ap = vertexPoint(a)
+    const bp = vertexPoint(b)
+    const c1: Pt = ho ? [ap[0] + ho[0], ap[1] + ho[1]] : ap
+    const c2: Pt = hi ? [bp[0] + hi[0], bp[1] + hi[1]] : bp
+    d += `C${at(c1)} ${at(c2)} ${at(bp)}`
+  }
+  return d + 'Z'
+}
+
 /** The outline of any shape as an SVG path, in its own units scaled by `k`. */
 export function shapePath(s: ShapeFrame, k = 1): string {
   const w = s.w * k
@@ -81,22 +112,28 @@ export function shapePath(s: ShapeFrame, k = 1): string {
   if (s.kind === 'rect') return roundedRectPath(w, h, s.radii?.map((r) => r * k) as [number, number, number, number] | undefined)
   if (s.kind === 'path') {
     // every ring of every polygon is a closed sub-path; holes come out right with the even-odd fill rule
-    return (s.geom ?? []).flatMap((poly) => poly.map((ring) => 'M' + ring.map(([x, y]) => `${x * w} ${y * h}`).join('L') + 'Z')).join('')
+    return (s.geom ?? []).flatMap((poly) => poly.map((ring) => ringPath(ring, w, h))).join('')
   }
   if (s.kind === 'ellipse') return `M0 ${h / 2}A${w / 2} ${h / 2} 0 1 1 ${w} ${h / 2}A${w / 2} ${h / 2} 0 1 1 0 ${h / 2}Z`
   return 'M' + polygonPoints(s.sides ?? 6, w, h).map(([x, y]) => `${x} ${y}`).join('L') + 'Z'
 }
 
 /**
- * The corner points a shape can be edited by, 0…1 of its box (straight corners; no rounding, no curve) — what the
- * point-editing tool shows and reshapes. A rectangle's corners regardless of any rounding, a regular polygon's corners, or
- * a path's own outline (its first ring). An ellipse has no natural corners, so null: it keeps the ordinary resize handles.
+ * The vertices a shape can be point-edited by, 0…1 of its box (a rectangle's corners regardless of any rounding, a
+ * regular polygon's corners, or a path's own outline — its first ring, with whatever curve handles it already has). An
+ * ellipse has no natural vertices, so null: it keeps the ordinary resize handles.
  */
-export function editableRing(s: ShapeFrame): Pt[] | null {
+export function editableRing(s: ShapeFrame): PathVertex[] | null {
   if (s.kind === 'path') return s.geom?.[0]?.[0] ?? null
   if (s.kind === 'rect') return [[0, 0], [1, 0], [1, 1], [0, 1]]
   if (s.kind === 'polygon') return polygonPoints(s.sides ?? 6, 1, 1)
   return null
+}
+
+/** A copy of `geom`'s first ring (of its first polygon) with one vertex replaced; everything else — other rings, other
+ * polygons (holes, extra pieces) — unchanged. */
+export function replaceVertex(geom: PathGeom, index: number, v: PathVertex): PathGeom {
+  return [[geom[0][0].map((old, i) => (i === index ? v : old)), ...geom[0].slice(1)], ...geom.slice(1)]
 }
 
 /** Where the four rounding handles of a rectangle sit, and which way is "inside" at each corner. */

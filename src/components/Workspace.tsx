@@ -34,7 +34,9 @@ import {
   type GuideAxis,
   type DrawKind,
   type PathGeom,
+  type PathSmoothPoint,
   type PathText,
+  type PathVertex,
   type ShapeFrame,
   type Sides,
   type ImageFit,
@@ -54,7 +56,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
-import { CORNERS, editableRing, fitRadii, regularRatio, type ShapePrefs } from '../shapes'
+import { CORNERS, editableRing, fitRadii, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -328,9 +330,21 @@ export function Workspace({
   const cornerMarquee = useRef<{ id: string; picking: boolean } | null>(null)
   /** the shape whose corner pick must survive the selection change that is about to happen */
   const keepPick = useRef<string | null>(null)
-  /** the point-editing tool, dragging one of a shape's own corner points: its outline before this drag (a fresh copy for
-   * every drag, so the point index stays meaningful even while the shape is reshaped), which point, and its box then */
-  const pointDrag = useRef<{ id: string; geom: PathGeom; index: number; box: Box; key: string } | null>(null)
+  /**
+   * The point-editing tool. `geom` and `box` are the shape's outline and box right before this drag started (a fresh
+   * copy every time, so an index stays meaningful even while the shape is reshaped by the same drag). 'anchor': moving
+   * one or more of the shape's own points (`indices`, `anchor` is the one actually under the pointer — the others follow
+   * it by the same amount). 'handle': moving one of a point's own curve handles; `forceMirror` is true only while a new,
+   * symmetric pair of handles is being pulled out of a plain corner (Alt-drag on the point itself) — the ordinary case
+   * (dragging a handle that already exists) instead follows Alt live, held during the drag.
+   */
+  const pointDrag = useRef<
+    | { kind: 'anchor'; id: string; geom: PathGeom; indices: number[]; anchor: number; box: Box; key: string }
+    | { kind: 'handle'; id: string; geom: PathGeom; index: number; which: 'hi' | 'ho'; forceMirror: boolean; box: Box; key: string }
+    | null
+  >(null)
+  /** the shape's own points that are selected, while the point-editing tool has it open */
+  const [pointSel, setPointSel] = useState<{ id: string; indices: number[] } | null>(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** "change all corners together": a drag on any rounding handle rounds all four corners */
   const [roundTogether, setRoundTogether] = useState(true)
@@ -345,6 +359,10 @@ export function Workspace({
     }
     setCornerPick(null)
   }, [selectedId])
+  // a different object, or a different tool: the point selection is over
+  useEffect(() => {
+    setPointSel(null)
+  }, [selectedId, tool])
   /** the settings window of a shape tool (double click on the tool) */
   const [toolDialog, setToolDialog] = useState<DrawKind | null>(null)
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
@@ -1185,6 +1203,20 @@ export function Workspace({
         if (guides.some((g) => chosen.has(g.id) && along(g.axis) !== 0)) {
           onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, pos: g.pos + along(g.axis) } : g)), 'nudge:guides')
         }
+      } else if (tool === 'direct' && pointSel && (e.key === 'Delete' || e.key === 'Backspace')) {
+        // the point-editing tool, with points of its own selected: only they go, not the whole shape (unless too few would be left)
+        e.preventDefault()
+        const sh = shapes.find((x) => x.id === pointSel.id)
+        const ring = sh && (sh.kind === 'path' ? sh.geom?.[0]?.[0] : editableRing(sh))
+        if (sh && ring) {
+          const keep = ring.filter((_, i) => !pointSel.indices.includes(i))
+          if (keep.length >= 3) {
+            const base: PathGeom = sh.kind === 'path' ? (sh.geom ?? [[ring]]) : [[ring]]
+            const geom: PathGeom = [[keep, ...base[0].slice(1)], ...base.slice(1)]
+            onShapesChange(shapes.map((x) => (x.id === sh.id ? { ...x, kind: 'path', geom, sides: undefined, radii: undefined } : x)), `del-points:${sh.id}`)
+          }
+        }
+        setPointSel(null)
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
         if (shapes.some((sh) => sh.id === selectedId)) onShapesChange(shapes.filter((sh) => sh.id !== selectedId))
@@ -1213,7 +1245,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange])
+  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange, tool, pointSel])
 
 
   // while a shape is being drawn, Shift / Alt / Ctrl / Enter change it at once, even if the mouse does not move
@@ -1591,7 +1623,12 @@ export function Workspace({
   /** the shape's outline right now, as a path's own geometry (one polygon, one ring): its rounding or its regular corners turn into plain points */
   const geomOf = (sh: ShapeFrame): PathGeom => (sh.kind === 'path' ? (sh.geom ?? [[[]]]) : [[editableRing(sh) ?? []]])
 
-  /** grabbing one of a shape's own corner points (the point-editing tool): it moves on its own, reshaping the outline */
+  /**
+   * Grabbing one of a shape's own points (the point-editing tool).
+   * Plain click: selects just this point. Shift: adds it to / removes it from the selection. A point already part of a
+   * multi-point selection: the whole group moves together. Alt: instead of moving it, pulls a new, symmetric pair of
+   * curve handles out of it, turning a sharp corner into a smooth one.
+   */
   const onPointDown = (id: string) => (index: number, e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return
     const sh = shapes.find((x) => x.id === id)
@@ -1599,11 +1636,24 @@ export function Workspace({
     e.stopPropagation()
     e.preventDefault()
     setSelectedId(id)
+    const geomBase = geomOf(sh)
+    const box = { x: sh.x, y: sh.y, w: sh.w, h: sh.h }
     dragSeq.current += 1
-    pointDrag.current = { id, geom: geomOf(sh), index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    if (e.altKey) {
+      const v = geomBase[0][0][index]
+      const geom = replaceVertex(geomBase, index, { p: vertexPoint(v), hi: [0, 0], ho: [0, 0] })
+      setPointSel({ id, indices: [index] })
+      pointDrag.current = { kind: 'handle', id, geom, index, which: 'ho', forceMirror: true, box, key: `curve:${dragSeq.current}` }
+    } else {
+      const already = pointSel?.id === id ? pointSel.indices : []
+      const indices = e.shiftKey ? (already.includes(index) ? already.filter((i) => i !== index) : [...already, index]) : already.includes(index) && already.length > 1 ? already : [index]
+      setPointSel(indices.length ? { id, indices } : null)
+      if (indices.length === 0) return
+      pointDrag.current = { kind: 'anchor', id, geom: geomBase, indices, anchor: index, box, key: `points:${dragSeq.current}` }
+    }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
-  /** grabbing the middle of one of a shape's edges: a new point goes in right there, and drags from then on like any other */
+  /** grabbing the middle of a shape's edge: a new point goes in right there, selected on its own, and drags from then on like any other */
   const onEdgeDown = (id: string) => (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return
     const sh = shapes.find((x) => x.id === id)
@@ -1613,31 +1663,116 @@ export function Workspace({
     setSelectedId(id)
     const base = geomOf(sh)
     const ring = base[0][0]
-    const a = ring[edgeIndex]
-    const b = ring[(edgeIndex + 1) % ring.length]
+    const a = vertexPoint(ring[edgeIndex])
+    const b = vertexPoint(ring[(edgeIndex + 1) % ring.length])
     const index = edgeIndex + 1
-    const geom: PathGeom = [[[...ring.slice(0, index), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], ...ring.slice(index)], ...base[0].slice(1)], ...base.slice(1)]
+    const geom: PathGeom = [[[...ring.slice(0, index), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as [number, number], ...ring.slice(index)], ...base[0].slice(1)], ...base.slice(1)]
     dragSeq.current += 1
-    pointDrag.current = { id, geom, index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    setPointSel({ id, indices: [index] })
+    pointDrag.current = { kind: 'anchor', id, geom, indices: [index], anchor: index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
-  /** the point being dragged follows the pointer (snapped like anything else); the box grows or shrinks to keep holding every point, and the rest of the outline rides along with it */
-  const movePoint = (d: NonNullable<typeof pointDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+  /** double click on a point: a sharp corner becomes a smooth curve point (handles a third of the way to each neighbour), or a curve point loses its handles and becomes a sharp corner again */
+  const onPointDouble = (id: string) => (index: number) => {
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    const geomBase = geomOf(sh)
+    const ring = geomBase[0][0]
+    const v = ring[index]
+    const nv: PathVertex = vertexHi(v) || vertexHo(v)
+      ? vertexPoint(v)
+      : (() => {
+          const p = vertexPoint(v)
+          const prev = vertexPoint(ring[(index - 1 + ring.length) % ring.length])
+          const next = vertexPoint(ring[(index + 1) % ring.length])
+          const smooth: PathSmoothPoint = { p, hi: [(prev[0] - p[0]) / 3, (prev[1] - p[1]) / 3], ho: [(next[0] - p[0]) / 3, (next[1] - p[1]) / 3] }
+          return smooth
+        })()
+    const geom = replaceVertex(geomBase, index, nv)
+    onShapesChange(shapes.map((x) => (x.id === id ? { ...x, kind: 'path', geom, sides: undefined, radii: undefined } : x)), `curve-toggle:${id}:${index}`)
+  }
+  /** grabbing one of a point's own curve handles: it reshapes the curve on that side */
+  const onHandleGrab = (id: string) => (index: number, which: 'hi' | 'ho', e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh) return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    setPointSel({ id, indices: [index] })
+    dragSeq.current += 1
+    pointDrag.current = { kind: 'handle', id, geom: geomOf(sh), index, which, forceMirror: false, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `handle:${dragSeq.current}` }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  /** one or more of a shape's own points follow the pointer as one rigid group (snapped like anything else, by the point actually grabbed); the box grows or shrinks to keep holding every point (its curve handles keep their own length), and the rest of the outline rides along with it */
+  const moveAnchors = (d: Extract<NonNullable<typeof pointDrag.current>, { kind: 'anchor' }>, e: ReactPointerEvent<HTMLDivElement>) => {
     const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
     setSnapShown(snapped.lines)
+    const anchorFrac = vertexPoint(d.geom[0][0][d.anchor])
+    const anchorWorld = { x: d.box.x + anchorFrac[0] * d.box.w, y: d.box.y + anchorFrac[1] * d.box.h }
+    const dx = snapped.p.x - anchorWorld.x
+    const dy = snapped.p.y - anchorWorld.y
+    const sel = new Set(d.indices)
     const world = d.geom.map((poly, pi) =>
       poly.map((ring, ri) =>
-        ring.map(([fx, fy], vi) => (pi === 0 && ri === 0 && vi === d.index ? snapped.p : { x: d.box.x + fx * d.box.w, y: d.box.y + fy * d.box.h })),
+        ring.map((v, vi) => {
+          const p = vertexPoint(v)
+          const at = { x: d.box.x + p[0] * d.box.w, y: d.box.y + p[1] * d.box.h }
+          return pi === 0 && ri === 0 && sel.has(vi) ? { x: at.x + dx, y: at.y + dy } : at
+        }),
       ),
     )
     const flat = world.flat(2)
-    const x = Math.min(...flat.map((p) => p.x))
-    const y = Math.min(...flat.map((p) => p.y))
-    const w = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.x)) - x)
-    const h = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.y)) - y)
-    const geom: PathGeom = world.map((poly) => poly.map((ring) => ring.map((p) => [(p.x - x) / w, (p.y - y) / h])))
-    onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, kind: 'path', x, y, w, h, geom, sides: undefined, radii: undefined } : sh)), d.key)
+    const nx = Math.min(...flat.map((p) => p.x))
+    const ny = Math.min(...flat.map((p) => p.y))
+    const nw = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.x)) - nx)
+    const nh = Math.max(MIN_FRAME_PT / 20, Math.max(...flat.map((p) => p.y)) - ny)
+    // a handle offset keeps the same actual length: measured in the old box, put back in the new one
+    const rescale = (hd: [number, number] | undefined): [number, number] | undefined => (hd ? [(hd[0] * d.box.w) / nw, (hd[1] * d.box.h) / nh] : undefined)
+    const geom: PathGeom = d.geom.map((poly, pi) =>
+      poly.map((ring, ri) =>
+        ring.map((v, vi) => {
+          const at = world[pi][ri][vi]
+          const p: [number, number] = [(at.x - nx) / nw, (at.y - ny) / nh]
+          const hi = rescale(vertexHi(v))
+          const ho = rescale(vertexHo(v))
+          return hi || ho ? { p, hi, ho } : p
+        }),
+      ),
+    )
+    onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, kind: 'path', x: nx, y: ny, w: nw, h: nh, geom, sides: undefined, radii: undefined } : sh)), d.key)
   }
+  /**
+   * One of a point's own curve handles follows the pointer. On a smooth point (both sides already have a handle, or this
+   * is the symmetric pair just being pulled out of a corner) the other side mirrors it — same angle, its own length —
+   * unless Alt is held, which lets the two sides point anywhere, independently.
+   */
+  const moveHandle = (d: Extract<NonNullable<typeof pointDrag.current>, { kind: 'handle' }>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
+    setSnapShown(snapped.lines)
+    const v = d.geom[0][0][d.index]
+    const anchorFrac = vertexPoint(v)
+    const anchorWorld = { x: d.box.x + anchorFrac[0] * d.box.w, y: d.box.y + anchorFrac[1] * d.box.h }
+    // the mirror keeps its angle and length in WORLD units, where a straight visual mirror is a straight numeric one too
+    // (a handle's fraction units are stretched by the box's own aspect ratio, so mirroring in that space would not look straight
+    // on a shape that is not square)
+    const offsetWorld: [number, number] = [snapped.p.x - anchorWorld.x, snapped.p.y - anchorWorld.y]
+    const otherFrac = d.which === 'hi' ? vertexHo(v) : vertexHi(v)
+    const otherWorld: [number, number] | undefined = otherFrac ? [otherFrac[0] * d.box.w, otherFrac[1] * d.box.h] : undefined
+    const mirror = d.forceMirror || !e.altKey
+    const olen = Math.hypot(offsetWorld[0], offsetWorld[1])
+    // a fresh symmetric pair (still both zero-length): the other side grows to match this one, not its own (zero) length
+    const mirrorLen = d.forceMirror ? olen : otherWorld ? Math.hypot(otherWorld[0], otherWorld[1]) : 0
+    const mirroredWorld: [number, number] | undefined =
+      mirror && otherWorld && olen > 1e-6 ? [(-offsetWorld[0] / olen) * mirrorLen, (-offsetWorld[1] / olen) * mirrorLen] : otherWorld
+    const toFrac = (w: [number, number]): [number, number] => [w[0] / d.box.w, w[1] / d.box.h]
+    const offset = toFrac(offsetWorld)
+    const mirrored = mirroredWorld && toFrac(mirroredWorld)
+    const nv: PathSmoothPoint = { p: anchorFrac, hi: d.which === 'hi' ? offset : mirrored, ho: d.which === 'ho' ? offset : mirrored }
+    const geom = replaceVertex(d.geom, d.index, nv)
+    onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, kind: 'path', geom, sides: undefined, radii: undefined } : sh)), d.key)
+  }
+  const movePoint = (d: NonNullable<typeof pointDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => (d.kind === 'handle' ? moveHandle(d, e) : moveAnchors(d, e))
 
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const isImage = images.some((x) => x.id === id)
@@ -2359,6 +2494,7 @@ export function Workspace({
                   activeCorners={sh.id === selectedId ? activeCornersOf(sh.id) : undefined}
                   together={roundTogether}
                   directMode={tool === 'direct'}
+                  selectedPoints={sh.id === pointSel?.id ? pointSel.indices : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
@@ -2370,7 +2506,9 @@ export function Workspace({
                   }}
                   onPegDown={onPegDown(sh.id)}
                   onPointDown={onPointDown(sh.id)}
+                  onPointDouble={onPointDouble(sh.id)}
                   onEdgeDown={onEdgeDown(sh.id)}
+                  onHandleGrab={onHandleGrab(sh.id)}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (

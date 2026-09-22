@@ -161,8 +161,20 @@ export const MAX_GUIDES = 5000
 export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path'
 /** The kinds a shape tool draws (a 'path' only comes out of combining shapes). */
 export type DrawKind = 'rect' | 'ellipse' | 'polygon'
-/** The outline of a combined shape: polygons, each an outer ring followed by holes; points in 0…1 of the shape's box. */
-export type PathGeom = [number, number][][][]
+/**
+ * One point of a path's own outline, 0…1 of the shape's box: a plain corner (just its position, straight lines on both
+ * sides), or a smooth point with direction handles that curve the segments on either side of it. `hi` / `ho` are the
+ * handles toward the previous / next point, as an offset from the point itself (missing on one side: that side stays
+ * straight).
+ */
+export interface PathSmoothPoint {
+  p: [number, number]
+  hi?: [number, number]
+  ho?: [number, number]
+}
+export type PathVertex = [number, number] | PathSmoothPoint
+/** The outline of a combined shape: polygons, each an outer ring followed by holes. */
+export type PathGeom = PathVertex[][][]
 export const MIN_SIDES = 3
 export const MAX_SIDES = 6
 export const DEFAULT_SHAPE_FILL = '#c8d6ea'

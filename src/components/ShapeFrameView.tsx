@@ -1,8 +1,8 @@
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { ShapeFrame } from '../document'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { PathVertex, ShapeFrame } from '../document'
 import { HANDLES, type HandleId } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
-import { CORNERS, editableRing, fitRadii, shapePath } from '../shapes'
+import { CORNERS, editableRing, fitRadii, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
 
 /** Distance of a rounding handle from the arc of its corner, screen px. */
@@ -31,6 +31,8 @@ interface Props {
   together?: boolean
   /** the point-editing tool is active: show the shape's own corner points instead of the usual resize handles (an ellipse has none of its own, so it keeps them) */
   directMode?: boolean
+  /** which of the shape's own points are selected: they show solid, and a selected point's own curve handles (if it has any) are shown too */
+  selectedPoints?: number[]
   /** a preview while the shape is being drawn: no handles, and clicks go through */
   ghost?: boolean
   onPointerDown?: (e: ReactPointerEvent<SVGPathElement>) => void
@@ -40,10 +42,14 @@ interface Props {
   onDoubleClick?: () => void
   /** a peg of the text on the outline: where it starts, where it is cut off, or the middle one that turns it in / out */
   onPegDown?: (peg: PathPeg, e: ReactPointerEvent<HTMLDivElement>) => void
-  /** grabbing one of the shape's own corner points: it moves on its own, reshaping the outline */
+  /** grabbing one of the shape's own corner points: it moves on its own (with the rest of the selected points, if there are more), reshaping the outline. Alt: pull new, symmetric curve handles out of it instead. */
   onPointDown?: (index: number, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** double click on one of the shape's own points: turns it from a sharp corner into a smooth curve point, or back */
+  onPointDouble?: (index: number) => void
   /** grabbing the middle of one of its edges: a new point is added there and dragged */
   onEdgeDown?: (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing one of a point's own curve handles: it reshapes the curve on that side (and the other side too, unless Alt is held) */
+  onHandleGrab?: (index: number, which: 'hi' | 'ho', e: ReactPointerEvent<HTMLDivElement>) => void
 }
 
 export type PathPeg = 'anchor' | 'end' | 'flip'
@@ -62,6 +68,7 @@ export function ShapeFrameView({
   activeCorners,
   together,
   directMode,
+  selectedPoints,
   ghost,
   onPointerDown,
   onHandleDown,
@@ -69,7 +76,9 @@ export function ShapeFrameView({
   onDoubleClick,
   onPegDown,
   onPointDown,
+  onPointDouble,
   onEdgeDown,
+  onHandleGrab,
 }: Props) {
   const w = shape.w * zoom
   const h = shape.h * zoom
@@ -169,12 +178,71 @@ export function ShapeFrameView({
 
       {showPoints && (
         <>
+          <svg className="curve-handle-lines" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+            {ring!.map((v, i) => {
+              if (!selectedPoints?.includes(i)) return null
+              const p = vertexPoint(v)
+              const hi = vertexHi(v)
+              const ho = vertexHo(v)
+              return (
+                <g key={i}>
+                  {hi && <line x1={p[0] * w} y1={p[1] * h} x2={(p[0] + hi[0]) * w} y2={(p[1] + hi[1]) * h} />}
+                  {ho && <line x1={p[0] * w} y1={p[1] * h} x2={(p[0] + ho[0]) * w} y2={(p[1] + ho[1]) * h} />}
+                </g>
+              )
+            })}
+          </svg>
+
           {ring!.map((_, i) => (
             <div key={`edge${i}`} className="edge-handle" title="גרור כדי להוסיף נקודה ולעצב את הקו" style={edgeAt(ring!, i, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
           ))}
-          {ring!.map(([fx, fy], i) => (
-            <div key={`pt${i}`} className="point-handle" title="נקודת עיגון — גרור כדי להזיז ולעצב את הצורה" style={{ left: fx * w, top: fy * h }} onPointerDown={(e) => onPointDown?.(i, e)} />
-          ))}
+
+          {ring!.map((v, i) => {
+            const p = vertexPoint(v)
+            const on = selectedPoints?.includes(i)
+            return (
+              <div
+                key={`pt${i}`}
+                className={'point-handle' + (on ? ' on' : '')}
+                title="נקודת עיגון — לחיצה לבחירה וגרירה להזזה (Shift מוסיף לבחירה). לחיצה כפולה הופכת בין פינה חדה לעקומה חלקה. Alt-גרירה ממנה מוציאה ידיות עיצוב."
+                style={{ left: p[0] * w, top: p[1] * h }}
+                onPointerDown={(e) => onPointDown?.(i, e)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  onPointDouble?.(i)
+                }}
+              />
+            )
+          })}
+
+          {ring!.flatMap((v, i): ReactNode[] => {
+            if (!selectedPoints?.includes(i)) return []
+            const p = vertexPoint(v)
+            const out: ReactNode[] = []
+            const hi = vertexHi(v)
+            if (hi)
+              out.push(
+                <div
+                  key={`hi${i}`}
+                  className="direction-handle"
+                  title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
+                  style={{ left: (p[0] + hi[0]) * w, top: (p[1] + hi[1]) * h }}
+                  onPointerDown={(e) => onHandleGrab?.(i, 'hi', e)}
+                />,
+              )
+            const ho = vertexHo(v)
+            if (ho)
+              out.push(
+                <div
+                  key={`ho${i}`}
+                  className="direction-handle"
+                  title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
+                  style={{ left: (p[0] + ho[0]) * w, top: (p[1] + ho[1]) * h }}
+                  onPointerDown={(e) => onHandleGrab?.(i, 'ho', e)}
+                />,
+              )
+            return out
+          })}
         </>
       )}
     </div>
@@ -182,8 +250,8 @@ export function ShapeFrameView({
 }
 
 /** the screen position of the middle of the edge from point `i` to the next one (wrapping around) */
-function edgeAt(ring: readonly [number, number][], i: number, w: number, h: number) {
-  const [ax, ay] = ring[i]
-  const [bx, by] = ring[(i + 1) % ring.length]
+function edgeAt(ring: PathVertex[], i: number, w: number, h: number) {
+  const [ax, ay] = vertexPoint(ring[i])
+  const [bx, by] = vertexPoint(ring[(i + 1) % ring.length])
   return { left: ((ax + bx) / 2) * w, top: ((ay + by) / 2) * h }
 }

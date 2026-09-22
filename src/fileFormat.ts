@@ -26,7 +26,9 @@ import {
   type PageSize,
   type PathGeom,
   type PathSide,
+  type PathSmoothPoint,
   type PathText,
+  type PathVertex,
   type ShapeFrame,
   type ShapeKind,
   type Run,
@@ -264,6 +266,27 @@ function parsePathText(v: unknown): { pathText?: PathText } {
   }
 }
 
+/** a number clamped like a path point (or a handle offset — the same range works for both) */
+const pathNum = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? Math.min(10, Math.max(-10, v)) : undefined)
+const pathPoint = (v: unknown): [number, number] | undefined => {
+  if (!Array.isArray(v)) return undefined
+  const x = pathNum(v[0])
+  const y = pathNum(v[1])
+  return x !== undefined && y !== undefined ? [x, y] : undefined
+}
+/** one point of a path's outline: a plain corner, or (an object with a curve handle) a smooth point */
+function parseVertex(v: unknown): PathVertex | undefined {
+  const p = pathPoint(v)
+  if (p) return p
+  if (!isObj(v)) return undefined
+  const pp = pathPoint(v.p)
+  if (!pp) return undefined
+  const hi = pathPoint(v.hi)
+  const ho = pathPoint(v.ho)
+  if (!hi && !ho) return pp
+  const smooth: PathSmoothPoint = { p: pp, hi, ho }
+  return smooth
+}
 /** the outline of a combined shape: polygons of rings of points, all numbers checked and the amount limited */
 function parseGeom(v: unknown): PathGeom | undefined {
   if (!Array.isArray(v)) return undefined
@@ -271,13 +294,13 @@ function parseGeom(v: unknown): PathGeom | undefined {
   let points = 0
   for (const poly of v.slice(0, 500)) {
     if (!Array.isArray(poly)) continue
-    const rings: [number, number][][] = []
+    const rings: PathVertex[][] = []
     for (const ring of poly.slice(0, 500)) {
       if (!Array.isArray(ring)) continue
       const pts = ring
         .slice(0, 20000)
-        .filter((p): p is [number, number] => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number' && Number.isFinite(p[0]) && Number.isFinite(p[1]))
-        .map((p): [number, number] => [Math.min(10, Math.max(-10, p[0])), Math.min(10, Math.max(-10, p[1]))])
+        .map(parseVertex)
+        .filter((p): p is PathVertex => p !== undefined)
       points += pts.length
       if (pts.length >= 3) rings.push(pts)
     }
