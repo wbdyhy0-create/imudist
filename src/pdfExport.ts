@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf'
-import { defaultLeading, type Asset, type Assets, type CharStyle, type DocSettings, type ImageFrame, type Run, type ShapeFrame, type TextFrame } from './document'
+import { defaultLeading, wordSpacingPt, type Asset, type Assets, type CharStyle, type DocSettings, type ImageFrame, type Run, type ShapeFrame, type TextFrame } from './document'
 import { insetBox, styleOf } from './frames'
 import { pageRects, type PageRect } from './pages'
 import { shapePath } from './shapes'
@@ -59,7 +59,18 @@ interface Line {
 /** Splits one paragraph's text (already known to have no "\n") into greedily-wrapped lines, each carrying the
  *  style runs it's made of. Mirrors the app's own DOM word-wrap closely enough for a print-quality render:
  *  breaks only at spaces, never inside a word, and a lone over-long word still gets its own line. */
-function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[], scale: number, maxWidth: number, firstIndent: number): Line[] {
+function wrapParagraph(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  runs: Run[],
+  scale: number,
+  maxWidth: number,
+  firstIndent: number,
+  /** matches TextFrameView.tsx's CSS `word-spacing`: extra width per space in a justified paragraph, in the same
+   *  canvas-pixel units as `maxWidth`. Widens EVERY space, on EVERY line — changes where lines wrap, not just how
+   *  they look, so leaving it out makes this wrap fit more per line than the app's own editor really can. */
+  wordSpacingExtra: number,
+): Line[] {
   interface Tok {
     text: string
     run: Run
@@ -82,7 +93,8 @@ function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[],
   }
   const widthOf = (tok: Tok) => {
     ctx.font = fontCss(tok.run.style, scale)
-    return ctx.measureText(tok.text).width
+    const w = ctx.measureText(tok.text).width
+    return tok.space ? w + wordSpacingExtra : w
   }
   const lines: Line[] = []
   let cur: Tok[] = []
@@ -100,7 +112,9 @@ function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[],
     }
     let w = 0
     for (const s of segs) {
-      s.width = widthOf({ text: s.text, run: s.run, space: false })
+      ctx.font = fontCss(s.run.style, scale)
+      const spacesIn = s.text.match(/ /g)?.length ?? 0
+      s.width = ctx.measureText(s.text).width + spacesIn * wordSpacingExtra
       w += s.width
     }
     lines.push({ segs, width: w, first, last: false, gapAbove: 0 })
@@ -130,13 +144,14 @@ function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[],
 function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: number, boxWidth: number): Line[] {
   const style = flow.style
   const firstIndent = style.firstLineIndent ?? 0
+  const wordSpacingExtra = wordSpacingPt(style) * scale
   const paraTexts = flow.slice.split('\n')
   const out: Line[] = []
   let pos = 0
   paraTexts.forEach((paraText, i) => {
     const runs = sliceRuns(flow.runs, pos, pos + paraText.length)
     pos += paraText.length + 1
-    const lines = wrapParagraph(ctx, paraText, runs, scale, boxWidth, firstIndent)
+    const lines = wrapParagraph(ctx, paraText, runs, scale, boxWidth, firstIndent, wordSpacingExtra)
     const gap = i === 0 ? 0 : (flow.paraGaps[flow.startParaIndex + i - 1] ?? 0) * scale
     if (lines.length) lines[0].gapAbove = gap
     out.push(...lines)
@@ -150,6 +165,7 @@ function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: numb
 function drawText(ctx: CanvasRenderingContext2D, flow: FrameFlow, lines: Line[], box: { x: number; y: number; w: number; h: number }, scale: number) {
   const style = flow.style
   const leading = (style.leading ?? defaultLeading(style)) * scale
+  const wordSpacingExtra = wordSpacingPt(style) * scale
   ctx.textBaseline = 'alphabetic'
   ctx.direction = 'rtl'
   let y = box.y * scale + leading * 0.82 // roughly the ascent, so the first line's cap sits just under the box top
@@ -163,6 +179,9 @@ function drawText(ctx: CanvasRenderingContext2D, flow: FrameFlow, lines: Line[],
     if (style.align === 'justify' && !line.last && spaces > 0) {
       extraPerSpace = Math.max(0, available - line.width) / spaces
     }
+    // the baseline word-spacing bump applies to every line of a justified paragraph (matches the DOM's unconditional
+    // CSS word-spacing), even a paragraph's own last line, which only skips the extra distributive justify stretch
+    const perGapExtra = wordSpacingExtra + extraPerSpace
     // right and justify both start flush with the right edge; justify's extra space is inserted between words below
     let x = rightEdge
     if (style.align === 'center') x = leftEdge + (available + line.width) / 2
@@ -172,11 +191,11 @@ function drawText(ctx: CanvasRenderingContext2D, flow: FrameFlow, lines: Line[],
       ctx.fillStyle = '#000'
       ;(ctx as unknown as { letterSpacing: string }).letterSpacing = letterSpacingCss(seg.run.style, scale)
       ctx.textAlign = 'right'
-      if (extraPerSpace > 0 && seg.text.includes(' ')) {
-        // draw word-by-word so the extra justification space can be inserted between them
+      if (perGapExtra > 0 && seg.text.includes(' ')) {
+        // draw word-by-word so the extra spacing can be inserted between them
         const words = seg.text.split(' ')
         for (let w = 0; w < words.length; w++) {
-          if (w > 0) x -= extraPerSpace + ctx.measureText(' ').width
+          if (w > 0) x -= perGapExtra + ctx.measureText(' ').width
           ctx.fillText(words[w], x, y)
           x -= ctx.measureText(words[w]).width
         }
