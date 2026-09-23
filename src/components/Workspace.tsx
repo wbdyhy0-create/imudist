@@ -2421,16 +2421,13 @@ export function Workspace({
     shapeFlipRef.current = undefined
     setShapeBox(null)
     setShapeFlip(undefined)
-    const pref = shapePrefs[s0.kind]
     // a line only needs its LENGTH to be big enough (one side is often 0 — a horizontal or vertical line); every
-    // other shape needs both sides big enough, same as before
+    // other shape needs both sides big enough. A click without a real drag makes nothing — it used to drop a
+    // default-size shape centered on the click point, but that meant an ordinary click anywhere on the canvas
+    // (not meant as a draw gesture at all) would silently create a shape, and repeated clicks kept stacking more
     const bigEnough = box && (s0.kind === 'line' ? Math.hypot(box.w, box.h) >= MIN_FRAME_PT : box.w >= MIN_FRAME_PT && box.h >= MIN_FRAME_PT)
-    // a plain click (no real drag) makes a default-size shape around the point for rect/ellipse/polygon — but a
-    // line has no sensible "default": every click without a drag would otherwise drop an easy-to-miss stray line
-    // exactly on top of the last one, since nothing about a bare click tells it which way to point
-    if (!bigEnough && s0.kind === 'line') return
-    const size = bigEnough ? box! : { x: s0.x - pref.w / 2, y: s0.y - pref.h / 2, w: pref.w, h: pref.h }
-    const shape = newShape(s0.kind, size, s0.frame, bigEnough ? flip : undefined)
+    if (!bigEnough) return
+    const shape = newShape(s0.kind, box!, s0.frame, flip)
     onShapesChange([...shapes, shape])
     setSelectedId(shape.id)
     setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
@@ -2792,7 +2789,7 @@ export function Workspace({
         <Toolbox
           tool={space ? 'hand' : tool}
           onSelect={setTool}
-          onSettings={(id) => setToolDialog(id === 'rect' || id === 'ellipse' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
+          onSettings={(id) => setToolDialog(id === 'rect' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
           previewMode={previewMode}
           onPreviewMode={onPreviewMode}
         />

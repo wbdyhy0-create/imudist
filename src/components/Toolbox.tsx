@@ -94,7 +94,8 @@ export const TOOLS: ToolDef[] = [
 ]
 
 /** tools that have a settings window (double click) */
-const SETTINGS_TOOLS: ToolId[] = ['rect', 'ellipse', 'polygon', 'framerect', 'frameellipse', 'framepolygon']
+// ellipse and line have no default-tool settings left (nothing but a click-made default size, which no longer exists)
+const SETTINGS_TOOLS: ToolId[] = ['rect', 'polygon', 'framerect', 'framepolygon']
 
 /** the plain shape each graphic-frame tool draws (they share its settings and its keyboard-drawing behaviour) */
 export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polygon'>> = { framerect: 'rect', frameellipse: 'ellipse', framepolygon: 'polygon' }

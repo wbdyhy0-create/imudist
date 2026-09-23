@@ -22,19 +22,16 @@ export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellips
 export const DRAW_KINDS: DrawKind[] = ['rect', 'ellipse', 'polygon', 'line']
 export const SIDE_NAMES: Record<number, string> = { 3: 'משולש', 4: 'מרובע', 5: 'מחומש', 6: 'משושה' }
 
-/** What a click without dragging creates (points), and the last settings of each tool. */
+/** The last settings of each shape tool that a plain click doesn't decide (a click without a drag makes nothing —
+ *  every shape needs an actual drag). */
 export interface ShapePrefs {
-  rect: { w: number; h: number; radius: number }
-  ellipse: { w: number; h: number }
-  polygon: { w: number; h: number; sides: number }
-  line: { w: number; h: number }
+  rect: { radius: number }
+  polygon: { sides: number }
 }
 
 export const DEFAULT_SHAPE_PREFS: ShapePrefs = {
-  rect: { w: 150, h: 100, radius: 0 },
-  ellipse: { w: 150, h: 100 },
-  polygon: { w: 120, h: 120, sides: 6 },
-  line: { w: 150, h: 0 },
+  rect: { radius: 0 },
+  polygon: { sides: 6 },
 }
 
 export const clampSides = (n: number) => Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(n)))
