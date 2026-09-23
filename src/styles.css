@@ -280,6 +280,9 @@ svg { display: block; }
 .handle.s { left: calc(50% - 4px); bottom: -4px; cursor: ns-resize; }
 .handle.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
 .handle.w { left: -4px; top: calc(50% - 4px); cursor: ew-resize; }
+/* a line's own two endpoint handles: positioned by inline left/top (the line's actual endpoints, which the fixed
+   nw/n/ne… corners above can't express), centered on that point the same way content-handle/point-handle are */
+.handle.line-end { margin: -4px 0 0 -4px; border-radius: 50%; cursor: move; }
 /* a ring around each corner handle: close to the corner it resizes (the handle itself sits on top and wins), a bit
    further out it turns the object — a curved arrow cursor, falling back to a plain grab hand */
 .rotate-handle {

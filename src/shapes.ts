@@ -18,8 +18,8 @@ export const vertexHo = (v: PathVertex): Pt | undefined => (Array.isArray(v) ? u
 
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
-export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע', path: 'צורה מורכבת' }
-export const DRAW_KINDS: DrawKind[] = ['rect', 'ellipse', 'polygon']
+export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע', path: 'צורה מורכבת', line: 'קו' }
+export const DRAW_KINDS: DrawKind[] = ['rect', 'ellipse', 'polygon', 'line']
 export const SIDE_NAMES: Record<number, string> = { 3: 'משולש', 4: 'מרובע', 5: 'מחומש', 6: 'משושה' }
 
 /** What a click without dragging creates (points), and the last settings of each tool. */
@@ -27,12 +27,14 @@ export interface ShapePrefs {
   rect: { w: number; h: number; radius: number }
   ellipse: { w: number; h: number }
   polygon: { w: number; h: number; sides: number }
+  line: { w: number; h: number }
 }
 
 export const DEFAULT_SHAPE_PREFS: ShapePrefs = {
   rect: { w: 150, h: 100, radius: 0 },
   ellipse: { w: 150, h: 100 },
   polygon: { w: 120, h: 120, sides: 6 },
+  line: { w: 150, h: 0 },
 }
 
 export const clampSides = (n: number) => Math.min(MAX_SIDES, Math.max(MIN_SIDES, Math.round(n)))
@@ -122,7 +124,29 @@ export function shapePath(s: ShapeFrame, k = 1): string {
     return (s.geom ?? []).flatMap((poly) => poly.map((ring) => ringPath(ring, w, h))).join('')
   }
   if (s.kind === 'ellipse') return `M0 ${h / 2}A${w / 2} ${h / 2} 0 1 1 ${w} ${h / 2}A${w / 2} ${h / 2} 0 1 1 0 ${h / 2}Z`
+  if (s.kind === 'line') return s.flip ? `M0 ${h}L${w} 0` : `M0 0L${w} ${h}`
   return 'M' + polygonPoints(s.sides ?? 6, w, h).map(([x, y]) => `${x} ${y}`).join('L') + 'Z'
+}
+
+/** A line's two endpoints in world points, in order (not `a`/`b` identity — see `boxFromEndpoints`, its inverse). */
+export function lineEndpoints(s: { x: number; y: number; w: number; h: number; flip?: true }): [Pt, Pt] {
+  return s.flip ? [[s.x, s.y + s.h], [s.x + s.w, s.y]] : [[s.x, s.y], [s.x + s.w, s.y + s.h]]
+}
+
+/**
+ * The box + `flip` a line's two endpoints make — the inverse of `lineEndpoints`. Order-independent: swapping `a` and
+ * `b` gives back the exact same box, by always reading the leftmost point first (top point, if they tie on x).
+ */
+export function boxFromEndpoints(a: Pt, b: Pt): { x: number; y: number; w: number; h: number; flip?: true } {
+  const [left, right] = a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a]
+  const flip = left[1] > right[1]
+  return {
+    x: left[0],
+    y: flip ? right[1] : left[1],
+    w: right[0] - left[0],
+    h: Math.abs(right[1] - left[1]),
+    ...(flip ? { flip: true as const } : {}),
+  }
 }
 
 /**

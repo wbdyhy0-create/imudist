@@ -56,7 +56,7 @@ import { boxAtClick, pourText, type FlowMode } from '../placeText'
 import { ownerPage, pageRects } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
-import { CORNERS, editableRing, fitRadii, imageGeometry, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
+import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -331,10 +331,15 @@ export function Workspace({
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
+  /** a line being drawn: which diagonal of `shapeBox` it runs — see document.ts's `ShapeFrame.flip` */
+  const [shapeFlip, setShapeFlip] = useState<true | undefined>(undefined)
+  const shapeFlipRef = useRef<true | undefined>(undefined)
   /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
   const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
   const enterHeld = useRef(false)
   const shapeBoxRef = useRef<Box | null>(null)
+  /** dragging one endpoint of an existing line: the other endpoint stays put */
+  const lineEndDrag = useRef<{ id: string; fixed: { x: number; y: number } } | null>(null)
   /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
   const cornerDrag = useRef<{ id: string; corners: number[]; origin: number; sweep: boolean; grab: number; last: { x: number; y: number }; key: string } | null>(null)
   /** a rubber band that started on empty canvas next to a selected rectangle: once it touches the rounding handles it picks corners instead of objects */
@@ -1683,6 +1688,24 @@ export function Workspace({
     setSnapShown(snapped.lines)
     let dx = p.x - s0.x
     let dy = p.y - s0.y
+    if (s0.kind === 'line') {
+      // Shift/Enter locks the angle to 45° steps instead of a fixed aspect ratio, so it stays straight while stretching
+      if (m.shift || enterHeld.current) {
+        const step = Math.PI / 4
+        const angle = Math.round(Math.atan2(dy, dx) / step) * step
+        const dist = Math.hypot(dx, dy)
+        dx = Math.cos(angle) * dist
+        dy = Math.sin(angle) * dist
+      }
+      const a = m.alt || m.ctrl ? { x: s0.x - dx, y: s0.y - dy } : { x: s0.x, y: s0.y }
+      const b = { x: s0.x + dx, y: s0.y + dy }
+      const { x, y, w, h, flip } = boxFromEndpoints([a.x, a.y], [b.x, b.y])
+      shapeBoxRef.current = { x, y, w, h }
+      shapeFlipRef.current = flip
+      setShapeBox({ x, y, w, h })
+      setShapeFlip(flip)
+      return
+    }
     if (m.shift || enterHeld.current) {
       const ratio = regularRatio(s0.kind, shapePrefs.polygon.sides)
       // the size follows the pointer's larger reach, in the shape's own proportions
@@ -1699,7 +1722,7 @@ export function Workspace({
   }
 
   /** a new shape of a kind, with the tool's settings */
-  const newShape = (kind: DrawKind, box: Box, frame: boolean): ShapeFrame => {
+  const newShape = (kind: DrawKind, box: Box, frame: boolean, flip?: true): ShapeFrame => {
     const r = kind === 'rect' ? shapePrefs.rect.radius : 0
     return {
       id: newFrameId(),
@@ -1708,7 +1731,8 @@ export function Workspace({
       ...(kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
       ...(r > 0 ? { radii: [r, r, r, r] as [number, number, number, number] } : {}),
       ...(frame ? { frame: true as const } : {}),
-      fill: DEFAULT_SHAPE_FILL,
+      ...(flip ? { flip } : {}),
+      fill: kind === 'line' ? null : DEFAULT_SHAPE_FILL,
       stroke: DEFAULT_SHAPE_STROKE,
       strokeWidth: 1,
       z: nextZ(frames, images, shapes),
@@ -1987,6 +2011,35 @@ export function Workspace({
     onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, image: { ...x.image!, offset: { x: box.x, y: box.y }, scale } } : x)), `content:${d.id}`)
   }
 
+  /** grabbing one of a line's two endpoint handles: it moves on its own, the other end staying put */
+  const onLineEndDown = (id: string) => (which: 0 | 1, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh || sh.kind !== 'line') return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    const ends = lineEndpoints(sh)
+    const fixed = ends[which === 0 ? 1 : 0]
+    lineEndDrag.current = { id, fixed: { x: fixed[0], y: fixed[1] } }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveLineEnd = (d: NonNullable<typeof lineEndDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
+    setSnapShown(snapped.lines)
+    let p = snapped.p
+    if (e.shiftKey) {
+      const dx = p.x - d.fixed.x
+      const dy = p.y - d.fixed.y
+      const step = Math.PI / 4
+      const angle = Math.round(Math.atan2(dy, dx) / step) * step
+      const dist = Math.hypot(dx, dy)
+      p = { x: d.fixed.x + Math.cos(angle) * dist, y: d.fixed.y + Math.sin(angle) * dist }
+    }
+    const box = boxFromEndpoints([d.fixed.x, d.fixed.y], [p.x, p.y])
+    onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, x: box.x, y: box.y, w: box.w, h: box.h, flip: box.flip } : x)), `lineend:${d.id}`)
+  }
+
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const isImage = images.some((x) => x.id === id)
     const isShape = shapes.some((x) => x.id === id)
@@ -2192,7 +2245,7 @@ export function Workspace({
         setSelectedId(null)
         setPathEdit(null)
       }
-    } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || FRAME_TOOL_KIND[tool]) && e.button === 0) {
+    } else if ((tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || tool === 'line' || FRAME_TOOL_KIND[tool]) && e.button === 0) {
       const frameKind = FRAME_TOOL_KIND[tool]
       const p = snapPoint(toWorld(e.clientX, e.clientY), false).p
       shapeStart.current = { kind: frameKind ?? (tool as DrawKind), x: p.x, y: p.y, frame: !!frameKind }
@@ -2234,6 +2287,10 @@ export function Workspace({
     }
     if (shapeStart.current) {
       updateShapeDraft(e.clientX, e.clientY, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
+      return
+    }
+    if (lineEndDrag.current) {
+      moveLineEnd(lineEndDrag.current, e)
       return
     }
     if (cornerDrag.current) {
@@ -2358,12 +2415,18 @@ export function Workspace({
     }
     if (!s0) return
     const box = shapeBoxRef.current
+    const flip = shapeFlipRef.current
     shapeStart.current = null
     shapeBoxRef.current = null
+    shapeFlipRef.current = undefined
     setShapeBox(null)
+    setShapeFlip(undefined)
     const pref = shapePrefs[s0.kind]
-    const size = box && box.w >= MIN_FRAME_PT && box.h >= MIN_FRAME_PT ? box : { x: s0.x - pref.w / 2, y: s0.y - pref.h / 2, w: pref.w, h: pref.h }
-    const shape = newShape(s0.kind, size, s0.frame)
+    // a line only needs its LENGTH to be big enough (one side is often 0 — a horizontal or vertical line); every
+    // other shape needs both sides big enough, same as before
+    const bigEnough = box && (s0.kind === 'line' ? Math.hypot(box.w, box.h) >= MIN_FRAME_PT : box.w >= MIN_FRAME_PT && box.h >= MIN_FRAME_PT)
+    const size = bigEnough ? box! : { x: s0.x - pref.w / 2, y: s0.y - pref.h / 2, w: pref.w, h: pref.h }
+    const shape = newShape(s0.kind, size, s0.frame, bigEnough ? flip : undefined)
     onShapesChange([...shapes, shape])
     setSelectedId(shape.id)
     setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
@@ -2424,6 +2487,7 @@ export function Workspace({
     groupDrag.current = null
     pointDrag.current = null
     contentDrag.current = null
+    lineEndDrag.current = null
     frameDrag.current = null
     rotateDrag.current = null
     pageDrag.current = null
@@ -2441,7 +2505,10 @@ export function Workspace({
     setSpacingShown((cur) => (cur.length ? [] : cur))
     shapeStart.current = null
     shapeBoxRef.current = null
+    shapeFlipRef.current = undefined
     setShapeBox(null)
+    setShapeFlip(undefined)
+    lineEndDrag.current = null
     groupDrag.current = null
     cornerDrag.current = null
     setHotCorners([])
@@ -2801,6 +2868,7 @@ export function Workspace({
                   onHandleGrab={onHandleGrab(sh.id)}
                   onContentGrab={onContentGrab(sh.id)}
                   onContentResize={onContentResize(sh.id)}
+                  onLineEndDown={onLineEndDown(sh.id)}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (
@@ -2812,7 +2880,8 @@ export function Workspace({
                     ...shapeBox,
                     ...(shapeStart.current.kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
                     ...(shapeStart.current.kind === 'rect' && shapePrefs.rect.radius > 0 ? { radii: [shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius] as [number, number, number, number] } : {}),
-                    fill: DEFAULT_SHAPE_FILL,
+                    ...(shapeFlip ? { flip: shapeFlip } : {}),
+                    fill: shapeStart.current.kind === 'line' ? null : DEFAULT_SHAPE_FILL,
                     stroke: DEFAULT_SHAPE_STROKE,
                     strokeWidth: 1,
                   }}

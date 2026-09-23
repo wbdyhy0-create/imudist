@@ -61,6 +61,8 @@ interface Props {
   onContentGrab?: (e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of the picture's own corner handles: it resizes on its own */
   onContentResize?: (corner: ContentCorner, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** grabbing one of a line's two endpoint handles (0 = its first point, 1 = its second): it moves on its own, the other end staying put */
+  onLineEndDown?: (which: 0 | 1, e: ReactPointerEvent<HTMLDivElement>) => void
 }
 
 export type PathPeg = 'anchor' | 'end' | 'flip'
@@ -94,7 +96,9 @@ export function ShapeFrameView({
   onHandleGrab,
   onContentGrab,
   onContentResize,
+  onLineEndDown,
 }: Props) {
+  const isLine = shape.kind === 'line'
   const w = shape.w * zoom
   const h = shape.h * zoom
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
@@ -120,20 +124,35 @@ export function ShapeFrameView({
     return { left: x * zoom, top: y * zoom }
   }
 
+  // a purely horizontal or vertical line has w or h = 0 — an SVG clips to a 0-sized viewport by default, which would
+  // hide the line (and its own stroke width) entirely, so it draws outside that box instead
+  const lineStrokeWidth = shape.strokeWidth * zoom
+  const dashArray = isLine && shape.strokeDash === 'dashed' ? `${lineStrokeWidth * 3} ${lineStrokeWidth * 2}` : undefined
+
   return (
     <div
       className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '')}
-      style={{ left: tx + shape.x * zoom, top: ty + shape.y * zoom, width: w, height: h, zIndex: z, transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined }}
+      style={{
+        left: tx + shape.x * zoom,
+        top: ty + shape.y * zoom,
+        width: w,
+        height: h,
+        zIndex: z,
+        overflow: isLine ? 'visible' : undefined,
+        transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
+      }}
     >
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={isLine ? { overflow: 'visible' } : undefined} aria-hidden="true">
         {!img ? (
           <path
             d={shapePath(shape, zoom)}
             fill={shape.fill ?? 'none'}
             fillRule="evenodd"
             stroke={shape.stroke ?? 'none'}
-            strokeWidth={shape.strokeWidth * zoom}
+            strokeWidth={lineStrokeWidth}
             strokeLinejoin="round"
+            strokeLinecap={isLine ? (shape.strokeCap ?? 'butt') : undefined}
+            strokeDasharray={dashArray}
             pointerEvents={ghost ? 'none' : 'all'}
             onPointerDown={onPointerDown}
             onDoubleClick={onDoubleClick}
@@ -207,7 +226,18 @@ export function ShapeFrameView({
         )}
       </svg>
 
-      {showHandles && HANDLES.map((handle) => <div key={handle} className={'handle ' + handle} onPointerDown={(e) => onHandleDown?.(handle, e)} />)}
+      {showHandles && !isLine && HANDLES.map((handle) => <div key={handle} className={'handle ' + handle} onPointerDown={(e) => onHandleDown?.(handle, e)} />)}
+      {showHandles &&
+        isLine &&
+        (shape.flip ? [[0, h], [w, 0]] : [[0, 0], [w, h]]).map(([left, top], i) => (
+          <div
+            key={i}
+            className="handle line-end"
+            title="גרור כדי להזיז את קצה הקו (Shift: זווית ישרה, ב-45°)"
+            style={{ left, top }}
+            onPointerDown={(e) => onLineEndDown?.(i as 0 | 1, e)}
+          />
+        ))}
       {showHandles &&
         ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown?.(c, e)} />)}
 

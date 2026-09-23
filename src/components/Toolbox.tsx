@@ -79,7 +79,7 @@ export const TOOLS: ToolDef[] = [
       </>
     ),
   },
-  { id: 'line', label: 'קו', group: 3, key: '\\', enabled: false, icon: <path d="M5 19 19 5" /> },
+  { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', enabled: false, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', enabled: false, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
 

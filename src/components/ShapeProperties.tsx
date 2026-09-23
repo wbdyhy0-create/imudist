@@ -1,4 +1,4 @@
-import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type PathSide, type PathText, type ShapeFrame } from '../document'
+import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
 import type { ArrangeOp } from '../stacking'
@@ -71,13 +71,17 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
             <NumberField value={shape.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ y: v })} />
           </Labeled>
           <Labeled label="רוחב">
-            <NumberField value={shape.w} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
+            <NumberField value={shape.w} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
           </Labeled>
           <Labeled label="גובה">
-            <NumberField value={shape.h} unit={unit} min={6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
+            <NumberField value={shape.h} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
           </Labeled>
         </div>
-        <p className="muted">Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.</p>
+        <p className="muted">
+          {shape.kind === 'line'
+            ? 'גרור את אחת מנקודות הקצה של הקו כדי להאריך, לקצר או לשנות את זוויתו. Shift שומר על זווית ישרה (קפיצות של 45°).'
+            : 'Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.'}
+        </p>
       </Group>
 
       {shape.kind === 'polygon' && (
@@ -172,9 +176,11 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
         </Group>
       )}
 
-      <Group title="מילוי">
-        <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill })} />
-      </Group>
+      {shape.kind !== 'line' && (
+        <Group title="מילוי">
+          <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill })} />
+        </Group>
+      )}
 
       <Group title="קו">
         <FillPicker
@@ -190,6 +196,39 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
           </Labeled>
         </div>
       </Group>
+
+      {shape.kind === 'line' && (
+        <Group title="סגנון קו">
+          <Labeled label="תבנית">
+            <div className="seg small" role="radiogroup" aria-label="תבנית הקו">
+              <button role="radio" aria-checked={!shape.strokeDash} className={!shape.strokeDash ? 'on' : ''} onClick={() => onChange({ strokeDash: undefined })}>
+                רציף
+              </button>
+              <button role="radio" aria-checked={shape.strokeDash === 'dashed'} className={shape.strokeDash === 'dashed' ? 'on' : ''} onClick={() => onChange({ strokeDash: 'dashed' })}>
+                מקווקו
+              </button>
+            </div>
+          </Labeled>
+          <div style={{ marginTop: 8 }}>
+            <Labeled label="קצוות">
+              <div className="seg small" role="radiogroup" aria-label="צורת הקצוות">
+                {(['butt', 'round', 'square'] as LineCap[]).map((cap) => (
+                  <button
+                    key={cap}
+                    role="radio"
+                    aria-checked={(shape.strokeCap ?? 'butt') === cap}
+                    className={(shape.strokeCap ?? 'butt') === cap ? 'on' : ''}
+                    title={cap === 'butt' ? 'קצה חד' : cap === 'round' ? 'קצה עגול' : 'קצה מרובע'}
+                    onClick={() => onChange({ strokeCap: cap === 'butt' ? undefined : cap })}
+                  >
+                    {cap === 'butt' ? 'חד' : cap === 'round' ? 'עגול' : 'מרובע'}
+                  </button>
+                ))}
+              </div>
+            </Labeled>
+          </div>
+        </Group>
+      )}
 
       <Group title="סדר שכבות">
         <ArrangeButtons onArrange={onArrange} />

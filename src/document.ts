@@ -275,10 +275,12 @@ export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[0].value
 /** No document may hold more guides than this. */
 export const MAX_GUIDES = 5000
 
-/** The drawn shapes: a rectangle (with optionally rounded corners), an ellipse, or a regular polygon of 3 to 6 corners. */
-export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path'
+/** The drawn shapes: a rectangle (with optionally rounded corners), an ellipse, a regular polygon of 3 to 6 corners, or a line. */
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path' | 'line'
 /** The kinds a shape tool draws (a 'path' only comes out of combining shapes). */
-export type DrawKind = 'rect' | 'ellipse' | 'polygon'
+export type DrawKind = 'rect' | 'ellipse' | 'polygon' | 'line'
+/** A line's end cap. */
+export type LineCap = 'butt' | 'round' | 'square'
 /**
  * One point of a path's own outline, 0…1 of the shape's box: a plain corner (just its position, straight lines on both
  * sides), or a smooth point with direction handles that curve the segments on either side of it. `hi` / `ho` are the
@@ -348,6 +350,13 @@ export interface ShapeFrame {
   frame?: true
   /** rectangle: the radius of each corner, points — top-left, top-right, bottom-right, bottom-left */
   radii?: [number, number, number, number]
+  /** line: true if it runs from the box's bottom-left to its top-right corner, instead of top-left to bottom-right
+   *  (the box alone can't tell these two apart, unlike every other shape, which is symmetric either way) */
+  flip?: true
+  /** line: dashed instead of solid */
+  strokeDash?: 'dashed'
+  /** line: the shape of its two ends; missing = 'butt' (a flat cut, flush with the end point) */
+  strokeCap?: LineCap
   /** #rrggbb, or null for no fill */
   fill: string | null
   /** #rrggbb, or null for no line */

@@ -31,6 +31,7 @@ import {
   type PathVertex,
   type ShapeFrame,
   type ShapeImage,
+  type LineCap,
   type ShapeKind,
   type Run,
   type Sides,
@@ -357,26 +358,34 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
   for (const raw of v) {
     if (!isObj(raw)) continue
     const geom = raw.kind === 'path' ? parseGeom(raw.geom) : undefined
-    const kind = oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path'], 'rect') === 'path' && !geom ? 'rect' : oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path'], 'rect')
+    const kind =
+      oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line'], 'rect') === 'path' && !geom
+        ? 'rect'
+        : oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line'], 'rect')
     let id = str(raw.id, '')
     if (!id || used.has(id)) id = `s${out.length}-${Math.random().toString(36).slice(2, 8)}`
     used.add(id)
     const r = Array.isArray(raw.radii) ? raw.radii : []
     const image = parseShapeImage(raw.image, assets)
+    // a line can be purely horizontal or vertical (one side exactly 0) — every other shape still needs both sides real
+    const minWH = kind === 'line' ? 0 : MIN_FRAME_PT
     out.push({
       id,
       kind,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
-      w: num(raw.w, 100, MIN_FRAME_PT, MAX_PAGE_PT),
-      h: num(raw.h, 100, MIN_FRAME_PT, MAX_PAGE_PT),
+      w: num(raw.w, 100, minWH, MAX_PAGE_PT),
+      h: num(raw.h, 100, minWH, MAX_PAGE_PT),
       ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
       ...(kind === 'path' && geom ? { geom } : {}),
+      ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
+      ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
+      ...(kind === 'line' && (raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
       ...parsePathText(raw.pathText),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       ...(image ? { image } : {}),
       ...(raw.frame === true ? { frame: true as const } : {}),
-      fill: colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
+      fill: kind === 'line' ? null : colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
       strokeWidth: num(raw.strokeWidth, 1, 0, 200),
       ...zOf(raw),
