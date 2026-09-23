@@ -211,7 +211,9 @@ export function readSelectionIn(root: HTMLElement): [number, number] | null {
   return [Math.min(a, b), Math.max(a, b)]
 }
 
-function locate(root: HTMLElement, target: number): [Node, number] {
+/** Character offset `target` of `root`'s text, as a DOM (node, offset) position. Shared by `setSelectionIn` and
+ *  pdfExport.ts's own line-break lookup (mapping a word's [start,end) into Ranges for `getClientRects()`). */
+export function locate(root: HTMLElement, target: number): [Node, number] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let pos = 0
   let last: Text | null = null

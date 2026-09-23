@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf'
-import { defaultLeading, wordSpacingPt, type Asset, type Assets, type CharStyle, type DocSettings, type ImageFrame, type Run, type ShapeFrame, type TextFrame } from './document'
+import { defaultLeading, wordSpacingPt, type Asset, type Assets, type CharStyle, type DocSettings, type ImageFrame, type Run, type ShapeFrame, type TextFrame, type TextStyle } from './document'
 import { insetBox, styleOf } from './frames'
 import { pageRects, type PageRect } from './pages'
+import { buildRunNodes, locate } from './richtext'
 import { shapePath } from './shapes'
 import { sliceRuns } from './story'
 import { flowFrames, type FrameFlow } from './textLayout'
@@ -56,54 +57,121 @@ interface Line {
   gapAbove: number
 }
 
-/** Splits one paragraph's text (already known to have no "\n") into greedily-wrapped lines, each carrying the
- *  style runs it's made of. Mirrors the app's own DOM word-wrap closely enough for a print-quality render:
- *  breaks only at spaces, never inside a word, and a lone over-long word still gets its own line. */
+let domMeasurer: HTMLDivElement | null = null
+function getDomMeasurer(): HTMLDivElement {
+  if (!domMeasurer) {
+    const m = document.createElement('div')
+    m.dir = 'rtl'
+    Object.assign(m.style, {
+      position: 'absolute',
+      left: '-100000px',
+      top: '0',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      boxSizing: 'border-box',
+      margin: '0',
+      padding: '0',
+      whiteSpace: 'pre-wrap',
+      overflowWrap: 'anywhere',
+      textRendering: 'geometricPrecision',
+    })
+    document.body.appendChild(m)
+    domMeasurer = m
+  }
+  return domMeasurer
+}
+
+/** Line index (0-based) that each word (given as a [start, end) offset into `paraText`) lands on. Renders the
+ *  paragraph with the SAME DOM-building code the real editor uses (richtext.ts's `buildRunNodes`, which the
+ *  on-screen `TextFrameView`/`RichEditor` and `textLayout.ts`'s own frame-fitting measurer both already rely on)
+ *  into a hidden element with the same CSS as `.text-frame-body`, then reads each word's line back via
+ *  `Range.getClientRects()` (`locate` maps a character offset to a DOM position, same helper `setSelectionIn`
+ *  uses for real caret placement). Canvas `measureText` can't replicate the browser's own text shaping (kerning,
+ *  `text-rendering: geometricPrecision`, how CSS `word-spacing` itself changes wrapping) closely enough for the
+ *  exported PDF's line breaks to reliably match what the user actually laid out on the canvas — rendering through
+ *  the real DOM instead of re-deriving its behavior sidesteps that whole class of mismatch. */
+function domLineIndices(
+  paraText: string,
+  runs: Run[],
+  style: TextStyle,
+  boxWidthPt: number,
+  firstIndentPt: number,
+  atParaStart: boolean,
+  wordRanges: [number, number][],
+): number[] {
+  const m = getDomMeasurer()
+  m.style.width = `${boxWidthPt}px`
+  m.style.wordSpacing = wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : ''
+  m.replaceChildren(buildRunNodes(paraText, runs, 1, { firstLineIndent: firstIndentPt, atParaStart }))
+  const tops = wordRanges.map(([a, b]) => {
+    const range = document.createRange()
+    const [sn, so] = locate(m, a)
+    const [en, eo] = locate(m, b)
+    range.setStart(sn, so)
+    range.setEnd(en, eo)
+    const rect = range.getClientRects()[0]
+    return rect ? rect.top : 0
+  })
+  const lines: number[] = []
+  let line = 0
+  for (let i = 0; i < tops.length; i++) {
+    if (i > 0 && tops[i] > tops[i - 1] + 0.5) line++
+    lines.push(line)
+  }
+  return lines
+}
+
+/** Splits one paragraph's text (already known to have no "\n") into lines, each carrying the style runs it's made
+ *  of. Line BREAKS come from `domLineIndices` (the real editor's own DOM layout); this only re-measures each
+ *  resulting line's width on the canvas (for positioning/justify within the render), reusing the exact same
+ *  word-spacing-aware math as before. */
 function wrapParagraph(
   ctx: CanvasRenderingContext2D,
   text: string,
   runs: Run[],
   scale: number,
-  maxWidth: number,
-  firstIndent: number,
-  /** matches TextFrameView.tsx's CSS `word-spacing`: extra width per space in a justified paragraph, in the same
-   *  canvas-pixel units as `maxWidth`. Widens EVERY space, on EVERY line — changes where lines wrap, not just how
-   *  they look, so leaving it out makes this wrap fit more per line than the app's own editor really can. */
+  style: TextStyle,
+  boxWidthPt: number,
+  firstIndentPt: number,
   wordSpacingExtra: number,
+  atParaStart: boolean,
 ): Line[] {
   interface Tok {
     text: string
     run: Run
     space: boolean
+    start: number
   }
   const tokens: Tok[] = []
   let pos = 0
   for (const run of runs) {
     const t = text.slice(pos, pos + run.len)
+    let p = pos
     pos += run.len
     let buf = ''
+    let bufStart = p
     for (const ch of t) {
       if (ch === ' ') {
-        if (buf) tokens.push({ text: buf, run, space: false })
-        tokens.push({ text: ' ', run, space: true })
+        if (buf) tokens.push({ text: buf, run, space: false, start: bufStart })
+        tokens.push({ text: ' ', run, space: true, start: p })
         buf = ''
-      } else buf += ch
+      } else {
+        if (!buf) bufStart = p
+        buf += ch
+      }
+      p++
     }
-    if (buf) tokens.push({ text: buf, run, space: false })
+    if (buf) tokens.push({ text: buf, run, space: false, start: bufStart })
   }
-  const widthOf = (tok: Tok) => {
-    ctx.font = fontCss(tok.run.style, scale)
-    const w = ctx.measureText(tok.text).width
-    return tok.space ? w + wordSpacingExtra : w
-  }
+  const words = tokens.filter((t) => !t.space)
   const lines: Line[] = []
-  let cur: Tok[] = []
-  let curWidth = 0
-  let first = true
-  const avail = () => maxWidth - (first ? firstIndent * scale : 0)
-  const commit = () => {
-    // a trailing space doesn't count toward the line's visible width or its wrap decision
-    while (cur.length && cur[cur.length - 1].space) cur.pop()
+  if (words.length === 0) {
+    lines.push({ segs: [], width: 0, first: true, last: true, gapAbove: 0 })
+    return lines
+  }
+  const wordRanges: [number, number][] = words.map((w) => [w.start, w.start + w.text.length])
+  const lineOf = domLineIndices(text, runs, style, boxWidthPt, firstIndentPt, atParaStart, wordRanges)
+  const commit = (cur: Tok[], isFirst: boolean) => {
     const segs: Seg[] = []
     for (const t of cur) {
       const last = segs[segs.length - 1]
@@ -117,31 +185,26 @@ function wrapParagraph(
       s.width = ctx.measureText(s.text).width + spacesIn * wordSpacingExtra
       w += s.width
     }
-    lines.push({ segs, width: w, first, last: false, gapAbove: 0 })
-    first = false
-    cur = []
-    curWidth = 0
+    lines.push({ segs, width: w, first: isFirst, last: false, gapAbove: 0 })
   }
-  let i = 0
-  while (i < tokens.length) {
-    const tok = tokens[i]
-    const w = widthOf(tok)
-    if (cur.length > 0 && !tok.space && curWidth + w > avail()) {
-      commit()
-      continue
+  let wi = 0
+  while (wi < words.length) {
+    const line = lineOf[wi]
+    const cur: Tok[] = []
+    while (wi < words.length && lineOf[wi] === line) {
+      if (cur.length) cur.push({ text: ' ', run: words[wi].run, space: true, start: words[wi].start })
+      cur.push(words[wi])
+      wi++
     }
-    cur.push(tok)
-    curWidth += w
-    i++
+    commit(cur, line === 0)
   }
-  if (cur.length) commit()
-  if (lines.length === 0) lines.push({ segs: [], width: 0, first: true, last: false, gapAbove: 0 })
   lines[lines.length - 1].last = true
   return lines
 }
 
-/** Every wrapped line of a frame's whole text, with the paragraph gap due above each paragraph's own first line. */
-function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: number, boxWidth: number): Line[] {
+/** Every wrapped line of a frame's whole text, with the paragraph gap due above each paragraph's own first line.
+ *  `boxWidthPt` is in world points (unscaled) — needed as-is for the DOM measurer inside `wrapParagraph`. */
+function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: number, boxWidthPt: number): Line[] {
   const style = flow.style
   const firstIndent = style.firstLineIndent ?? 0
   const wordSpacingExtra = wordSpacingPt(style) * scale
@@ -151,7 +214,8 @@ function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: numb
   paraTexts.forEach((paraText, i) => {
     const runs = sliceRuns(flow.runs, pos, pos + paraText.length)
     pos += paraText.length + 1
-    const lines = wrapParagraph(ctx, paraText, runs, scale, boxWidth, firstIndent, wordSpacingExtra)
+    const atParaStart = i === 0 ? flow.atParaStart : true
+    const lines = wrapParagraph(ctx, paraText, runs, scale, style, boxWidthPt, firstIndent, wordSpacingExtra, atParaStart)
     const gap = i === 0 ? 0 : (flow.paraGaps[flow.startParaIndex + i - 1] ?? 0) * scale
     if (lines.length) lines[0].gapAbove = gap
     out.push(...lines)
@@ -306,7 +370,7 @@ async function renderPage(
       w: box.w,
       h: box.h,
     }
-    const lines = layoutFrame(ctx, flow, scale, box.w * scale)
+    const lines = layoutFrame(ctx, flow, scale, box.w)
     drawText(ctx, flow, lines, boxWorld, scale)
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0)
