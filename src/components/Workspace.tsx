@@ -47,7 +47,7 @@ import {
   type TextStyle,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -1769,6 +1769,15 @@ export function Workspace({
     beginFrameDrag(e as unknown as ReactPointerEvent<HTMLElement>, id, 'move')
   }
 
+  /** a world point, translated into the shape's own unrotated frame (as if `rotation` were 0) — corner-rounding is
+   *  worked out entirely in that frame, since `radii`/`CORNERS` are themselves unrotated; without this, dragging a
+   *  rounding handle on a turned shape read the pointer's position along the wrong (pre-rotation) axes */
+  const toShapeLocal = (sh: ShapeFrame, p: { x: number; y: number }) => {
+    if (!sh.rotation) return p
+    const c = { x: sh.x + sh.w / 2, y: sh.y + sh.h / 2 }
+    const [dx, dy] = rotateVec(p.x - c.x, p.y - c.y, -sh.rotation)
+    return { x: c.x + dx, y: c.y + dy }
+  }
   /**
    * Grabbing a rounding handle. With "all corners together" that rounds all four. Without it: the corners picked before
    * are rounded together, or (nothing picked yet) only this one until the pointer passes over another corner's handle,
@@ -1784,14 +1793,15 @@ export function Workspace({
     const corners = roundTogether ? [0, 1, 2, 3] : active.length < 4 ? active : [corner]
     setSelectedId(id)
     const c = CORNERS[corner]
-    const p = toWorld(e.clientX, e.clientY)
+    const p = toShapeLocal(sh, toWorld(e.clientX, e.clientY))
     const inward = ((p.x - (sh.x + c.fx * sh.w)) * c.sx + (p.y - (sh.y + c.fy * sh.h)) * c.sy) / 2
     dragSeq.current += 1
     cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether && active.length === 4, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], last: p, key: `round:${dragSeq.current}` }
     setHotCorners(corners)
     vpRef.current!.setPointerCapture(e.pointerId)
   }
-  /** where the rounding handle of a corner is (world points) */
+  /** where the rounding handle of a corner is, in the shape's own unrotated frame (world points, but only really
+   *  "world" when the shape itself isn't rotated — every caller already works in that same frame via `toShapeLocal`) */
   const cornerHandleAt = (sh: ShapeFrame, k: number) => {
     const c = CORNERS[k]
     const at = fitRadii(sh.radii, sh.w, sh.h)[k] + CORNER_HANDLE_OFFSET / live.current.zoom
@@ -1802,7 +1812,10 @@ export function Workspace({
     const sh = shapes.find((x) => x.id === id)
     if (!sh || sh.kind !== 'rect') return []
     const pad = 7 / live.current.zoom // a handle has some size of its own
-    const [lx, hx, ly, hy] = [Math.min(x0, x1) - pad, Math.max(x0, x1) + pad, Math.min(y0, y1) - pad, Math.max(y0, y1) + pad]
+    // the rect is in world space; the handles are worked out in the shape's own unrotated frame, so bring the rect
+    // there instead (a single corner sweep is small enough that treating its own box as still axis-aligned is fine)
+    const [p0, p1] = [toShapeLocal(sh, { x: x0, y: y0 }), toShapeLocal(sh, { x: x1, y: y1 })]
+    const [lx, hx, ly, hy] = [Math.min(p0.x, p1.x) - pad, Math.max(p0.x, p1.x) + pad, Math.min(p0.y, p1.y) - pad, Math.max(p0.y, p1.y) + pad]
     return CORNERS.flatMap((_, k) => {
       const h = cornerHandleAt(sh, k)
       return h.x >= lx && h.x <= hx && h.y >= ly && h.y <= hy ? [k] : []
@@ -1811,7 +1824,7 @@ export function Workspace({
   const moveCorner = (d: NonNullable<typeof cornerDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
     const sh = shapes.find((x) => x.id === d.id)
     if (!sh) return
-    const p = toWorld(e.clientX, e.clientY)
+    const p = toShapeLocal(sh, toWorld(e.clientX, e.clientY))
     const maxR = Math.min(sh.w, sh.h) / 2
     // passing over the rounding handle of another corner while the button is held adds that corner
     // (the whole stretch the pointer went since the last move counts, so a quick sweep cannot jump over a handle)
