@@ -144,19 +144,35 @@ export function ShapeFrameView({
     >
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={isLine ? { overflow: 'visible' } : undefined} aria-hidden="true">
         {!img ? (
-          <path
-            d={shapePath(shape, zoom)}
-            fill={shape.fill ?? 'none'}
-            fillRule="evenodd"
-            stroke={shape.stroke ?? 'none'}
-            strokeWidth={lineStrokeWidth}
-            strokeLinejoin="round"
-            strokeLinecap={isLine ? (shape.strokeCap ?? 'butt') : undefined}
-            strokeDasharray={dashArray}
-            pointerEvents={ghost ? 'none' : 'all'}
-            onPointerDown={onPointerDown}
-            onDoubleClick={onDoubleClick}
-          />
+          <>
+            {isLine && (
+              // a thin (or even 1pt) line is genuinely hard to click exactly on — this invisible, much wider twin
+              // of the same path takes the click/hover instead, so getting NEAR the line is enough to select it
+              <path
+                d={shapePath(shape, zoom)}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={Math.max(lineStrokeWidth, 12)}
+                strokeLinecap="round"
+                pointerEvents={ghost ? 'none' : 'stroke'}
+                onPointerDown={onPointerDown}
+                onDoubleClick={onDoubleClick}
+              />
+            )}
+            <path
+              d={shapePath(shape, zoom)}
+              fill={shape.fill ?? 'none'}
+              fillRule="evenodd"
+              stroke={shape.stroke ?? 'none'}
+              strokeWidth={lineStrokeWidth}
+              strokeLinejoin="round"
+              strokeLinecap={isLine ? (shape.strokeCap ?? 'butt') : undefined}
+              strokeDasharray={dashArray}
+              pointerEvents={ghost ? 'none' : isLine ? 'none' : 'all'}
+              onPointerDown={isLine ? undefined : onPointerDown}
+              onDoubleClick={isLine ? undefined : onDoubleClick}
+            />
+          </>
         ) : (
           <>
             <defs>
