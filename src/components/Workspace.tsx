@@ -334,6 +334,9 @@ export function Workspace({
   /** a line being drawn: which diagonal of `shapeBox` it runs — see document.ts's `ShapeFrame.flip` */
   const [shapeFlip, setShapeFlip] = useState<true | undefined>(undefined)
   const shapeFlipRef = useRef<true | undefined>(undefined)
+  /** the small degrees readout next to a line's moving end while drawing it or dragging one of its endpoints
+   *  (InDesign shows the same thing) — world point of the moving end, and the angle to show there */
+  const [angleTip, setAngleTip] = useState<{ x: number; y: number; deg: number } | null>(null)
   /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
   const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
   const enterHeld = useRef(false)
@@ -1674,6 +1677,14 @@ export function Workspace({
     return { dx: dx + (sx?.delta ?? 0), dy: dy + (sy?.delta ?? 0), lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
   }
 
+  /** A line's angle for the small degrees readout (InDesign shows the same thing next to its own line tool):
+   *  counter-clockwise-positive from the horizontal, the common design-tool reading — the opposite sign of
+   *  `angleOf`'s own screen/clockwise convention (used for object rotation) — and folded to -180…180, not 0…360. */
+  const lineAngleDeg = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    const deg = normalizeDeg(-angleOf(from, to))
+    return deg > 180 ? deg - 360 : deg
+  }
+
   /**
    * The box of the shape being drawn for a pointer position. Free by default, from the starting corner towards the
    * pointer in any direction. Shift (or Enter) keeps it exactly regular — a square, a circle, a hexagon with equal sides —
@@ -1704,6 +1715,7 @@ export function Workspace({
       shapeFlipRef.current = flip
       setShapeBox({ x, y, w, h })
       setShapeFlip(flip)
+      setAngleTip({ x: b.x, y: b.y, deg: lineAngleDeg(a, b) })
       return
     }
     if (m.shift || enterHeld.current) {
@@ -2038,6 +2050,7 @@ export function Workspace({
     }
     const box = boxFromEndpoints([d.fixed.x, d.fixed.y], [p.x, p.y])
     onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, x: box.x, y: box.y, w: box.w, h: box.h, flip: box.flip } : x)), `lineend:${d.id}`)
+    setAngleTip({ x: p.x, y: p.y, deg: lineAngleDeg(d.fixed, p) })
   }
 
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
@@ -2421,6 +2434,7 @@ export function Workspace({
     shapeFlipRef.current = undefined
     setShapeBox(null)
     setShapeFlip(undefined)
+    setAngleTip(null)
     // a line only needs its LENGTH to be big enough (one side is often 0 — a horizontal or vertical line); every
     // other shape needs both sides big enough. A click without a real drag makes nothing — it used to drop a
     // default-size shape centered on the click point, but that meant an ordinary click anywhere on the canvas
@@ -2489,6 +2503,7 @@ export function Workspace({
     pointDrag.current = null
     contentDrag.current = null
     lineEndDrag.current = null
+    setAngleTip(null)
     frameDrag.current = null
     rotateDrag.current = null
     pageDrag.current = null
@@ -2510,6 +2525,7 @@ export function Workspace({
     setShapeBox(null)
     setShapeFlip(undefined)
     lineEndDrag.current = null
+    setAngleTip(null)
     groupDrag.current = null
     cornerDrag.current = null
     setHotCorners([])
@@ -2893,6 +2909,11 @@ export function Workspace({
                   selected={false}
                   showEdge
                 />
+              )}
+              {angleTip && (
+                <div className="guide-tip" style={{ left: tx + angleTip.x * zoom + 10, top: ty + angleTip.y * zoom - 24 }}>
+                  {angleTip.deg.toFixed(1)}°
+                </div>
               )}
               {visibleFrames.map((f) => {
                 const fl = flow.get(f.id)
