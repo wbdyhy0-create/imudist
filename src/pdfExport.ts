@@ -50,6 +50,8 @@ interface Line {
   width: number
   /** true for a paragraph's own first line (gets `firstLineIndent`) */
   first: boolean
+  /** true for a paragraph's own last line — never justified, same as the app's own CSS justify */
+  last: boolean
   /** extra space above this line: leading is added on top separately for every line */
   gapAbove: number
 }
@@ -101,7 +103,7 @@ function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[],
       s.width = widthOf({ text: s.text, run: s.run, space: false })
       w += s.width
     }
-    lines.push({ segs, width: w, first, gapAbove: 0 })
+    lines.push({ segs, width: w, first, last: false, gapAbove: 0 })
     first = false
     cur = []
     curWidth = 0
@@ -119,7 +121,8 @@ function wrapParagraph(ctx: CanvasRenderingContext2D, text: string, runs: Run[],
     i++
   }
   if (cur.length) commit()
-  if (lines.length === 0) lines.push({ segs: [], width: 0, first: true, gapAbove: 0 })
+  if (lines.length === 0) lines.push({ segs: [], width: 0, first: true, last: false, gapAbove: 0 })
+  lines[lines.length - 1].last = true
   return lines
 }
 
@@ -157,7 +160,7 @@ function drawText(ctx: CanvasRenderingContext2D, flow: FrameFlow, lines: Line[],
     const available = rightEdge - leftEdge
     const spaces = line.segs.reduce((n, s) => n + (s.text.match(/ /g)?.length ?? 0), 0)
     let extraPerSpace = 0
-    if (style.align === 'justify' && line !== lines[lines.length - 1] && spaces > 0) {
+    if (style.align === 'justify' && !line.last && spaces > 0) {
       extraPerSpace = Math.max(0, available - line.width) / spaces
     }
     // right and justify both start flush with the right edge; justify's extra space is inserted between words below
