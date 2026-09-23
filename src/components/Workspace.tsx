@@ -327,6 +327,10 @@ export function Workspace({
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
   /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
   const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
+  /** InDesign's own "fine outline" rotation guides: a faint outline of the object's box at the angle this drag
+   *  started from, plus a wedge showing how far it has turned since — world point of the centre, box size, the
+   *  rotation it started at, and how many degrees it has swept so far */
+  const [rotatePreview, setRotatePreview] = useState<{ cx: number; cy: number; w: number; h: number; startRotation: number; sweep: number } | null>(null)
   const dragSeq = useRef(0)
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
@@ -2033,7 +2037,11 @@ export function Workspace({
     setSelectedId(id)
     const ends = lineEndpoints(sh)
     const fixed = ends[which === 0 ? 1 : 0]
+    const moving = ends[which]
     lineEndDrag.current = { id, fixed: { x: fixed[0], y: fixed[1] } }
+    // reuses the same rotate-guide overlay as onRotateDown (w/h = 0: no ghost box for a line, just the wedge —
+    // its "centre" is the fixed end, its "starting rotation" is the line's own angle before this drag)
+    setRotatePreview({ cx: fixed[0], cy: fixed[1], w: 0, h: 0, startRotation: angleOf({ x: fixed[0], y: fixed[1] }, { x: moving[0], y: moving[1] }), sweep: 0 })
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   const moveLineEnd = (d: NonNullable<typeof lineEndDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
@@ -2048,6 +2056,7 @@ export function Workspace({
       const dist = Math.hypot(dx, dy)
       p = { x: d.fixed.x + Math.cos(angle) * dist, y: d.fixed.y + Math.sin(angle) * dist }
     }
+    setRotatePreview((prev) => (prev ? { ...prev, sweep: normalizeDeg(angleOf(d.fixed, p) - prev.startRotation) } : prev))
     const box = boxFromEndpoints([d.fixed.x, d.fixed.y], [p.x, p.y])
     onShapesChange(shapes.map((x) => (x.id === d.id ? { ...x, x: box.x, y: box.y, w: box.w, h: box.h, flip: box.flip } : x)), `lineend:${d.id}`)
     setAngleTip({ x: p.x, y: p.y, deg: lineAngleDeg(d.fixed, p) })
@@ -2091,6 +2100,7 @@ export function Workspace({
       startRotation: f.rotation ?? 0,
       key: `rotate:${dragSeq.current}`,
     }
+    setRotatePreview({ cx: center.x, cy: center.y, w: f.w, h: f.h, startRotation: f.rotation ?? 0, sweep: 0 })
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   /** the object follows the pointer around its own centre; Shift holds it to 45° steps */
@@ -2099,6 +2109,7 @@ export function Workspace({
     let rotation = d.startRotation + (angle - d.startAngle)
     if (e.shiftKey) rotation = Math.round(rotation / 45) * 45
     rotation = normalizeDeg(rotation)
+    setRotatePreview((p) => (p ? { ...p, sweep: normalizeDeg(rotation - d.startRotation) } : p))
     const patch = { rotation: rotation || undefined }
     if (d.kind === 'shape') onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...patch } : sh)), d.key)
     else if (d.kind === 'image') onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...patch } : im)), d.key)
@@ -2506,6 +2517,7 @@ export function Workspace({
     setAngleTip(null)
     frameDrag.current = null
     rotateDrag.current = null
+    setRotatePreview(null)
     pageDrag.current = null
     setPageSnap(null)
     marginDrag.current = null
@@ -2534,6 +2546,7 @@ export function Workspace({
     createStart.current = null
     frameDrag.current = null
     rotateDrag.current = null
+    setRotatePreview(null)
     pageDrag.current = null
     setPageSnap(null)
     marginDrag.current = null
@@ -3048,6 +3061,25 @@ export function Workspace({
                   })}
                 </svg>
               )}
+              {rotatePreview &&
+                (() => {
+                  const { cx, cy, w, h, startRotation, sweep } = rotatePreview
+                  const sx = tx + cx * zoom
+                  const sy = ty + cy * zoom
+                  const sw = w * zoom
+                  const sh = h * zoom
+                  const r = Math.min(80, Math.max(24, Math.min(sw, sh) * 0.4))
+                  const rad = (deg: number) => (deg * Math.PI) / 180
+                  const p2 = { x: sx + r * Math.cos(rad(sweep)), y: sy + r * Math.sin(rad(sweep)) }
+                  const largeArc = sweep > 180 ? 1 : 0
+                  const wedge = `M${sx} ${sy} L${sx + r} ${sy} A${r} ${r} 0 ${largeArc} 1 ${p2.x} ${p2.y} Z`
+                  return (
+                    <svg className="spacing-layer" aria-hidden="true">
+                      <rect x={sx - sw / 2} y={sy - sh / 2} width={sw} height={sh} className="rotate-ghost" transform={`rotate(${startRotation} ${sx} ${sy})`} />
+                      <path d={wedge} className="rotate-wedge" />
+                    </svg>
+                  )
+                })()}
               {marquee && (
                 <div
                   className="marquee"

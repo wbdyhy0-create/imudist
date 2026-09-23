@@ -62,6 +62,11 @@
 .guide.aligned::before { box-shadow: 0 0 7px 1px #ffb02e; }
 .guide-tip.aligned { background: #b87400; }
 
+/* rotating an object (its own rotate handles, or a line's endpoint): InDesign's own "fine outline" guides — a faint
+   outline of the shape at the angle it started this drag from, and a small wedge showing how far it has turned since */
+.rotate-ghost { fill: none; stroke: #66aaff; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.8; }
+.rotate-wedge { fill: none; stroke: #ffb02e; stroke-width: 1; }
+
 /* ── open documents as tabs ───────────────────────────────── */
 .doc-tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tabs { display: flex; align-items: flex-end; gap: 2px; min-width: 0; height: 100%; }
