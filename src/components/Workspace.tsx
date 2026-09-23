@@ -2091,25 +2091,30 @@ export function Workspace({
     const f = isImage ? images.find((x) => x.id === id) : isShape ? shapes.find((x) => x.id === id) : frames.find((x) => x.id === id)
     if (!f) return
     const center = { x: f.x + f.w / 2, y: f.y + f.h / 2 }
+    const grabbed = toWorld(e.clientX, e.clientY)
     dragSeq.current += 1
     rotateDrag.current = {
       id,
       kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
       center,
-      startAngle: angleOf(center, toWorld(e.clientX, e.clientY)),
+      startAngle: angleOf(center, grabbed),
       startRotation: f.rotation ?? 0,
       key: `rotate:${dragSeq.current}`,
     }
     setRotatePreview({ cx: center.x, cy: center.y, w: f.w, h: f.h, startRotation: f.rotation ?? 0, sweep: 0 })
+    setAngleTip({ x: grabbed.x, y: grabbed.y, deg: 0 })
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   /** the object follows the pointer around its own centre; Shift holds it to 45° steps */
   const moveRotate = (d: NonNullable<typeof rotateDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
-    const angle = angleOf(d.center, toWorld(e.clientX, e.clientY))
+    const pointer = toWorld(e.clientX, e.clientY)
+    const angle = angleOf(d.center, pointer)
     let rotation = d.startRotation + (angle - d.startAngle)
     if (e.shiftKey) rotation = Math.round(rotation / 45) * 45
     rotation = normalizeDeg(rotation)
-    setRotatePreview((p) => (p ? { ...p, sweep: normalizeDeg(rotation - d.startRotation) } : p))
+    const sweep = normalizeDeg(rotation - d.startRotation)
+    setRotatePreview((p) => (p ? { ...p, sweep } : p))
+    setAngleTip({ x: pointer.x, y: pointer.y, deg: sweep > 180 ? sweep - 360 : sweep })
     const patch = { rotation: rotation || undefined }
     if (d.kind === 'shape') onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...patch } : sh)), d.key)
     else if (d.kind === 'image') onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...patch } : im)), d.key)
