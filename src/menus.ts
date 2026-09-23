@@ -41,6 +41,7 @@ export interface MenuContext {
   /** the open documents, for the Window menu */
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
+  exportPdf: () => void
 }
 
 const off = (label: string, shortcut?: string): MenuItem => ({ label, shortcut, disabled: true })
@@ -86,7 +87,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'הוספת קובץ…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
         off('ייבוא XML…'),
         sep,
-        off('ייצוא…', 'Ctrl+E'),
+        { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
         sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
         { label: 'הגדרות מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },

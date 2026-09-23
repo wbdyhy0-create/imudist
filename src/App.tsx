@@ -3,6 +3,7 @@ import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
 import { DocumentSetupDialog } from './components/DocumentSetupDialog'
+import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
@@ -39,7 +40,7 @@ export default function App() {
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
   /** the left-hand dialog: creating a document, or changing the open document's settings */
-  const [dialog, setDialog] = useState<'new' | 'setup' | null>(null)
+  const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | null>(null)
   const dialogOpen = dialog !== null
   const [preview, setPreview] = useState<DocSettings | null>(null)
   const [showRulers, setShowRulers] = useState(true)
@@ -138,6 +139,7 @@ export default function App() {
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
+        exportPdf: () => setDialog('export'),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
     [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
@@ -352,6 +354,9 @@ export default function App() {
             onClose={closeDialog}
             onPreview={setPreview}
           />
+        )}
+        {dialog === 'export' && doc && (
+          <ExportPdfDialog doc={doc} frames={session.frames} images={session.images} shapes={session.shapes} assets={session.assets} onClose={closeDialog} />
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
