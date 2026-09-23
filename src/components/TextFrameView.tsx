@@ -191,28 +191,45 @@ export function TextFrameView(p: Props) {
         top: p.ty + frame.y * p.zoom,
         width: frame.w * p.zoom,
         height: frame.h * p.zoom,
-        fontSize: style.fontSize * p.zoom,
-        fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-        lineHeight: `${(style.leading ?? defaultLeading(style)) * p.zoom}px`,
-        textAlign: style.align,
-        wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style) * p.zoom}px` : undefined,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
-        // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
-        // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
-        // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
-        paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst * p.zoom : undefined,
-        paddingBottom: !hasNext ? p.spaceAfterLast * p.zoom : undefined,
-        paddingLeft: style.indentLeft ? style.indentLeft * p.zoom : undefined,
-        paddingRight: style.indentRight ? style.indentRight * p.zoom : undefined,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}
     >
+      {/* text is laid out at a FIXED 1x scale (world points = css px) here and visually scaled as a whole via
+       *  `transform`, instead of recomputing every size at `zoom` — the browser's own word-wrap is not perfectly
+       *  scale-invariant (font hinting/kerning shift subtly at different pixel sizes), so re-laying-out text at
+       *  each zoom level let a paragraph wrap differently than it does at 100%, drifting from what `textLayout.ts`'s
+       *  own fixed-scale measurer (used for pagination/overflow) assumed. A pure visual transform can't do that:
+       *  it's computed once and never re-triggers line-breaking. Matches how real DTP tools (InDesign) handle zoom.
+       *  Handles/ports stay OUTSIDE this wrapper, on the outer (still zoom-multiplied) box, so their own fixed
+       *  on-screen size is untouched by this transform. */}
+      <div
+        className="text-frame-scale"
+        style={{
+          width: frame.w,
+          height: frame.h,
+          fontSize: style.fontSize,
+          fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+          lineHeight: `${style.leading ?? defaultLeading(style)}px`,
+          textAlign: style.align,
+          wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : undefined,
+          // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
+          // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
+          // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
+          paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst : undefined,
+          paddingBottom: !hasNext ? p.spaceAfterLast : undefined,
+          paddingLeft: style.indentLeft || undefined,
+          paddingRight: style.indentRight || undefined,
+          transform: `scale(${p.zoom})`,
+          transformOrigin: '0 0',
+        }}
+      >
       {editing ? (
         <RichEditor
           text={slice}
           runs={p.runs}
-          scale={p.zoom}
+          scale={1}
           floats={p.floats}
           showMarks={p.showHidden}
           paraGaps={p.paraGaps}
@@ -232,7 +249,7 @@ export function TextFrameView(p: Props) {
           <RichText
             text={slice}
             runs={p.runs}
-            scale={p.zoom}
+            scale={1}
             highlight={p.highlight}
             floats={p.floats}
             showMarks={p.showHidden}
@@ -243,6 +260,7 @@ export function TextFrameView(p: Props) {
           />
         </div>
       )}
+      </div>
 
       {showIn && (
         <div

@@ -237,6 +237,10 @@ svg { display: block; }
 .text-frame { position: absolute; box-sizing: border-box; color: #111; line-height: 1.25; text-rendering: geometricPrecision; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
+/* text is laid out at a fixed 1x scale inside here (world points = css px), then the whole thing is scaled as one
+   unit via `transform` (set inline, since it depends on the current zoom) — see TextFrameView.tsx's own comment.
+   Positioned at the outer .text-frame's own origin, out of flow, so it never affects that box's own layout. */
+.text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; }
 /* unicode-bidi stays "normal" (not "plaintext"): the frame's own base direction is always RTL, fixed by dir="rtl", never
    guessed from whichever language happens to be typed first (that guess is what "plaintext" does, and a frame that starts
    with an English word would then read as a whole LTR paragraph). Mixed text (Hebrew, English, digits, punctuation) still
