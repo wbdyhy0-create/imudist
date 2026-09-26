@@ -14,18 +14,24 @@ interface Props {
   step?: number
   min?: number
   max?: number
+  /** the value stands for several different ones (a selection with more than one size): the field shows "mixed" */
+  mixed?: boolean
+  /** given, the arrows and the up / down keys report a change (in the displayed unit) instead of computing the next value from `value` */
+  onStep?: (delta: number) => void
 }
 
 const STEP: Record<Unit, number> = { px: 1, mm: 1, cm: 0.1, in: 0.1 }
 
-export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity }: Props) {
+export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity, mixed = false, onStep }: Props) {
   // non-null while the user is typing
   const [text, setText] = useState<string | null>(null)
-  const display = unit
-    ? unitLabel
-      ? `${formatNumber(fromPt(value, unit))} ${unitLabel}`
-      : formatLength(value, unit)
-    : String(value)
+  const display = mixed
+    ? ''
+    : unit
+      ? unitLabel
+        ? `${formatNumber(fromPt(value, unit))} ${unitLabel}`
+        : formatLength(value, unit)
+      : String(value)
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
 
@@ -36,6 +42,11 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
 
   const bump = (dir: 1 | -1, big: boolean) => {
     const step = (stepSize ?? (unit ? STEP[unit] : 1)) * (big ? 10 : 1)
+    if (onStep) {
+      onStep(dir * step)
+      setText(null)
+      return
+    }
     const next = unit ? toPt(fromPt(value, unit) + dir * step, unit) : value + dir * step
     onChange(clamp(next))
     setText(null)
@@ -66,6 +77,7 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
         id={id}
         aria-label={ariaLabel}
         value={text ?? display}
+        placeholder={mixed ? 'מעורב' : undefined}
         onFocus={(e) => {
           setText(display)
           e.currentTarget.select()

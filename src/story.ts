@@ -79,6 +79,26 @@ export function styleRange(runs: Run[], a: number, b: number, patch: Partial<Cha
   return mergeRuns(out)
 }
 
+/** Change the characters [a, b) relative to what each has now: `change` gets a run's style and returns the patch for it. */
+export function restyleRange(runs: Run[], a: number, b: number, change: (style: CharStyle) => Partial<CharStyle>): Run[] {
+  const out: Run[] = []
+  let pos = 0
+  for (const r of runs) {
+    const s = pos
+    const e = pos + r.len
+    const pieces: [number, number, boolean][] = [
+      [s, Math.min(e, a), false],
+      [Math.max(s, a), Math.min(e, b), true],
+      [Math.max(s, b), e, false],
+    ]
+    for (const [ps, pe, patched] of pieces) {
+      if (pe > ps) out.push({ len: pe - ps, style: patched ? { ...r.style, ...change(r.style) } : r.style })
+    }
+    pos = e
+  }
+  return mergeRuns(out)
+}
+
 /**
  * Replace the characters [from, to) with `insert`. Inserted text takes the style of the character before it
  * (or the first character when inserting at the very start).

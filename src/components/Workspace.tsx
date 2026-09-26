@@ -63,7 +63,7 @@ import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
@@ -702,6 +702,28 @@ export function Workspace({
         return chainIds.has(f.id) ? { ...f, ...patch } : f
       }),
       key,
+    )
+  }
+
+  /**
+   * The size arrows: every size in the text (the selection, or the whole story) moves by `delta`, so a story with a heading
+   * and body text keeps its sizes apart. Typing a size sets them all to it (applyCharStyle).
+   */
+  const stepFontSize = (id: string, delta: number) => {
+    const fl = flow.get(id)
+    const head = fl && frames.find((f) => f.id === fl.headId)
+    if (!fl || !head) return
+    const runs = normalizeRuns(head.text, head.runs, head)
+    const sel = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
+    const clampSize = (size: number) => Math.min(999, Math.max(1, size + delta))
+    onFramesChange(
+      frames.map((f) => {
+        if (sel) return f.id === head.id ? { ...f, runs: restyleRange(runs, sel.a, sel.b, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
+        if (!chainIds.has(f.id)) return f
+        return { ...f, fontSize: clampSize(f.fontSize), ...(f.id === head.id ? { runs: restyleRange(runs, 0, head.text.length, (style) => ({ fontSize: clampSize(style.fontSize) })) } : {}) }
+      }),
+      `style:${head.id}:fontSizeStep`,
     )
   }
 
@@ -3612,6 +3634,13 @@ export function Workspace({
       }
     : null
 
+  // more than one size in the text the panel speaks for: its size field must not pretend one of them is the size
+  const panelSizeMixed = panelHead
+    ? new Set(
+        (panelSel ? sliceRuns(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelSel.b) : normalizeRuns(panelHead.text, panelHead.runs, panelHead)).map((run) => run.style.fontSize),
+      ).size > 1
+    : false
+
   const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => {
     if (seen.has(id)) return {}
     const style = source.find((candidate) => candidate.id === id)
@@ -4602,6 +4631,8 @@ export function Workspace({
                       thread={threadInfo}
                       onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
                       onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
+                      sizeMixed={panelSizeMixed}
+                      onSizeStep={(delta) => selFrame && stepFontSize(selFrame.id, delta)}
                       onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
                       onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
                       onArrange={(op) => selFrame && arrangeObject(selFrame.id, op)}

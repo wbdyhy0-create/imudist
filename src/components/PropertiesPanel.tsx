@@ -19,6 +19,9 @@ interface Props {
   thread: { index: number; count: number; overflow: boolean } | null
   onGeometry: (patch: Partial<Box>) => void
   onCharStyle: (patch: Partial<CharStyle>) => void
+  /** the text in scope has more than one size: the size field is blank, and its arrows move every size by the same amount */
+  sizeMixed?: boolean
+  onSizeStep?: (delta: number) => void
   onAlign: (align: TextAlign) => void
   /** leading / word-spacing bounds: belong to the whole story, not to a piece of text */
   onParagraphStyle: (patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
@@ -36,7 +39,7 @@ const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
 
 
 /** Font, weight, size and bold / italic of a piece of text: the same controls for text frames and text on a path. */
-export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharStyle: (patch: Partial<CharStyle>) => void }) {
+export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { style: CharStyle; onCharStyle: (patch: Partial<CharStyle>) => void; sizeMixed?: boolean; onSizeStep?: (delta: number) => void }) {
   const catalog = useFontCatalog()
   const family = catalog.families.find((f) => f.family === style.fontFamily)
   const faceKey = `${style.weight}|${style.italic ? 1 : 0}`
@@ -77,7 +80,7 @@ export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharS
 
             <div className="grid2">
               <Labeled label="גודל">
-                <NumberField value={style.fontSize} unit="px" unitLabel="pt" min={1} max={999} step={1} onChange={(v) => onCharStyle({ fontSize: v })} />
+                <NumberField value={style.fontSize} unit="px" unitLabel="pt" min={1} max={999} step={1} mixed={sizeMixed} onStep={onSizeStep} onChange={(v) => onCharStyle({ fontSize: v })} />
               </Labeled>
               <Labeled label="עיצוב">
                 <div className="toggle-group">
@@ -105,7 +108,7 @@ export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharS
   )
 }
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
+export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, sizeMixed, onSizeStep, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
   const catalog = useFontCatalog()
 
   // The panel's buttons must not take the focus away from the text being edited.
@@ -146,7 +149,7 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
               {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
             </p>
 
-            <CharControls style={style} onCharStyle={onCharStyle} />
+            <CharControls style={style} onCharStyle={onCharStyle} sizeMixed={sizeMixed} onSizeStep={onSizeStep} />
 
             <Labeled label="יישור">
               <div className="toggle-group">
