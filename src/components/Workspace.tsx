@@ -57,6 +57,7 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
+import { fitPath } from '../curveFit'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
@@ -1979,12 +1980,30 @@ export function Workspace({
   }
 
   const pathShapeFromPoints = (points: WorldPathPoint[], closed: boolean, smooth: boolean, allowSingle = false, smoothFactor = 0.28, strokeCap: 'butt' | 'round' = 'round'): ShapeFrame | null => {
-    const clean = points.filter((point, index) => index === 0 || Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) >= 2)
+    const clean = points.filter((point, index) => index === 0 || point.hi || point.ho || Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) >= 2)
     if (clean.length < (closed ? 3 : 2) && !(allowSingle && clean.length === 1)) return null
-    const x = Math.min(...clean.map((point) => point.x))
-    const y = Math.min(...clean.map((point) => point.y))
-    const w = Math.max(MIN_FRAME_PT / 20, Math.max(...clean.map((point) => point.x)) - x)
-    const h = Math.max(MIN_FRAME_PT / 20, Math.max(...clean.map((point) => point.y)) - y)
+    // a curve with handles bulges out of the box of its anchors (two anchors on a level line, with a drawn arc between them,
+    // would be a box of no height), so the box takes in samples along every such segment too
+    const extent: { x: number; y: number }[] = [...clean]
+    for (let i = 0; i < (closed ? clean.length : clean.length - 1); i++) {
+      const a = clean[i]
+      const b = clean[(i + 1) % clean.length]
+      if (!a.ho && !b.hi) continue
+      const c1 = { x: a.x + (a.ho?.x ?? 0), y: a.y + (a.ho?.y ?? 0) }
+      const c2 = { x: b.x + (b.hi?.x ?? 0), y: b.y + (b.hi?.y ?? 0) }
+      for (let step = 1; step < 16; step++) {
+        const t = step / 16
+        const m = 1 - t
+        extent.push({
+          x: m * m * m * a.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * b.x,
+          y: m * m * m * a.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * b.y,
+        })
+      }
+    }
+    const x = Math.min(...extent.map((point) => point.x))
+    const y = Math.min(...extent.map((point) => point.y))
+    const w = Math.max(MIN_FRAME_PT / 20, Math.max(...extent.map((point) => point.x)) - x)
+    const h = Math.max(MIN_FRAME_PT / 20, Math.max(...extent.map((point) => point.y)) - y)
     const vertex = (point: WorldPathPoint, index: number): PathVertex => {
       const p: [number, number] = [(point.x - x) / w, (point.y - y) / h]
       if (!smooth && !point.hi && !point.ho) return p
@@ -2033,44 +2052,26 @@ export function Workspace({
     }
   }
 
-  const simplifyPencilPoints = (points: WorldPathPoint[], tolerance = 6): WorldPathPoint[] => {
-    if (points.length <= 2) return points
-    const toleranceSquared = tolerance * tolerance
-    const distanceSquared = (point: WorldPathPoint, start: WorldPathPoint, end: WorldPathPoint) => {
-      const dx = end.x - start.x
-      const dy = end.y - start.y
-      if (dx === 0 && dy === 0) return (point.x - start.x) ** 2 + (point.y - start.y) ** 2
-      const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
-      const x = start.x + t * dx
-      const y = start.y + t * dy
-      return (point.x - x) ** 2 + (point.y - y) ** 2
-    }
-    const keep = new Set([0, points.length - 1])
-    const visit = (startIndex: number, endIndex: number) => {
-      let farthest = toleranceSquared
-      let farthestIndex = -1
-      for (let index = startIndex + 1; index < endIndex; index++) {
-        const distance = distanceSquared(points[index], points[startIndex], points[endIndex])
-        if (distance > farthest) {
-          farthest = distance
-          farthestIndex = index
-        }
-      }
-      if (farthestIndex < 0) return
-      keep.add(farthestIndex)
-      visit(startIndex, farthestIndex)
-      visit(farthestIndex, endIndex)
-    }
-    visit(0, points.length - 1)
-    return points.filter((_, index) => keep.has(index))
+  /**
+   * The pencil's stroke as a few Bezier anchors. Both sliders widen how far the curve may stray from what was drawn, so the
+   * higher they are the fewer anchors it takes, and at the top of both it is a single curve: an anchor at each end, with a
+   * handle each.
+   */
+  const fitPencilStroke = (points: WorldPathPoint[]): WorldPathPoint[] => {
+    const fidelity = (pencilSettings.fidelity - 0.5) / 9.5
+    const smoothness = pencilSettings.smoothness / 100
+    if (fidelity >= 0.999 && smoothness >= 0.999) return fitPath(points, Infinity)
+    const size = Math.max(Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)), Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)))
+    return fitPath(points, (pencilSettings.fidelity * (0.5 + 1.5 * smoothness)) / zoom + size * 0.25 * (fidelity * smoothness) ** 2)
   }
 
   const commitFreehandPath = (points: WorldPathPoint[], closed: boolean, smooth: boolean) => {
-    const prepared = !closed && smooth && points.every((point) => !point.hi && !point.ho) ? simplifyPencilPoints(points, pencilSettings.fidelity / zoom) : points
-    const effectiveSmoothness = pencilSettings.cap === 'round' ? Math.max(100, pencilSettings.smoothness) : pencilSettings.smoothness
-    const smoothFactor = pencilSettings.cap === 'round' ? 0.75 : 0.18 + (effectiveSmoothness / 100) * 0.36
-    // a pen path keeps its straight segments and sharp corners: a round cap would make every path smooth its own corners
-    const shape = pathShapeFromPoints(prepared, closed, smooth, false, smooth ? smoothFactor : 0.28, smooth ? pencilSettings.cap : 'butt')
+    // a pencil stroke becomes fitted curves; a pen path keeps its own points, straight segments and sharp corners
+    const fitted = !closed && smooth && points.every((point) => !point.hi && !point.ho)
+    if (fitted && !points.some((point) => Math.hypot(point.x - points[0].x, point.y - points[0].y) >= 2)) return // a click, not a stroke
+    const shape = fitted
+      ? pathShapeFromPoints(fitPencilStroke(points), false, false, false, 0.28, pencilSettings.cap)
+      : pathShapeFromPoints(points, closed, smooth, false, 0.28, 'butt')
     if (!shape) return
     onShapesChange([...shapes, shape])
     lastPencilPathId.current = shape.id
@@ -2090,17 +2091,31 @@ export function Workspace({
     const existing = target && shapes.find((shape) => shape.id === target.id && shape.kind === 'path')
     if (existing) {
       const ring = existing.geom?.[0]?.[0] ?? []
-      const original = ring.map((vertex) => {
+      const original: WorldPathPoint[] = ring.map((vertex) => {
         const point = vertexPoint(vertex)
-        return { x: existing.x + point[0] * existing.w, y: existing.y + point[1] * existing.h }
+        const hi = vertexHi(vertex)
+        const ho = vertexHo(vertex)
+        return {
+          x: existing.x + point[0] * existing.w,
+          y: existing.y + point[1] * existing.h,
+          ...(hi ? { hi: { x: hi[0] * existing.w, y: hi[1] * existing.h } } : {}),
+          ...(ho ? { ho: { x: ho[0] * existing.w, y: ho[1] * existing.h } } : {}),
+        }
       })
-      const extension = pencilPoints.current.slice(1)
-      const combined = target.mode === 'start'
-        ? [...extension.reverse(), ...original]
-        : target.mode === 'end'
-          ? [...original, ...extension]
-          : [...original.slice(0, target.index + 1), ...extension]
-      const edited = pathShapeFromPoints(combined, false, true, false, 0.18 + (pencilSettings.smoothness / 100) * 0.36, pencilSettings.cap)
+      // the new stroke starts exactly on the anchor it continues from, and is fitted on its own; the join takes the stroke's handle
+      const joinAt = target.mode === 'start' ? 0 : target.mode === 'end' ? original.length - 1 : target.index
+      const anchor = original[joinAt]
+      const stroke = [{ x: anchor.x, y: anchor.y }, ...pencilPoints.current.slice(1)]
+      const extended = stroke.some((point) => Math.hypot(point.x - anchor.x, point.y - anchor.y) >= 2)
+      let combined = original
+      if (extended && target.mode === 'start') {
+        const fitted = fitPencilStroke(stroke.reverse())
+        combined = [...fitted.slice(0, -1), { ...anchor, hi: fitted[fitted.length - 1].hi }, ...original.slice(1)]
+      } else if (extended) {
+        const fitted = fitPencilStroke(stroke)
+        combined = [...original.slice(0, joinAt), { ...anchor, ho: fitted[0].ho }, ...fitted.slice(1)]
+      }
+      const edited = pathShapeFromPoints(combined, false, false, false, 0.28, pencilSettings.cap)
       if (edited) {
         const next = { ...existing, x: edited.x, y: edited.y, w: edited.w, h: edited.h, geom: edited.geom, closed: false }
         onShapesChange(shapes.map((shape) => (shape.id === existing.id ? next : shape)))
