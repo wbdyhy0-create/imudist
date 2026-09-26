@@ -1992,14 +1992,25 @@ export function Workspace({
       const next = clean[index + 1] ?? (closed ? clean[0] : undefined)
       const result: PathSmoothPoint = { p }
       if (point.hi) result.hi = [point.hi.x / w, point.hi.y / h]
-      else if (smooth && (previous || next)) {
-        const before = previous ?? { x: point.x - (next!.x - point.x), y: point.y - (next!.y - point.y) }
-        result.hi = [((before.x - point.x) / w) * smoothFactor, ((before.y - point.y) / h) * smoothFactor]
-      }
       if (point.ho) result.ho = [point.ho.x / w, point.ho.y / h]
-      else if (smooth && (next || previous)) {
+      if (smooth && (!point.hi || !point.ho) && (previous || next)) {
+        const before = previous ?? { x: point.x - (next!.x - point.x), y: point.y - (next!.y - point.y) }
         const after = next ?? { x: point.x + (point.x - previous!.x), y: point.y + (point.y - previous!.y) }
-        result.ho = [((after.x - point.x) / w) * smoothFactor, ((after.y - point.y) / h) * smoothFactor]
+        // Both handles lie along the line through the two neighbours, one on each side, so the curve runs smoothly
+        // through the point. (Pointing each handle at its own neighbour instead put both control points of every
+        // segment on the chord: the "curve" was a straight polyline, kinked at every point.) Each handle is a fraction of
+        // the segment on its own side, and the fraction is capped so a strong bend cannot loop.
+        const tangent = { x: after.x - before.x, y: after.y - before.y }
+        const length = Math.hypot(tangent.x, tangent.y)
+        if (length > 1e-6) {
+          const ux = tangent.x / length
+          const uy = tangent.y / length
+          const k = Math.min(0.5, smoothFactor)
+          const incoming = Math.hypot(point.x - before.x, point.y - before.y) * k
+          const outgoing = Math.hypot(after.x - point.x, after.y - point.y) * k
+          if (!point.hi) result.hi = [(-ux * incoming) / w, (-uy * incoming) / h]
+          if (!point.ho) result.ho = [(ux * outgoing) / w, (uy * outgoing) / h]
+        }
       }
       return result
     }
@@ -2055,7 +2066,7 @@ export function Workspace({
   }
 
   const commitFreehandPath = (points: WorldPathPoint[], closed: boolean, smooth: boolean) => {
-    const prepared = !closed && smooth && points.every((point) => !point.hi && !point.ho) ? simplifyPencilPoints(points, pencilSettings.fidelity) : points
+    const prepared = !closed && smooth && points.every((point) => !point.hi && !point.ho) ? simplifyPencilPoints(points, pencilSettings.fidelity / zoom) : points
     const effectiveSmoothness = pencilSettings.cap === 'round' ? Math.max(100, pencilSettings.smoothness) : pencilSettings.smoothness
     const smoothFactor = pencilSettings.cap === 'round' ? 0.75 : 0.18 + (effectiveSmoothness / 100) * 0.36
     // a pen path keeps its straight segments and sharp corners: a round cap would make every path smooth its own corners
@@ -3074,7 +3085,7 @@ export function Workspace({
     if (pencilPoints.current.length > 0) {
       const point = toWorld(e.clientX, e.clientY)
       const last = pencilPoints.current[pencilPoints.current.length - 1]
-      if (Math.hypot(point.x - last.x, point.y - last.y) >= pencilSettings.fidelity) {
+      if (Math.hypot(point.x - last.x, point.y - last.y) >= pencilSettings.fidelity / zoom) {
         pencilPoints.current = [...pencilPoints.current, point]
         setFreehandPreview({ points: pencilPoints.current, closed: false })
       }
