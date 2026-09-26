@@ -12,7 +12,7 @@ import {
   type TextStyle,
 } from './document'
 import { chainOf, insetBox, styleOf } from './frames'
-import { buildRunNodes, buildWrapFloats, type RunNodeOpts } from './richtext'
+import { buildParagraphNodes, buildWrapFloats, type ParagraphPatch, type RunNodeOpts } from './richtext'
 import { atParaStart, normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 
@@ -107,13 +107,15 @@ function fitEnd(
   floats: WrapFloat[],
   hint?: number,
   paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart'>,
+  /** per-paragraph layout (a paragraph style's leading / indents / alignment): measured the way TextFrameView draws it */
+  patches?: ParagraphPatch[],
 ): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${box.w}px`
   const inner = m.firstElementChild as HTMLElement
   const fits = (end: number) => {
-    inner.replaceChildren(...buildWrapFloats(floats, 1), buildRunNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, paraOpts))
+    inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, paraOpts, patches))
     return inner.getBoundingClientRect().height <= box.h + 0.5
   }
 
@@ -206,6 +208,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
       `${style.wordSpacingMin}|${style.wordSpacingMax}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
+      `${JSON.stringify(head.paragraphStylePatches)}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
     const hit = cache.get(head.id)
@@ -232,7 +235,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
           startParaIndex,
           firstLineIndent: style.firstLineIndent,
           atParaStart: atStart,
-        })
+        }, head.paragraphStylePatches)
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,

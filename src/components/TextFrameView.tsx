@@ -21,13 +21,18 @@ function withMarks(
   startParaIndex: number,
   atStart: boolean,
   isLastPart: boolean,
-  firstLineIndent: number,
+  firstLineIndent: (paragraphIndex: number) => number,
   scale: number,
-): ReactNode {
-  if (!showMarks && paraGaps.length === 0 && !firstLineIndent) return text
+): { nodes: ReactNode[]; trailing: ReactNode[] } {
+  if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex)) return { nodes: [text], trailing: [] }
   let idx = startParaIndex
   const nodes: ReactNode[] = []
-  if (firstLineIndent && atStart) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+  // the `.para-gap` / `.para-indent` spacers that follow a paragraph's closing "\n" belong to the START of the next
+  // paragraph's line. RichText wraps each paragraph in its own block, so leaving them at the end of this one would
+  // put them alone on an extra empty line (a full strut + the gap) at the end of every paragraph — text the frame's
+  // measurer (richtext.ts's flat buildRunNodes) never has, so the visible text ran taller than what was measured to fit
+  const trailing: ReactNode[] = []
+  if (firstLineIndent(startParaIndex) && atStart) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent(startParaIndex) * scale }} />)
   const pieces = splitMarks(text)
   for (const [i, piece] of pieces.entries()) {
     if (piece.kind === 'text') {
@@ -42,11 +47,12 @@ function withMarks(
       const atEnd = isLastPart && i === pieces.length - 1
       const gapValue = paraGaps[idx]
       idx++
-      if (gapValue && !atEnd) nodes.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
-      if (firstLineIndent && !atEnd) nodes.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent * scale }} />)
+      const spacers = i === pieces.length - 1 ? trailing : nodes
+      if (gapValue && !atEnd) spacers.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
+      if (firstLineIndent(idx) && !atEnd) spacers.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent(idx) * scale }} />)
     }
   }
-  return nodes
+  return { nodes, trailing }
 }
 
 interface Props {
@@ -70,6 +76,7 @@ interface Props {
   tx: number
   ty: number
   selected: boolean
+  locked?: boolean
   /** part of a selection of several objects: outlined, without handles */
   marked?: boolean
   editing: boolean
@@ -84,6 +91,7 @@ interface Props {
   startParaIndex: number
   /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
   atParaStart: boolean
+  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
@@ -113,6 +121,7 @@ function RichText({
   startParaIndex,
   atParaStart,
   firstLineIndent,
+  paragraphPatches,
 }: {
   text: string
   runs: Run[]
@@ -123,7 +132,8 @@ function RichText({
   paraGaps: (number | undefined)[]
   startParaIndex: number
   atParaStart: boolean
-  firstLineIndent: number
+  firstLineIndent: (paragraphIndex: number) => number
+  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -132,6 +142,7 @@ function RichText({
     // split the run at the highlight edges
     const cuts = [pos, end]
     if (highlight) for (const c of highlight) if (c > pos && c < end) cuts.push(c)
+    for (let breakAt = text.indexOf('\n', pos); breakAt >= 0 && breakAt + 1 < end; breakAt = text.indexOf('\n', breakAt + 1)) cuts.push(breakAt + 1)
     cuts.sort((a, b) => a - b)
     for (let i = 0; i + 1 < cuts.length; i++) {
       const [s, e] = [cuts[i], cuts[i + 1]]
@@ -141,7 +152,39 @@ function RichText({
   }
   // a running paragraph counter across every part, in order, so a "\n" right at a run/highlight boundary is still
   // only counted once and still gets the right entry of `paraGaps`
-  let paraIndex = startParaIndex
+  const paragraphNodes: { index: number; nodes: ReactNode[] }[] = []
+  let renderParaIndex = startParaIndex
+  // the spacers closing the previous paragraph, waiting to open the next one (see withMarks)
+  let carry: ReactNode[] = []
+  for (const [i, part] of parts.entries()) {
+    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale)
+    let group = paragraphNodes[paragraphNodes.length - 1]
+    let opening: ReactNode[] = []
+    if (!group || group.index !== renderParaIndex) {
+      group = { index: renderParaIndex, nodes: [] }
+      paragraphNodes.push(group)
+      opening = carry
+    }
+    carry = trailing
+    group.nodes.push(
+      <span
+        key={part.key}
+        className={part.hl ? 'sel' : undefined}
+        style={{
+          fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+          color: part.run.style.color ?? '#111',
+          fontSize: part.run.style.fontSize * scale,
+          fontWeight: part.run.style.weight,
+          fontStyle: part.run.style.italic ? 'italic' : 'normal',
+          letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
+        }}
+      >
+        {opening}
+        {rendered}
+      </span>,
+    )
+    renderParaIndex += (part.text.match(/\n/g) ?? []).length
+  }
   return (
     <>
       {floats.map((f, i) => (
@@ -151,25 +194,9 @@ function RichText({
           style={{ float: f.side, width: f.width * scale, height: f.height * scale, shapeOutside: shapeOf(f, scale) }}
         />
       ))}
-      {parts.map((p, i) => {
-        const rendered = withMarks(p.text, showMarks, paraGaps, paraIndex, i === 0 && atParaStart, i === parts.length - 1, firstLineIndent, scale)
-        paraIndex += (p.text.match(/\n/g) ?? []).length
-        return (
-          <span
-            key={p.key}
-            className={p.hl ? 'sel' : undefined}
-            style={{
-              fontFamily: `"${p.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-              fontSize: p.run.style.fontSize * scale,
-              fontWeight: p.run.style.weight,
-              fontStyle: p.run.style.italic ? 'italic' : 'normal',
-              // tracking is 1/1000 em (InDesign's own unit), same formula as richtext.ts's applyRunStyle
-              letterSpacing: p.run.style.tracking ? `${(p.run.style.tracking / 1000) * p.run.style.fontSize * scale}px` : undefined,
-            }}
-          >
-            {rendered}
-          </span>
-        )
+      {paragraphNodes.map((paragraph) => {
+        const patch = paragraphPatches?.[paragraph.index]
+        return <div key={`paragraph-${paragraph.index}`} style={{ textAlign: patch?.align, lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
       })}
     </>
   )
@@ -177,14 +204,15 @@ function RichText({
 
 /** A right-to-left text frame with its handles and thread ports. */
 export function TextFrameView(p: Props) {
-  const { frame, style, slice, selected, editing, showEdge, marked } = p
+  const { frame, style, slice, selected, editing, showEdge, marked, locked } = p
+  const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
 
   return (
     <div
-      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '')}
+      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
       style={{
         zIndex: p.z,
         left: p.tx + frame.x * p.zoom,
@@ -256,7 +284,8 @@ export function TextFrameView(p: Props) {
             paraGaps={p.paraGaps}
             startParaIndex={p.startParaIndex}
             atParaStart={p.atParaStart}
-            firstLineIndent={style.firstLineIndent ?? 0}
+            firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
+            paragraphPatches={paragraphPatches}
           />
         </div>
       )}

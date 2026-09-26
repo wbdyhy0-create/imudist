@@ -9,8 +9,11 @@
 .guide.h::before { left: 0; right: 0; top: 3px; height: 1px; }
 .guide.v { width: 7px; cursor: ew-resize; }
 .guide.v::before { top: 0; bottom: 0; left: 3px; width: 1px; }
-.guide.selected.h::before { top: 2px; height: 3px; }
-.guide.selected.v::before { left: 2px; width: 3px; }
+.guide.selected.h::before { top: 3px; height: 1px; }
+.guide.selected.v::before { left: 3px; width: 1px; }
+.guide.dragging::before { background: #00d1b2; }
+.guide.dragging.h::before { top: 3px; height: 1px; }
+.guide.dragging.v::before { left: 3px; width: 1px; }
 .guide.removing { opacity: 0.35; }
 .guide-tip { position: absolute; z-index: 800001; pointer-events: none; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.8); color: #fff; font-size: 11px; direction: ltr; white-space: nowrap; }
 
@@ -31,11 +34,6 @@
 .dlg-summary.warn { color: var(--danger); }
 .modal.wide .modal-buttons { margin-top: 4px; }
 
-/* hovering a guide shows which one a click would take */
-.guide.live:hover::before { box-shadow: 0 0 5px var(--gc); }
-.guide.h.live:hover::before { top: 2px; height: 3px; }
-.guide.v.live:hover::before { left: 2px; width: 3px; }
-.guide.selected::before { box-shadow: 0 0 6px var(--gc); }
 .marquee { position: absolute; z-index: 850000; pointer-events: none; border: 1px dashed var(--accent-line); background: rgba(61, 139, 255, 0.12); }
 .ctx-menu { position: fixed; z-index: 2000000; min-width: 190px; inset-inline-start: auto; top: auto; }
 
@@ -59,7 +57,6 @@
 .guide-align { position: absolute; z-index: 800002; pointer-events: none; filter: drop-shadow(0 0 3px #ffb02e); }
 .guide-align.h { background: repeating-linear-gradient(90deg, #ffb02e 0 9px, transparent 9px 14px); }
 .guide-align.v { background: repeating-linear-gradient(180deg, #ffb02e 0 9px, transparent 9px 14px); }
-.guide.aligned::before { box-shadow: 0 0 7px 1px #ffb02e; }
 .guide-tip.aligned { background: #b87400; }
 
 /* rotating an object (its own rotate handles, or a line's endpoint): InDesign's own "fine outline" guides — a faint
@@ -91,6 +88,8 @@
 
 /* the point-editing tool: the shape's own corner points, and a point that can be added on each edge */
 .point-handle { position: absolute; z-index: 4; width: 8px; height: 8px; margin: -4px 0 0 -4px; background: #fff; border: 1.5px solid var(--accent); pointer-events: auto; cursor: pointer; }
+.pentool .point-handle { cursor: grab; }
+.pentool .point-handle:active { cursor: grabbing; }
 .point-handle:hover { background: var(--accent); }
 .point-handle.on { background: var(--accent); }
 .edge-handle { position: absolute; z-index: 3; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; border: 1px solid var(--accent); opacity: 0.7; pointer-events: auto; cursor: copy; }

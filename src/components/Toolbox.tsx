@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 export type ToolId =
-  | 'select' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil'
-  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'feather' | 'note' | 'eyedropper'
+  | 'select' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
+  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper'
   | 'hand' | 'zoom'
 
 interface ToolDef {
@@ -80,22 +80,25 @@ export const TOOLS: ToolDef[] = [
     ),
   },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
-  { id: 'pen', label: 'עט', group: 3, key: 'P', enabled: false, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
-  { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', enabled: false, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
+  { id: 'pen', label: 'עט', group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
+  { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
 
-  { id: 'scissors', label: 'מספריים', group: 4, key: 'C', enabled: false, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
-  { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', enabled: false, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
+  { id: 'scissors', label: 'מספריים', group: 4, key: 'C', code: 'KeyC', enabled: true, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
+  { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
+  { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
   { id: 'gap', label: 'רווח', group: 4, key: 'U', enabled: false, icon: <path d="M4 4v16M20 4v16M9 12h6M11 9.500 8.500 12l2.500 2.500M13 9.500l2.500 2.500-2.500 2.500" /> },
-  { id: 'gradient', label: 'דוגמית מעבר צבע', group: 4, key: 'G', enabled: false, icon: <path d="M4 6h16v12H4zM8 6v12M12 6v12M16 6v12" /> },
+  { id: 'color', label: 'צבע', group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
+  { id: 'gradient', label: 'מעבר צבע', group: 5, key: 'G', code: 'KeyG', enabled: true, icon: <path d="M4 6h16v12H4zM7 6v12M10 6v12M13 6v12M16 6v12" /> },
+  { id: 'swatches', label: 'דוגמיות צבע', group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
   { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', enabled: false, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
 
-  { id: 'eyedropper', label: 'טפטפת', group: 5, key: 'I', enabled: false, icon: <path d="m15 4 5 5-2.500 2.500-5-5zM12.500 8.500 4 17v3h3l8.500-8.500" /> },
+  { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <path d="m15 4 5 5-2.500 2.500-5-5zM12.500 8.500 4 17v3h3l8.500-8.500" /> },
   { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
 ]
 
 /** tools that have a settings window (double click) */
 // ellipse and line have no default-tool settings left (nothing but a click-made default size, which no longer exists)
-const SETTINGS_TOOLS: ToolId[] = ['rect', 'polygon', 'framerect', 'framepolygon']
+const SETTINGS_TOOLS: ToolId[] = ['rect', 'polygon', 'framerect', 'framepolygon', 'pen', 'pencil']
 
 /** the plain shape each graphic-frame tool draws (they share its settings and its keyboard-drawing behaviour) */
 export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polygon'>> = { framerect: 'rect', frameellipse: 'ellipse', framepolygon: 'polygon' }
@@ -108,9 +111,34 @@ const FOLD_GROUPS: ToolId[][] = [
   ['rect', 'ellipse', 'polygon'],
   ['type', 'pathtype'],
   ['framerect', 'frameellipse', 'framepolygon'],
+  ['color', 'gradient', 'swatches'],
 ]
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
+const TOOL_HINTS: Partial<Record<ToolId, string>> = {
+  select: 'בחירת אובייקטים, הזזה ושינוי גודל',
+  direct: 'עריכת נקודות עוגן וידיות של נתיב',
+  hand: 'הזזת תצוגת הקנבס',
+  zoom: 'הגדלה והקטנה של תצוגת המסמך',
+  type: 'יצירת ועריכת תיבות טקסט',
+  pathtype: 'הוספת טקסט לאורך נתיב',
+  page: 'שינוי גודל ושוליים של עמוד',
+  rect: 'ציור מלבן',
+  ellipse: 'ציור אליפסה',
+  polygon: 'ציור מצולע',
+  framerect: 'יצירת מסגרת תמונה מלבנית',
+  frameellipse: 'יצירת מסגרת תמונה אליפטית',
+  framepolygon: 'יצירת מסגרת תמונה מצולעת',
+  line: 'ציור קו ישר',
+  pen: 'יצירת נתיב עם נקודות וידיות Bezier',
+  pencil: 'ציור קו חופשי מוחלק',
+  scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
+  eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
+  color: 'בחירת צבע מילוי או קו',
+  gradient: 'יצירת מעבר צבע',
+  swatches: 'בחירה וניהול של דוגמיות צבע',
+  eyedropper: 'דגימת סגנון מטקסט או אובייקט',
+}
 
 interface ToolboxProps {
   tool: ToolId
@@ -119,9 +147,14 @@ interface ToolboxProps {
   onSettings?: (id: ToolId) => void
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
+  colorTarget: 'fill' | 'stroke'
+  fillColor?: string | null
+  strokeColor?: string | null
+  onColorTarget: (target: 'fill' | 'stroke') => void
+  onOpenColor: (target: 'fill' | 'stroke') => void
 }
 
-export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode }: ToolboxProps) {
+export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode, colorTarget, fillColor, strokeColor, onColorTarget, onOpenColor }: ToolboxProps) {
   // which tool of a fold group its slot shows, keyed by the group's first id; starts at that first tool, and follows
   // `tool` whenever it becomes one of the group's own (a click on the slot, a pick from its flyout, or the tool's own
   // keyboard shortcut, which changes `tool` from outside this component). Adjusted right in render, as React's docs say
@@ -135,10 +168,12 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
   }
 
   const [flyout, setFlyout] = useState<{ group: ToolId[]; rect: DOMRect } | null>(null)
+  const [hoveredTool, setHoveredTool] = useState<{ label: string; description: string; key?: string; rect: DOMRect } | null>(null)
   const renderedGroups = new Set<ToolId>()
 
   return (
     <div className="toolbox" role="toolbar" aria-orientation="vertical" aria-label="כלים">
+      <div className="toolbox-scroll">
       {TOOLS.map((t, i) => {
         const group = foldGroupOf.get(t.id)
         if (group) {
@@ -147,48 +182,53 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
         }
         const active = toolDef(group ? (current[group[0]] ?? group[0]) : t.id)
         const hasFlyout = !!group && group.length > 1
+        const tooltipDescription = `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? ' · לחיצה כפולה להצגת כלים נוספים' : ''}`
         return (
           <Fragment key={t.id}>
             {i > 0 && TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
             <div className="tool-slot">
               <button
                 className={'tool' + (tool === active.id ? ' active' : '') + (active.enabled ? '' : ' off')}
-                title={
-                  active.enabled
-                    ? `${active.label}${active.key ? ` (${active.key})` : ''}${SETTINGS_TOOLS.includes(active.id) ? ' · לחיצה כפולה להגדרות' : ''}${hasFlyout ? ' · לחיצה על החץ לכלים נוספים' : ''}`
-                    : `${active.label} — עדיין לא זמין`
-                }
                 aria-disabled={!active.enabled}
                 aria-pressed={tool === active.id}
+                aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : `${active.label} — עדיין לא זמין`}
+                onMouseEnter={(event) => setHoveredTool({ label: active.label, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                onMouseLeave={() => setHoveredTool(null)}
+                onFocus={(event) => setHoveredTool({ label: active.label, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                onBlur={() => setHoveredTool(null)}
                 onClick={() => active.enabled && onSelect(active.id)}
-                onDoubleClick={() => active.enabled && SETTINGS_TOOLS.includes(active.id) && onSettings?.(active.id)}
+                onDoubleClick={(event) => {
+                  setHoveredTool(null)
+                  if (!active.enabled) return
+                  if (hasFlyout) setFlyout({ group, rect: event.currentTarget.getBoundingClientRect() })
+                  else if (SETTINGS_TOOLS.includes(active.id)) onSettings?.(active.id)
+                }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
                   {active.icon}
                 </svg>
               </button>
-              {hasFlyout && (
-                <button
-                  className="tool-flyout-mark"
-                  title="כלים נוספים"
-                  aria-label={`כלים נוספים בקבוצת ${active.label}`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setFlyout({ group, rect: e.currentTarget.parentElement!.getBoundingClientRect() })
-                  }}
-                >
-                  <svg viewBox="0 0 6 6" aria-hidden="true">
-                    <path d="M0.5 5.5 5.5 5.5 5.5 0.5Z" fill="currentColor" />
-                  </svg>
-                </button>
-              )}
             </div>
           </Fragment>
         )
       })}
       <div className="swatches">
-        <span className="swatch-fill" title="צבע מילוי" />
-        <span className="swatch-stroke" title="צבע קו" />
+        <button
+          className={'swatch-fill' + (colorTarget === 'fill' ? ' active' : '')}
+          style={fillColor ? { background: fillColor } : undefined}
+          title="מילוי — לחיצה מחליפה יעד, לחיצה כפולה פותחת את כלי הצבע"
+          aria-label="מילוי"
+          onClick={() => onColorTarget('fill')}
+          onDoubleClick={() => onOpenColor('fill')}
+        />
+        <button
+          className={'swatch-stroke' + (colorTarget === 'stroke' ? ' active' : '')}
+          style={strokeColor ? { borderColor: strokeColor, background: 'transparent' } : undefined}
+          title="קו — לחיצה מחליפה יעד, לחיצה כפולה פותחת את כלי הצבע"
+          aria-label="קו"
+          onClick={() => onColorTarget('stroke')}
+          onDoubleClick={() => onOpenColor('stroke')}
+        />
       </div>
       <div className="screen-modes" role="group" aria-label="מצב מסך">
         <button
@@ -217,6 +257,14 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
           </svg>
         </button>
       </div>
+      </div>
+      {hoveredTool && (
+        <div className="tool-tooltip-fixed" role="tooltip" style={{ left: hoveredTool.rect.right + 8, top: hoveredTool.rect.top + hoveredTool.rect.height / 2 }}>
+          <strong>{hoveredTool.label}</strong>
+          <span>{hoveredTool.description}</span>
+          {hoveredTool.key && <kbd>{hoveredTool.key}</kbd>}
+        </div>
+      )}
       {flyout && (
         <ToolFlyout
           group={flyout.group}

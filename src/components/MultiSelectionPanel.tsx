@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { BOOL_OP_NAMES, type BoolOp } from '../shapeOps'
+import { AlignButtons, type AlignOp } from './AlignButtons'
 import { Group } from './PropertiesPanel'
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
   /** how many of the selected objects are shapes */
   shapeCount: number
   onShapeOp: (op: BoolOp) => void
+  onAlign: (op: AlignOp) => void
   /** exactly a picture and a shape are selected together */
   canInsertImage: boolean
   onInsertImage: () => void
@@ -47,7 +49,7 @@ const OPS: { op: BoolOp; hint: string; icon: ReactNode }[] = [
 ]
 
 /** The properties panel while several objects are selected: combining shapes, putting a picture inside a shape, and deleting. */
-export function MultiSelectionPanel({ count, shapeCount, onShapeOp, canInsertImage, onInsertImage, onDelete }: Props) {
+export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, onDelete }: Props) {
   return (
     <aside className="props-panel" aria-label="בחירה מרובה">
       <h2 className="props-title">{count} אובייקטים נבחרו</h2>
@@ -79,6 +81,10 @@ export function MultiSelectionPanel({ count, shapeCount, onShapeOp, canInsertIma
         ) : (
           <p className="muted">בחר שתי צורות או יותר כדי לאחד אותן, לחסר אחת מהשנייה, לחתוך או להחריג.</p>
         )}
+      </Group>
+
+      <Group title="יישור אובייקטים">
+        <AlignButtons onAlign={onAlign} />
       </Group>
 
       <div className="props-buttons" style={{ marginTop: 10 }}>

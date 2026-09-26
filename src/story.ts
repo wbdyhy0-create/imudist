@@ -1,4 +1,4 @@
-import type { CharStyle, Run } from './document'
+import type { CharStyle, Run, TextFrame } from './document'
 
 /**
  * Pure helpers for a story's formatted text. A story is a string plus `runs`: consecutive pieces that share a
@@ -7,6 +7,7 @@ import type { CharStyle, Run } from './document'
 
 export const charStyleOf = (s: CharStyle): CharStyle => ({
   fontFamily: s.fontFamily,
+  ...(s.color ? { color: s.color } : {}),
   fontSize: s.fontSize,
   weight: s.weight,
   italic: s.italic,
@@ -14,7 +15,7 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
 })
 
 const sameStyle = (a: CharStyle, b: CharStyle) =>
-  a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
+  a.fontFamily === b.fontFamily && a.color === b.color && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
 
 /** Drop empty runs and join neighbours that have the same style. */
 export function mergeRuns(runs: Run[]): Run[] {
@@ -183,6 +184,37 @@ export function spliceParaOverrides(
   const out = overrides.slice()
   out.splice(startPara + 1, removedParas, ...Array<number | null>(addedParas).fill(null))
   return out.some((v) => v !== null) ? out : undefined
+}
+
+/**
+ * The per-paragraph lists of a story (paragraph style ids / names and their resolved patches) follow the text the
+ * way `spliceParaOverrides` does — paragraphs the edit removes drop out, later ones shift — except that a paragraph
+ * the edit CREATES (Enter inside a paragraph) inherits the entry of the paragraph it was split from, like every text
+ * editor does, instead of starting unstyled. Without this an Enter above a styled paragraph left every style below
+ * it one paragraph out of place.
+ */
+function spliceParaList<T>(list: T[] | undefined, oldText: string, from: number, to: number, insert: string, fallback: T): T[] | undefined {
+  if (!list || list.length === 0) return list
+  const startPara = paraIndexAt(oldText, from)
+  const removedParas = paraIndexAt(oldText, to) - startPara
+  const addedParas = (insert.match(/\n/g) ?? []).length
+  const out = list.slice()
+  out.splice(startPara + 1, removedParas, ...Array<T>(addedParas).fill(out[startPara] ?? fallback))
+  return out
+}
+
+type ParagraphLists = Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>
+
+/** `spliceParaList` for all three per-paragraph lists of a story head; only the lists it actually has are returned. */
+export function spliceParagraphStyles(f: ParagraphLists, oldText: string, from: number, to: number, insert: string): ParagraphLists {
+  const out: ParagraphLists = {}
+  const ids = spliceParaList(f.paragraphStyleIds, oldText, from, to, insert, '')
+  const names = spliceParaList(f.paragraphStyleNames, oldText, from, to, insert, '')
+  const patches = spliceParaList(f.paragraphStylePatches, oldText, from, to, insert, {})
+  if (ids) out.paragraphStyleIds = ids
+  if (names) out.paragraphStyleNames = names
+  if (patches) out.paragraphStylePatches = patches
+  return out
 }
 
 /** The smallest edit that turns `oldText` into `newText` (common prefix / suffix removed). */

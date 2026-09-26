@@ -60,12 +60,6 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
             <p className="muted">שייכות לכל התיבה.</p>
           </Group>
 
-          <Group title="אפקטים מיוחדים">
-            <Labeled label="הזחת שורה שנייה בלבד (אפקט חלון)">
-              <NumberField value={style.secondLineIndent ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ secondLineIndent: v })} />
-            </Labeled>
-            <p className="muted">השורה הראשונה נשארת בשוליים הרגילים, השורה השנייה בלבד מוזחת פנימה מימין, ומהשורה השלישית ואילך חוזרים לשוליים הרגילים. שייך לכל התיבה.</p>
-          </Group>
         </>
       )}
     </aside>

@@ -23,6 +23,7 @@ interface Props {
   /** stacking rank (higher = in front) */
   z: number
   selected: boolean
+  locked?: boolean
   /** part of a selection of several objects: outlined, without handles */
   marked?: boolean
   /** outlines and handles are non-printing: hidden in Preview mode */
@@ -51,6 +52,7 @@ interface Props {
   onPegDown?: (peg: PathPeg, e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of the shape's own corner points: it moves on its own (with the rest of the selected points, if there are more), reshaping the outline. Alt: pull new, symmetric curve handles out of it instead. */
   onPointDown?: (index: number, e: ReactPointerEvent<HTMLDivElement>) => void
+  onDirectMove?: (e: ReactPointerEvent<HTMLDivElement>) => void
   /** double click on one of the shape's own points: turns it from a sharp corner into a smooth curve point, or back */
   onPointDouble?: (index: number) => void
   /** grabbing the middle of one of its edges: a new point is added there and dragged */
@@ -75,6 +77,7 @@ export function ShapeFrameView({
   ty,
   z,
   selected,
+  locked,
   marked,
   showEdge,
   hotCorners = [],
@@ -91,6 +94,7 @@ export function ShapeFrameView({
   onDoubleClick,
   onPegDown,
   onPointDown,
+  onDirectMove,
   onPointDouble,
   onEdgeDown,
   onHandleGrab,
@@ -99,17 +103,26 @@ export function ShapeFrameView({
   onLineEndDown,
 }: Props) {
   const isLine = shape.kind === 'line'
+  const isPath = shape.kind === 'path'
   const w = shape.w * zoom
   const h = shape.h * zoom
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
   /** the shape's own corner points, while the point-editing tool has it selected */
   const ring = directMode ? editableRing(shape) : null
   const showHandles = selected && showEdge && !ghost && !ring
-  const showCorners = showHandles && radii !== null && Math.min(w, h) >= MIN_CORNER_HANDLES
-  const showPoints = !!ring && selected && showEdge && !ghost
+  const showCorners = showHandles && radii !== null
+  const showPoints = !!ring && selected && showEdge
   const img = shape.image && asset ? { box: imageGeometry(shape, asset), asset } : null
   const showContent = !!img && directMode && selected && showEdge && !ghost
   const clipId = `clip-${shape.id}`
+  const shapeFill = shape.frame ? 'none' : shape.fill ?? 'none'
+  const gradientId = `shape-gradient-${shape.id}`
+  const fillPaint = shape.fillGradient ? `url(#${gradientId})` : shapeFill
+  const gradientStops = shape.fillGradient?.stops?.length
+    ? shape.fillGradient.stops
+    : shape.fillGradient
+      ? [{ offset: 0, color: shape.fillGradient.start }, { offset: 1, color: shape.fillGradient.end }]
+      : []
 
   // text along the outline
   const pt = shape.pathText
@@ -131,46 +144,60 @@ export function ShapeFrameView({
 
   return (
     <div
-      className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '')}
+      className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
       style={{
         left: tx + shape.x * zoom,
         top: ty + shape.y * zoom,
         width: w,
         height: h,
         zIndex: z,
+        opacity: shape.opacity ?? 1,
         overflow: isLine ? 'visible' : undefined,
         transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
       }}
     >
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={isLine ? { overflow: 'visible' } : undefined} aria-hidden="true">
+        {shape.fillGradient && (
+          <defs>
+            {shape.fillGradient.type === 'radial' ? (
+              <radialGradient id={gradientId} cx="50%" cy="50%" r="70%">
+                {gradientStops.map((stop, index) => <stop key={index} offset={`${stop.offset * 100}%`} stopColor={shape.fillGradient!.reverse ? gradientStops[gradientStops.length - 1 - index].color : stop.color} />)}
+              </radialGradient>
+            ) : (
+              <linearGradient id={gradientId} x1={shape.fillGradient.reverse ? '100%' : '0%'} x2={shape.fillGradient.reverse ? '0%' : '100%'} y1="0%" y2="0%">
+                {gradientStops.map((stop, index) => <stop key={index} offset={`${stop.offset * 100}%`} stopColor={stop.color} />)}
+              </linearGradient>
+            )}
+          </defs>
+        )}
         {!img ? (
           <>
-            {isLine && (
+            {(isLine || isPath) && (
               // a thin (or even 1pt) line is genuinely hard to click exactly on — this invisible, much wider twin
               // of the same path takes the click/hover instead, so getting NEAR the line is enough to select it
               <path
                 d={shapePath(shape, zoom)}
-                fill="none"
+                fill={isPath && shape.closed !== false ? 'transparent' : 'none'}
                 stroke="transparent"
                 strokeWidth={Math.max(lineStrokeWidth, 12)}
                 strokeLinecap="round"
-                pointerEvents={ghost ? 'none' : 'stroke'}
+                pointerEvents={ghost ? 'none' : isPath && shape.closed !== false ? 'all' : 'stroke'}
                 onPointerDown={onPointerDown}
                 onDoubleClick={onDoubleClick}
               />
             )}
             <path
               d={shapePath(shape, zoom)}
-              fill={shape.fill ?? 'none'}
+              fill={fillPaint}
               fillRule="evenodd"
               stroke={shape.stroke ?? 'none'}
               strokeWidth={lineStrokeWidth}
-              strokeLinejoin="round"
-              strokeLinecap={isLine ? (shape.strokeCap ?? 'butt') : undefined}
+              strokeLinejoin={isPath ? (shape.strokeCap === 'butt' ? 'miter' : 'round') : 'round'}
+              strokeLinecap={isLine || isPath ? (shape.strokeCap ?? (isPath ? 'round' : 'butt')) : undefined}
               strokeDasharray={dashArray}
-              pointerEvents={ghost ? 'none' : isLine ? 'none' : 'all'}
-              onPointerDown={isLine ? undefined : onPointerDown}
-              onDoubleClick={isLine ? undefined : onDoubleClick}
+              pointerEvents={ghost ? 'none' : isLine || isPath ? 'none' : 'all'}
+              onPointerDown={isLine || isPath ? undefined : onPointerDown}
+              onDoubleClick={isLine || isPath ? undefined : onDoubleClick}
             />
           </>
         ) : (
@@ -183,7 +210,7 @@ export function ShapeFrameView({
             {/* the fill (if any) is the click target, and shows through a picture with transparency */}
             <path
               d={shapePath(shape, zoom)}
-              fill={shape.fill ?? 'none'}
+              fill={fillPaint}
               fillRule="evenodd"
               pointerEvents={ghost ? 'none' : 'all'}
               onPointerDown={onPointerDown}
@@ -288,6 +315,7 @@ export function ShapeFrameView({
 
       {showPoints && (
         <>
+          <div className="direct-move-handle" title="גרור כדי להזיז את האובייקט" style={{ left: w / 2, top: h / 2 }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDirectMove?.(e) }} />
           <svg className="curve-handle-lines" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
             {ring!.map((v, i) => {
               if (!selectedPoints?.includes(i)) return null
@@ -337,7 +365,7 @@ export function ShapeFrameView({
                   className="direction-handle"
                   title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
                   style={{ left: (p[0] + hi[0]) * w, top: (p[1] + hi[1]) * h }}
-                  onPointerDown={(e) => onHandleGrab?.(i, 'hi', e)}
+                  onPointerDown={(e) => { e.stopPropagation(); onHandleGrab?.(i, 'hi', e) }}
                 />,
               )
             const ho = vertexHo(v)
@@ -348,7 +376,7 @@ export function ShapeFrameView({
                   className="direction-handle"
                   title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
                   style={{ left: (p[0] + ho[0]) * w, top: (p[1] + ho[1]) * h }}
-                  onPointerDown={(e) => onHandleGrab?.(i, 'ho', e)}
+                  onPointerDown={(e) => { e.stopPropagation(); onHandleGrab?.(i, 'ho', e) }}
                 />,
               )
             return out

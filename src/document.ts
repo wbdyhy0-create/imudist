@@ -53,6 +53,7 @@ export type TextAlign = 'right' | 'center' | 'left' | 'justify'
 /** Character formatting: can differ from one piece of text to the next. */
 export interface CharStyle {
   fontFamily: string
+  color?: string
   /** points */
   fontSize: number
   /** CSS weight, 100 (thin) … 900 (black) */
@@ -195,6 +196,15 @@ export interface Run {
  */
 export interface TextFrame extends TextStyle {
   id: string
+  paragraphStyleId?: string
+  /** Imported paragraph-style ids, one entry per paragraph in the story head. */
+  paragraphStyleIds?: string[]
+  /** Imported paragraph-style names, parallel to paragraphStyleIds. */
+  paragraphStyleNames?: string[]
+  /** Resolved paragraph-level overrides, parallel to paragraphStyleIds. */
+  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  /** top-level Layers panel membership; missing means the default Layer 1 */
+  layerId?: string
   x: number
   y: number
   w: number
@@ -219,6 +229,14 @@ export interface TextFrame extends TextStyle {
 /** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
 
+export interface GradientFill {
+  type: 'linear' | 'radial'
+  start: string
+  end: string
+  stops?: { offset: number; color: string }[]
+  reverse?: boolean
+}
+
 /**
  * How text flows around a picture. none: text ignores it (they may overlap). around: text runs beside it, on the
  * wider side, and above and below. jump: text stops above it and continues below (nothing beside it).
@@ -231,12 +249,17 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
+  /** top-level Layers panel membership; missing means the default Layer 1 */
+  layerId?: string
   x: number
   y: number
   w: number
   h: number
   assetId: string
   fit: ImageFit
+  opacity?: number
+  flipX?: boolean
+  flipY?: boolean
   /** stacking order (higher = in front). Missing = the default layer: pictures behind text frames */
   z?: number
   /** text wrap (missing = none) */
@@ -271,7 +294,7 @@ export const GUIDE_COLORS: { value: string; label: string }[] = [
   { value: '#a78bfa', label: 'סגול' },
   { value: '#8a8f98', label: 'אפור' },
 ]
-export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[0].value
+export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[1].value
 /** No document may hold more guides than this. */
 export const MAX_GUIDES = 5000
 
@@ -332,6 +355,8 @@ export interface ShapeImage {
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
+  /** top-level Layers panel membership; missing means the default Layer 1 */
+  layerId?: string
   kind: ShapeKind
   x: number
   y: number
@@ -341,6 +366,10 @@ export interface ShapeFrame {
   sides?: number
   /** path: the outline, relative to the box, so it scales with the shape */
   geom?: PathGeom
+  /** freehand paths can remain open; ordinary paths are closed when this is missing */
+  closed?: boolean
+  /** Pencil paths can use midpoint quadratic smoothing when this is set. */
+  curveMode?: 'quadratic'
   /** text along the outline */
   pathText?: PathText
   /** a picture placed inside the shape, clipped to its outline */
@@ -359,6 +388,10 @@ export interface ShapeFrame {
   strokeCap?: LineCap
   /** #rrggbb, or null for no fill */
   fill: string | null
+  /** object opacity, 0…1; missing = fully opaque */
+  opacity?: number
+  /** optional two-color fill used by the gradient tool */
+  fillGradient?: GradientFill
   /** #rrggbb, or null for no line */
   stroke: string | null
   /** line thickness, points */

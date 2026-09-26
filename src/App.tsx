@@ -16,6 +16,7 @@ import { pickFiles } from './fileio'
 import { FILE_EXT } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
+import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 
 const APP_NAME = 'Imudist'
@@ -54,6 +55,7 @@ export default function App() {
   const [shapePrefs, setShapePrefs] = useState<ShapePrefs>(DEFAULT_SHAPE_PREFS)
   /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
   const [placing, setPlacing] = useState<PlacedText | null>(null)
+  const [importOptionsFile, setImportOptionsFile] = useState<File | null>(null)
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const ws = useRef<WorkspaceHandle>(null)
@@ -86,10 +88,27 @@ export default function App() {
           setPlacingImages(read)
         }
       } else if (files.length > 0) {
+        if (files[0].name.toLowerCase().endsWith('.docx')) {
+          setImportOptionsFile(files[0])
+          return
+        }
         const text = await readPlacedText(files[0])
         setPlacingImages([])
         setPlacing(text)
       }
+    } catch (e) {
+      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+    }
+  }
+  const confirmDocxImport = async (replaceSelected: boolean) => {
+    const file = importOptionsFile
+    setImportOptionsFile(null)
+    if (!file) return
+    try {
+      const placed = await readPlacedText(file)
+      if (replaceSelected && ws.current?.replaceSelectedText(placed)) return
+      setPlacingImages([])
+      setPlacing(placed)
     } catch (e) {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
@@ -361,6 +380,7 @@ export default function App() {
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
       {session.modal && <Modal spec={session.modal} />}
+      {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected) => void confirmDocxImport(replaceSelected)} onClose={() => setImportOptionsFile(null)} />}
     </div>
   )
 }

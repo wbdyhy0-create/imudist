@@ -1,0 +1,178 @@
+import { useEffect, useRef, useState } from 'react'
+import type { GradientFill, ShapeFrame } from '../document'
+import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab, tintHex, type ColorModel } from '../colorModels'
+import { FillPicker } from './FillPicker'
+import { Group } from './PropertiesPanel'
+
+interface Props {
+  tool: 'color' | 'gradient' | 'swatches'
+  shape: ShapeFrame | null
+  onShape: (patch: Partial<ShapeFrame>) => void
+  target: 'fill' | 'stroke'
+  onTarget: (target: 'fill' | 'stroke') => void
+}
+
+interface Swatch { name: string; color: string | null; kind: 'תהליך' | 'ספוט'; global: boolean }
+
+const INITIAL_SWATCHES: Swatch[] = [
+  { name: 'ללא', color: null, kind: 'תהליך', global: false },
+  { name: 'סימון התאמה', color: '#000000', kind: 'ספוט', global: true },
+  { name: 'נייר', color: '#ffffff', kind: 'תהליך', global: true },
+  { name: 'שחור', color: '#000000', kind: 'תהליך', global: true },
+  { name: 'ציאן', color: '#00ffff', kind: 'תהליך', global: true },
+  { name: 'מג׳נטה', color: '#ff00ff', kind: 'תהליך', global: true },
+  { name: 'צהוב', color: '#ffff00', kind: 'תהליך', global: true },
+  { name: 'כחול', color: '#0066ff', kind: 'תהליך', global: false },
+  { name: 'ירוק', color: '#00a651', kind: 'תהליך', global: false },
+  { name: 'אדום', color: '#ed1c24', kind: 'תהליך', global: false },
+]
+
+const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
+const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
+
+export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Props) {
+  const [model, setModel] = useState<ColorModel>('CMYK')
+  const [color, setColor] = useState(shape?.fill ?? '#0066ff')
+  const [baseColor, setBaseColor] = useState<string | null>(shape?.fill ?? '#0066ff')
+  const baseColors = useRef({ fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' })
+  const [tint, setTint] = useState(100)
+  const [opacity, setOpacity] = useState(shape?.opacity ?? 1)
+  const [gradient, setGradient] = useState<GradientFill>(normalizedGradient(shape?.fillGradient ?? DEFAULT_GRADIENT))
+  const [swatches, setSwatches] = useState(INITIAL_SWATCHES)
+
+  useEffect(() => {
+    baseColors.current = { fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' }
+    // the panel stays open while the selection moves to another shape: show that shape's colours, not the last one's
+    setBaseColor(baseColors.current[target])
+    setColor(baseColors.current[target])
+    setOpacity(shape?.opacity ?? 1)
+    if (shape?.fillGradient) setGradient(normalizedGradient(shape.fillGradient))
+  }, [shape?.id])
+
+  useEffect(() => {
+    const targetColor = baseColors.current[target]
+    setBaseColor(targetColor)
+    setColor(targetColor)
+  }, [target])
+
+  const title = tool === 'color' ? 'צבע' : tool === 'gradient' ? 'מעבר צבע' : 'דוגמיות צבע'
+  const applyColor = (next: string | null) => {
+    if (!shape) return
+    setBaseColor(next)
+    setColor(next ?? '#000000')
+    baseColors.current[target] = next ?? '#000000'
+    onShape(target === 'fill' ? { fill: next ? tintHex(next, tint) : null, fillGradient: undefined } : { stroke: next ? tintHex(next, tint) : null })
+  }
+  const applyTint = (value: number) => {
+    setTint(value)
+    if (!shape || !baseColor) return
+    onShape(target === 'fill' ? { fill: tintHex(baseColor, value) } : { stroke: tintHex(baseColor, value) })
+  }
+  const updateGradient = (patch: Partial<GradientFill>) => {
+    const next = { ...gradient, ...patch }
+    setGradient(next)
+    if (shape) onShape({ fill: null, fillGradient: next })
+  }
+  const updateStop = (index: number, patch: Partial<{ offset: number; color: string }>) => {
+    const stops = (gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]).map((stop, stopIndex) => stopIndex === index ? { ...stop, ...patch } : stop)
+    updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
+  }
+  const addStop = () => {
+    const stops = [...(gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }])]
+    stops.splice(Math.max(1, stops.length - 1), 0, { offset: 0.5, color: '#888888' })
+    updateGradient({ stops })
+  }
+  const removeStop = (index: number) => {
+    const stops = (gradient.stops ?? []).filter((_, stopIndex) => stopIndex !== index)
+    if (stops.length < 2) return
+    updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
+  }
+  const addSwatch = () => setSwatches((current) => [...current, { name: `צבע ${current.length + 1}`, color, kind: 'תהליך', global: false }])
+  const applySwatch = (swatch: Swatch) => applyColor(swatch.color)
+
+  const rgb = hexToRgb(color)
+  const cmyk = rgbToCmyk(rgb)
+  const lab = rgbToLab(rgb)
+  const setModelValue = (field: string, value: number) => {
+    if (model === 'CMYK') {
+      const next = { cyan: cmyk.cyan, magenta: cmyk.magenta, yellow: cmyk.yellow, black: cmyk.black, [field]: value }
+      applyColor(rgbToHex(cmykToRgb(next)))
+    } else if (model === 'RGB') {
+      const next = { red: rgb.red, green: rgb.green, blue: rgb.blue, [field]: value }
+      applyColor(rgbToHex(next))
+    } else {
+      const next = { lightness: lab.lightness, a: lab.a, b: lab.b, [field]: value }
+      applyColor(labToHex(next))
+    }
+  }
+  const values = model === 'CMYK'
+    ? [{ key: 'cyan', label: 'ציאן', value: cmyk.cyan, max: 100 }, { key: 'magenta', label: 'מג׳נטה', value: cmyk.magenta, max: 100 }, { key: 'yellow', label: 'צהוב', value: cmyk.yellow, max: 100 }, { key: 'black', label: 'שחור', value: cmyk.black, max: 100 }]
+    : model === 'RGB'
+      ? [{ key: 'red', label: 'אדום', value: rgb.red, max: 255 }, { key: 'green', label: 'ירוק', value: rgb.green, max: 255 }, { key: 'blue', label: 'כחול', value: rgb.blue, max: 255 }]
+      : [{ key: 'lightness', label: 'בהירות', value: lab.lightness, max: 100 }, { key: 'a', label: 'A', value: lab.a, max: 128 }, { key: 'b', label: 'B', value: lab.b, max: 128 }]
+
+  return (
+    <aside className="props-panel color-tools-panel" aria-label={title} dir="rtl">
+      <h2 className="props-title">{title}</h2>
+      {!shape ? <p className="muted">בחר צורה כדי להחיל עליה צבע.</p> : tool === 'gradient' ? (
+        <Group title="מעבר צבע">
+          <label className="field-label" htmlFor="gradient-type">סוג מעבר</label>
+          <select id="gradient-type" className="select" value={gradient.type} onChange={(e) => updateGradient({ type: e.target.value as GradientFill['type'] })}>
+            <option value="linear">קווי</option>
+            <option value="radial">מעגלי</option>
+          </select>
+          <div className="gradient-preview" style={{ background: `${gradient.type === 'radial' ? 'radial-gradient' : 'linear-gradient'}(${gradient.reverse ? 'to left' : 'to right'}, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} />
+          <div className="gradient-ramp" aria-label="רמפת מעבר צבע">
+            {(gradient.stops ?? []).map((stop, index) => (
+              <div key={`${index}-${stop.offset}`} className="gradient-stop" style={{ insetInlineStart: `${stop.offset * 100}%`, background: stop.color }} title={`עצירה ${index + 1}`} />
+            ))}
+          </div>
+          <div className="gradient-stop-list">
+            {(gradient.stops ?? []).map((stop, index) => (
+              <div className="gradient-stop-editor" key={`${index}-editor`}>
+                <input type="color" value={stop.color} onChange={(e) => updateStop(index, { color: e.target.value })} aria-label={`צבע עצירה ${index + 1}`} />
+                <input type="number" min={0} max={100} value={Math.round(stop.offset * 100)} onChange={(e) => updateStop(index, { offset: Number(e.target.value) / 100 })} aria-label={`מיקום עצירה ${index + 1}`} />
+                {(gradient.stops?.length ?? 0) > 2 && <button className="icon-button" onClick={() => removeStop(index)} aria-label="מחק עצירה">×</button>}
+              </div>
+            ))}
+          </div>
+          <div className="props-buttons"><button className="btn small" onClick={addStop}>הוסף עצירה</button></div>
+          <label className="page-bar-check"><input type="checkbox" checked={!!gradient.reverse} onChange={(e) => updateGradient({ reverse: e.target.checked })} />הפוך מעבר</label>
+        </Group>
+      ) : (
+        <>
+          <Group title="מילוי וקו">
+            <div className="seg small" role="radiogroup" aria-label="החל צבע על">
+                <button role="radio" aria-checked={target === 'fill'} className={target === 'fill' ? 'on' : ''} onClick={() => onTarget('fill')}>מילוי</button>
+              <button role="radio" aria-checked={target === 'stroke'} className={target === 'stroke' ? 'on' : ''} onClick={() => onTarget('stroke')}>קו</button>
+            </div>
+          </Group>
+          <Group title="מודל צבע">
+            <select className="select" value={model} onChange={(e) => setModel(e.target.value as ColorModel)}>
+              <option value="CMYK">CMYK — דפוס</option>
+              <option value="RGB">RGB — מסך</option>
+              <option value="LAB">LAB — דיוק חזותי</option>
+            </select>
+            <div className="color-values">
+              {values.map((entry) => <label key={entry.key}>{entry.label}<input type="number" min={-128} max={entry.max} value={Math.round(entry.value)} onChange={(e) => setModelValue(entry.key, Number(e.target.value))} /></label>)}
+            </div>
+            <label className="color-hex">ערך מסך <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} /></label>
+            <label className="field-label" htmlFor="color-tint">גוון: {tint}%</label>
+            <input id="color-tint" type="range" min={0} max={100} value={tint} onChange={(e) => applyTint(Number(e.target.value))} />
+            <label className="field-label" htmlFor="color-opacity">שקיפות: {Math.round(opacity * 100)}%</label>
+            <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} />
+          </Group>
+          <Group title="דוגמיות צבע">
+            <FillPicker label="דוגמיות צבע" value={target === 'fill' ? shape.fill : shape.stroke} onChange={applyColor} />
+          </Group>
+        </>
+      )}
+      {tool === 'swatches' && shape && <Group title="ניהול דוגמיות">
+        <div className="swatches-manager">
+          {swatches.map((swatch) => <button key={swatch.name} className="managed-swatch" title={`${swatch.kind}${swatch.global ? ' · גלובלי' : ''}`} onClick={() => applySwatch(swatch)}><span style={{ background: swatch.color ?? 'transparent' }} />{swatch.name}</button>)}
+        </div>
+        <button className="btn small" onClick={addSwatch}>הוסף את הצבע הנוכחי</button>
+      </Group>}
+    </aside>
+  )
+}

@@ -1,11 +1,12 @@
 import jsPDF from 'jspdf'
-import { defaultLeading, wordSpacingPt, type Asset, type Assets, type CharStyle, type DocSettings, type ImageFrame, type Run, type ShapeFrame, type TextFrame, type TextStyle } from './document'
-import { insetBox, styleOf } from './frames'
+import html2canvas from 'html2canvas'
+import { defaultLeading, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { styleOf } from './frames'
 import { pageRects, type PageRect } from './pages'
-import { buildRunNodes, locate } from './richtext'
-import { shapePath } from './shapes'
-import { sliceRuns } from './story'
+import { buildParagraphNodes, buildWrapFloats } from './richtext'
+import { imageGeometry, shapePath } from './shapes'
 import { flowFrames, type FrameFlow } from './textLayout'
+import { floatsFor } from './wrap'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -32,246 +33,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-function fontCss(style: CharStyle, scale: number): string {
-  return `${style.italic ? 'italic' : 'normal'} ${style.weight} ${style.fontSize * scale}px "${style.fontFamily}", "Segoe UI", Arial, sans-serif`
-}
-
-function letterSpacingCss(style: CharStyle, scale: number): string {
-  return style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : '0px'
-}
-
-/** One already-measured piece of a wrapped line: its own run (font/color/…) and its width at the render scale. */
-interface Seg {
-  text: string
-  run: Run
-  width: number
-}
-interface Line {
-  segs: Seg[]
-  width: number
-  /** true for a paragraph's own first line (gets `firstLineIndent`) */
-  first: boolean
-  /** true for a paragraph's own last line — never justified, same as the app's own CSS justify */
-  last: boolean
-  /** extra space above this line: leading is added on top separately for every line */
-  gapAbove: number
-}
-
-let domMeasurer: HTMLDivElement | null = null
-function getDomMeasurer(): HTMLDivElement {
-  if (!domMeasurer) {
-    const m = document.createElement('div')
-    m.dir = 'rtl'
-    Object.assign(m.style, {
-      position: 'absolute',
-      left: '-100000px',
-      top: '0',
-      visibility: 'hidden',
-      pointerEvents: 'none',
-      boxSizing: 'border-box',
-      margin: '0',
-      padding: '0',
-      whiteSpace: 'pre-wrap',
-      overflowWrap: 'anywhere',
-      textRendering: 'geometricPrecision',
-    })
-    document.body.appendChild(m)
-    domMeasurer = m
-  }
-  return domMeasurer
-}
-
-/** Line index (0-based) that each word (given as a [start, end) offset into `paraText`) lands on. Renders the
- *  paragraph with the SAME DOM-building code the real editor uses (richtext.ts's `buildRunNodes`, which the
- *  on-screen `TextFrameView`/`RichEditor` and `textLayout.ts`'s own frame-fitting measurer both already rely on)
- *  into a hidden element with the same CSS as `.text-frame-body`, then reads each word's line back via
- *  `Range.getClientRects()` (`locate` maps a character offset to a DOM position, same helper `setSelectionIn`
- *  uses for real caret placement). Canvas `measureText` can't replicate the browser's own text shaping (kerning,
- *  `text-rendering: geometricPrecision`, how CSS `word-spacing` itself changes wrapping) closely enough for the
- *  exported PDF's line breaks to reliably match what the user actually laid out on the canvas — rendering through
- *  the real DOM instead of re-deriving its behavior sidesteps that whole class of mismatch. */
-function domLineIndices(
-  paraText: string,
-  runs: Run[],
-  style: TextStyle,
-  boxWidthPt: number,
-  firstIndentPt: number,
-  atParaStart: boolean,
-  wordRanges: [number, number][],
-): number[] {
-  const m = getDomMeasurer()
-  m.style.width = `${boxWidthPt}px`
-  m.style.wordSpacing = wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : ''
-  m.replaceChildren(buildRunNodes(paraText, runs, 1, { firstLineIndent: firstIndentPt, atParaStart }))
-  const tops = wordRanges.map(([a, b]) => {
-    const range = document.createRange()
-    const [sn, so] = locate(m, a)
-    const [en, eo] = locate(m, b)
-    range.setStart(sn, so)
-    range.setEnd(en, eo)
-    const rect = range.getClientRects()[0]
-    return rect ? rect.top : 0
-  })
-  const lines: number[] = []
-  let line = 0
-  for (let i = 0; i < tops.length; i++) {
-    if (i > 0 && tops[i] > tops[i - 1] + 0.5) line++
-    lines.push(line)
-  }
-  return lines
-}
-
-/** Splits one paragraph's text (already known to have no "\n") into lines, each carrying the style runs it's made
- *  of. Line BREAKS come from `domLineIndices` (the real editor's own DOM layout); this only re-measures each
- *  resulting line's width on the canvas (for positioning/justify within the render), reusing the exact same
- *  word-spacing-aware math as before. */
-function wrapParagraph(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  runs: Run[],
-  scale: number,
-  style: TextStyle,
-  boxWidthPt: number,
-  firstIndentPt: number,
-  wordSpacingExtra: number,
-  atParaStart: boolean,
-): Line[] {
-  interface Tok {
-    text: string
-    run: Run
-    space: boolean
-    start: number
-  }
-  const tokens: Tok[] = []
-  let pos = 0
-  for (const run of runs) {
-    const t = text.slice(pos, pos + run.len)
-    let p = pos
-    pos += run.len
-    let buf = ''
-    let bufStart = p
-    for (const ch of t) {
-      if (ch === ' ') {
-        if (buf) tokens.push({ text: buf, run, space: false, start: bufStart })
-        tokens.push({ text: ' ', run, space: true, start: p })
-        buf = ''
-      } else {
-        if (!buf) bufStart = p
-        buf += ch
-      }
-      p++
-    }
-    if (buf) tokens.push({ text: buf, run, space: false, start: bufStart })
-  }
-  const words = tokens.filter((t) => !t.space)
-  const lines: Line[] = []
-  if (words.length === 0) {
-    lines.push({ segs: [], width: 0, first: true, last: true, gapAbove: 0 })
-    return lines
-  }
-  const wordRanges: [number, number][] = words.map((w) => [w.start, w.start + w.text.length])
-  const lineOf = domLineIndices(text, runs, style, boxWidthPt, firstIndentPt, atParaStart, wordRanges)
-  const commit = (cur: Tok[], isFirst: boolean) => {
-    const segs: Seg[] = []
-    for (const t of cur) {
-      const last = segs[segs.length - 1]
-      if (last && last.run.style === t.run.style) last.text += t.text
-      else segs.push({ text: t.text, run: t.run, width: 0 })
-    }
-    let w = 0
-    for (const s of segs) {
-      ctx.font = fontCss(s.run.style, scale)
-      const spacesIn = s.text.match(/ /g)?.length ?? 0
-      s.width = ctx.measureText(s.text).width + spacesIn * wordSpacingExtra
-      w += s.width
-    }
-    lines.push({ segs, width: w, first: isFirst, last: false, gapAbove: 0 })
-  }
-  let wi = 0
-  while (wi < words.length) {
-    const line = lineOf[wi]
-    const cur: Tok[] = []
-    while (wi < words.length && lineOf[wi] === line) {
-      if (cur.length) cur.push({ text: ' ', run: words[wi].run, space: true, start: words[wi].start })
-      cur.push(words[wi])
-      wi++
-    }
-    commit(cur, line === 0)
-  }
-  lines[lines.length - 1].last = true
-  return lines
-}
-
-/** Every wrapped line of a frame's whole text, with the paragraph gap due above each paragraph's own first line.
- *  `boxWidthPt` is in world points (unscaled) — needed as-is for the DOM measurer inside `wrapParagraph`. */
-function layoutFrame(ctx: CanvasRenderingContext2D, flow: FrameFlow, scale: number, boxWidthPt: number): Line[] {
-  const style = flow.style
-  const firstIndent = style.firstLineIndent ?? 0
-  const wordSpacingExtra = wordSpacingPt(style) * scale
-  const paraTexts = flow.slice.split('\n')
-  const out: Line[] = []
-  let pos = 0
-  paraTexts.forEach((paraText, i) => {
-    const runs = sliceRuns(flow.runs, pos, pos + paraText.length)
-    pos += paraText.length + 1
-    const atParaStart = i === 0 ? flow.atParaStart : true
-    const lines = wrapParagraph(ctx, paraText, runs, scale, style, boxWidthPt, firstIndent, wordSpacingExtra, atParaStart)
-    const gap = i === 0 ? 0 : (flow.paraGaps[flow.startParaIndex + i - 1] ?? 0) * scale
-    if (lines.length) lines[0].gapAbove = gap
-    out.push(...lines)
-  })
-  return out
-}
-
-/** Draws one frame's already-wrapped lines inside `box` (world points, unscaled — this function does the scaling).
- *  `box` is already the fully-inset CONTENT rect (indentLeft/Right, spaceBefore/After already folded in by the
- *  caller, same as `insetBox`/`flowFrames` do it) — this function only adds firstLineIndent per paragraph. */
-function drawText(ctx: CanvasRenderingContext2D, flow: FrameFlow, lines: Line[], box: { x: number; y: number; w: number; h: number }, scale: number) {
-  const style = flow.style
-  const leading = (style.leading ?? defaultLeading(style)) * scale
-  const wordSpacingExtra = wordSpacingPt(style) * scale
-  ctx.textBaseline = 'alphabetic'
-  ctx.direction = 'rtl'
-  let y = box.y * scale + leading * 0.82 // roughly the ascent, so the first line's cap sits just under the box top
-  for (const line of lines) {
-    y += line.gapAbove
-    const rightEdge = (box.x + box.w) * scale - (line.first ? (style.firstLineIndent ?? 0) * scale : 0)
-    const leftEdge = box.x * scale
-    const available = rightEdge - leftEdge
-    const spaces = line.segs.reduce((n, s) => n + (s.text.match(/ /g)?.length ?? 0), 0)
-    let extraPerSpace = 0
-    if (style.align === 'justify' && !line.last && spaces > 0) {
-      extraPerSpace = Math.max(0, available - line.width) / spaces
-    }
-    // the baseline word-spacing bump applies to every line of a justified paragraph (matches the DOM's unconditional
-    // CSS word-spacing), even a paragraph's own last line, which only skips the extra distributive justify stretch
-    const perGapExtra = wordSpacingExtra + extraPerSpace
-    // right and justify both start flush with the right edge; justify's extra space is inserted between words below
-    let x = rightEdge
-    if (style.align === 'center') x = leftEdge + (available + line.width) / 2
-    else if (style.align === 'left') x = leftEdge + line.width
-    for (const seg of line.segs) {
-      ctx.font = fontCss(seg.run.style, scale)
-      ctx.fillStyle = '#000'
-      ;(ctx as unknown as { letterSpacing: string }).letterSpacing = letterSpacingCss(seg.run.style, scale)
-      ctx.textAlign = 'right'
-      if (perGapExtra > 0 && seg.text.includes(' ')) {
-        // draw word-by-word so the extra spacing can be inserted between them
-        const words = seg.text.split(' ')
-        for (let w = 0; w < words.length; w++) {
-          if (w > 0) x -= perGapExtra + ctx.measureText(' ').width
-          ctx.fillText(words[w], x, y)
-          x -= ctx.measureText(words[w]).width
-        }
-      } else {
-        ctx.fillText(seg.text, x, y)
-        x -= seg.width
-      }
-    }
-    y += leading
-  }
-}
-
 const OBJECT_FIT_RECT = (fit: 'fill' | 'fit' | 'stretch', boxW: number, boxH: number, natW: number, natH: number) => {
   if (fit === 'stretch') return { x: 0, y: 0, w: boxW, h: boxH }
   const scale = fit === 'fit' ? Math.min(boxW / natW, boxH / natH) : Math.max(boxW / natW, boxH / natH)
@@ -290,6 +51,12 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
   if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
   ctx.translate(-boxW / 2, -boxH / 2)
+  ctx.globalAlpha = image.opacity ?? 1
+  if (image.flipX || image.flipY) {
+    ctx.translate(boxW / 2, boxH / 2)
+    ctx.scale(image.flipX ? -1 : 1, image.flipY ? -1 : 1)
+    ctx.translate(-boxW / 2, -boxH / 2)
+  }
   ctx.beginPath()
   ctx.rect(0, 0, boxW, boxH)
   ctx.clip()
@@ -298,7 +65,102 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   ctx.restore()
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number) {
+async function drawTextDom(
+  ctx: CanvasRenderingContext2D,
+  content: { frames: TextFrame[]; images: ImageFrame[] },
+  flows: Map<string, FrameFlow>,
+  page: PageRect,
+  scale: number,
+) {
+  const root = document.createElement('div')
+  Object.assign(root.style, {
+    position: 'fixed',
+    left: '-100000px',
+    top: '0',
+    width: `${page.w}px`,
+    height: `${page.h}px`,
+    overflow: 'hidden',
+    direction: 'rtl',
+    pointerEvents: 'none',
+    background: 'transparent',
+  })
+  document.body.appendChild(root)
+  try {
+    for (const frame of content.frames) {
+      if (frame.x >= page.x + page.w || frame.x + frame.w <= page.x || frame.y >= page.y + page.h || frame.y + frame.h <= page.y) continue
+      const flow = flows.get(frame.id)
+      if (!flow || !flow.slice) continue
+      const style = styleOf(frame)
+      const hasPrev = flow.prevId !== null
+      const hasNext = frame.next !== null
+      const outer = document.createElement('div')
+      Object.assign(outer.style, {
+        position: 'absolute',
+        left: `${frame.x - page.x}px`,
+        top: `${frame.y - page.y}px`,
+        width: `${frame.w}px`,
+        height: `${frame.h}px`,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        color: '#111',
+        direction: 'rtl',
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere',
+        textRendering: 'geometricPrecision',
+        transform: frame.rotation ? `rotate(${frame.rotation}deg)` : '',
+        transformOrigin: 'center center',
+      })
+      const inner = document.createElement('div')
+      Object.assign(inner.style, {
+        width: `${frame.w}px`,
+        height: `${frame.h}px`,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+        fontSize: `${style.fontSize}px`,
+        fontWeight: String(style.weight),
+        fontStyle: style.italic ? 'italic' : 'normal',
+        lineHeight: `${style.leading ?? defaultLeading(style)}px`,
+        textAlign: style.align,
+        wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : '',
+        paddingTop: !hasPrev && flow.spaceBeforeFirst ? `${flow.spaceBeforeFirst}px` : '',
+        paddingBottom: !hasNext && flow.spaceAfterLast ? `${flow.spaceAfterLast}px` : '',
+        paddingLeft: style.indentLeft ? `${style.indentLeft}px` : '',
+        paddingRight: style.indentRight ? `${style.indentRight}px` : '',
+      })
+      inner.append(...buildWrapFloats(floatsFor(frame, content.images, style, !hasPrev), 1))
+      inner.appendChild(
+        buildParagraphNodes(
+          flow.slice,
+          flow.runs,
+          1,
+          {
+            paraGaps: flow.paraGaps,
+            startParaIndex: flow.startParaIndex,
+            firstLineIndent: style.firstLineIndent,
+            atParaStart: flow.atParaStart,
+          },
+          content.frames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
+        ),
+      )
+      outer.appendChild(inner)
+      root.appendChild(outer)
+    }
+    await document.fonts?.ready
+    const raster = await html2canvas(root, {
+      backgroundColor: null,
+      scale,
+      width: page.w,
+      height: page.h,
+      logging: false,
+    })
+    ctx.drawImage(raster, 0, 0)
+  } finally {
+    root.remove()
+  }
+}
+
+async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number, asset?: Asset) {
   const boxX = (shape.x - page.x) * scale
   const boxY = (shape.y - page.y) * scale
   const w = shape.w * scale
@@ -307,10 +169,31 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageR
   ctx.translate(boxX + w / 2, boxY + h / 2)
   if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
   ctx.translate(-w / 2, -h / 2)
+  ctx.globalAlpha = shape.opacity ?? 1
   const path = new Path2D(shapePath(shape, scale))
-  if (shape.fill) {
+  if (shape.fillGradient && !shape.frame) {
+    const g = shape.fillGradient.type === 'radial'
+      ? ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7)
+      : ctx.createLinearGradient(shape.fillGradient.reverse ? w : 0, 0, shape.fillGradient.reverse ? 0 : w, 0)
+    const stops = shape.fillGradient.stops?.length
+      ? shape.fillGradient.stops
+      : [{ offset: 0, color: shape.fillGradient.start }, { offset: 1, color: shape.fillGradient.end }]
+    // a reversed radial gradient swaps the colours between the stops (offsets stay), like the on-screen SVG does
+    const reverseRadial = shape.fillGradient.type === 'radial' && shape.fillGradient.reverse
+    stops.forEach((stop, index) => g.addColorStop(Math.max(0, Math.min(1, stop.offset)), reverseRadial ? stops[stops.length - 1 - index].color : stop.color))
+    ctx.fillStyle = g
+    ctx.fill(path, 'evenodd')
+  } else if (shape.fill && !shape.frame) {
     ctx.fillStyle = shape.fill
     ctx.fill(path, 'evenodd')
+  }
+  if (shape.image && asset) {
+    const img = await loadImage(asset.dataUrl)
+    const box = imageGeometry(shape, asset)
+    ctx.save()
+    ctx.clip(path)
+    ctx.drawImage(img, box.x * scale, box.y * scale, box.w * scale, box.h * scale)
+    ctx.restore()
   }
   if (shape.stroke && shape.strokeWidth > 0) {
     ctx.strokeStyle = shape.stroke
@@ -350,29 +233,16 @@ async function renderPage(
 
   // shapes and pictures, in document order (no explicit z is fine here — this app doesn't expose a merged
   // stacking order at this layer, and export ordering by array position matches how they were placed)
-  for (const shape of content.shapes) if (overlaps(shape.x, shape.y, shape.w, shape.h)) drawShape(ctx, shape, page, scale)
+  for (const shape of content.shapes) {
+    if (!overlaps(shape.x, shape.y, shape.w, shape.h)) continue
+    await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
+  }
   for (const image of content.images) {
     if (!overlaps(image.x, image.y, image.w, image.h)) continue
     const asset = content.assets[image.assetId]
     if (asset) await drawImage(ctx, image, asset, page, scale)
   }
-  for (const frame of content.frames) {
-    if (!overlaps(frame.x, frame.y, frame.w, frame.h)) continue
-    const flow = flows.get(frame.id)
-    if (!flow || !flow.slice) continue
-    const style = styleOf(frame)
-    const hasPrev = flow.prevId !== null
-    const hasNext = frame.next !== null
-    const box = insetBox(frame, style, !hasPrev ? flow.spaceBeforeFirst : 0, !hasNext ? flow.spaceAfterLast : 0)
-    const boxWorld = {
-      x: frame.x - page.x + (style.indentLeft ?? 0),
-      y: frame.y - page.y + (!hasPrev ? flow.spaceBeforeFirst : 0),
-      w: box.w,
-      h: box.h,
-    }
-    const lines = layoutFrame(ctx, flow, scale, box.w)
-    drawText(ctx, flow, lines, boxWorld, scale)
-  }
+  await drawTextDom(ctx, content, flows, page, scale)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   return canvas
 }

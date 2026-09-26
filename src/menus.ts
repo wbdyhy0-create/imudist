@@ -57,6 +57,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       if (ws) run(ws)
     },
   })
+  const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = '') => doc(label, shortcut, (ws) => ws.selectTool(id))
 
   return [
     {
@@ -111,6 +112,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'העתק', shownShortcut: 'Ctrl+C', disabled: !c.hasDoc, onClick: () => c.ws.current?.copy() },
         { label: 'הדבק', shownShortcut: 'Ctrl+V', disabled: !c.hasDoc, onClick: () => c.ws.current?.paste() },
         doc('שכפל במקום', 'Ctrl+F', (ws) => ws.duplicateInPlace()),
+        doc('שכפל במרווח האחרון', 'Ctrl+D', (ws) => ws.repeatDuplicate()),
         { label: 'שכפל וגרור', shownShortcut: 'Alt + גרירה', disabled: true },
         sep,
         { label: 'בחר הכול', shortcut: 'Ctrl+A', disabled: !c.hasDoc, onClick: () => c.ws.current?.selectAllText() },
@@ -136,8 +138,13 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'טיפוגרפיה',
       items: [
-        off('גופן'),
-        off('גודל'),
+        {
+          label: 'כלי טקסט',
+          submenu: [tool('טקסט', 'type', 'T'), tool('טקסט על קו', 'pathtype', 'Shift+T'), tool('דוגם סגנון', 'eyedropper', 'I')],
+        },
+        sep,
+        { label: 'גופן', disabled: !c.showProps, onClick: c.toggleProps },
+        { label: 'גודל', disabled: !c.showProps, onClick: c.toggleProps },
         sep,
         off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
         sep,
@@ -147,6 +154,20 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'אובייקט',
       items: [
+        {
+          label: 'כלי אובייקט',
+          submenu: [
+            tool('בחירה', 'select', 'V'),
+            tool('עריכת נקודות', 'direct', 'A'),
+            tool('מלבן', 'rect', 'M'),
+            tool('אליפסה', 'ellipse', 'L'),
+            tool('מצולע', 'polygon', 'Y'),
+            tool('מסגרת גרפית', 'framerect', 'F'),
+            tool('קו', 'line'),
+            tool('כלי הצבע', 'color', 'K'),
+          ],
+        },
+        sep,
         off('שינוי צורה'),
         {
           label: 'סדר',
@@ -198,7 +219,15 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'חלון',
       items: [
-        off('כלים'),
+        {
+          label: 'כלים',
+          submenu: [
+            tool('יד', 'hand', 'H'),
+            tool('זום', 'zoom', 'Z'),
+            tool('מעבר צבע', 'gradient', 'G'),
+            tool('דוגמיות צבע', 'swatches'),
+          ],
+        },
         { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages },
         { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps },
         { label: 'פסקה', shortcut: 'Ctrl+Alt+L', checked: c.showParagraph, onClick: c.toggleParagraph },

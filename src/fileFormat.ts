@@ -20,6 +20,7 @@ import {
   type Assets,
   type CharStyle,
   type DocSettings,
+  type GradientFill,
   type Guide,
   type ImageFit,
   type ImageFrame,
@@ -135,12 +136,14 @@ function parseSettings(v: unknown, name: string): DocSettings {
 
 function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
   const s = isObj(v) ? v : {}
+  const color = typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? s.color : fallback.color
   return {
     fontFamily: str(s.fontFamily, fallback.fontFamily),
     fontSize: num(s.fontSize, fallback.fontSize, 1, 999),
     weight: num(s.weight, fallback.weight, 1, 1000),
     italic: bool(s.italic, fallback.italic),
     tracking: num(s.tracking, fallback.tracking, -1000, 1000),
+    ...(color ? { color } : {}),
   }
 }
 
@@ -168,6 +171,21 @@ const parseParaOverrides = (v: unknown): (number | null)[] | undefined =>
 const paraOverridesOf = (raw: Record<string, unknown>): { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] } => ({
   ...(parseParaOverrides(raw.paraSpaceBefore) ? { paraSpaceBefore: parseParaOverrides(raw.paraSpaceBefore) } : {}),
   ...(parseParaOverrides(raw.paraSpaceAfter) ? { paraSpaceAfter: parseParaOverrides(raw.paraSpaceAfter) } : {}),
+})
+const paragraphStyleIdsOf = (raw: Record<string, unknown>): { paragraphStyleIds?: string[] } => ({
+  ...(Array.isArray(raw.paragraphStyleIds) ? { paragraphStyleIds: raw.paragraphStyleIds.filter((id): id is string => typeof id === 'string').slice(0, 100000) } : {}),
+})
+const paragraphStyleNamesOf = (raw: Record<string, unknown>): { paragraphStyleNames?: string[] } => ({
+  ...(Array.isArray(raw.paragraphStyleNames) ? { paragraphStyleNames: raw.paragraphStyleNames.filter((name): name is string => typeof name === 'string').slice(0, 100000) } : {}),
+})
+const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStylePatches?: TextFrame['paragraphStylePatches'] } => ({
+  ...(Array.isArray(raw.paragraphStylePatches)
+    ? {
+        paragraphStylePatches: raw.paragraphStylePatches.map((value) =>
+          isObj(value) ? { ...paragraphStyleOf(value), ...(['right', 'center', 'left', 'justify'].includes(value.align as string) ? { align: value.align as TextAlign } : {}) } : {},
+        ),
+      }
+    : {}),
 })
 
 function parseFrames(v: unknown): TextFrame[] {
@@ -202,6 +220,9 @@ function parseFrames(v: unknown): TextFrame[] {
       ...zOf(raw),
       ...rotationOf(raw),
       ...paragraphStyleOf(raw),
+      ...paragraphStyleIdsOf(raw),
+      ...paragraphStyleNamesOf(raw),
+      ...paragraphStylePatchesOf(raw),
       ...paraOverridesOf(raw),
     })
   }
@@ -269,6 +290,9 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       fit: oneOf<ImageFit>(raw.fit, ['fill', 'fit', 'stretch'], 'fill'),
       ...zOf(raw),
       ...rotationOf(raw),
+      ...opacityOf(raw),
+      ...(raw.flipX === true ? { flipX: true as const } : {}),
+      ...(raw.flipY === true ? { flipY: true as const } : {}),
       ...(raw.wrap === 'around' || raw.wrap === 'jump' ? { wrap: raw.wrap as WrapMode } : {}),
       ...(typeof raw.wrapOffset === 'number' ? { wrapOffset: num(raw.wrapOffset, DEFAULT_WRAP_OFFSET, 0, 500) } : {}),
     })
@@ -278,6 +302,33 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null : typeof v === 'string' && HEX.test(v) ? v : fallback)
+/** object opacity, 0…1: only written when the object is not fully opaque */
+const opacityOf = (raw: Record<string, unknown>): { opacity?: number } =>
+  typeof raw.opacity === 'number' && Number.isFinite(raw.opacity) && raw.opacity < 1 ? { opacity: num(raw.opacity, 1, 0, 1) } : {}
+
+/** the optional two-colour (or multi-stop) fill of a shape */
+function parseGradient(v: unknown): { fillGradient?: GradientFill } {
+  if (!isObj(v)) return {}
+  const start = colorOrNull(v.start, null)
+  const end = colorOrNull(v.end, null)
+  if (!start || !end) return {}
+  const stops = Array.isArray(v.stops)
+    ? v.stops
+        .filter(isObj)
+        .map((stop) => ({ offset: num(stop.offset, 0, 0, 1), color: colorOrNull(stop.color, null) }))
+        .filter((stop): stop is { offset: number; color: string } => !!stop.color)
+        .slice(0, 16)
+    : []
+  return {
+    fillGradient: {
+      type: v.type === 'radial' ? 'radial' : 'linear',
+      start,
+      end,
+      ...(stops.length >= 2 ? { stops } : {}),
+      ...(v.reverse === true ? { reverse: true } : {}),
+    },
+  }
+}
 
 /** the optional text on a shape's outline */
 function parsePathText(v: unknown): { pathText?: PathText } {
@@ -320,7 +371,7 @@ function parseVertex(v: unknown): PathVertex | undefined {
   return smooth
 }
 /** the outline of a combined shape: polygons of rings of points, all numbers checked and the amount limited */
-function parseGeom(v: unknown): PathGeom | undefined {
+function parseGeom(v: unknown, open = false): PathGeom | undefined {
   if (!Array.isArray(v)) return undefined
   const out: PathGeom = []
   let points = 0
@@ -334,7 +385,8 @@ function parseGeom(v: unknown): PathGeom | undefined {
         .map(parseVertex)
         .filter((p): p is PathVertex => p !== undefined)
       points += pts.length
-      if (pts.length >= 3) rings.push(pts)
+      // an open path (a pencil/pen line) needs no area: two points, even one (a dot with round caps), are a real shape
+      if (pts.length >= (open ? 1 : 3)) rings.push(pts)
     }
     if (rings.length) out.push(rings)
   }
@@ -357,7 +409,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
   const used = new Set<string>()
   for (const raw of v) {
     if (!isObj(raw)) continue
-    const geom = raw.kind === 'path' ? parseGeom(raw.geom) : undefined
+    const geom = raw.kind === 'path' ? parseGeom(raw.geom, raw.closed === false) : undefined
     const kind =
       oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line'], 'rect') === 'path' && !geom
         ? 'rect'
@@ -368,7 +420,9 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
     const r = Array.isArray(raw.radii) ? raw.radii : []
     const image = parseShapeImage(raw.image, assets)
     // a line can be purely horizontal or vertical (one side exactly 0) — every other shape still needs both sides real
-    const minWH = kind === 'line' ? 0 : MIN_FRAME_PT
+    // a near-flat freehand path is only a fraction of a point thick (see Workspace's pathShapeFromPoints); clamping it
+    // up to MIN_FRAME_PT on load would stretch its wobble vertically
+    const minWH = kind === 'line' ? 0 : kind === 'path' ? MIN_FRAME_PT / 20 : MIN_FRAME_PT
     out.push({
       id,
       kind,
@@ -381,15 +435,20 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
       ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
       ...(kind === 'line' && (raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
+      ...(kind === 'path' && (raw.strokeCap === 'butt' || raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
+      ...(kind === 'path' && raw.closed === false ? { closed: false as const } : {}),
+      ...(kind === 'path' && raw.curveMode === 'quadratic' ? { curveMode: 'quadratic' as const } : {}),
       ...parsePathText(raw.pathText),
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       ...(image ? { image } : {}),
       ...(raw.frame === true ? { frame: true as const } : {}),
       fill: kind === 'line' ? null : colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
+      ...(kind === 'line' ? {} : parseGradient(raw.fillGradient)),
       stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
       strokeWidth: num(raw.strokeWidth, 1, 0, 200),
       ...zOf(raw),
       ...rotationOf(raw),
+      ...opacityOf(raw),
     })
   }
   return out

@@ -89,13 +89,38 @@ export function roundedRectPath(w: number, h: number, radii?: [number, number, n
 
 /** One ring of a 'path' shape as an SVG sub-path: a straight line between two plain corners, a cubic curve wherever either
  * end has a direction handle. */
-function ringPath(ring: PathVertex[], w: number, h: number): string {
+function ringPath(ring: PathVertex[], w: number, h: number, closed = true, rounded = false, curveMode?: 'quadratic'): string {
   if (ring.length === 0) return ''
   const at = (p: Pt) => `${p[0] * w} ${p[1] * h}`
   let d = 'M' + at(vertexPoint(ring[0]))
-  for (let i = 0; i < ring.length; i++) {
+  const edgeCount = closed ? ring.length : ring.length - 1
+  for (let i = 0; i < edgeCount; i++) {
     const a = ring[i]
     const b = ring[(i + 1) % ring.length]
+    const hasExplicitHandles = !!vertexHi(a) || !!vertexHo(a) || !!vertexHi(b) || !!vertexHo(b)
+    if (curveMode === 'quadratic' && !closed && !hasExplicitHandles) {
+      if (i === 0) {
+        if (edgeCount === 1) d += 'L' + at(vertexPoint(b))
+        continue
+      }
+      const current = vertexPoint(a)
+      const next = vertexPoint(b)
+      const midpoint: Pt = [(current[0] + next[0]) / 2, (current[1] + next[1]) / 2]
+      d += `Q${at(current)} ${at(midpoint)}`
+      if (i === edgeCount - 1) d += 'L' + at(next)
+      continue
+    }
+    if (rounded && !hasExplicitHandles) {
+      const ap = vertexPoint(a)
+      const bp = vertexPoint(b)
+      const previous = i > 0 ? vertexPoint(ring[i - 1]) : closed ? vertexPoint(ring[ring.length - 1]) : [ap[0] - (bp[0] - ap[0]), ap[1] - (bp[1] - ap[1])]
+      const nextIndex = i + 2
+      const next = nextIndex < ring.length ? vertexPoint(ring[nextIndex]) : closed ? vertexPoint(ring[nextIndex % ring.length]) : [bp[0] + (bp[0] - ap[0]), bp[1] + (bp[1] - ap[1])]
+      const c1: Pt = [ap[0] + (bp[0] - previous[0]) * 0.25, ap[1] + (bp[1] - previous[1]) * 0.25]
+      const c2: Pt = [bp[0] - (next[0] - ap[0]) * 0.25, bp[1] - (next[1] - ap[1]) * 0.25]
+      d += `C${at(c1)} ${at(c2)} ${at(bp)}`
+      continue
+    }
     const ho = vertexHo(a)
     const hi = vertexHi(b)
     if (!ho && !hi) {
@@ -108,7 +133,7 @@ function ringPath(ring: PathVertex[], w: number, h: number): string {
     const c2: Pt = hi ? [bp[0] + hi[0], bp[1] + hi[1]] : bp
     d += `C${at(c1)} ${at(c2)} ${at(bp)}`
   }
-  return d + 'Z'
+  return closed ? d + 'Z' : d
 }
 
 /** The outline of any shape as an SVG path, in its own units scaled by `k`. */
@@ -118,7 +143,7 @@ export function shapePath(s: ShapeFrame, k = 1): string {
   if (s.kind === 'rect') return roundedRectPath(w, h, s.radii?.map((r) => r * k) as [number, number, number, number] | undefined)
   if (s.kind === 'path') {
     // every ring of every polygon is a closed sub-path; holes come out right with the even-odd fill rule
-    return (s.geom ?? []).flatMap((poly) => poly.map((ring) => ringPath(ring, w, h))).join('')
+    return (s.geom ?? []).flatMap((poly) => poly.map((ring) => ringPath(ring, w, h, s.closed !== false, s.strokeCap === 'round', s.curveMode))).join('')
   }
   if (s.kind === 'ellipse') return `M0 ${h / 2}A${w / 2} ${h / 2} 0 1 1 ${w} ${h / 2}A${w / 2} ${h / 2} 0 1 1 0 ${h / 2}Z`
   if (s.kind === 'line') return s.flip ? `M0 ${h}L${w} 0` : `M0 0L${w} ${h}`

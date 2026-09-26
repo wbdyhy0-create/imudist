@@ -112,11 +112,11 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
           <p className="muted">
             {linked
               ? 'גרירת אחד הריבועים המסובבים שבפינות מעגלת את כל הפינות. בטל את הסימון כדי לעגל פינות בנפרד.'
-              : 'כדי לבחור פינות: גרור מסגרת בחירה מחוץ לצורה כך שתיגע בריבועים שבפינות, או לחץ על ריבוע וגרור אותו מעל ריבועים נוספים. אחרי הבחירה נשארים רק הריבועים של הפינות שנבחרו, וגרירה של אחד מהם מעגלת את כולן יחד.'}
+              : 'גרור ידית אחת כדי לעגל רק אותה. בזמן הגרירה העבר את הסמן מעל ידיות נוספות כדי לצרף אותן, ואז כולן יתעגלו יחד. כל ארבע הידיות נשארות מוצגות.'}
           </p>
           {!linked && cornersPicked && (
             <button type="button" className="btn small" onClick={onPickAllCorners}>
-              הצג את כל הפינות
+              בחר את כל הפינות
             </button>
           )}
         </Group>
@@ -178,7 +178,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
 
       {shape.kind !== 'line' && (
         <Group title="מילוי">
-          <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill })} />
+          <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill, fillGradient: undefined })} />
         </Group>
       )}
 

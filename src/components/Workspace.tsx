@@ -13,7 +13,6 @@ import {
 } from 'react'
 import {
   DEFAULT_GUIDE_COLOR,
-  DEFAULT_SHAPE_FILL,
   DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
   isFacing,
@@ -49,7 +48,7 @@ import {
 import { isTyping } from '../dom'
 import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
-import { countWords, type PlacedText } from '../importText'
+import { countWords, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
@@ -63,26 +62,35 @@ import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
+import { DockingPanels } from './DockingPanels'
+import { ColorToolsPanel } from './ColorToolsPanel'
+import { ContextToolbar } from './ContextToolbar'
+import { ColorPickerDialog } from './ColorPickerDialog'
+import type { AlignOp } from './AlignButtons'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
 import { ParagraphPanel } from './ParagraphPanel'
+import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStylesPanel'
+import { StyleManagerPanel } from './StyleManagerPanel'
 import { PathTextEditor } from './PathTextEditor'
 import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
+import { LayersPanel } from './LayersPanel'
 import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { SpreadView } from './SpreadView'
+import { StrokeSettingsDialog, type PencilSettings } from './StrokeSettingsDialog'
 import { StatusBar, formatZoom } from './StatusBar'
 import { UNIT_OPTIONS, formatLength, type Unit } from '../units'
 import { TextFrameView } from './TextFrameView'
@@ -93,8 +101,6 @@ import type { PageOps, TabView } from '../useDocumentSession'
 const PAD = 120
 const RULER = 20
 const FIT_MARGIN = 40
-/** how far a guide sticks out beyond its page, screen px */
-const GUIDE_OVER = 14
 /** a dragged guide is held on another guide when it is this close, screen px */
 const SNAP_PX = 6
 /** thickness of the area that grabs a margin line, screen px */
@@ -110,6 +116,7 @@ const stepZoom = (z: number, dir: 1 | -1) =>
     : ([...ZOOM_STEPS].reverse().find((s) => s < z / 1.001) ?? ZOOM_MIN)
 
 export interface WorkspaceHandle {
+  selectTool: (tool: ToolId) => void
   zoomIn: () => void
   zoomOut: () => void
   fitPage: () => void
@@ -133,12 +140,16 @@ export interface WorkspaceHandle {
   cut: () => void
   paste: () => void
   duplicateInPlace: () => void
+    /** duplicate the selection using the last manually established repeat distance (Ctrl+D) */
+    repeatDuplicate: () => void
   /** open the dialog that creates several guides at once */
   createGuides: () => void
   /** delete the guides of the selected page */
   clearGuides: () => void
   /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
   cleanSpacing: () => void
+  canReplaceSelectedText: () => boolean
+  replaceSelectedText: (placed: PlacedText) => boolean
 }
 
 /**
@@ -210,6 +221,13 @@ interface TextSel {
   b: number
 }
 
+interface WorldPathPoint {
+  x: number
+  y: number
+  hi?: { x: number; y: number }
+  ho?: { x: number; y: number }
+}
+
 /**
  * The viewport scrolls right-to-left (scrollbar on the left, like the rest of the RTL UI).
  * All geometry math uses "distance from the left edge", so read/write the offset that way.
@@ -271,11 +289,19 @@ export function Workspace({
   const [scroll, setScroll] = useState({ x: 0, y: 0 })
   const [view, setView] = useState<View>({ zoom: 1, anchor: null })
   const [tool, setTool] = useState<ToolId>('select')
+  const [colorTarget, setColorTarget] = useState<'fill' | 'stroke'>('fill')
+  const [colorDialogTarget, setColorDialogTarget] = useState<'fill' | 'stroke' | null>(null)
+  const [sampledTextStyle, setSampledTextStyle] = useState<CharStyle | null>(null)
   const [space, setSpace] = useState(false)
   const [panning, setPanning] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
   /** the selected text frame or picture (guides have their own, multiple, selection) */
   const [selectedId, setSelectedIdRaw] = useState<string | null>(null)
+  const [layerVisible, setLayerVisible] = useState(true)
+  const [layerLocked, setLayerLocked] = useState(false)
+  const [activeLayerId, setActiveLayerId] = useState('layer-1')
+  const [itemVisibility, setItemVisibility] = useState<Record<string, boolean>>({})
+  const [itemLocks, setItemLocks] = useState<Record<string, boolean>>({})
   const [guideSel, setGuideSel] = useState<string[]>([])
   /** several selected text frames / pictures / shapes (then `selectedId` is null) */
   const [multiSel, setMultiSel] = useState<string[]>([])
@@ -305,11 +331,26 @@ export function Workspace({
   const [pathRequest, setPathRequest] = useState<(SelRequest & { id: string }) | null>(null)
   const pathRequestToken = useRef(0)
   const [pathHover, setPathHover] = useState(false)
+  const [scissorHover, setScissorHover] = useState(false)
+  const eraserDragging = useRef(false)
+  const eraserTouched = useRef(new Set<string>())
+  const [eraserRadius, setEraserRadius] = useState(12)
+  const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   /** dragging a peg of the text on an outline */
   const pegDrag = useRef<{ id: string; peg: PathPeg; key: string } | null>(null)
   const marqueeBase = useRef<{ guides: string[]; objects: string[] } | null>(null)
   /** moving several selected objects together: where each one was, and where the pointer started */
   const groupDrag = useRef<{ origins: Map<string, { x: number; y: number }>; start: { x: number; y: number }; key: string } | null>(null)
+    /** the last duplicate that is waiting to learn its manually placed distance */
+    const repeatPending = useRef<{ ids: string[]; sources: Box[] } | null>(null)
+    const repeatOffset = useRef<{ x: number; y: number } | null>(null)
+    const groupResize = useRef<{
+      mode: HandleId
+      start: { x: number; y: number }
+      box: Box
+      objects: { id: string; x: number; y: number; w: number; h: number }[]
+      key: string
+    } | null>(null)
   /** the right-click menu of the rulers (units), at a screen position */
   const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -320,6 +361,8 @@ export function Workspace({
   const requestToken = useRef(0)
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
+  const [paragraphStyles, setParagraphStyles] = useState<ParagraphStyleRecord[]>([{ id: 'body', name: 'גוף הטקסט', patch: { fontFamily: 'Segoe UI', fontSize: 14, leading: 17, align: 'right', tracking: 0 } }, { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } }])
+  const styleSearchIndex = useRef<Record<string, number>>({})
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
@@ -335,6 +378,13 @@ export function Workspace({
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
+  const penPoints = useRef<WorldPathPoint[]>([])
+  const pencilPoints = useRef<WorldPathPoint[]>([])
+  const pencilEditTarget = useRef<{ id: string; index: number; mode: 'start' | 'end' | 'segment'; snap?: { x: number; y: number } } | null>(null)
+  const lastPencilPathId = useRef<string | null>(null)
+  const penDrag = useRef<{ index: number; start: { x: number; y: number } } | null>(null)
+  const [penDragging, setPenDragging] = useState(false)
+  const [freehandPreview, setFreehandPreview] = useState<{ points: WorldPathPoint[]; closed: boolean } | null>(null)
   /** a line being drawn: which diagonal of `shapeBox` it runs — see document.ts's `ShapeFrame.flip` */
   const [shapeFlip, setShapeFlip] = useState<true | undefined>(undefined)
   const shapeFlipRef = useRef<true | undefined>(undefined)
@@ -376,7 +426,7 @@ export function Workspace({
   >(null)
   const [hotCorners, setHotCorners] = useState<number[]>([])
   /** "change all corners together": a drag on any rounding handle rounds all four corners */
-  const [roundTogether, setRoundTogether] = useState(true)
+  const [roundTogether, setRoundTogether] = useState(false)
   /** with it off: the corners picked by the last rounding gesture; only their handles stay, and they are rounded together */
   const [cornerPick, setCornerPick] = useState<{ id: string; corners: number[] } | null>(null)
   const activeCornersOf = (id: string): number[] => (!roundTogether && cornerPick?.id === id ? cornerPick.corners : [0, 1, 2, 3])
@@ -393,7 +443,9 @@ export function Workspace({
     setPointSel(null)
   }, [selectedId, tool])
   /** the settings window of a shape tool (double click on the tool) */
-  const [toolDialog, setToolDialog] = useState<DrawKind | null>(null)
+  const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
+  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(1)
+  const [pencilSettings, setPencilSettings] = useState<PencilSettings>({ fidelity: 2.5, smoothness: 65, cap: 'round', editSelected: true, within: 12 })
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
   /** the dragged page has the same height as the pages beside it: where the dashed line goes (world y) and how far it reaches */
   const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
@@ -525,7 +577,7 @@ export function Workspace({
    * `paraOverrides`, when given, replaces the head frame's per-paragraph spaceBefore/spaceAfter overrides too (see
    * `applyEdit`, the one caller that has them — spliced to stay lined up with the story's new paragraphs).
    */
-  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] }) => {
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>) => {
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
     const nf = flowFrames(next, images)
     const chain = chainOf(next, headId)
@@ -548,6 +600,7 @@ export function Workspace({
     commitStory(headId, r.text, r.runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
+      ...spliceParagraphStyles(head, head.text, from, to, insert),
     })
   }
 
@@ -628,33 +681,56 @@ export function Workspace({
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
-    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const sel = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
+    const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) })
     onFramesChange(
       frames.map((f) => {
         if (sel) return f.id === head.id ? { ...f, runs: styleRange(runs, sel.a, sel.b, patch) } : f
-        if (f.id === head.id) return { ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) }
+        if (f.id === head.id) return applyWholeStyle(f)
         return chainIds.has(f.id) ? { ...f, ...patch } : f
       }),
       key,
     )
   }
 
+  const sampleTextStyle = (id: string) => {
+    const fl = flow.get(id)
+    const head = fl && frames.find((f) => f.id === fl.headId)
+    if (!fl || !head) return
+    const runs = normalizeRuns(head.text, head.runs, head)
+    const selected = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length
+    const style = selected && textSel ? styleAtChar(runs, textSel.a, head) : charStyleOf(head)
+    setSampledTextStyle(style)
+  }
+
   /** alignment belongs to the whole story */
   const applyAlign = (id: string, align: TextAlign) => {
     const ids = new Set(chainOf(frames, id).map((f) => f.id))
-    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align } : f)), `align:${id}`)
+    // a paragraph's own alignment (from a paragraph style) would otherwise still win over what was just chosen
+    const withoutAlign = (patches: NonNullable<TextFrame['paragraphStylePatches']>) =>
+      patches.map((patch) => {
+        const next = { ...patch }
+        delete next.align
+        return next
+      })
+    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align, ...(f.paragraphStylePatches ? { paragraphStylePatches: withoutAlign(f.paragraphStylePatches) } : {}) } : f)), `align:${id}`)
   }
 
-  /** leading, word-spacing bounds, indents and the second-line effect all belong to the whole story, like alignment
-   *  (spaceBefore/spaceAfter are different — see applyParaSpacing right below, which can target one paragraph) */
+  /** Apply paragraph layout to the selected text, or to the paragraphs shown by the selected frame. */
   const applyParagraphStyle = (
     id: string,
     patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
   ) => {
-    const ids = new Set(chainOf(frames, id).map((f) => f.id))
-    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `paragraph:${id}:${Object.keys(patch).join(',')}`)
+    const flowPart = flow.get(id)
+    const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
+    if (!flowPart || !head) return
+    const selected = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const indexes = selected ? paragraphsInRange(head.text, selected.a, selected.b) : paragraphsInRange(head.text, flowPart.start, Math.max(flowPart.start + 1, flowPart.end))
+    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
+    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...patch }
+    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
   }
 
   /**
@@ -664,18 +740,14 @@ export function Workspace({
    * how a paragraph's own override interacts with its neighbours' when both set one.
    */
   const applyParaSpacing = (id: string, patch: Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>) => {
-    const chain = chainOf(frames, id)
-    const head = chain[0]
+    const flowPart = flow.get(id)
+    const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
     if (!head) return
     const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
-    if (!sel) {
-      const ids = new Set(chain.map((f) => f.id))
-      onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, ...patch } : f)), `parastyle:${id}:${Object.keys(patch).join(',')}`)
-      return
-    }
     let paraSpaceBefore = head.paraSpaceBefore
     let paraSpaceAfter = head.paraSpaceAfter
-    for (const i of paragraphsInRange(head.text, sel.a, sel.b)) {
+    const indexes = sel ? paragraphsInRange(head.text, sel.a, sel.b) : paragraphsInRange(head.text, flowPart.start, Math.max(flowPart.start + 1, flowPart.end))
+    for (const i of indexes) {
       if (patch.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, i, patch.spaceBefore)
       if (patch.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, i, patch.spaceAfter)
     }
@@ -704,6 +776,7 @@ export function Workspace({
                 runs: newRuns,
                 paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, head.text, d.from, d.to, d.insert),
                 paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, head.text, d.from, d.to, d.insert),
+                ...spliceParagraphStyles(f, head.text, d.from, d.to, d.insert),
               }
             : f,
         ),
@@ -724,6 +797,7 @@ export function Workspace({
           runs: c.runs,
           paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, f.text, d.from, d.to, d.insert),
           paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, f.text, d.from, d.to, d.insert),
+          ...spliceParagraphStyles(f, f.text, d.from, d.to, d.insert),
         }
       }),
     )
@@ -740,6 +814,30 @@ export function Workspace({
     setLinkFrom(null)
   }
 
+  const importedStyleId = (style: ImportedParagraphStyle, used: Set<string>) => {
+    const stem = `paragraph-style-word-${style.wordId.replace(/[^a-zA-Z0-9_-]/g, '-') || 'style'}`
+    let id = stem
+    let suffix = 2
+    while (used.has(id)) id = `${stem}-${suffix++}`
+    used.add(id)
+    return id
+  }
+
+  const preparePlacedText = (placed: PlacedText): PlacedText => {
+    if (!placed.paragraphStyles?.length || !placed.paragraphStyleIds?.length) return placed
+    const nextStyles = [...paragraphStyles]
+    const used = new Set(nextStyles.map((style) => style.id))
+    const ids = new Map<string, string>()
+    for (const imported of placed.paragraphStyles) {
+      const existing = nextStyles.find((style) => style.name === imported.name)
+      const id = existing?.id ?? importedStyleId(imported, used)
+      ids.set(imported.wordId, id)
+      if (!existing) nextStyles.push({ id, name: imported.name, patch: imported.patch })
+    }
+    if (nextStyles.length !== paragraphStyles.length) setParagraphStyles(nextStyles)
+    return { ...placed, paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) }
+  }
+
 
   /**
    * Pour the loaded text into a frame at `target`. Shift = semi-automatic, Alt = automatic, otherwise the mode
@@ -748,11 +846,21 @@ export function Workspace({
   const doPlace = (target: { box: Box; frameId?: string }, mods: { shift: boolean; alt: boolean }) => {
     if (!placing) return
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
-    const result = pourText(doc, frames, images, placing, target, mode, shapes)
-    pageOps.commit(result.content)
+    const result = pourText(doc, frames, images, preparePlacedText(placing), target, mode, shapes)
+    pageOps.commit({ ...result.content, frames: result.content.frames.map((frame) => ({ ...frame, layerId: activeLayerId })) })
     setSelectedId(result.headId)
     setEditingId(null)
     onPlacingChange(result.remaining)
+  }
+
+  const replaceSelectedText = (placed: PlacedText) => {
+    const selected = selectedId ? frames.find((frame) => frame.id === selectedId) : undefined
+    if (!selected) return false
+    const result = pourText(doc, frames, images, preparePlacedText(placed), { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, 'single', shapes)
+    pageOps.commit({ ...result.content, frames: result.content.frames.map((frame) => ({ ...frame, layerId: frame.layerId ?? activeLayerId })) })
+    setSelectedId(result.headId)
+    setEditingId(null)
+    return true
   }
 
   /**
@@ -796,7 +904,7 @@ export function Workspace({
       x = Math.min(Math.max(at.x, page.x), page.x + page.w - w)
       y = Math.min(Math.max(at.y, page.y), page.y + page.h - h)
     }
-    const frame: ImageFrame = { id: newFrameId(), x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images, shapes) }
+    const frame: ImageFrame = { id: newFrameId(), layerId: activeLayerId, x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images, shapes) }
     pageOps.commit({ images: [...images, frame], assets: assets[assetId] ? assets : { ...assets, [assetId]: asset } })
     setSelectedId(frame.id)
     setEditingId(null)
@@ -805,7 +913,9 @@ export function Workspace({
 
   /** clicking a picture: the Selection tool selects it and starts moving it (other tools pass the click on) */
   const onImagePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || tool !== 'select') return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'transform' && tool !== 'direct')) return
+    if (layerLocked || itemLocks[id]) return
+    if (layerLocked) return
     const im = images.find((x) => x.id === id)
     if (!im) return
     if (handleMultiPointer(id, e)) return
@@ -820,6 +930,24 @@ export function Workspace({
   const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) =>
     onShapesChange(shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh)), key)
 
+  const flipShape = (id: string, axis: 'x' | 'y') => {
+    const shape = shapes.find((candidate) => candidate.id === id)
+    if (!shape) return
+    const flipVertex = (vertex: PathVertex): PathVertex => {
+      if (Array.isArray(vertex)) return axis === 'x' ? [1 - vertex[0], vertex[1]] : [vertex[0], 1 - vertex[1]]
+      return {
+        p: axis === 'x' ? [1 - vertex.p[0], vertex.p[1]] : [vertex.p[0], 1 - vertex.p[1]],
+        hi: vertex.hi ? (axis === 'x' ? [-vertex.hi[0], vertex.hi[1]] : [vertex.hi[0], -vertex.hi[1]]) : undefined,
+        ho: vertex.ho ? (axis === 'x' ? [-vertex.ho[0], vertex.ho[1]] : [vertex.ho[0], -vertex.ho[1]]) : undefined,
+      }
+    }
+    const patch: Partial<ShapeFrame> = {}
+    if (shape.kind === 'path' && shape.geom) patch.geom = shape.geom.map((poly) => poly.map((ring) => ring.map(flipVertex)))
+    if (shape.kind === 'rect' && shape.radii) patch.radii = axis === 'x' ? [shape.radii[1], shape.radii[0], shape.radii[3], shape.radii[2]] : [shape.radii[3], shape.radii[2], shape.radii[1], shape.radii[0]]
+    if (shape.kind === 'line') patch.flip = shape.flip ? undefined : true
+    if (Object.keys(patch).length > 0) updateShape(id, patch, `flip:${axis}:${id}`)
+  }
+
   const updateImage = (id: string, patch: Partial<ImageFrame>, key?: string) =>
     onImagesChange(images.map((im) => (im.id === id ? { ...im, ...patch } : im)), key)
 
@@ -828,6 +956,28 @@ export function Workspace({
     if (!id) return
     const r = arrange(frames, images, id, op, shapes)
     if (r) pageOps.commit(r)
+  }
+
+  const alignObjects = (op: AlignOp) => {
+    if (multiSel.length < 2) return
+    const chosen = chosenObjects()
+    if (chosen.length < 2) return
+    const left = Math.min(...chosen.map((o) => o.x))
+    const top = Math.min(...chosen.map((o) => o.y))
+    const right = Math.max(...chosen.map((o) => o.x + o.w))
+    const bottom = Math.max(...chosen.map((o) => o.y + o.h))
+    const patch = (o: (typeof chosen)[number]) => {
+      if (op === 'left') return { x: left }
+      if (op === 'centerX') return { x: (left + right - o.w) / 2 }
+      if (op === 'right') return { x: right - o.w }
+      if (op === 'top') return { y: top }
+      if (op === 'centerY') return { y: (top + bottom - o.h) / 2 }
+      return { y: bottom - o.h }
+    }
+    const ids = new Set(multiSel)
+    onFramesChange(frames.map((o) => (ids.has(o.id) ? { ...o, ...patch(o) } : o)), `align:${op}`)
+    onImagesChange(images.map((o) => (ids.has(o.id) ? { ...o, ...patch(o) } : o)), `align:${op}`)
+    onShapesChange(shapes.map((o) => (ids.has(o.id) ? { ...o, ...patch(o) } : o)), `align:${op}`)
   }
 
   // ── ruler guides ───────────────────────────────────────────────────────────────
@@ -843,7 +993,7 @@ export function Workspace({
     e.stopPropagation()
     const orig = id ? guides.find((g) => g.id === id) : undefined
     if (id && !orig) return
-    const color = orig?.color ?? guideColor
+    const color = displayGuideColor(orig?.color ?? guideColor)
     let last: { page: number; pos: number; remove: boolean; snap: GuideSnap | null } | null = orig ? { page: orig.page, pos: orig.pos, remove: false, snap: null } : null
     if (orig) {
       selectGuides([orig.id])
@@ -949,6 +1099,16 @@ export function Workspace({
     const ids = new Set(selectedId ? [selectedId] : multiSel)
     return [...frames, ...images, ...shapes].filter((o) => ids.has(o.id))
   }
+  const groupSelection = (() => {
+    if (selectedId || multiSel.length < 2) return null
+    const objects = chosenObjects()
+    if (objects.length < 2) return null
+    const x = Math.min(...objects.map((o) => o.x))
+    const y = Math.min(...objects.map((o) => o.y))
+    const right = Math.max(...objects.map((o) => o.x + o.w))
+    const bottom = Math.max(...objects.map((o) => o.y + o.h))
+    return { box: { x, y, w: Math.max(MIN_FRAME_PT, right - x), h: Math.max(MIN_FRAME_PT, bottom - y) }, objects }
+  })()
 
   /** move objects (by id → where each was) by an offset; the three kinds change together and share one undo step per key */
   const offsetObjects = (origins: Map<string, { x: number; y: number }>, dx: number, dy: number, key: string) => {
@@ -965,6 +1125,26 @@ export function Workspace({
   // ── copy, paste, duplicate ─────────────────────────────────────────────────────
   /** the selected text frames, pictures and shapes (not guides) */
   const selectedObjectIds = () => (selectedId ? [selectedId] : multiSel).filter((id) => frames.some((f) => f.id === id) || images.some((im) => im.id === id) || shapes.some((sh) => sh.id === id))
+
+  const inferRepeatOffset = (ids: string[]): { x: number; y: number } | null => {
+    if (ids.length !== 1) return null
+    const id = ids[0]
+    const selectedShape = shapes.find((o) => o.id === id)
+    const selectedImage = images.find((o) => o.id === id)
+    const selectedFrame = frames.find((o) => o.id === id)
+    const selected = selectedShape ?? selectedImage ?? selectedFrame
+    if (!selected) return null
+    const pool = selectedShape ? shapes : selectedImage ? images : frames
+    const candidates = pool
+      .filter((o) => o.id !== id && Math.abs(o.w - selected.w) < 0.5 && Math.abs(o.h - selected.h) < 0.5)
+      .map((o) => ({ object: o, distance: Math.hypot(o.x - selected.x, o.y - selected.y) }))
+      .filter((o) => o.distance > 0)
+      .sort((a, b) => a.distance - b.distance)
+    const nearest = candidates[0]?.object
+    if (!nearest) return null
+    const selectedIsAbove = (selected.z ?? 0) >= (nearest.z ?? 0)
+    return selectedIsAbove ? { x: selected.x - nearest.x, y: selected.y - nearest.y } : { x: nearest.x - selected.x, y: nearest.y - selected.y }
+  }
 
   /**
    * Copies of the given objects, as they are now. A text frame is copied as what it shows (a frame of a thread only its
@@ -1051,9 +1231,37 @@ export function Workspace({
 
   /** a copy right on top of the selected objects (Ctrl+F) */
   const duplicateSelection = () => {
-    const data = snapshotObjects(selectedObjectIds())
-    if (data) insertObjects(data, { x: 0, y: 0 })
+      const data = snapshotObjects(selectedObjectIds())
+      if (!data) return
+      const ids = insertObjects(data, { x: 0, y: 0 })
+      const sourceObjects = [...data.frames, ...data.images, ...data.shapes]
+      repeatPending.current = { ids, sources: sourceObjects.map((o) => ({ x: o.x, y: o.y, w: o.w, h: o.h })) }
   }
+    const repeatDuplicate = () => {
+      const ids = selectedObjectIds()
+      const inferred = inferRepeatOffset(ids)
+      const offset = inferred ?? repeatOffset.current
+      if (!offset) {
+        duplicateSelection()
+        return
+      }
+      repeatOffset.current = offset
+      const data = snapshotObjects(ids)
+      if (data) insertObjects(data, offset)
+    }
+    const learnRepeatOffset = (id?: string, placed?: Box) => {
+      const pending = repeatPending.current
+      if (!pending || pending.ids.length === 0) return
+      const all = [...frames, ...images, ...shapes]
+      const index = id ? pending.ids.indexOf(id) : 0
+      if (index < 0) return
+      const current = placed ?? all.find((o) => o.id === pending.ids[index])
+      if (!current) return
+      const source = pending.sources[index]
+      const offset = { x: current.x - source.x, y: current.y - source.y }
+      if (offset.x !== 0 || offset.y !== 0) repeatOffset.current = offset
+      repeatPending.current = null
+    }
 
   /**
    * Alt + drag on an object: it is copied on the spot and the copy is what the pointer drags, so the original stays.
@@ -1214,6 +1422,7 @@ export function Workspace({
   }
 
   useImperativeHandle(ref, () => ({
+    selectTool: (nextTool) => setTool(nextTool),
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
     fitPage: () => fitPage(),
@@ -1232,11 +1441,14 @@ export function Workspace({
     cut: () => void copyToClipboard(true),
     paste: () => pasteFromClipboard(),
     duplicateInPlace: () => duplicateSelection(),
+    repeatDuplicate: () => repeatDuplicate(),
     createGuides: () => setGuidesDialog(true),
     clearGuides: () => {
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
     },
     cleanSpacing: cleanSpacingCmd,
+    canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
+    replaceSelectedText,
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -1330,6 +1542,7 @@ export function Workspace({
     if (!selectedId && !linkFrom && !guidesSelected && multiSel.length === 0) return
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      if ((layerLocked || (selectedId && itemLocks[selectedId])) && e.key !== 'Escape') return
       if (e.key === 'Escape') {
         if (linkFrom) setLinkFrom(null)
         else {
@@ -1399,7 +1612,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, onFramesChange, onImagesChange, onShapesChange, onGuidesChange, tool, pointSel])
+  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, layerLocked, itemLocks, onFramesChange, onImagesChange, onShapesChange, onGuidesChange, tool, pointSel])
 
 
   // while a shape is being drawn, Shift / Alt / Ctrl / Enter change it at once, even if the mouse does not move
@@ -1742,30 +1955,389 @@ export function Workspace({
     const r = kind === 'rect' ? shapePrefs.rect.radius : 0
     return {
       id: newFrameId(),
+      layerId: activeLayerId,
       kind,
       ...box,
       ...(kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
       ...(r > 0 ? { radii: [r, r, r, r] as [number, number, number, number] } : {}),
       ...(frame ? { frame: true as const } : {}),
       ...(flip ? { flip } : {}),
-      fill: kind === 'line' ? null : DEFAULT_SHAPE_FILL,
+      fill: null,
       stroke: DEFAULT_SHAPE_STROKE,
-      strokeWidth: 1,
+      strokeWidth: drawingStrokeWidth,
       z: nextZ(frames, images, shapes),
     }
   }
 
+  const pathShapeFromPoints = (points: WorldPathPoint[], closed: boolean, smooth: boolean, allowSingle = false, smoothFactor = 0.28, strokeCap: 'butt' | 'round' = 'round'): ShapeFrame | null => {
+    const clean = points.filter((point, index) => index === 0 || Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) >= 2)
+    if (clean.length < (closed ? 3 : 2) && !(allowSingle && clean.length === 1)) return null
+    const x = Math.min(...clean.map((point) => point.x))
+    const y = Math.min(...clean.map((point) => point.y))
+    const w = Math.max(MIN_FRAME_PT / 20, Math.max(...clean.map((point) => point.x)) - x)
+    const h = Math.max(MIN_FRAME_PT / 20, Math.max(...clean.map((point) => point.y)) - y)
+    const vertex = (point: WorldPathPoint, index: number): PathVertex => {
+      const p: [number, number] = [(point.x - x) / w, (point.y - y) / h]
+      if (!smooth && !point.hi && !point.ho) return p
+      const previous = clean[index - 1] ?? (closed ? clean[clean.length - 1] : undefined)
+      const next = clean[index + 1] ?? (closed ? clean[0] : undefined)
+      const result: PathSmoothPoint = { p }
+      if (point.hi) result.hi = [point.hi.x / w, point.hi.y / h]
+      else if (smooth && (previous || next)) {
+        const before = previous ?? { x: point.x - (next!.x - point.x), y: point.y - (next!.y - point.y) }
+        result.hi = [((before.x - point.x) / w) * smoothFactor, ((before.y - point.y) / h) * smoothFactor]
+      }
+      if (point.ho) result.ho = [point.ho.x / w, point.ho.y / h]
+      else if (smooth && (next || previous)) {
+        const after = next ?? { x: point.x + (point.x - previous!.x), y: point.y + (point.y - previous!.y) }
+        result.ho = [((after.x - point.x) / w) * smoothFactor, ((after.y - point.y) / h) * smoothFactor]
+      }
+      return result
+    }
+    return {
+      id: newFrameId(),
+      kind: 'path',
+      layerId: activeLayerId,
+      x,
+      y,
+      w,
+      h,
+      geom: [[clean.map(vertex)]],
+      closed,
+      curveMode: smooth ? 'quadratic' : undefined,
+      strokeCap,
+      fill: null,
+      stroke: DEFAULT_SHAPE_STROKE,
+      strokeWidth: drawingStrokeWidth,
+      z: nextZ(frames, images, shapes),
+    }
+  }
+
+  const simplifyPencilPoints = (points: WorldPathPoint[], tolerance = 6): WorldPathPoint[] => {
+    if (points.length <= 2) return points
+    const toleranceSquared = tolerance * tolerance
+    const distanceSquared = (point: WorldPathPoint, start: WorldPathPoint, end: WorldPathPoint) => {
+      const dx = end.x - start.x
+      const dy = end.y - start.y
+      if (dx === 0 && dy === 0) return (point.x - start.x) ** 2 + (point.y - start.y) ** 2
+      const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+      const x = start.x + t * dx
+      const y = start.y + t * dy
+      return (point.x - x) ** 2 + (point.y - y) ** 2
+    }
+    const keep = new Set([0, points.length - 1])
+    const visit = (startIndex: number, endIndex: number) => {
+      let farthest = toleranceSquared
+      let farthestIndex = -1
+      for (let index = startIndex + 1; index < endIndex; index++) {
+        const distance = distanceSquared(points[index], points[startIndex], points[endIndex])
+        if (distance > farthest) {
+          farthest = distance
+          farthestIndex = index
+        }
+      }
+      if (farthestIndex < 0) return
+      keep.add(farthestIndex)
+      visit(startIndex, farthestIndex)
+      visit(farthestIndex, endIndex)
+    }
+    visit(0, points.length - 1)
+    return points.filter((_, index) => keep.has(index))
+  }
+
+  const commitFreehandPath = (points: WorldPathPoint[], closed: boolean, smooth: boolean) => {
+    const prepared = !closed && smooth && points.every((point) => !point.hi && !point.ho) ? simplifyPencilPoints(points, pencilSettings.fidelity) : points
+    const effectiveSmoothness = pencilSettings.cap === 'round' ? Math.max(100, pencilSettings.smoothness) : pencilSettings.smoothness
+    const smoothFactor = pencilSettings.cap === 'round' ? 0.75 : 0.18 + (effectiveSmoothness / 100) * 0.36
+    const shape = pathShapeFromPoints(prepared, closed, smooth, false, smooth ? smoothFactor : 0.28, smooth ? pencilSettings.cap : 'round')
+    if (!shape) return
+    onShapesChange([...shapes, shape])
+    lastPencilPathId.current = shape.id
+    setSelectedId(shape.id)
+    setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
+  }
+
+  const finishPen = (closed = true) => {
+    commitFreehandPath(penPoints.current, closed, false)
+    penPoints.current = []
+    setFreehandPreview(null)
+  }
+
+  const finishPencil = () => {
+    const target = pencilEditTarget.current
+    const existing = target && shapes.find((shape) => shape.id === target.id && shape.kind === 'path')
+    if (existing) {
+      const ring = existing.geom?.[0]?.[0] ?? []
+      const original = ring.map((vertex) => {
+        const point = vertexPoint(vertex)
+        return { x: existing.x + point[0] * existing.w, y: existing.y + point[1] * existing.h }
+      })
+      const extension = pencilPoints.current.slice(1)
+      const combined = target.mode === 'start'
+        ? [...extension.reverse(), ...original]
+        : target.mode === 'end'
+          ? [...original, ...extension]
+          : [...original.slice(0, target.index + 1), ...extension]
+      const edited = pathShapeFromPoints(combined, false, true, false, 0.18 + (pencilSettings.smoothness / 100) * 0.36, pencilSettings.cap)
+      if (edited) {
+        const next = { ...existing, x: edited.x, y: edited.y, w: edited.w, h: edited.h, geom: edited.geom, closed: false }
+        onShapesChange(shapes.map((shape) => (shape.id === existing.id ? next : shape)))
+        lastPencilPathId.current = existing.id
+        setSelectedId(existing.id)
+      }
+    } else {
+      commitFreehandPath(pencilPoints.current, false, true)
+    }
+    pencilEditTarget.current = null
+    pencilPoints.current = []
+    setFreehandPreview(null)
+  }
+
+  const pencilEditHit = (point: { x: number; y: number }) => {
+    if (!pencilSettings.editSelected) return null
+    const distanceToSegment = (p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => {
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lengthSquared = dx * dx + dy * dy
+      const t = lengthSquared ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared)) : 0
+      return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+    }
+    const limit = pencilSettings.within / zoom
+    const preferred = [selectedId, lastPencilPathId.current].filter((id): id is string => !!id)
+    const candidates = [...shapes.filter((shape) => shape.kind === 'path' && preferred.includes(shape.id)), ...shapes.filter((shape) => shape.kind === 'path' && !preferred.includes(shape.id))]
+    let best: { id: string; index: number; mode: 'start' | 'end' | 'segment'; snap?: { x: number; y: number }; distance: number } | null = null
+    for (const shape of candidates) {
+      const ring = shape.geom?.[0]?.[0]
+      if (!ring || ring.length === 0) continue
+      const world = ring.map((vertex) => {
+        const p = vertexPoint(vertex)
+        return { x: shape.x + p[0] * shape.w, y: shape.y + p[1] * shape.h }
+      })
+      const startDistance = Math.hypot(point.x - world[0].x, point.y - world[0].y)
+      const endDistance = Math.hypot(point.x - world[world.length - 1].x, point.y - world[world.length - 1].y)
+      if (startDistance <= limit && (!best || startDistance < best.distance)) best = { id: shape.id, index: 0, mode: 'start', snap: world[0], distance: startDistance }
+      if (endDistance <= limit && (!best || endDistance < best.distance)) best = { id: shape.id, index: world.length - 2, mode: 'end', snap: world[world.length - 1], distance: endDistance }
+      for (let i = 0; i < world.length - 1; i++) {
+        const distance = distanceToSegment(point, world[i], world[i + 1])
+        if (distance <= limit && (!best || distance < best.distance)) best = { id: shape.id, index: i, mode: 'segment', distance }
+      }
+    }
+    if (!best) return null
+    const { distance: _distance, ...target } = best
+    return target
+  }
+
+  const worldPointsOf = (shape: ShapeFrame): WorldPathPoint[] =>
+    (shape.geom?.[0]?.[0] ?? []).map((vertex) => {
+      const p = vertexPoint(vertex)
+      return { x: shape.x + p[0] * shape.w, y: shape.y + p[1] * shape.h }
+    })
+
+  const scissorHit = (point: { x: number; y: number }) => {
+    const limit = 12 / zoom
+    const distanceToSegment = (a: WorldPathPoint, b: WorldPathPoint) => {
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lengthSquared = dx * dx + dy * dy
+      const t = lengthSquared ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared)) : 0
+      return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy))
+    }
+    return shapes.some((shape) => {
+      if (shape.kind !== 'path') return false
+      const points = worldPointsOf(shape)
+      return points.some((candidate, index) => Math.hypot(point.x - candidate.x, point.y - candidate.y) <= limit || (index < points.length - 1 && distanceToSegment(candidate, points[index + 1]) <= limit))
+    })
+  }
+
+  const pathWithWorldPoints = (base: ShapeFrame, points: WorldPathPoint[]): ShapeFrame | null => {
+    const made = pathShapeFromPoints(points, false, true, false, 0.28, base.strokeCap === 'butt' ? 'butt' : 'round')
+    return made ? { ...base, x: made.x, y: made.y, w: made.w, h: made.h, geom: made.geom, closed: false, curveMode: 'quadratic' } : null
+  }
+
+  const splitPathAt = (id: string, point: { x: number; y: number }) => {
+    const shape = shapes.find((candidate) => candidate.id === id && candidate.kind === 'path')
+    if (!shape) return
+    const points = worldPointsOf(shape)
+    if (points.length < 3) return
+    const index = points.reduce((best, candidate, i) => Math.hypot(candidate.x - point.x, candidate.y - point.y) < Math.hypot(points[best].x - point.x, points[best].y - point.y) ? i : best, 0)
+    if (index <= 0 || index >= points.length - 1) return
+    const first = pathWithWorldPoints(shape, points.slice(0, index + 1))
+    const second = pathWithWorldPoints(shape, points.slice(index))
+    if (!first || !second) return
+    onShapesChange([...shapes.filter((candidate) => candidate.id !== id), { ...first, id: newFrameId() }, { ...second, id: newFrameId() }])
+    setSelectedId(null)
+  }
+
+  const eraseAt = (point: { x: number; y: number }) => {
+    const limit = eraserRadius / zoom
+    for (const shape of shapes) {
+      if (shape.kind !== 'path' || eraserTouched.current.has(shape.id)) continue
+      const points = worldPointsOf(shape)
+      const close = points.some((candidate, index) => {
+        if (Math.hypot(point.x - candidate.x, point.y - candidate.y) <= limit) return true
+        if (index >= points.length - 1) return false
+        const next = points[index + 1]
+        const dx = next.x - candidate.x
+        const dy = next.y - candidate.y
+        const lengthSquared = dx * dx + dy * dy
+        const t = lengthSquared ? Math.max(0, Math.min(1, ((point.x - candidate.x) * dx + (point.y - candidate.y) * dy) / lengthSquared)) : 0
+        return Math.hypot(point.x - (candidate.x + t * dx), point.y - (candidate.y + t * dy)) <= limit
+      })
+      if (close) {
+        const replacementIds = eraseSegmentAt(shape.id, point)
+        eraserTouched.current.add(shape.id)
+        replacementIds.forEach((replacementId) => eraserTouched.current.add(replacementId))
+        return
+      }
+    }
+  }
+
+  const eraseSegmentAt = (id: string, point: { x: number; y: number }): string[] => {
+    const shape = shapes.find((candidate) => candidate.id === id && candidate.kind === 'path')
+    if (!shape) return []
+    const points = worldPointsOf(shape)
+    if (points.length < 2) return []
+    let index = 0
+    let nearest = Infinity
+    let nearestT = 0
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i]
+      const b = points[i + 1]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lengthSquared = dx * dx + dy * dy
+      const t = lengthSquared ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared)) : 0
+      const projected = { x: a.x + t * dx, y: a.y + t * dy }
+      const distance = Math.hypot(point.x - projected.x, point.y - projected.y)
+      if (distance < nearest) {
+        nearest = distance
+        index = i
+        nearestT = t
+      }
+    }
+    const a = points[index]
+    const b = points[index + 1]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const length = Math.max(1, Math.hypot(dx, dy))
+    const radius = eraserRadius / zoom
+    const center = { x: a.x + nearestT * dx, y: a.y + nearestT * dy }
+    const cutStart = { x: center.x - (dx / length) * radius, y: center.y - (dy / length) * radius }
+    const cutEnd = { x: center.x + (dx / length) * radius, y: center.y + (dy / length) * radius }
+    const left = pathWithWorldPoints(shape, [...points.slice(0, index + 1), cutStart])
+    const right = pathWithWorldPoints(shape, [cutEnd, ...points.slice(index + 1)])
+    const replacement = [left, right].filter((part): part is ShapeFrame => !!part).map((part) => ({ ...part, id: newFrameId() }))
+    onShapesChange([...shapes.filter((candidate) => candidate.id !== id), ...replacement])
+    setSelectedId(null)
+    return replacement.map((part) => part.id)
+  }
+
+  const joinSelectedPaths = () => {
+    const ids = [...new Set([...multiSel, ...(selectedId ? [selectedId] : [])])]
+    const picked = ids.map((id) => shapes.find((shape) => shape.id === id && shape.kind === 'path')).filter((shape): shape is ShapeFrame => !!shape)
+    if (picked.length !== 2) return
+    const [first, second] = picked
+    const a = worldPointsOf(first)
+    const b = worldPointsOf(second)
+    if (a.length < 2 || b.length < 2) return
+    const options = [
+      { aa: a, bb: b },
+      { aa: a, bb: [...b].reverse() },
+      { aa: [...a].reverse(), bb: b },
+      { aa: [...a].reverse(), bb: [...b].reverse() },
+    ]
+    const best = options.sort((left, right) => Math.hypot(left.aa[left.aa.length - 1].x - left.bb[0].x, left.aa[left.aa.length - 1].y - left.bb[0].y) - Math.hypot(right.aa[right.aa.length - 1].x - right.bb[0].x, right.aa[right.aa.length - 1].y - right.bb[0].y))[0]
+    const merged = pathWithWorldPoints(first, [...best.aa, ...best.bb])
+    if (!merged) return
+    const joined = { ...merged, id: newFrameId() }
+    onShapesChange([...shapes.filter((shape) => !ids.includes(shape.id)), joined])
+    setSelectedId(joined.id)
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'j' && !isTyping(event.target)) {
+        event.preventDefault()
+        joinSelectedPaths()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [multiSel, selectedId, shapes])
+
+  const previousDrawingTool = useRef(tool)
+  useEffect(() => {
+    if (previousDrawingTool.current === 'pen' && tool !== 'pen' && penPoints.current.length >= 2) finishPen(false)
+    if (previousDrawingTool.current === 'pen' && tool !== 'pen' && penPoints.current.length < 2) {
+      penPoints.current = []
+      setFreehandPreview(null)
+    }
+    previousDrawingTool.current = tool
+  }, [tool])
+
+  useEffect(() => {
+    if (tool !== 'eraser') setEraserPoint(null)
+  }, [tool])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (tool !== 'eraser' || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key === '[' || event.key === '{' || event.key === '(' || event.code === 'BracketLeft') {
+        event.preventDefault()
+        setEraserRadius((value) => Math.max(1, value - 1))
+      } else if (event.key === ']' || event.key === '}' || event.key === ')' || event.code === 'BracketRight') {
+        event.preventDefault()
+        setEraserRadius((value) => Math.min(96, value + 1))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tool])
+
+  const setPenHandlesAlong = (point: WorldPathPoint, dx: number, dy: number) => {
+    const length = Math.max(24, Math.hypot(dx, dy) * 0.35)
+    const scale = length / Math.max(Math.hypot(dx, dy), 0.001)
+    point.hi = { x: -dx * scale, y: -dy * scale }
+    point.ho = { x: dx * scale, y: dy * scale }
+  }
+
+
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'direct')) return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0) return
+    if (layerLocked || itemLocks[id]) return
+    if (layerLocked) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
+    if (tool === 'scissors' || tool === 'eraser') {
+      e.stopPropagation()
+      e.preventDefault()
+      const point = toWorld(e.clientX, e.clientY)
+      if (tool === 'scissors') splitPathAt(id, point)
+      else {
+        eraserDragging.current = true
+        eraserTouched.current.clear()
+        eraseAt(point)
+        vpRef.current?.setPointerCapture(e.pointerId)
+      }
+      return
+    }
+    if (tool === 'color' || tool === 'gradient' || tool === 'swatches') {
+      e.stopPropagation()
+      e.preventDefault()
+      setSelectedPage(ownerPage(rects, sh.x + sh.w / 2, sh.y + sh.h / 2))
+      setSelectedId(id)
+      setEditingId(null)
+      return
+    }
+    if (tool !== 'select' && tool !== 'direct' && tool !== 'pen' && tool !== 'pencil' && tool !== 'transform') return
     if (handleMultiPointer(id, e)) return
     e.stopPropagation()
     e.preventDefault()
     setSelectedPage(ownerPage(rects, sh.x + sh.w / 2, sh.y + sh.h / 2))
     setSelectedId(id)
     setEditingId(null)
+    if (tool === 'direct') return
     beginFrameDrag(e as unknown as ReactPointerEvent<HTMLElement>, id, 'move')
   }
 
@@ -1790,13 +2362,19 @@ export function Workspace({
     e.stopPropagation()
     e.preventDefault()
     const active = activeCornersOf(id)
-    const corners = roundTogether ? [0, 1, 2, 3] : active.length < 4 ? active : [corner]
+    const corners = roundTogether
+      ? [0, 1, 2, 3]
+      : active.length < 4
+        ? active.includes(corner)
+          ? active
+          : [...active, corner]
+        : [corner]
     setSelectedId(id)
     const c = CORNERS[corner]
     const p = toShapeLocal(sh, toWorld(e.clientX, e.clientY))
     const inward = ((p.x - (sh.x + c.fx * sh.w)) * c.sx + (p.y - (sh.y + c.fy * sh.h)) * c.sy) / 2
     dragSeq.current += 1
-    cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether && active.length === 4, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], last: p, key: `round:${dragSeq.current}` }
+    cornerDrag.current = { id, corners, origin: corner, sweep: !roundTogether, grab: inward - fitRadii(sh.radii, sh.w, sh.h)[corner], last: p, key: `round:${dragSeq.current}` }
     setHotCorners(corners)
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -1867,6 +2445,8 @@ export function Workspace({
     const geomBase = geomOf(sh)
     const box = { x: sh.x, y: sh.y, w: sh.w, h: sh.h }
     dragSeq.current += 1
+    e.currentTarget.setPointerCapture(e.pointerId)
+    vpRef.current?.setPointerCapture(e.pointerId)
     if (e.altKey) {
       const v = geomBase[0][0][index]
       const geom = replaceVertex(geomBase, index, { p: vertexPoint(v), hi: [0, 0], ho: [0, 0] })
@@ -1929,7 +2509,9 @@ export function Workspace({
     setSelectedId(id)
     setPointSel({ id, indices: [index] })
     dragSeq.current += 1
-    pointDrag.current = { kind: 'handle', id, geom: geomOf(sh), index, which, forceMirror: false, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `handle:${dragSeq.current}` }
+    const vertex = geomOf(sh)[0][0][index]
+    pointDrag.current = { kind: 'handle', id, geom: geomOf(sh), index, which, forceMirror: !vertexHi(vertex) && !vertexHo(vertex), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `handle:${dragSeq.current}` }
+    e.currentTarget.setPointerCapture(e.pointerId)
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   /** one or more of a shape's own points follow the pointer as one rigid group (snapped like anything else, by the point actually grabbed); the box grows or shrinks to keep holding every point (its curve handles keep their own length), and the rest of the outline rides along with it */
@@ -1991,8 +2573,11 @@ export function Workspace({
     const olen = Math.hypot(offsetWorld[0], offsetWorld[1])
     // a fresh symmetric pair (still both zero-length): the other side grows to match this one, not its own (zero) length
     const mirrorLen = d.forceMirror ? olen : otherWorld ? Math.hypot(otherWorld[0], otherWorld[1]) : 0
-    const mirroredWorld: [number, number] | undefined =
-      mirror && otherWorld && olen > 1e-6 ? [(-offsetWorld[0] / olen) * mirrorLen, (-offsetWorld[1] / olen) * mirrorLen] : otherWorld
+    const mirroredWorld: [number, number] | undefined = mirror && olen > 1e-6
+      ? otherWorld
+        ? [(-offsetWorld[0] / olen) * mirrorLen, (-offsetWorld[1] / olen) * mirrorLen]
+        : [-offsetWorld[0], -offsetWorld[1]]
+      : otherWorld
     const toFrac = (w: [number, number]): [number, number] => [w[0] / d.box.w, w[1] / d.box.h]
     const offset = toFrac(offsetWorld)
     const mirrored = mirroredWorld && toFrac(mirroredWorld)
@@ -2090,6 +2675,42 @@ export function Workspace({
       kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
     }
     vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const beginGroupResize = (mode: HandleId, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!groupSelection || e.button !== 0 || panMode) return
+    e.stopPropagation()
+    e.preventDefault()
+    dragSeq.current += 1
+    groupResize.current = {
+      mode,
+      start: toWorld(e.clientX, e.clientY),
+      box: { ...groupSelection.box },
+      objects: groupSelection.objects.map((o) => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h })),
+      key: `group-resize:${dragSeq.current}`,
+    }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveGroupResize = (d: NonNullable<typeof groupResize.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const p = toWorld(e.clientX, e.clientY)
+    const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
+    const next = dragBox(d.box, d.mode, raw.x, raw.y, MIN_FRAME_PT, e.shiftKey ? d.box.w / d.box.h : undefined)
+    const sx = next.w / d.box.w
+    const sy = next.h / d.box.h
+    const update = <T extends { id: string; x: number; y: number; w: number; h: number }>(list: T[]) =>
+      list.map((o) => {
+        const original = d.objects.find((x) => x.id === o.id)
+        if (!original) return o
+        return {
+          ...o,
+          x: next.x + (original.x - d.box.x) * sx,
+          y: next.y + (original.y - d.box.y) * sy,
+          w: Math.max(MIN_FRAME_PT, original.w * sx),
+          h: Math.max(MIN_FRAME_PT, original.h * sy),
+        }
+      })
+    onFramesChange(update(frames), d.key)
+    onImagesChange(update(images), d.key)
+    onShapesChange(update(shapes), d.key)
   }
 
   /** grabbing the ring around one of an object's corners: it turns around its own centre from then on (any corner starts
@@ -2251,7 +2872,8 @@ export function Workspace({
 
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) return // scrollbars
+    if (e.target === e.currentTarget && tool !== 'pen' && tool !== 'pencil') return // scrollbars
+    if (layerLocked && !panMode && tool !== 'zoom') return
     if (linkFrom && !panMode) {
       setLinkFrom(null) // clicked away from any frame
       return
@@ -2268,6 +2890,44 @@ export function Workspace({
     } else if (tool === 'zoom' && e.button === 0) {
       const rect = e.currentTarget.getBoundingClientRect()
       zoomAt(stepZoom(zoom, e.altKey ? -1 : 1), e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
+    } else if (tool === 'pen' && e.button === 0) {
+      const point = toWorld(e.clientX, e.clientY)
+      const first = penPoints.current[0]
+      if (first && penPoints.current.length >= 3 && Math.hypot(point.x - first.x, point.y - first.y) <= 10 / zoom) {
+        finishPen()
+        e.preventDefault()
+        return
+      }
+      const previous = penPoints.current[penPoints.current.length - 1]
+      if (previous) {
+        const dx = point.x - previous.x
+        const dy = point.y - previous.y
+        setPenHandlesAlong(previous, dx, dy)
+        setPenHandlesAlong(point, dx, dy)
+      } else {
+        setPenHandlesAlong(point, 1, 0)
+      }
+      penPoints.current = [...penPoints.current, point]
+      penDrag.current = { index: penPoints.current.length - 1, start: point }
+      setPenDragging(true)
+      setFreehandPreview({ points: penPoints.current, closed: false })
+      e.preventDefault()
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } else if (tool === 'pencil' && e.button === 0) {
+      const point = toWorld(e.clientX, e.clientY)
+      const target = e.ctrlKey || e.metaKey ? pencilEditHit(point) : null
+      pencilEditTarget.current = target
+      pencilPoints.current = [target?.snap ?? point]
+      setFreehandPreview({ points: pencilPoints.current, closed: false })
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } else if (tool === 'eraser' && e.button === 0) {
+      eraserDragging.current = true
+      eraserTouched.current.clear()
+      eraseAt(toWorld(e.clientX, e.clientY))
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
     } else if ((tool === 'type' || placing || placingImages.length > 0) && e.button === 0) {
       // start dragging a new text frame (with text loaded, the frame receives it)
       placeMods.current = { shift: e.shiftKey, alt: e.altKey }
@@ -2327,6 +2987,35 @@ export function Workspace({
       const over = !!nearestOutline(toWorld(e.clientX, e.clientY))
       setPathHover((cur) => (cur === over ? cur : over))
     }
+    if (tool === 'scissors') setScissorHover(scissorHit(toWorld(e.clientX, e.clientY)))
+    else if (scissorHover) setScissorHover(false)
+    if (tool === 'eraser') setEraserPoint(toWorld(e.clientX, e.clientY))
+    else if (eraserPoint) setEraserPoint(null)
+    if (tool === 'eraser' && eraserDragging.current && e.buttons !== 0) {
+      eraseAt(toWorld(e.clientX, e.clientY))
+      return
+    }
+    if (penDrag.current) {
+      const point = toWorld(e.clientX, e.clientY)
+      const anchor = penPoints.current[penDrag.current.index]
+      if (anchor) {
+        const dx = point.x - penDrag.current.start.x
+        const dy = point.y - penDrag.current.start.y
+        anchor.ho = { x: dx, y: dy }
+        anchor.hi = { x: -dx, y: -dy }
+        setFreehandPreview({ points: penPoints.current, closed: false })
+      }
+      return
+    }
+    if (pencilPoints.current.length > 0) {
+      const point = toWorld(e.clientX, e.clientY)
+      const last = pencilPoints.current[pencilPoints.current.length - 1]
+      if (Math.hypot(point.x - last.x, point.y - last.y) >= pencilSettings.fidelity) {
+        pencilPoints.current = [...pencilPoints.current, point]
+        setFreehandPreview({ points: pencilPoints.current, closed: false })
+      }
+      return
+    }
     if (shapeStart.current) {
       updateShapeDraft(e.clientX, e.clientY, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
       return
@@ -2340,11 +3029,19 @@ export function Workspace({
       return
     }
     if (pointDrag.current) {
+      if (e.buttons === 0) {
+        pointDrag.current = null
+        return
+      }
       movePoint(pointDrag.current, e)
       return
     }
     if (contentDrag.current) {
       moveContent(contentDrag.current, e)
+      return
+    }
+    if (groupResize.current) {
+      moveGroupResize(groupResize.current, e)
       return
     }
     if (groupDrag.current) {
@@ -2388,22 +3085,33 @@ export function Workspace({
       return
     }
     if (rotateDrag.current) {
+      if (e.buttons === 0) {
+        rotateDrag.current = null
+        setRotatePreview(null)
+        return
+      }
       moveRotate(rotateDrag.current, e)
       return
     }
     if (frameDrag.current) {
+      if (e.buttons === 0) {
+        frameDrag.current = null
+        setSpacingShown((cur) => (cur.length ? [] : cur))
+        return
+      }
       const d = frameDrag.current
       const p = toWorld(e.clientX, e.clientY)
       const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
+      const resizeRaw = raw
       const free = !(e.ctrlKey || e.metaKey)
       // the other objects on the page the dragged one is over
       const page = ownerPage(rects, d.orig.x + raw.x + d.orig.w / 2, d.orig.y + raw.y + d.orig.h / 2)
       const near = [...frames, ...images, ...shapes].filter((o) => o.id !== d.id && ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2) === page)
       // the edges that move are held on the margins, column edges, page edges, guides and the edges and middles of the other objects (Ctrl = free)
       // Alt stretches to both sides at once, around the middle
-      const snapped = free ? snapDrag(d.orig, d.mode, raw.x, raw.y, e.altKey, objectLines(near)) : null
-      let dx = snapped ? snapped.dx : raw.x
-      let dy = snapped ? snapped.dy : raw.y
+      const snapped = free ? snapDrag(d.orig, d.mode, resizeRaw.x, resizeRaw.y, e.altKey, objectLines(near)) : null
+      let dx = snapped ? snapped.dx : resizeRaw.x
+      let dy = snapped ? snapped.dy : resizeRaw.y
       if (d.mode === 'move') {
         // the gaps to the neighbours: shown as numbers, and held equal to another gap when close to one (not where a line already holds the object)
         const box = { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy }
@@ -2421,16 +3129,19 @@ export function Workspace({
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
+        if (d.mode === 'move') learnRepeatOffset(d.id, box)
         onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
         return
       }
       if (d.kind === 'image') {
         // corners keep the picture's proportions unless Shift is held
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? undefined : d.orig.w / d.orig.h, e.altKey)
+        if (d.mode === 'move') learnRepeatOffset(d.id, box)
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
         return
       }
       const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, undefined, e.altKey)
+      if (d.mode === 'move') learnRepeatOffset(d.id, box)
       onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
       return
     }
@@ -2500,6 +3211,7 @@ export function Workspace({
         const frame: TextFrame = {
           ...DEFAULT_TEXT_STYLE,
           id: newFrameId(),
+          layerId: activeLayerId,
           x: Math.min(draft.x0, draft.x1),
           y: Math.min(draft.y0, draft.y1),
           w,
@@ -2518,11 +3230,19 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = () => {
+    eraserDragging.current = false
+    eraserTouched.current.clear()
+    if (eraserPoint) setEraserPoint(null)
     pegDrag.current = null
+    penDrag.current = null
+    setPenDragging(false)
+    if (pencilPoints.current.length > 0) finishPencil()
     finishShape()
     finishDraft()
     setSnapShown((cur) => (cur.length ? [] : cur))
     setSpacingShown((cur) => (cur.length ? [] : cur))
+    if (frameDrag.current?.mode === 'move') learnRepeatOffset()
+    groupResize.current = null
     // a rubber band that caught a single object leaves it selected the ordinary way (with its panel and handles)
     if (marqueeBase.current && multiSel.length === 1 && guideSel.length === 0) {
       setSelectedIdRaw(multiSel[0])
@@ -2546,7 +3266,16 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    eraserDragging.current = false
+    eraserTouched.current.clear()
+    setEraserPoint(null)
     pegDrag.current = null
+    penDrag.current = null
+    setPenDragging(false)
+    penPoints.current = []
+    pencilPoints.current = []
+    pencilEditTarget.current = null
+    setFreehandPreview(null)
     setSnapShown((cur) => (cur.length ? [] : cur))
     setSpacingShown((cur) => (cur.length ? [] : cur))
     shapeStart.current = null
@@ -2563,6 +3292,7 @@ export function Workspace({
     contentDrag.current = null
     createStart.current = null
     frameDrag.current = null
+    groupResize.current = null
     rotateDrag.current = null
     setRotatePreview(null)
     pageDrag.current = null
@@ -2579,6 +3309,8 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return // let the pan handler see it
+    if (layerLocked || itemLocks[id]) return
+    if (layerLocked) return
     if (placingImages.length > 0) return // the click places a picture on the page, even over a text frame
     const clicked = frames.find((f) => f.id === id)
     if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
@@ -2597,7 +3329,19 @@ export function Workspace({
       completeLink(id)
       return
     }
-    if (tool !== 'type' && tool !== 'select') return
+    if (tool === 'eyedropper') {
+      e.stopPropagation()
+      e.preventDefault()
+      if (sampledTextStyle) {
+        applyCharStyle(id, sampledTextStyle)
+        setSampledTextStyle(null)
+        setTool('select')
+      } else {
+        sampleTextStyle(id)
+      }
+      return
+    }
+    if (tool !== 'type' && tool !== 'select' && tool !== 'transform' && tool !== 'direct') return
     e.stopPropagation()
     if (tool === 'type') {
       if (editingId !== id) {
@@ -2651,9 +3395,9 @@ export function Workspace({
   // linked-from — an import of a 100-page Word file otherwise creates 100+ live components that all re-render on
   // every keystroke, even though at most a couple of pages are ever on screen at once
   const alwaysMounted = new Set([selectedId, editingId, linkFrom, pathEdit, ...multiSel].filter((id): id is string => !!id))
-  const visibleFrames = frames.filter((f) => alwaysMounted.has(f.id) || inViewY(f.y, f.h))
-  const visibleImages = images.filter((im) => alwaysMounted.has(im.id) || inViewY(im.y, im.h))
-  const visibleShapes = shapes.filter((sh) => alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))
+  const visibleFrames = layerVisible ? frames.filter((f) => itemVisibility[f.id] !== false && (alwaysMounted.has(f.id) || inViewY(f.y, f.h))) : []
+  const visibleImages = layerVisible ? images.filter((im) => itemVisibility[im.id] !== false && (alwaysMounted.has(im.id) || inViewY(im.y, im.h))) : []
+  const visibleShapes = layerVisible ? shapes.filter((sh) => itemVisibility[sh.id] !== false && (alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))) : []
 
   const viewportClass =
     'viewport' +
@@ -2670,20 +3414,37 @@ export function Workspace({
             ? ' zoomtool'
             : tool === 'page'
               ? ' pagetool'
+              : tool === 'pen'
+                ? ' pentool'
+                : tool === 'pencil'
+                  ? ' penciltool'
+                : tool === 'scissors'
+                  ? ' scissorstool'
+                  : tool === 'eraser'
+                    ? ' erasertool'
+              : tool === 'eyedropper'
+                ? ' eyedropper'
               : tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || FRAME_TOOL_KIND[tool]
                 ? ' shapetool'
+                : tool === 'line'
+                  ? ' linetool'
                 : tool === 'pathtype'
                   ? ' pathtool' + (pathHover ? ' overpath' : '')
             : tool === 'type'
               ? ' texttool'
+              : tool === 'direct'
+                ? ' directtool'
+                : tool === 'transform'
+                  ? ' transformtool'
               : tool === 'select'
                 ? ' selecttool'
-                : '')
+                : '') + (penDragging ? ' pen-dragging' : '') + (scissorHover ? ' scissors-target' : '')
 
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
   const selShape = selectedId ? (shapes.find((sh) => sh.id === selectedId) ?? null) : null
+  const colorTool = tool === 'color' || tool === 'gradient' || tool === 'swatches' ? tool : null
   /** what the text-on-outline controls show: the style of the selected text, else the text's own */
   const pathStyleShown = (sh: ShapeFrame): CharStyle => {
     const pt = sh.pathText!
@@ -2709,9 +3470,26 @@ export function Workspace({
   // the Paragraph panel: indents/leading/etc. are always the whole story's own settings (never selection-scoped);
   // spaceBefore/spaceAfter show the FIRST paragraph the selection touches (own override if it has one, else the
   // story's own default) when there is a selection, since that is what applyParaSpacing would actually change
+  // leading, indents and alignment can now differ paragraph by paragraph (a paragraph style, or a change made while
+  // some text / a frame is selected is stored as a per-paragraph patch), so the fields show the first paragraph in
+  // scope — otherwise a value just typed would snap back to the story's own the moment it was applied
+  const scopeFlow = selFrame ? flow.get(selFrame.id) : undefined
+  const scopeParagraph = panelHead
+    ? panelSel
+      ? paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]
+      : scopeFlow
+        ? paragraphsInRange(panelHead.text, scopeFlow.start, Math.max(scopeFlow.start + 1, scopeFlow.end))[0]
+        : 0
+    : 0
+  const scopePatch = panelHead?.paragraphStylePatches?.[scopeParagraph ?? 0]
   const paragraphStyle: TextStyle | null = panelHead
     ? {
         ...styleOf(panelHead),
+        ...(scopePatch?.leading !== undefined ? { leading: scopePatch.leading } : {}),
+        ...(scopePatch?.indentLeft !== undefined ? { indentLeft: scopePatch.indentLeft } : {}),
+        ...(scopePatch?.indentRight !== undefined ? { indentRight: scopePatch.indentRight } : {}),
+        ...(scopePatch?.firstLineIndent !== undefined ? { firstLineIndent: scopePatch.firstLineIndent } : {}),
+        ...(scopePatch?.align !== undefined ? { align: scopePatch.align } : {}),
         ...(panelSel
           ? {
               spaceBefore: panelHead.paraSpaceBefore?.[paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]] ?? panelHead.spaceBefore,
@@ -2725,13 +3503,281 @@ export function Workspace({
         ...(panelSel
           ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelHead)
           : charStyleOf(panelHead)),
-        align: panelHead.align,
-        // leading and word-spacing bounds belong to the whole story, like align — never to a selected range
-        leading: panelHead.leading,
+        align: scopePatch?.align ?? panelHead.align,
+        // word-spacing bounds belong to the whole story; leading / alignment show the paragraph in scope (see above)
+        leading: scopePatch?.leading ?? panelHead.leading,
         wordSpacingMin: panelHead.wordSpacingMin,
         wordSpacingMax: panelHead.wordSpacingMax,
       }
     : null
+
+  const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => {
+    if (seen.has(id)) return {}
+    const style = source.find((candidate) => candidate.id === id)
+    if (!style) return {}
+    const nextSeen = new Set(seen).add(id)
+    return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
+  }
+  const applyParagraphStyleToFrame = (id: string) => {
+    const resolved = resolveParagraphStyle(id)
+    if (!selectedId) return
+    const selected = frames.find((frame) => frame.id === selectedId)
+    if (!selected) return
+    const head = chainOf(frames, selected.id)[0]
+    const selectedRange = textSel && textSel.headId === head.id && textSel.a !== textSel.b ? textSel : null
+    if (!selectedRange) {
+      // the whole story: its style lives on the story's first frame, and the runs carry their own character formatting,
+      // so the character part of the style has to reach them too or existing text would keep its old look
+      const styleKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const storyStyle = Object.fromEntries(styleKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]])) as Partial<TextStyle>
+      const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+      onFramesChange(
+        frames.map((frame) => (frame.id === head.id ? { ...frame, ...storyStyle, paragraphStyleId: id, runs: styleRange(normalizeRuns(head.text, head.runs, head), 0, head.text.length, charPatch) } : frame)),
+        `paragraph-style:${head.id}`,
+      )
+      return
+    }
+    const indexes = paragraphsInRange(head.text, selectedRange.a, selectedRange.b)
+    const ids = head.paragraphStyleIds ? head.paragraphStyleIds.slice() : head.text.split('\n').map(() => head.paragraphStyleId ?? '')
+    const names = head.paragraphStyleNames ? head.paragraphStyleNames.slice() : head.text.split('\n').map(() => '')
+    let runs = normalizeRuns(head.text, head.runs, head)
+    for (const index of indexes) {
+      const [start, end] = paragraphBounds(head.text, index)
+      ids[index] = id
+      names[index] = paragraphStyles.find((style) => style.id === id)?.name ?? names[index]
+      const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+      runs = styleRange(runs, start, end, charPatch)
+    }
+    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : ids.map(() => ({}))
+    let paraSpaceBefore = head.paraSpaceBefore
+    let paraSpaceAfter = head.paraSpaceAfter
+    for (const index of indexes) {
+      patches[index] = resolved
+      if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
+      if (resolved.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, index, resolved.spaceAfter)
+    }
+    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, runs } : frame), `paragraph-style-selection:${head.id}`)
+  }
+  const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
+    const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
+    setParagraphStyles(nextStyles)
+    const resolved = resolveParagraphStyle(id, nextStyles)
+    const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const updateImportedParagraphs = (frame: TextFrame) => {
+      const hasFrameStyle = frame.paragraphStyleId === id
+      const hasParagraphStyles = !!frame.paragraphStyleIds?.length
+      if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id)) return frame
+      if (hasFrameStyle && !hasParagraphStyles) return { ...frame, ...resolved }
+      const paragraphStyleIds = frame.paragraphStyleIds ?? []
+      const paragraphStylePatches = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
+      let paraSpaceBefore = frame.paraSpaceBefore
+      let paraSpaceAfter = frame.paraSpaceAfter
+      let runs = normalizeRuns(frame.text, frame.runs, frame)
+      let start = 0
+      paragraphStyleIds.forEach((styleId, index) => {
+        const end = index + 1 < paragraphStyleIds.length ? (frame.text.indexOf('\n', start) + 1 || frame.text.length) : frame.text.length
+        if (styleId === id) {
+          runs = styleRange(runs, start, end, charPatch)
+          paragraphStylePatches[index] = Object.fromEntries(['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
+          if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
+          if (resolved.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, index, resolved.spaceAfter)
+        }
+        start = end
+      })
+      const sameStyle = paragraphStyleIds.length > 0 && paragraphStyleIds.every((styleId) => styleId === id)
+      return { ...frame, ...(sameStyle ? resolved : {}), paragraphStylePatches, paraSpaceBefore, paraSpaceAfter, runs }
+    }
+    onFramesChange(frames.map(updateImportedParagraphs), `paragraph-style-edit:${id}`)
+  }
+  const createParagraphStyle = () => {
+    // an id from the clock, not the list length: deleting a style and adding another must never reuse an id
+    const id = `paragraph-style-${Date.now()}`
+    setParagraphStyles((current) => [...current, { id, name: `סגנון ${current.length + 1}`, basedOnId: 'body', patch: {} }])
+  }
+  const deleteParagraphStyle = (id: string) => {
+    if (paragraphStyles.length <= 1) return
+    const fallback = paragraphStyles.find((style) => style.id !== id)?.id
+    setParagraphStyles((current) => current.filter((style) => style.id !== id))
+    if (fallback)
+      onFramesChange(
+        frames.map((frame) =>
+          frame.paragraphStyleId === id || frame.paragraphStyleIds?.includes(id)
+            ? {
+                ...frame,
+                ...(frame.paragraphStyleId === id ? { paragraphStyleId: fallback } : {}),
+                ...(frame.paragraphStyleIds ? { paragraphStyleIds: frame.paragraphStyleIds.map((styleId) => (styleId === id ? fallback : styleId)) } : {}),
+              }
+            : frame,
+        ),
+        `paragraph-style-delete:${id}`,
+      )
+  }
+
+  const paragraphBounds = (text: string, index: number) => {
+    let start = 0
+    for (let i = 0; i < index; i++) {
+      const end = text.indexOf('\n', start)
+      start = end < 0 ? text.length : end + 1
+    }
+    const end = text.indexOf('\n', start)
+    return [start, end < 0 ? text.length : end + 1] as const
+  }
+
+  const paragraphUsesStyle = (frame: TextFrame, index: number, styleId: string) => {
+    const style = resolveParagraphStyle(styleId)
+    const [start] = paragraphBounds(frame.text, index)
+    const run = styleAtChar(normalizeRuns(frame.text, frame.runs, frame), start, frame)
+    return Object.entries(style).filter(([key]) => ['fontFamily', 'fontSize', 'weight', 'italic', 'color'].includes(key)).every(([key, value]) => value === undefined || run[key as keyof CharStyle] === value)
+  }
+
+  const swapParagraphStyles = (sourceId: string, targetId: string, removeSource: boolean) => {
+    if (sourceId === targetId) return
+    const target = resolveParagraphStyle(targetId)
+    const nextFrames = frames.map((frame) => {
+      let next = frame
+      if (frame.paragraphStyleId === sourceId) next = { ...next, ...target, paragraphStyleId: targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
+      if (frame.paragraphStyleIds?.length) {
+        let runs = normalizeRuns(frame.text, frame.runs, frame)
+        const ids = frame.paragraphStyleIds.map((id, index) => {
+          const isSource = id === sourceId || frame.paragraphStyleNames?.[index] === paragraphStyles.find((style) => style.id === sourceId)?.name || (!frame.paragraphStyleIds?.length && paragraphUsesStyle(frame, index, sourceId))
+          if (!isSource) return id
+          const [start, end] = paragraphBounds(frame.text, index)
+          runs = styleRange(runs, start, end, target)
+          return targetId
+        })
+        const names = frame.paragraphStyleNames?.map((name, index) => ids[index] === targetId ? paragraphStyles.find((style) => style.id === targetId)?.name ?? name : name)
+        next = { ...next, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs }
+      } else if (frame.text) {
+        let runs = normalizeRuns(frame.text, frame.runs, frame)
+        frame.text.split('\n').forEach((_, index) => {
+          if (paragraphUsesStyle(frame, index, sourceId)) {
+            const [start, end] = paragraphBounds(frame.text, index)
+            runs = styleRange(runs, start, end, target)
+          }
+        })
+        next = { ...next, runs }
+      }
+      return next
+    })
+    onFramesChange(nextFrames, `style-swap:${sourceId}:${targetId}`)
+    if (removeSource) deleteParagraphStyle(sourceId)
+  }
+
+  const findParagraphStyle = (styleId: string, direction: -1 | 0 | 1 = 0) => {
+    const heads = headFrames(frames)
+    const name = paragraphStyles.find((style) => style.id === styleId)?.name
+    const occurrences = heads.flatMap((frame) => frame.text.split('\n').flatMap((_, index) => {
+      const idsMatch = frame.paragraphStyleIds?.[index] === styleId
+      const namesMatch = !!name && frame.paragraphStyleNames?.[index] === name
+      const legacyMatch = !frame.paragraphStyleIds?.length && paragraphUsesStyle(frame, index, styleId)
+      if (frame.paragraphStyleId !== styleId && !idsMatch && !namesMatch && !legacyMatch) return []
+      const [start, end] = paragraphBounds(frame.text, index)
+      return [{ frame, start, end }]
+    }))
+    if (occurrences.length > 0) {
+      const previous = styleSearchIndex.current[styleId]
+      const index = direction === 0 ? 0 : previous === undefined ? (direction < 0 ? occurrences.length - 1 : 0) : (previous + direction + occurrences.length) % occurrences.length
+      styleSearchIndex.current[styleId] = index
+      const occurrence = occurrences[index]
+      const chain = chainOf(frames, occurrence.frame.id)
+      const target = chain.find((frame) => {
+        const flowPart = flow.get(frame.id)
+        return !!flowPart && occurrence.start < flowPart.end && occurrence.end > flowPart.start
+      }) ?? occurrence.frame
+      const targetFlow = flow.get(target.id)
+      const localStart = targetFlow ? Math.max(0, occurrence.start - targetFlow.start) : 0
+      const localEnd = targetFlow ? Math.min(targetFlow.slice.length, occurrence.end - targetFlow.start) : 0
+      const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
+      setSelectedPage(page)
+      setSelectedId(target.id)
+      setEditingId(target.id)
+      setTextSel({ headId: occurrence.frame.id, a: occurrence.start, b: occurrence.end })
+      askSelection(target.id, localStart, localEnd)
+      goTo(spreadOfPage(page))
+    }
+    return occurrences.length
+  }
+
+  const swapOneParagraphStyle = (sourceId: string, targetId: string) => {
+    const target = resolveParagraphStyle(targetId)
+    let changed = false
+    const nextFrames = frames.map((frame) => {
+      if (changed) return frame
+      if (frame.paragraphStyleId === sourceId) {
+        changed = true
+        return { ...frame, ...target, paragraphStyleId: targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
+      }
+      const index = frame.paragraphStyleIds?.indexOf(sourceId) ?? -1
+      const name = paragraphStyles.find((style) => style.id === sourceId)?.name
+      const nameIndex = name ? frame.paragraphStyleNames?.indexOf(name) ?? -1 : -1
+      const legacyIndex = index < 0 && nameIndex < 0 && !frame.paragraphStyleIds?.length ? frame.text.split('\n').findIndex((_, paragraphIndex) => paragraphUsesStyle(frame, paragraphIndex, sourceId)) : -1
+      const sourceIndex = index >= 0 ? index : nameIndex >= 0 ? nameIndex : legacyIndex
+      if (sourceIndex < 0) return frame
+      const [start, end] = paragraphBounds(frame.text, sourceIndex)
+      const ids = frame.paragraphStyleIds!.slice()
+      ids[sourceIndex] = targetId
+      const names = frame.paragraphStyleNames?.slice()
+      if (names) names[sourceIndex] = paragraphStyles.find((style) => style.id === targetId)?.name ?? names[sourceIndex]
+      changed = true
+      return { ...frame, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), start, end, target) }
+    })
+    if (changed) onFramesChange(nextFrames, `style-swap-one:${sourceId}:${targetId}`)
+  }
+
+  const batchSwapParagraphStyles = (pairs: { sourceId: string; targetId: string }[]) => {
+    let nextFrames = frames
+    for (const pair of pairs) {
+      if (pair.sourceId === pair.targetId) continue
+      const target = resolveParagraphStyle(pair.targetId)
+      nextFrames = nextFrames.map((frame) => {
+        let next = frame
+        if (frame.paragraphStyleId === pair.sourceId) next = { ...next, ...target, paragraphStyleId: pair.targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
+        if (frame.paragraphStyleIds?.length) {
+          let runs = normalizeRuns(frame.text, frame.runs, frame)
+          const ids = frame.paragraphStyleIds.map((id, index) => {
+            const sourceName = paragraphStyles.find((style) => style.id === pair.sourceId)?.name
+            if (id !== pair.sourceId && frame.paragraphStyleNames?.[index] !== sourceName) return id
+            const [start, end] = paragraphBounds(frame.text, index)
+            runs = styleRange(runs, start, end, target)
+            return pair.targetId
+          })
+          const names = frame.paragraphStyleNames?.map((name, index) => ids[index] === pair.targetId ? paragraphStyles.find((style) => style.id === pair.targetId)?.name ?? name : name)
+          next = { ...next, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs }
+        }
+        return next
+      })
+    }
+    onFramesChange(nextFrames, 'style-batch-swap')
+  }
+
+  const createManagedParagraphStyle = (name: string, patch: ParagraphStyleRecord['patch']) => {
+    const id = `paragraph-style-${Date.now()}`
+    setParagraphStyles((current) => [...current, { id, name, patch }])
+  }
+
+  const applyTagStyle = (tag: string, styleId: string, removeTag: boolean, all: boolean) => {
+    if (!tag || !styleId) return
+    const target = resolveParagraphStyle(styleId)
+    const nextFrames = frames.map((frame) => {
+      if (!frame.text || frame.next || !headFrames(frames).some((head) => head.id === frame.id)) return frame
+      let text = frame.text
+      let runs = normalizeRuns(text, frame.runs, frame)
+      let at = text.indexOf(tag)
+      while (at >= 0) {
+        const end = at + tag.length
+        runs = styleRange(runs, Math.max(0, at - (text.lastIndexOf('\n', at - 1) + 1)), text.indexOf('\n', at) < 0 ? text.length : text.indexOf('\n', at) + 1, target)
+        if (removeTag) {
+          const edited = editStory(text, runs, at, end, '', frame)
+          text = edited.text
+          runs = edited.runs
+        }
+        if (!all) break
+        at = text.indexOf(tag, removeTag ? at : end)
+      }
+      return text === frame.text && runs === frame.runs ? frame : { ...frame, text, runs, paragraphStyleId: styleId }
+    })
+    onFramesChange(nextFrames, `tag-style:${styleId}`)
+  }
 
   /** a guide can be grabbed with the Selection tool only, and not while something is being placed */
   const guidesLive = tool === 'select' && !space && !placing && placingImages.length === 0 && !linkFrom
@@ -2745,12 +3791,13 @@ export function Workspace({
   const guideFromRuler = (axis: GuideAxis) => (e: ReactPointerEvent<HTMLElement>) => {
     if (!panMode && !placing && placingImages.length === 0) beginGuideDrag(axis, null, e)
   }
+  const displayGuideColor = (color: string) => (color.toLowerCase() === '#00d1b2' ? '#3d8bff' : color)
   const guideStyle = (axis: GuideAxis, page: number, pos: number, color: string): CSSProperties | null => {
     const r = rects[page]
     if (!r) return null
     const base = axis === 'h'
-      ? { left: tx + r.x * zoom - GUIDE_OVER, top: ty + (r.y + pos) * zoom - 3, width: r.w * zoom + 2 * GUIDE_OVER }
-      : { left: tx + (r.x + pos) * zoom - 3, top: ty + r.y * zoom - GUIDE_OVER, height: r.h * zoom + 2 * GUIDE_OVER }
+      ? { left: tx + r.x * zoom, top: ty + (r.y + pos) * zoom - 3, width: r.w * zoom }
+      : { left: tx + (r.x + pos) * zoom - 3, top: ty + r.y * zoom, height: r.h * zoom }
     return { ...base, '--gc': color } as unknown as CSSProperties
   }
 
@@ -2761,6 +3808,20 @@ export function Workspace({
     const b = Math.min(textSel.b, fl.end)
     return a < b ? [a - fl.start, b - fl.start] : null
   }
+  const freehandShape = freehandPreview
+    ? pathShapeFromPoints(
+        freehandPreview.points,
+        freehandPreview.closed,
+        tool === 'pencil',
+        tool === 'pen',
+        pencilSettings.cap === 'round' ? 0.75 : 0.18 + (pencilSettings.smoothness / 100) * 0.36,
+        tool === 'pencil' ? pencilSettings.cap : 'round',
+      )
+    : null
+
+  void showProps
+  void showPages
+  void showParagraph
 
   return (
     <div className="workspace">
@@ -2832,13 +3893,53 @@ export function Workspace({
         )}
       </div>
 
+      <ContextToolbar
+        tool={space ? 'hand' : tool}
+        shape={selShape}
+        image={selImage}
+        frame={selFrame}
+        strokeWidth={drawingStrokeWidth}
+        colorTarget={colorTarget}
+        onColorTarget={setColorTarget}
+        onFlip={(axis) => selShape && flipShape(selShape.id, axis)}
+        onArrange={(op) => selShape ? arrangeObject(selShape.id, op) : selImage ? arrangeObject(selImage.id, op) : selFrame ? arrangeObject(selFrame.id, op) : undefined}
+        onOpacity={(value) => {
+          if (selShape) updateShape(selShape.id, { opacity: value }, `context-opacity:${selShape.id}`)
+          else if (selImage) updateImage(selImage.id, { opacity: value }, `context-opacity:${selImage.id}`)
+        }}
+        onImageFit={(fit) => selImage && updateImage(selImage.id, { fit })}
+        onImageFlip={(axis) => selImage && updateImage(selImage.id, axis === 'x' ? { flipX: !selImage.flipX } : { flipY: !selImage.flipY })}
+        onImageWrap={(wrap) => selImage && updateImage(selImage.id, { wrap })}
+        onImageMatchShape={() => { const asset = selImage && assets[selImage.assetId]; if (selImage && asset) updateImage(selImage.id, { h: selImage.w * (asset.height / asset.width) }) }}
+        onImageDelete={() => { if (selImage) { onImagesChange(images.filter((image) => image.id !== selImage.id)); setSelectedId(null) } }}
+        onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
+        onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
+        onLeading={(leading) => selFrame && applyParagraphStyle(selFrame.id, { leading })}
+        onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
+        onParagraphSpacing={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)}
+        onFill={(color) => selShape && updateShape(selShape.id, colorTarget === 'fill' ? { fill: color, fillGradient: undefined } : { stroke: color }, `context-${colorTarget}:${selShape.id}`)}
+        onStrokeWidth={(value) => {
+          setDrawingStrokeWidth(value)
+          if (selShape) updateShape(selShape.id, { strokeWidth: value }, `context-stroke:${selShape.id}`)
+        }}
+      />
+
       <div className="ws-main">
         <Toolbox
           tool={space ? 'hand' : tool}
           onSelect={setTool}
-          onSettings={(id) => setToolDialog(id === 'rect' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
+          onSettings={(id) => setToolDialog(id === 'pen' || id === 'pencil' ? id : id === 'rect' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
           previewMode={previewMode}
           onPreviewMode={onPreviewMode}
+          colorTarget={colorTarget}
+          fillColor={selShape?.fill}
+          strokeColor={selShape?.stroke}
+          onColorTarget={setColorTarget}
+          onOpenColor={(target) => {
+            setColorTarget(target)
+            setColorDialogTarget(target)
+            setTool('color')
+          }}
         />
         <div
           className="ws-center"
@@ -2858,6 +3959,12 @@ export function Workspace({
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={cancelDrag}
+            onDoubleClick={(e) => {
+              if (tool === 'pen' && penPoints.current.length >= 2) {
+                e.preventDefault()
+                finishPen(false)
+              }
+            }}
           >
             <div className="sheet" style={{ width: sheetW, height: sheetH }}>
               <svg width={sheetW} height={sheetH}>
@@ -2865,6 +3972,21 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
+              {groupSelection && !previewMode && !placing && placingImages.length === 0 && tool === 'select' && (
+                <div
+                  className="group-selection"
+                  style={{
+                    left: tx + groupSelection.box.x * zoom,
+                    top: ty + groupSelection.box.y * zoom,
+                    width: groupSelection.box.w * zoom,
+                    height: groupSelection.box.h * zoom,
+                  }}
+                >
+                  {HANDLES.map((h) => (
+                    <div key={h} className={'handle ' + h} onPointerDown={(e) => beginGroupResize(h, e)} />
+                  ))}
+                </div>
+              )}
               {visibleImages.map((im) => (
                 <ImageFrameView
                   key={im.id}
@@ -2875,6 +3997,7 @@ export function Workspace({
                   ty={ty}
                   z={rank.get(im.id) ?? 0}
                   selected={im.id === selectedId}
+                  locked={layerLocked || !!itemLocks[im.id]}
                   marked={!previewMode && multiSel.includes(im.id)}
                   showEdge={!previewMode}
                   onPointerDown={onImagePointerDown(im.id)}
@@ -2890,14 +4013,15 @@ export function Workspace({
                   tx={tx}
                   ty={ty}
                   z={rank.get(sh.id) ?? 0}
-                  selected={sh.id === selectedId}
+                  selected={sh.id === selectedId && tool !== 'pencil'}
+                  locked={layerLocked || !!itemLocks[sh.id]}
                   marked={!previewMode && multiSel.includes(sh.id)}
                   showEdge={!previewMode}
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
-                  activeCorners={sh.id === selectedId ? activeCornersOf(sh.id) : undefined}
+                  activeCorners={sh.id === selectedId ? [0, 1, 2, 3] : undefined}
                   together={roundTogether}
                   directMode={tool === 'direct'}
-                  selectedPoints={sh.id === pointSel?.id ? pointSel.indices : undefined}
+                  selectedPoints={tool === 'direct' ? (editableRing(sh)?.map((_, index) => index) ?? undefined) : sh.id === pointSel?.id ? pointSel.indices : undefined}
                   asset={sh.image ? assets[sh.image.assetId] : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
@@ -2911,6 +4035,7 @@ export function Workspace({
                   }}
                   onPegDown={onPegDown(sh.id)}
                   onPointDown={onPointDown(sh.id)}
+                  onDirectMove={tool === 'direct' ? (event) => beginFrameDrag(event as unknown as ReactPointerEvent<HTMLElement>, sh.id, 'move') : undefined}
                   onPointDouble={onPointDouble(sh.id)}
                   onEdgeDown={onEdgeDown(sh.id)}
                   onHandleGrab={onHandleGrab(sh.id)}
@@ -2929,7 +4054,7 @@ export function Workspace({
                     ...(shapeStart.current.kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
                     ...(shapeStart.current.kind === 'rect' && shapePrefs.rect.radius > 0 ? { radii: [shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius] as [number, number, number, number] } : {}),
                     ...(shapeFlip ? { flip: shapeFlip } : {}),
-                    fill: shapeStart.current.kind === 'line' ? null : DEFAULT_SHAPE_FILL,
+                    fill: null,
                     stroke: DEFAULT_SHAPE_STROKE,
                     strokeWidth: 1,
                   }}
@@ -2941,6 +4066,39 @@ export function Workspace({
                   showEdge
                 />
               )}
+              {freehandShape && (
+                <ShapeFrameView
+                  ghost
+                  shape={freehandShape}
+                  zoom={zoom}
+                  tx={tx}
+                  ty={ty}
+                  z={900002}
+                  selected={tool === 'pen'}
+                  directMode={tool === 'pen'}
+                  selectedPoints={tool === 'pen' && freehandShape.geom ? freehandShape.geom[0][0].map((_, index) => index) : undefined}
+                  onPointDown={
+                    tool === 'pen'
+                      ? (index, event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          penDrag.current = { index, start: toWorld(event.clientX, event.clientY) }
+                          setPenDragging(true)
+                          event.currentTarget.setPointerCapture(event.pointerId)
+                          vpRef.current?.setPointerCapture(event.pointerId)
+                        }
+                      : undefined
+                  }
+                  showEdge
+                />
+              )}
+              {tool === 'eraser' && eraserPoint && (
+                <div
+                  className="eraser-brush"
+                  aria-hidden="true"
+                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2 }}
+                />
+              )}
               {angleTip && (
                 <div className="guide-tip" style={{ left: tx + angleTip.x * zoom + 10, top: ty + angleTip.y * zoom - 24 }}>
                   {angleTip.deg.toFixed(1)}°
@@ -2949,6 +4107,7 @@ export function Workspace({
               {visibleFrames.map((f) => {
                 const fl = flow.get(f.id)
                 if (!fl) return null
+                const storyHead = chainOf(frames, f.id)[0]
                 return (
                   <TextFrameView
                     key={f.id}
@@ -2961,6 +4120,7 @@ export function Workspace({
                     paraGaps={fl.paraGaps}
                     startParaIndex={fl.startParaIndex}
                     atParaStart={fl.atParaStart}
+                    paragraphPatches={storyHead.paragraphStylePatches}
                     spaceBeforeFirst={fl.spaceBeforeFirst}
                     spaceAfterLast={fl.spaceAfterLast}
                     z={rank.get(f.id) ?? 0}
@@ -2970,6 +4130,7 @@ export function Workspace({
                     tx={tx}
                     ty={ty}
                     selected={f.id === selectedId}
+                    locked={layerLocked || !!itemLocks[f.id]}
                     marked={!previewMode && multiSel.includes(f.id)}
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
@@ -2999,7 +4160,7 @@ export function Workspace({
                 <>
                   {guides.map((g) => {
                     if (g.id === guideDrag?.id) return null
-                    const st = guideStyle(g.axis, g.page, g.pos, g.color ?? DEFAULT_GUIDE_COLOR)
+                    const st = guideStyle(g.axis, g.page, g.pos, displayGuideColor(g.color ?? DEFAULT_GUIDE_COLOR))
                     return st ? (
                       <div
                         key={g.id}
@@ -3028,7 +4189,7 @@ export function Workspace({
                       return (
                         <>
                           {align && <div className={`guide-align ${guideDrag.axis}`} style={align} />}
-                          <div className={`guide ${guideDrag.axis} selected${guideDrag.remove ? ' removing' : ''}${snap ? ' aligned' : ''}`} style={st} />
+                          <div className={`guide ${guideDrag.axis} dragging${guideDrag.remove ? ' removing' : ''}${snap ? ' aligned' : ''}`} style={st} />
                           {!guideDrag.remove && (
                             <div className={'guide-tip' + (snap ? ' aligned' : '')} style={tip}>
                               {formatLength(guideDrag.pos, doc.unit)}
@@ -3189,134 +4350,169 @@ export function Workspace({
             </div>
           </div>
         </div>
-        {(showPages || showProps || showParagraph) && (
-          <div className="side-panels">
-            {showParagraph && (
-              <ParagraphPanel
-                frame={selFrame}
-                style={paragraphStyle}
-                scope={panelSel ? 'selection' : 'all'}
-                unit={doc.unit}
-                onChange={(patch) => panelHead && applyParagraphStyle(panelHead.id, patch)}
-                onSpacingChange={(patch) => panelHead && applyParaSpacing(panelHead.id, patch)}
-              />
-            )}
-            {showPages && (
-              <PagesPanel
-                doc={doc}
-                frames={frames}
-                images={images}
-                shapes={shapes}
-                spreads={spreads}
-                currentSpread={cur}
-                selected={selPage}
-                onSelect={selectPage}
-                onInsert={insertPages}
-                onDelete={deleteSelectedPage}
-                onMove={movePage}
-                onView={(perRow) => {
-                  // a way to look at the pages: the arrangement is reset to rows of that many pages
-                  pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] })
-                  window.setTimeout(() => fitSpread(), 80)
-                }}
-              />
-            )}
-            {showProps && selGuides.length > 0 && (
-              <GuideProperties
-                guides={selGuides}
-                pageNumber={doc.startPage + selGuides[0].page}
-                unit={doc.unit}
-                onPos={(pos) => updateGuide(selGuides[0].id, { pos }, `guidepos:${selGuides[0].id}`)}
-                onColor={(color) => {
-                  setGuideColor(color)
-                  const chosen = new Set(selGuides.map((g) => g.id))
-                  onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, color } : g)))
-                }}
-                onDelete={() => {
-                  const chosen = new Set(selGuides.map((g) => g.id))
-                  onGuidesChange(guides.filter((g) => !chosen.has(g.id)))
-                  setGuideSel([])
-                }}
-              />
-            )}
-            {showProps && multiSel.length > 1 && (
-              <MultiSelectionPanel
-                count={multiSel.length}
-                shapeCount={shapes.filter((sh) => multiSel.includes(sh.id)).length}
-                onShapeOp={combineSelectedShapes}
-                canInsertImage={!!imageShapeMerge}
-                onInsertImage={insertImageIntoShape}
-                onDelete={() => deleteSelection(multiSel, [])}
-              />
-            )}
-            {showProps && selShape && (
-              <ShapeProperties
-                shape={selShape}
-                unit={doc.unit}
-                onGeometry={(patch) => updateShape(selShape.id, patch, `geo:${selShape.id}`)}
-                onChange={(patch) => updateShape(selShape.id, patch, patch.radii || patch.strokeWidth !== undefined ? `shape:${selShape.id}` : undefined)}
-                onArrange={(op) => arrangeObject(selShape.id, op)}
-                onDelete={() => {
-                  onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
-                  setSelectedId(null)
-                }}
-                linked={roundTogether}
-                onLinkedChange={(v) => {
-                  setRoundTogether(v)
-                  setCornerPick(null)
-                }}
-                cornersPicked={activeCornersOf(selShape.id).length < 4}
-                onPickAllCorners={() => setCornerPick(null)}
-                pathStyle={selShape.pathText ? pathStyleShown(selShape) : null}
-                pathScope={selShape.pathText && pathSel && pathSel.id === selShape.id && pathSel.a !== pathSel.b && pathSel.b <= selShape.pathText.text.length ? 'selection' : 'all'}
-                onPathChar={(patch) => applyPathChar(selShape.id, patch)}
-                onPathChange={(patch) => updatePathText(selShape.id, patch, `path:${selShape.id}`)}
-                onEditPath={() => setPathEdit(selShape.id)}
-                onRemovePath={() => {
-                  onShapesChange(shapes.map((sh) => (sh.id === selShape.id ? { ...sh, pathText: undefined } : sh)))
-                  setPathEdit(null)
-                }}
-              />
-            )}
-            {showProps && selImage && (
-              <ImageProperties
-                image={selImage}
-                asset={assets[selImage.assetId]}
-                unit={doc.unit}
-                onGeometry={(patch) => updateImage(selImage.id, patch, `geo:${selImage.id}`)}
-                onFit={(fit: ImageFit) => updateImage(selImage.id, { fit })}
-                onWrap={(wrap) => updateImage(selImage.id, { wrap })}
-                onWrapOffset={(wrapOffset) => updateImage(selImage.id, { wrapOffset }, `wrapoff:${selImage.id}`)}
-                onArrange={(op) => arrangeObject(selImage.id, op)}
-                onMatchShape={() => {
-                  const a = assets[selImage.assetId]
-                  if (a) updateImage(selImage.id, { h: selImage.w * (a.height / a.width) })
-                }}
-                onDelete={() => {
-                  onImagesChange(images.filter((im) => im.id !== selImage.id))
-                  setSelectedId(null)
-                }}
-              />
-            )}
-            {showProps && !selImage && !selShape && selGuides.length === 0 && multiSel.length < 2 && (
-          <PropertiesPanel
-            frame={selFrame}
-            style={panelStyle}
-            scope={panelSel ? 'selection' : 'all'}
-            unit={doc.unit}
-            thread={threadInfo}
-            onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
-            onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
-            onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
-            onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
-            onArrange={(op) => selFrame && arrangeObject(selFrame.id, op)}
-            onLink={() => selFrame && setLinkFrom(selFrame.id)}
-            onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
-          />
-            )}
-          </div>
-        )}
+        <DockingPanels
+          panels={[
+            {
+              id: 'properties',
+              label: 'מאפיינים',
+              visible: true,
+              content: (
+                <>
+                  {selGuides.length > 0 && (
+                    <GuideProperties
+                      guides={selGuides}
+                      pageNumber={doc.startPage + selGuides[0].page}
+                      unit={doc.unit}
+                      onPos={(pos) => updateGuide(selGuides[0].id, { pos }, `guidepos:${selGuides[0].id}`)}
+                      onColor={(color) => {
+                        setGuideColor(color)
+                        const chosen = new Set(selGuides.map((g) => g.id))
+                        onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, color } : g)))
+                      }}
+                      onDelete={() => {
+                        const chosen = new Set(selGuides.map((g) => g.id))
+                        onGuidesChange(guides.filter((g) => !chosen.has(g.id)))
+                        setGuideSel([])
+                      }}
+                    />
+                  )}
+                  {multiSel.length > 1 && (
+                    <MultiSelectionPanel
+                      count={multiSel.length}
+                      shapeCount={shapes.filter((sh) => multiSel.includes(sh.id)).length}
+                      onShapeOp={combineSelectedShapes}
+                      onAlign={alignObjects}
+                      canInsertImage={!!imageShapeMerge}
+                      onInsertImage={insertImageIntoShape}
+                      onDelete={() => deleteSelection(multiSel, [])}
+                    />
+                  )}
+                  {selShape && (
+                    <ShapeProperties
+                      shape={selShape}
+                      unit={doc.unit}
+                      onGeometry={(patch) => updateShape(selShape.id, patch, `geo:${selShape.id}`)}
+                      onChange={(patch) => updateShape(selShape.id, patch, patch.radii || patch.strokeWidth !== undefined ? `shape:${selShape.id}` : undefined)}
+                      onArrange={(op) => arrangeObject(selShape.id, op)}
+                      onDelete={() => {
+                        onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
+                        setSelectedId(null)
+                      }}
+                      linked={roundTogether}
+                      onLinkedChange={(v) => {
+                        setRoundTogether(v)
+                        setCornerPick(null)
+                      }}
+                      cornersPicked={activeCornersOf(selShape.id).length < 4}
+                      onPickAllCorners={() => setCornerPick(null)}
+                      pathStyle={selShape.pathText ? pathStyleShown(selShape) : null}
+                      pathScope={selShape.pathText && pathSel && pathSel.id === selShape.id && pathSel.a !== pathSel.b && pathSel.b <= selShape.pathText.text.length ? 'selection' : 'all'}
+                      onPathChar={(patch) => applyPathChar(selShape.id, patch)}
+                      onPathChange={(patch) => updatePathText(selShape.id, patch, `path:${selShape.id}`)}
+                      onEditPath={() => setPathEdit(selShape.id)}
+                      onRemovePath={() => {
+                        onShapesChange(shapes.map((x) => (x.id === selShape.id ? { ...x, pathText: undefined } : x)))
+                        setPathEdit(null)
+                      }}
+                    />
+                  )}
+                  {selImage && (
+                    <ImageProperties
+                      image={selImage}
+                      asset={assets[selImage.assetId]}
+                      unit={doc.unit}
+                      onGeometry={(patch) => updateImage(selImage.id, patch, `geo:${selImage.id}`)}
+                      onFit={(fit: ImageFit) => updateImage(selImage.id, { fit })}
+                      onWrap={(wrap) => updateImage(selImage.id, { wrap })}
+                      onWrapOffset={(wrapOffset) => updateImage(selImage.id, { wrapOffset }, `wrapoff:${selImage.id}`)}
+                      onArrange={(op) => arrangeObject(selImage.id, op)}
+                      onMatchShape={() => {
+                        const a = assets[selImage.assetId]
+                        if (a) updateImage(selImage.id, { h: selImage.w * (a.height / a.width) })
+                      }}
+                      onDelete={() => {
+                        onImagesChange(images.filter((im) => im.id !== selImage.id))
+                        setSelectedId(null)
+                      }}
+                    />
+                  )}
+                  {!selImage && !selShape && selGuides.length === 0 && multiSel.length < 2 && (
+                    <PropertiesPanel
+                      frame={selFrame}
+                      style={panelStyle}
+                      scope={panelSel ? 'selection' : 'all'}
+                      unit={doc.unit}
+                      thread={threadInfo}
+                      onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
+                      onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
+                      onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
+                      onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
+                      onArrange={(op) => selFrame && arrangeObject(selFrame.id, op)}
+                      onLink={() => selFrame && setLinkFrom(selFrame.id)}
+                      onUnlink={() => selFrame && onFramesChange(unlinkBefore(frames, selFrame.id))}
+                    />
+                  )}
+                </>
+              ),
+            },
+            {
+              id: 'paragraph',
+              label: 'פסקה',
+              visible: true,
+              content: <ParagraphPanel frame={selFrame} style={paragraphStyle} scope={panelSel ? 'selection' : 'all'} unit={doc.unit} onChange={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)} onSpacingChange={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)} />,
+            },
+            {
+              id: 'paragraph-styles',
+              label: 'סגנונות פסקה',
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={deleteParagraphStyle} />,
+            },
+            {
+              id: 'style-manager',
+              label: 'ניהול סגנונות',
+              floating: true,
+              content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onClean={() => cleanSpacingCmd()} />,
+            },
+            {
+              id: 'pages',
+              label: 'עמודים',
+              visible: true,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selected={selPage} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} />,
+            },
+            {
+              id: 'color',
+              label: 'צבע',
+              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, `color-tool:${colorTool ?? 'color'}`)} />,
+            },
+            {
+              id: 'gradient',
+              label: 'מעבר צבע',
+              content: <ColorToolsPanel tool="gradient" shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, 'color-tool:gradient')} />,
+            },
+            {
+              id: 'swatches',
+              label: 'דוגמיות',
+              content: <ColorToolsPanel tool="swatches" shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, 'color-tool:swatches')} />,
+            },
+            {
+              id: 'layers',
+              label: 'שכבות',
+              content: <LayersPanel frames={frames} images={images} shapes={shapes} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onVisibility={setLayerVisible} onLock={(locked) => { setLayerLocked(locked); if (locked) { setSelectedId(null); setMultiSel([]); setGuideSel([]) } }} onItemVisibility={(id, visible) => { setItemVisibility((current) => ({ ...current, [id]: visible })); if (!visible && selectedId === id) setSelectedId(null) }} onItemLock={(id, locked) => { setItemLocks((current) => ({ ...current, [id]: locked })); if (locked && selectedId === id) setSelectedId(null) }} />,
+            },
+          ]}
+        />
       </div>
+
+      {colorDialogTarget && (
+        <ColorPickerDialog
+          initial={colorDialogTarget === 'fill' ? selShape?.fill ?? '#0066ff' : selShape?.stroke ?? '#000000'}
+          target={colorDialogTarget}
+          onApply={(color) => {
+            if (!selShape) return
+            updateShape(selShape.id, colorDialogTarget === 'fill' ? { fill: color, fillGradient: undefined } : { stroke: color }, `color-dialog:${colorDialogTarget}`)
+          }}
+          onClose={() => setColorDialogTarget(null)}
+        />
+      )}
 
       {pathEdit &&
         (() => {
@@ -3334,7 +4530,18 @@ export function Workspace({
             />
           )
         })()}
-      {toolDialog && (
+      {(toolDialog === 'pen' || toolDialog === 'pencil') && (
+        <StrokeSettingsDialog
+          toolName={toolDialog === 'pen' ? 'העט' : 'העיפרון'}
+          value={drawingStrokeWidth}
+          unit={doc.unit}
+          pencil={toolDialog === 'pencil' ? pencilSettings : undefined}
+          onPencilChange={setPencilSettings}
+          onApply={setDrawingStrokeWidth}
+          onClose={() => setToolDialog(null)}
+        />
+      )}
+      {toolDialog && toolDialog !== 'pen' && toolDialog !== 'pencil' && (
         <ShapeToolDialog
           kind={toolDialog}
           prefs={shapePrefs}

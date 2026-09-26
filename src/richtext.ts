@@ -1,4 +1,5 @@
-import type { CharStyle, Run } from './document'
+import type { CharStyle, Run, TextAlign } from './document'
+import { sliceRuns } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 
 /** CSS for one run. `scale` is the zoom (1 for measuring); font sizes are stored in points. */
@@ -171,6 +172,66 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
   return frag
 }
 
+/** Layout a single paragraph may override on its own (a paragraph style applied to it, or settings changed for it). */
+export interface ParagraphPatch {
+  leading?: number
+  indentLeft?: number
+  indentRight?: number
+  firstLineIndent?: number
+  align?: TextAlign
+}
+
+/** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || !!p.indentLeft || !!p.indentRight || p.align !== undefined)
+
+/**
+ * `buildRunNodes`, for a story some of whose paragraphs carry their own layout (`ParagraphPatch`): every paragraph
+ * becomes a block with its own line height / side indents / alignment — the same structure TextFrameView draws for
+ * reading — so the frame-fitting measurer (textLayout.ts) and the PDF export lay text out exactly like the screen.
+ * Text with no such paragraph goes through the flat `buildRunNodes` untouched. The live editor deliberately keeps the
+ * flat form: a caret at a paragraph's very start would land at the end of the block before it.
+ *
+ * The spacers that follow a paragraph's closing "
+" (`.para-gap`, `.para-indent`) open the NEXT paragraph's block —
+ * left at the end of the previous one they'd sit alone on an extra empty line.
+ */
+export function buildParagraphNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}, patches?: ParagraphPatch[]): DocumentFragment {
+  if (!patches || !patches.some(shapesBlock)) return buildRunNodes(text, runs, scale, opts)
+  const frag = document.createDocumentFragment()
+  const first = opts.startParaIndex ?? 0
+  const indentOf = (paragraph: number) => patches[paragraph]?.firstLineIndent ?? opts.firstLineIndent ?? 0
+  let pos = 0
+  let paragraph = first
+  while (pos < text.length) {
+    const nl = text.indexOf('\n', pos)
+    const end = nl < 0 ? text.length : nl + 1
+    const block = document.createElement('div')
+    const patch = patches[paragraph]
+    if (patch?.align) block.style.textAlign = patch.align
+    if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
+    if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
+    if (patch?.indentRight) block.style.paddingRight = `${patch.indentRight * scale}px`
+    block.style.boxSizing = 'border-box'
+    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks })
+    const lead = nodes.firstChild as HTMLElement | null
+    const isOpening = pos > 0 || !!opts.atParaStart
+    // the previous paragraph's closing gap, then this paragraph's own first-line indent
+    const spacers: HTMLElement[] = []
+    if (pos > 0) {
+      const gap = opts.paraGaps ? opts.paraGaps[paragraph - 1] : opts.paraLineHeight
+      if (gap) spacers.push(paraGap(gap * scale))
+    }
+    const indent = indentOf(paragraph)
+    if (indent && isOpening) spacers.push(paraIndent(indent * scale))
+    if (lead) for (const spacer of spacers.reverse()) lead.insertBefore(spacer, lead.firstChild)
+    block.appendChild(nodes)
+    frag.appendChild(block)
+    pos = end
+    paragraph++
+  }
+  return frag
+}
+
 /**
  * Empty floated shapes that keep text out of the areas of pictures (text wrap). They go before the text, inside the same
  * container, so the browser flows the lines around them. They hold no characters, so text offsets are unaffected.
@@ -211,9 +272,7 @@ export function readSelectionIn(root: HTMLElement): [number, number] | null {
   return [Math.min(a, b), Math.max(a, b)]
 }
 
-/** Character offset `target` of `root`'s text, as a DOM (node, offset) position. Shared by `setSelectionIn` and
- *  pdfExport.ts's own line-break lookup (mapping a word's [start,end) into Ranges for `getClientRects()`). */
-export function locate(root: HTMLElement, target: number): [Node, number] {
+function locate(root: HTMLElement, target: number): [Node, number] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let pos = 0
   let last: Text | null = null

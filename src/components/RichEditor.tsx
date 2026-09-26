@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run } from '../document'
 import { buildRunNodes, buildWrapFloats, readSelectionIn, setSelectionIn } from '../richtext'
+import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
 
@@ -142,7 +143,9 @@ export function RichEditor(p: Props) {
 
     const onPaste = (e: ClipboardEvent) => {
       e.preventDefault()
-      const text = (e.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n')
+      const clipboardText = e.clipboardData?.getData('text/plain') ?? ''
+      const entry = isClipToken(clipboardText) ? clipForToken(clipboardText) : null
+      const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
       if (!text) return
       const [a, b] = range()
       live.current.onEdit(a, b, text)

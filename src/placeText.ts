@@ -76,6 +76,7 @@ export interface PourResult {
 }
 
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
+const paragraphIndexAt = (text: string, offset: number) => (text.slice(0, offset).match(/\n/g) ?? []).length
 
 /** The text frames of some pages: one exactly on the margins, or — when the page has columns — one exactly on each column. */
 export function primaryFrames(doc: DocSettings, pageIndices: number[]): TextFrame[] {
@@ -146,7 +147,7 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
     headId = head.id
   } else {
     const runs = normalizeRuns(placed.text, placed.runs, placed.style)
-    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, next: null, z }]
+    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, paragraphStyleIds: placed.paragraphStyleIds, paragraphStyleNames: placed.paragraphStyleNames, next: null, z }]
     headId = id
   }
 
@@ -154,7 +155,7 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
   const headFrame = next.find((f) => f.id === headId)!
   const storyRuns = normalizeRuns(headFrame.text, headFrame.runs, headFrame)
   const remaining: PlacedText | null = last.overflow
-    ? { ...placed, text: last.story.slice(last.end), runs: sliceRuns(storyRuns, last.end, last.story.length), continueFrom: id }
+    ? { ...placed, text: last.story.slice(last.end), runs: sliceRuns(storyRuns, last.end, last.story.length), paragraphStyleIds: placed.paragraphStyleIds?.slice(paragraphIndexAt(last.story, last.end)), paragraphStyleNames: placed.paragraphStyleNames?.slice(paragraphIndexAt(last.story, last.end)), continueFrom: id }
     : null
   return { content: { doc, frames: next }, headId, remaining, overflow: false, pagesAdded: 0 }
 }
@@ -241,6 +242,8 @@ export function pourText(
     // the whole story lives in the first frame; the other frames only display their share
     text: i === 0 ? story : '',
     runs: i === 0 ? runs : [],
+    paragraphStyleIds: i === 0 ? placed.paragraphStyleIds : undefined,
+    paragraphStyleNames: i === 0 ? placed.paragraphStyleNames : undefined,
     next: i < boxes.length - 1 ? ids[i + 1] : null,
     // an existing frame keeps its place in the stack
     z: i === 0 && existing ? existing.z : z,

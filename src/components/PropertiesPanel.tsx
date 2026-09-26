@@ -77,7 +77,7 @@ export function CharControls({ style, onCharStyle }: { style: CharStyle; onCharS
 
             <div className="grid2">
               <Labeled label="גודל">
-                <NumberField value={style.fontSize} unit="px" unitLabel="pt" min={1} max={999} onChange={(v) => onCharStyle({ fontSize: v })} />
+                <NumberField value={style.fontSize} unit="px" unitLabel="pt" min={1} max={999} step={1} onChange={(v) => onCharStyle({ fontSize: v })} />
               </Labeled>
               <Labeled label="עיצוב">
                 <div className="toggle-group">
