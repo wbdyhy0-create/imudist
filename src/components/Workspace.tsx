@@ -3695,14 +3695,15 @@ export function Workspace({
     const id = `paragraph-style-${Date.now()}`
     setParagraphStyles((current) => [...current, { id, name: `סגנון ${current.length + 1}`, basedOnId: 'body', patch: {} }])
   }
-  const deleteParagraphStyle = (id: string) => {
+  const deleteParagraphStyle = (id: string, baseFrames = frames, fallbackId?: string) => {
     if (paragraphStyles.length <= 1) return
-    const fallback = paragraphStyles.find((style) => style.id !== id)?.id
+    const fallback = fallbackId ?? paragraphStyles.find((style) => style.id !== id)?.id
     setParagraphStyles((current) => current.filter((style) => style.id !== id))
-    if (fallback)
+    const uses = (frame: TextFrame) => frame.paragraphStyleId === id || !!frame.paragraphStyleIds?.includes(id)
+    if (fallback && baseFrames.some(uses))
       onFramesChange(
-        frames.map((frame) =>
-          frame.paragraphStyleId === id || frame.paragraphStyleIds?.includes(id)
+        baseFrames.map((frame) =>
+          uses(frame)
             ? {
                 ...frame,
                 ...(frame.paragraphStyleId === id ? { paragraphStyleId: fallback } : {}),
@@ -3731,50 +3732,90 @@ export function Workspace({
     return Object.entries(style).filter(([key]) => ['fontFamily', 'fontSize', 'weight', 'italic', 'color'].includes(key)).every(([key, value]) => value === undefined || run[key as keyof CharStyle] === value)
   }
 
-  const swapParagraphStyles = (sourceId: string, targetId: string, removeSource: boolean) => {
-    if (sourceId === targetId) return
-    const target = resolveParagraphStyle(targetId)
-    const nextFrames = frames.map((frame) => {
-      let next = frame
-      if (frame.paragraphStyleId === sourceId) next = { ...next, ...target, paragraphStyleId: targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
-      if (frame.paragraphStyleIds?.length) {
-        let runs = normalizeRuns(frame.text, frame.runs, frame)
-        const ids = frame.paragraphStyleIds.map((id, index) => {
-          const isSource = id === sourceId || frame.paragraphStyleNames?.[index] === paragraphStyles.find((style) => style.id === sourceId)?.name || (!frame.paragraphStyleIds?.length && paragraphUsesStyle(frame, index, sourceId))
-          if (!isSource) return id
-          const [start, end] = paragraphBounds(frame.text, index)
-          runs = styleRange(runs, start, end, target)
-          return targetId
-        })
-        const names = frame.paragraphStyleNames?.map((name, index) => ids[index] === targetId ? paragraphStyles.find((style) => style.id === targetId)?.name ?? name : name)
-        next = { ...next, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs }
-      } else if (frame.text) {
-        let runs = normalizeRuns(frame.text, frame.runs, frame)
-        frame.text.split('\n').forEach((_, index) => {
-          if (paragraphUsesStyle(frame, index, sourceId)) {
-            const [start, end] = paragraphBounds(frame.text, index)
-            runs = styleRange(runs, start, end, target)
-          }
-        })
-        next = { ...next, runs }
-      }
-      return next
-    })
-    onFramesChange(nextFrames, `style-swap:${sourceId}:${targetId}`)
-    if (removeSource) deleteParagraphStyle(sourceId)
-  }
-
-  const findParagraphStyle = (styleId: string, direction: -1 | 0 | 1 = 0) => {
-    const heads = headFrames(frames)
+  /**
+   * The paragraphs of a story that carry a style: the ones its per-paragraph lists name it for, or - for a story that has
+   * no lists - all of them when the story itself has the style, or those whose look matches it.
+   */
+  const paragraphsWithStyle = (frame: TextFrame, styleId: string): number[] => {
     const name = paragraphStyles.find((style) => style.id === styleId)?.name
-    const occurrences = heads.flatMap((frame) => frame.text.split('\n').flatMap((_, index) => {
+    return frame.text.split('\n').flatMap((_, index) => {
       const idsMatch = frame.paragraphStyleIds?.[index] === styleId
       const namesMatch = !!name && frame.paragraphStyleNames?.[index] === name
       const legacyMatch = !frame.paragraphStyleIds?.length && paragraphUsesStyle(frame, index, styleId)
-      if (frame.paragraphStyleId !== styleId && !idsMatch && !namesMatch && !legacyMatch) return []
+      return frame.paragraphStyleId === styleId || idsMatch || namesMatch || legacyMatch ? [index] : []
+    })
+  }
+
+  /** every paragraph that carries a style, story by story in reading order */
+  const styleOccurrences = (styleId: string) =>
+    headFrames(frames).flatMap((frame) =>
+      paragraphsWithStyle(frame, styleId).map((index) => {
+        const [start, end] = paragraphBounds(frame.text, index)
+        return { frame, index, start, end }
+      }),
+    )
+
+  /**
+   * Gives paragraphs of a story another paragraph style: its name in the per-paragraph lists, the character look in the
+   * runs, and the paragraph look (leading, spacing, indents, alignment) in the paragraph overrides. A story that has no
+   * lists yet gets them here, so the paragraphs that stay on `sourceId` still carry it afterwards.
+   */
+  const restyleParagraphs = (frame: TextFrame, indexes: number[], sourceId: string, targetId: string): TextFrame => {
+    if (indexes.length === 0) return frame
+    const resolved = resolveParagraphStyle(targetId)
+    const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
+    const charPatch = pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking']) as Partial<CharStyle>
+    // what the old style set and the new one leaves alone goes back to plain: bold text swapped to a regular style must not stay bold
+    const leaving = resolveParagraphStyle(sourceId)
+    if (leaving.weight !== undefined && charPatch.weight === undefined) charPatch.weight = 400
+    if (leaving.italic !== undefined && charPatch.italic === undefined) charPatch.italic = false
+    if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
+    const layout = pick(['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
+    const count = frame.text.split('\n').length
+    const hadLists = !!frame.paragraphStyleIds?.length
+    const carriesSource = hadLists ? new Set<number>() : new Set(paragraphsWithStyle(frame, sourceId))
+    const sourceName = paragraphStyles.find((style) => style.id === sourceId)?.name ?? ''
+    const targetName = paragraphStyles.find((style) => style.id === targetId)?.name ?? ''
+    const ids = Array.from({ length: count }, (_, i) => (hadLists ? frame.paragraphStyleIds![i] ?? '' : carriesSource.has(i) ? sourceId : frame.paragraphStyleId ?? ''))
+    const names = Array.from({ length: count }, (_, i) => (hadLists ? frame.paragraphStyleNames?.[i] ?? '' : carriesSource.has(i) ? sourceName : ''))
+    const patches = Array.from({ length: count }, (_, i) => frame.paragraphStylePatches?.[i] ?? {})
+    const override = (list: (number | null)[] | undefined, index: number, value: number | undefined) => {
+      if (value !== undefined) return withParaOverride(list, index, value)
+      if (list?.[index] == null) return list
+      const out = list.slice()
+      out[index] = null
+      return out
+    }
+    let runs = normalizeRuns(frame.text, frame.runs, frame)
+    let paraSpaceBefore = frame.paraSpaceBefore
+    let paraSpaceAfter = frame.paraSpaceAfter
+    for (const index of indexes) {
       const [start, end] = paragraphBounds(frame.text, index)
-      return [{ frame, start, end }]
-    }))
+      ids[index] = targetId
+      names[index] = targetName
+      patches[index] = layout
+      runs = styleRange(runs, start, end, charPatch)
+      paraSpaceBefore = override(paraSpaceBefore, index, layout.spaceBefore)
+      paraSpaceAfter = override(paraSpaceAfter, index, layout.spaceAfter)
+    }
+    // every paragraph moved: the story as a whole is now on the target style too
+    const whole = new Set(indexes).size >= count
+    const storyStyle = whole ? (pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
+    const paragraphStyleId = whole ? targetId : !hadLists || frame.paragraphStyleId === sourceId ? undefined : frame.paragraphStyleId
+    return { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, runs }
+  }
+
+  const swapParagraphStyles = (sourceId: string, targetId: string, removeSource: boolean) => {
+    if (sourceId === targetId) return
+    const heads = new Set(headFrames(frames).map((frame) => frame.id))
+    const nextFrames = frames.map((frame) => (heads.has(frame.id) ? restyleParagraphs(frame, paragraphsWithStyle(frame, sourceId), sourceId, targetId) : frame))
+    onFramesChange(nextFrames, `style-swap:${sourceId}:${targetId}`)
+    delete styleSearchIndex.current[sourceId]
+    if (removeSource) deleteParagraphStyle(sourceId, nextFrames, targetId)
+  }
+
+  const findParagraphStyle = (styleId: string, direction: -1 | 0 | 1 = 0) => {
+    const occurrences = styleOccurrences(styleId)
     if (occurrences.length > 0) {
       const previous = styleSearchIndex.current[styleId]
       const index = direction === 0 ? 0 : previous === undefined ? (direction < 0 ? occurrences.length - 1 : 0) : (previous + direction + occurrences.length) % occurrences.length
@@ -3799,54 +3840,27 @@ export function Workspace({
     return occurrences.length
   }
 
+  /** Replaces the style of the occurrence the explorer is on (the first, when it has not been used); returns how many are left. */
   const swapOneParagraphStyle = (sourceId: string, targetId: string) => {
-    const target = resolveParagraphStyle(targetId)
-    let changed = false
-    const nextFrames = frames.map((frame) => {
-      if (changed) return frame
-      if (frame.paragraphStyleId === sourceId) {
-        changed = true
-        return { ...frame, ...target, paragraphStyleId: targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
-      }
-      const index = frame.paragraphStyleIds?.indexOf(sourceId) ?? -1
-      const name = paragraphStyles.find((style) => style.id === sourceId)?.name
-      const nameIndex = name ? frame.paragraphStyleNames?.indexOf(name) ?? -1 : -1
-      const legacyIndex = index < 0 && nameIndex < 0 && !frame.paragraphStyleIds?.length ? frame.text.split('\n').findIndex((_, paragraphIndex) => paragraphUsesStyle(frame, paragraphIndex, sourceId)) : -1
-      const sourceIndex = index >= 0 ? index : nameIndex >= 0 ? nameIndex : legacyIndex
-      if (sourceIndex < 0) return frame
-      const [start, end] = paragraphBounds(frame.text, sourceIndex)
-      const ids = frame.paragraphStyleIds!.slice()
-      ids[sourceIndex] = targetId
-      const names = frame.paragraphStyleNames?.slice()
-      if (names) names[sourceIndex] = paragraphStyles.find((style) => style.id === targetId)?.name ?? names[sourceIndex]
-      changed = true
-      return { ...frame, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), start, end, target) }
-    })
-    if (changed) onFramesChange(nextFrames, `style-swap-one:${sourceId}:${targetId}`)
+    if (sourceId === targetId) return 0
+    const occurrences = styleOccurrences(sourceId)
+    if (occurrences.length === 0) return 0
+    const current = Math.min(styleSearchIndex.current[sourceId] ?? 0, occurrences.length - 1)
+    const occurrence = occurrences[current]
+    onFramesChange(frames.map((frame) => (frame.id === occurrence.frame.id ? restyleParagraphs(frame, [occurrence.index], sourceId, targetId) : frame)), `style-swap-one:${sourceId}:${targetId}`)
+    // the list is one shorter now, and the next occurrence sits where this one was
+    if (current > 0) styleSearchIndex.current[sourceId] = current - 1
+    else delete styleSearchIndex.current[sourceId]
+    return occurrences.length - 1
   }
 
   const batchSwapParagraphStyles = (pairs: { sourceId: string; targetId: string }[]) => {
+    const heads = new Set(headFrames(frames).map((frame) => frame.id))
     let nextFrames = frames
     for (const pair of pairs) {
       if (pair.sourceId === pair.targetId) continue
-      const target = resolveParagraphStyle(pair.targetId)
-      nextFrames = nextFrames.map((frame) => {
-        let next = frame
-        if (frame.paragraphStyleId === pair.sourceId) next = { ...next, ...target, paragraphStyleId: pair.targetId, runs: styleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, target) }
-        if (frame.paragraphStyleIds?.length) {
-          let runs = normalizeRuns(frame.text, frame.runs, frame)
-          const ids = frame.paragraphStyleIds.map((id, index) => {
-            const sourceName = paragraphStyles.find((style) => style.id === pair.sourceId)?.name
-            if (id !== pair.sourceId && frame.paragraphStyleNames?.[index] !== sourceName) return id
-            const [start, end] = paragraphBounds(frame.text, index)
-            runs = styleRange(runs, start, end, target)
-            return pair.targetId
-          })
-          const names = frame.paragraphStyleNames?.map((name, index) => ids[index] === pair.targetId ? paragraphStyles.find((style) => style.id === pair.targetId)?.name ?? name : name)
-          next = { ...next, paragraphStyleIds: ids, ...(names ? { paragraphStyleNames: names } : {}), runs }
-        }
-        return next
-      })
+      nextFrames = nextFrames.map((frame) => (heads.has(frame.id) ? restyleParagraphs(frame, paragraphsWithStyle(frame, pair.sourceId), pair.sourceId, pair.targetId) : frame))
+      delete styleSearchIndex.current[pair.sourceId]
     }
     onFramesChange(nextFrames, 'style-batch-swap')
   }
@@ -4607,7 +4621,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={deleteParagraphStyle} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
             },
             {
               id: 'style-manager',

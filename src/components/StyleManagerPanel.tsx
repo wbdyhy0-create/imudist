@@ -7,7 +7,7 @@ interface Props {
   onChange: (id: string, patch: Partial<ParagraphStyleRecord>) => void
   onCreate: (name: string, patch: ParagraphStyleRecord['patch']) => void
   onSwap: (sourceId: string, targetId: string, removeSource: boolean) => void
-  onSwapOne: (sourceId: string, targetId: string) => void
+  onSwapOne: (sourceId: string, targetId: string) => number
   onBatch: (pairs: { sourceId: string; targetId: string }[]) => void
   onFindStyle: (styleId: string, direction?: -1 | 0 | 1) => number
   onTag: (tag: string, styleId: string, removeTag: boolean, all: boolean) => void
@@ -56,7 +56,7 @@ export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOn
         <label className="field-label">סגנון מקור<select className="select" value={wordSourceId} onChange={(e) => { setWordSourceId(e.target.value); setWordFound(null) }}>{optionList}</select></label>
         <fieldset className="style-manager-explorer"><legend>סייר סגנונות מקור</legend><div className="style-manager-actions"><button className="btn" onClick={() => { const count = onFindStyle(wordSourceId, -1); setWordFound(count) }}>« הקודם</button><button className="btn" onClick={() => { const count = onFindStyle(wordSourceId, 0); setWordFound(count) }}>הצג מופע ראשון</button><button className="btn" onClick={() => { const count = onFindStyle(wordSourceId, 1); setWordFound(count) }}>הבא »</button></div><p className="style-manager-status">{wordFound === null ? 'בחר סגנון ולחץ על הצג מופע ראשון' : wordFound ? `נמצאו ${wordFound} מופעים לסגנון זה.` : 'לא נמצאו מופעים לסגנון זה.'}</p></fieldset>
         <label className="field-label">סגנון יעד<select className="select" value={wordTargetId} onChange={(e) => setWordTargetId(e.target.value)}>{optionList}</select></label>
-        <div className="style-manager-actions"><button className="btn" disabled={!wordSourceId || !wordTargetId || wordSourceId === wordTargetId} onClick={() => onSwapOne(wordSourceId, wordTargetId)}>החלף מופע זה</button><button className="btn primary" disabled={!wordSourceId || !wordTargetId || wordSourceId === wordTargetId} onClick={() => onSwap(wordSourceId, wordTargetId, true)}>החלף הכל ומחק סגנון</button></div>
+        <div className="style-manager-actions"><button className="btn" disabled={!wordSourceId || !wordTargetId || wordSourceId === wordTargetId} onClick={() => setWordFound(onSwapOne(wordSourceId, wordTargetId))}>החלף מופע זה</button><button className="btn primary" disabled={!wordSourceId || !wordTargetId || wordSourceId === wordTargetId} onClick={() => { onSwap(wordSourceId, wordTargetId, true); setWordSourceId(wordTargetId); setWordTargetId(styles.find((style) => style.id !== wordSourceId && style.id !== wordTargetId)?.id ?? wordTargetId); setWordFound(null) }}>החלף הכל ומחק סגנון</button></div>
       </div>}
 
       {tab === 'swap' && <div className="style-manager-section">
