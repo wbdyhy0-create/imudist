@@ -236,6 +236,8 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
     const paragraphProps = overlay(defaults, resolve(pStyle))
     let last: CharStyle = { fontFamily: baseFont, fontSize: baseSize, weight: paragraphProps.bold ? 700 : 400, italic: !!paragraphProps.italic, tracking: 0 }
     let firstRun: CharStyle | null = null
+    // a line break inside a paragraph is a paragraph break here, so it needs an entry in the per-paragraph lists too
+    let breaks = 0
 
     for (const r of Array.from(p.getElementsByTagName('*')).filter((el) => el.localName === 'r' && isWordElement(el))) {
       let text = ''
@@ -247,6 +249,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
         else if (c.localName === 'noBreakHyphen') text += '‑'
       }
       if (!text) continue
+      for (const char of text) if (char === '\n') breaks++
       const rPr = child(r, 'rPr')
       const props = overlay(overlay(paragraphProps, resolve(attr(child(rPr, 'rStyle'), 'val'))), readRPr(rPr, themeFonts))
       if (props.hidden) continue
@@ -266,12 +269,16 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
     const inferredId = directFormatting && (!pStyle || pStyle === defaultParagraphStyle) ? `inferred-${firstRun!.fontFamily}-${firstRun!.fontSize}-${firstRun!.weight}-${firstRun!.italic}-${firstRun!.color ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-') : null
     if (inferredId && firstRun) {
       if (!inferredStyles.has(inferredId)) inferredStyles.set(inferredId, { wordId: inferredId, name: firstRun.weight >= 600 ? 'כותרת בולד' : 'טקסט מעוצב', patch: { fontFamily: firstRun.fontFamily, fontSize: firstRun.fontSize, weight: firstRun.weight, italic: firstRun.italic, ...(firstRun.color ? { color: firstRun.color } : {}), ...(paragraphAlign ? { align: paragraphAlign } : {}) } })
-      paragraphStyleIds.push(inferredId)
-      paragraphStyleNames.push(inferredStyles.get(inferredId)!.name)
+      for (let copy = 0; copy <= breaks; copy++) {
+        paragraphStyleIds.push(inferredId)
+        paragraphStyleNames.push(inferredStyles.get(inferredId)!.name)
+      }
     } else {
       if (pStyle && !styles.has(pStyle) && firstRun && !unresolvedStyles.has(pStyle)) unresolvedStyles.set(pStyle, { wordId: pStyle, name: pStyle, patch: { fontFamily: firstRun.fontFamily, fontSize: firstRun.fontSize, weight: firstRun.weight, italic: firstRun.italic, ...(firstRun.color ? { color: firstRun.color } : {}), ...(paragraphAlign ? { align: paragraphAlign } : {}) } })
-      paragraphStyleIds.push(pStyle ?? '')
-      paragraphStyleNames.push(paragraphStyles.find((style) => style.wordId === pStyle)?.name ?? pStyle ?? '')
+      for (let copy = 0; copy <= breaks; copy++) {
+        paragraphStyleIds.push(pStyle ?? '')
+        paragraphStyleNames.push(paragraphStyles.find((style) => style.wordId === pStyle)?.name ?? pStyle ?? '')
+      }
     }
     if (pi < paragraphs.length - 1) pieces.push({ text: '\n', style: last }) // paragraph break
   })
