@@ -407,12 +407,13 @@ export function Workspace({
    * The point-editing tool. `geom` and `box` are the shape's outline and box right before this drag started (a fresh
    * copy every time, so an index stays meaningful even while the shape is reshaped by the same drag). 'anchor': moving
    * one or more of the shape's own points (`indices`, `anchor` is the one actually under the pointer — the others follow
-   * it by the same amount). 'handle': moving one of a point's own curve handles; `forceMirror` is true only while a new,
+   * it by the same amount; `twin`, set when Alt was held while grabbing an edge, is the mirrored point that follows by
+   * the mirrored amount for the whole drag). 'handle': moving one of a point's own curve handles; `forceMirror` is true only while a new,
    * symmetric pair of handles is being pulled out of a plain corner (Alt-drag on the point itself) — the ordinary case
    * (dragging a handle that already exists) instead follows Alt live, held during the drag.
    */
   const pointDrag = useRef<
-    | { kind: 'anchor'; id: string; geom: PathGeom; indices: number[]; anchor: number; box: Box; key: string }
+    | { kind: 'anchor'; id: string; geom: PathGeom; indices: number[]; anchor: number; twin?: number; box: Box; key: string }
     | { kind: 'handle'; id: string; geom: PathGeom; index: number; which: 'hi' | 'ho'; forceMirror: boolean; box: Box; key: string }
     | null
   >(null)
@@ -2435,6 +2436,11 @@ export function Workspace({
    * Alt makes a drag on a point or one of its handles reshape this partner in parallel (mirrored); without Alt only
    * the grabbed point changes. `null` when the outline has no mirrored partner for it.
    */
+  const mirrorAxis = (geom: PathGeom, a: number, b: number): 'v' | 'h' => {
+    const p = vertexPoint(geom[0][0][a])
+    const q = vertexPoint(geom[0][0][b])
+    return Math.abs(q[0] - (1 - p[0])) < 0.02 && Math.abs(q[1] - p[1]) < 0.02 ? 'v' : 'h'
+  }
   const twinPoint = (geom: PathGeom, index: number): { index: number; axis: 'v' | 'h' } | null => {
     const ring = geom[0][0]
     const p = vertexPoint(ring[index])
@@ -2484,7 +2490,12 @@ export function Workspace({
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
-  /** grabbing the middle of a shape's edge: a new point goes in right there, selected on its own, and drags from then on like any other */
+  /**
+   * grabbing the middle of a shape's edge: a new point goes in right there, selected on its own, and drags from then on
+   * like any other. With Alt the opposite edge (the one mirrored across the shape's vertical middle, or its horizontal
+   * middle for a top / bottom edge) gets its own new point too, and it follows in parallel, mirrored — pulling in the
+   * middle of one end of a rectangle pulls in the other end just the same.
+   */
   const onEdgeDown = (id: string) => (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return
     const sh = shapes.find((x) => x.id === id)
@@ -2494,13 +2505,42 @@ export function Workspace({
     setSelectedId(id)
     const base = geomOf(sh)
     const ring = base[0][0]
-    const a = vertexPoint(ring[edgeIndex])
-    const b = vertexPoint(ring[(edgeIndex + 1) % ring.length])
-    const index = edgeIndex + 1
-    const geom: PathGeom = [[[...ring.slice(0, index), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as [number, number], ...ring.slice(index)], ...base[0].slice(1)], ...base.slice(1)]
+    const middleOf = (k: number): [number, number] => {
+      const a = vertexPoint(ring[k])
+      const b = vertexPoint(ring[(k + 1) % ring.length])
+      return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+    }
+    const grabbed = middleOf(edgeIndex)
+    let partnerEdge = -1
+    if (e.altKey) {
+      const near = (x: number, y: number) => Math.abs(x - y) < 0.02
+      for (const axis of ['v', 'h'] as const) {
+        partnerEdge = ring.findIndex((_, k) => {
+          if (k === edgeIndex) return false
+          const q = middleOf(k)
+          return axis === 'v' ? near(q[0], 1 - grabbed[0]) && near(q[1], grabbed[1]) : near(q[0], grabbed[0]) && near(q[1], 1 - grabbed[1])
+        })
+        if (partnerEdge >= 0) break
+      }
+    }
+    const nextRing: PathVertex[] = []
+    let index = -1
+    let partner = -1
+    ring.forEach((v, k) => {
+      nextRing.push(v)
+      if (k === edgeIndex) {
+        index = nextRing.length
+        nextRing.push(grabbed)
+      }
+      if (k === partnerEdge) {
+        partner = nextRing.length
+        nextRing.push(middleOf(k))
+      }
+    })
+    const geom: PathGeom = [[nextRing, ...base[0].slice(1)], ...base.slice(1)]
     dragSeq.current += 1
     setPointSel({ id, indices: [index] })
-    pointDrag.current = { kind: 'anchor', id, geom, indices: [index], anchor: index, box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    pointDrag.current = { kind: 'anchor', id, geom, indices: [index], anchor: index, ...(partner >= 0 ? { twin: partner } : {}), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   /** double click on a point: a sharp corner becomes a smooth curve point (handles a third of the way to each neighbour), or a curve point loses its handles and becomes a sharp corner again */
@@ -2548,11 +2588,11 @@ export function Workspace({
     const sel = new Set(d.indices)
     // Alt: the mirrored partner of every moved point follows by the mirrored amount
     const twins = new Map<number, { dx: number; dy: number }>()
-    if (e.altKey)
-      for (const i of d.indices) {
-        const twin = twinPoint(d.geom, i)
-        if (twin && !sel.has(twin.index) && !twins.has(twin.index)) twins.set(twin.index, twin.axis === 'v' ? { dx: -dx, dy } : { dx, dy: -dy })
-      }
+    const addTwin = (twin: { index: number; axis: 'v' | 'h' } | null) => {
+      if (twin && !sel.has(twin.index) && !twins.has(twin.index)) twins.set(twin.index, twin.axis === 'v' ? { dx: -dx, dy } : { dx, dy: -dy })
+    }
+    if (d.twin !== undefined) addTwin({ index: d.twin, axis: mirrorAxis(d.geom, d.anchor, d.twin) })
+    else if (e.altKey) for (const i of d.indices) addTwin(twinPoint(d.geom, i))
     const world = d.geom.map((poly, pi) =>
       poly.map((ring, ri) =>
         ring.map((v, vi) => {
