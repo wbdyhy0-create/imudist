@@ -382,7 +382,15 @@ export function Workspace({
   const pencilPoints = useRef<WorldPathPoint[]>([])
   const pencilEditTarget = useRef<{ id: string; index: number; mode: 'start' | 'end' | 'segment'; snap?: { x: number; y: number } } | null>(null)
   const lastPencilPathId = useRef<string | null>(null)
-  const penDrag = useRef<{ index: number; start: { x: number; y: number } } | null>(null)
+  /**
+   * The pen tool's current gesture. 'new': a point just placed (a plain click leaves it a corner; dragging pulls a symmetric
+   * pair of handles out of it). 'handles': Alt on an existing point - dragging pulls handles out of it, a plain Alt click
+   * turns it back into a corner. 'move': dragging an existing point. 'handle': dragging one handle of a point (the other
+   * side mirrors unless Alt).
+   */
+  const penDrag = useRef<{ index: number; start: { x: number; y: number }; origin?: { x: number; y: number }; mode: 'new' | 'handles' | 'move' | 'handle'; which?: 'hi' | 'ho'; moved: boolean } | null>(null)
+  /** where the pointer is while a pen path is open: the rubber-band line to it */
+  const [penHover, setPenHover] = useState<{ x: number; y: number } | null>(null)
   const [penDragging, setPenDragging] = useState(false)
   const [freehandPreview, setFreehandPreview] = useState<{ points: WorldPathPoint[]; closed: boolean } | null>(null)
   /** a line being drawn: which diagonal of `shapeBox` it runs — see document.ts's `ShapeFrame.flip` */
@@ -2050,7 +2058,8 @@ export function Workspace({
     const prepared = !closed && smooth && points.every((point) => !point.hi && !point.ho) ? simplifyPencilPoints(points, pencilSettings.fidelity) : points
     const effectiveSmoothness = pencilSettings.cap === 'round' ? Math.max(100, pencilSettings.smoothness) : pencilSettings.smoothness
     const smoothFactor = pencilSettings.cap === 'round' ? 0.75 : 0.18 + (effectiveSmoothness / 100) * 0.36
-    const shape = pathShapeFromPoints(prepared, closed, smooth, false, smooth ? smoothFactor : 0.28, smooth ? pencilSettings.cap : 'round')
+    // a pen path keeps its straight segments and sharp corners: a round cap would make every path smooth its own corners
+    const shape = pathShapeFromPoints(prepared, closed, smooth, false, smooth ? smoothFactor : 0.28, smooth ? pencilSettings.cap : 'butt')
     if (!shape) return
     onShapesChange([...shapes, shape])
     lastPencilPathId.current = shape.id
@@ -2062,6 +2071,7 @@ export function Workspace({
     commitFreehandPath(penPoints.current, closed, false)
     penPoints.current = []
     setFreehandPreview(null)
+    setPenHover(null)
   }
 
   const finishPencil = () => {
@@ -2294,14 +2304,6 @@ export function Workspace({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [tool])
-
-  const setPenHandlesAlong = (point: WorldPathPoint, dx: number, dy: number) => {
-    const length = Math.max(24, Math.hypot(dx, dy) * 0.35)
-    const scale = length / Math.max(Math.hypot(dx, dy), 0.001)
-    point.hi = { x: -dx * scale, y: -dy * scale }
-    point.ho = { x: dx * scale, y: dy * scale }
-  }
-
 
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
@@ -2946,18 +2948,11 @@ export function Workspace({
         e.preventDefault()
         return
       }
-      const previous = penPoints.current[penPoints.current.length - 1]
-      if (previous) {
-        const dx = point.x - previous.x
-        const dy = point.y - previous.y
-        setPenHandlesAlong(previous, dx, dy)
-        setPenHandlesAlong(point, dx, dy)
-      } else {
-        setPenHandlesAlong(point, 1, 0)
-      }
-      penPoints.current = [...penPoints.current, point]
-      penDrag.current = { index: penPoints.current.length - 1, start: point }
+      // a click makes a plain corner point (a straight line to the previous one); only dragging on it pulls handles out
+      penPoints.current = [...penPoints.current, { x: point.x, y: point.y }]
+      penDrag.current = { index: penPoints.current.length - 1, start: point, mode: 'new', moved: false }
       setPenDragging(true)
+      setPenHover(null)
       setFreehandPreview({ points: penPoints.current, closed: false })
       e.preventDefault()
       e.stopPropagation()
@@ -3043,14 +3038,35 @@ export function Workspace({
       eraseAt(toWorld(e.clientX, e.clientY))
       return
     }
+    if (tool === 'pen' && !penDrag.current) {
+      if (penPoints.current.length > 0) setPenHover(toWorld(e.clientX, e.clientY))
+    } else if (penHover) setPenHover(null)
     if (penDrag.current) {
+      const d = penDrag.current
       const point = toWorld(e.clientX, e.clientY)
-      const anchor = penPoints.current[penDrag.current.index]
+      const anchor = penPoints.current[d.index]
       if (anchor) {
-        const dx = point.x - penDrag.current.start.x
-        const dy = point.y - penDrag.current.start.y
-        anchor.ho = { x: dx, y: dy }
-        anchor.hi = { x: -dx, y: -dy }
+        const dx = point.x - d.start.x
+        const dy = point.y - d.start.y
+        if (!d.moved && Math.hypot(dx, dy) * zoom < 3) return // still a click
+        d.moved = true
+        if (d.mode === 'move' && d.origin) {
+          anchor.x = d.origin.x + dx
+          anchor.y = d.origin.y + dy
+        } else if (d.mode === 'handle' && d.which) {
+          const handle = { x: point.x - anchor.x, y: point.y - anchor.y }
+          const opposite = { x: -handle.x, y: -handle.y }
+          if (d.which === 'ho') {
+            anchor.ho = handle
+            if (!e.altKey) anchor.hi = opposite
+          } else {
+            anchor.hi = handle
+            if (!e.altKey) anchor.ho = opposite
+          }
+        } else {
+          anchor.ho = { x: dx, y: dy }
+          anchor.hi = { x: -dx, y: -dy }
+        }
         setFreehandPreview({ points: penPoints.current, closed: false })
       }
       return
@@ -3282,6 +3298,16 @@ export function Workspace({
     eraserTouched.current.clear()
     if (eraserPoint) setEraserPoint(null)
     pegDrag.current = null
+    const penGesture = penDrag.current
+    if (penGesture?.mode === 'handles' && !penGesture.moved) {
+      // a plain Alt click on a smooth point turns it back into a corner
+      const anchor = penPoints.current[penGesture.index]
+      if (anchor && (anchor.hi || anchor.ho)) {
+        delete anchor.hi
+        delete anchor.ho
+        setFreehandPreview({ points: penPoints.current, closed: false })
+      }
+    }
     penDrag.current = null
     setPenDragging(false)
     if (pencilPoints.current.length > 0) finishPencil()
@@ -3321,6 +3347,7 @@ export function Workspace({
     penDrag.current = null
     setPenDragging(false)
     penPoints.current = []
+    setPenHover(null)
     pencilPoints.current = []
     pencilEditTarget.current = null
     setFreehandPreview(null)
@@ -3863,7 +3890,7 @@ export function Workspace({
         tool === 'pencil',
         tool === 'pen',
         pencilSettings.cap === 'round' ? 0.75 : 0.18 + (pencilSettings.smoothness / 100) * 0.36,
-        tool === 'pencil' ? pencilSettings.cap : 'round',
+        tool === 'pencil' ? pencilSettings.cap : 'butt',
       )
     : null
 
@@ -4130,8 +4157,29 @@ export function Workspace({
                       ? (index, event) => {
                           event.preventDefault()
                           event.stopPropagation()
-                          penDrag.current = { index, start: toWorld(event.clientX, event.clientY) }
+                          const anchor = penPoints.current[index]
+                          if (!anchor) return
+                          // the first point again closes the path; Alt on any point pulls its handles out; otherwise it moves
+                          if (index === 0 && !event.altKey && penPoints.current.length >= 3) {
+                            finishPen()
+                            return
+                          }
+                          penDrag.current = { index, start: toWorld(event.clientX, event.clientY), origin: { x: anchor.x, y: anchor.y }, mode: event.altKey ? 'handles' : 'move', moved: false }
                           setPenDragging(true)
+                          setPenHover(null)
+                          event.currentTarget.setPointerCapture(event.pointerId)
+                          vpRef.current?.setPointerCapture(event.pointerId)
+                        }
+                      : undefined
+                  }
+                  onHandleGrab={
+                    tool === 'pen'
+                      ? (index, which, event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          penDrag.current = { index, start: toWorld(event.clientX, event.clientY), mode: 'handle', which, moved: false }
+                          setPenDragging(true)
+                          setPenHover(null)
                           event.currentTarget.setPointerCapture(event.pointerId)
                           vpRef.current?.setPointerCapture(event.pointerId)
                         }
@@ -4288,6 +4336,27 @@ export function Workspace({
                   })}
                 </svg>
               )}
+              {tool === 'pen' && freehandPreview && freehandPreview.points.length > 0 && penHover && !penDragging &&
+                (() => {
+                  const points = freehandPreview.points
+                  const last = points[points.length - 1]
+                  const first = points[0]
+                  // near the first point (with a shape's worth of points) the next click closes the path
+                  const closing = points.length >= 3 && Math.hypot(penHover.x - first.x, penHover.y - first.y) <= 10 / zoom
+                  const to = closing ? first : penHover
+                  const screen = (q: { x: number; y: number }) => ({ x: tx + q.x * zoom, y: ty + q.y * zoom })
+                  const a = screen(last)
+                  const b = screen(to)
+                  const out = last.ho ? screen({ x: last.x + last.ho.x, y: last.y + last.ho.y }) : null
+                  const into = closing && first.hi ? screen({ x: first.x + first.hi.x, y: first.y + first.hi.y }) : null
+                  const d = out || into ? `M${a.x} ${a.y} C${(out ?? a).x} ${(out ?? a).y} ${(into ?? b).x} ${(into ?? b).y} ${b.x} ${b.y}` : `M${a.x} ${a.y} L${b.x} ${b.y}`
+                  return (
+                    <svg className="spacing-layer" aria-hidden="true">
+                      <path d={d} className="pen-rubber" />
+                      {closing && <circle cx={b.x} cy={b.y} r={8} className="pen-close-ring" />}
+                    </svg>
+                  )
+                })()}
               {rotatePreview &&
                 (() => {
                   const { cx, cy, w, h, startRotation, sweep } = rotatePreview
