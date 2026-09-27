@@ -50,11 +50,12 @@ interface Props {
   onDoubleClick?: () => void
   /** a peg of the text on the outline: where it starts, where it is cut off, or the middle one that turns it in / out */
   onPegDown?: (peg: PathPeg, e: ReactPointerEvent<HTMLDivElement>) => void
-  /** grabbing one of the shape's own corner points: it moves on its own (with the rest of the selected points, if there are more), reshaping the outline. Alt: pull new, symmetric curve handles out of it instead. */
+  /** grabbing one of the shape's own corner points: it moves on its own (with the rest of the selected points, if there are more), reshaping the outline. Alt: pull new, symmetric curve handles out of it instead. A
+   * second press shortly after on the very same point is a double click - toggling it between a sharp corner and a
+   * smooth curve point - detected here rather than through onDoubleClick, which the preventDefault this needs (to
+   * start a drag) would otherwise suppress. */
   onPointDown?: (index: number, e: ReactPointerEvent<HTMLDivElement>) => void
   onDirectMove?: (e: ReactPointerEvent<HTMLDivElement>) => void
-  /** double click on one of the shape's own points: turns it from a sharp corner into a smooth curve point, or back */
-  onPointDouble?: (index: number) => void
   /** grabbing the middle of one of its edges: a new point is added there and dragged */
   onEdgeDown?: (edgeIndex: number, e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of a point's own curve handles: it reshapes the curve on that side (and the other side too, unless Alt is held) */
@@ -95,7 +96,6 @@ export function ShapeFrameView({
   onPegDown,
   onPointDown,
   onDirectMove,
-  onPointDouble,
   onEdgeDown,
   onHandleGrab,
   onContentGrab,
@@ -345,10 +345,6 @@ export function ShapeFrameView({
                 title="נקודת עיגון — לחיצה לבחירה וגרירה להזזה (Shift מוסיף לבחירה). לחיצה כפולה הופכת בין פינה חדה לעקומה חלקה. Alt-גרירה ממנה מוציאה ידיות עיצוב."
                 style={{ left: p[0] * w, top: p[1] * h }}
                 onPointerDown={(e) => onPointDown?.(i, e)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation()
-                  onPointDouble?.(i)
-                }}
               />
             )
           })}

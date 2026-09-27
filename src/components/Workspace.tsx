@@ -4373,7 +4373,6 @@ export function Workspace({
                   onPegDown={onPegDown(sh.id)}
                   onPointDown={onPointDown(sh.id)}
                   onDirectMove={tool === 'direct' ? (event) => beginFrameDrag(event as unknown as ReactPointerEvent<HTMLElement>, sh.id, 'move') : undefined}
-                  onPointDouble={onPointDouble(sh.id)}
                   onEdgeDown={onEdgeDown(sh.id)}
                   onHandleGrab={onHandleGrab(sh.id)}
                   onContentGrab={onContentGrab(sh.id)}
