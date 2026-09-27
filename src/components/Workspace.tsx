@@ -57,6 +57,7 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
+import { paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -3670,18 +3671,19 @@ export function Workspace({
     : false
 
   // the paragraph style the Paragraph Styles panel highlights: the one of the paragraph the selection (or the caret) is in
+  const paragraphStyleIdOf = (frame: TextFrame, index: number): string | null => {
+    const listed = frame.paragraphStyleIds?.[index]
+    const named = frame.paragraphStyleNames?.[index]
+    return (
+      paragraphStyles.find((style) => style.id === listed)?.id ??
+      paragraphStyles.find((style) => !!named && style.name === named)?.id ??
+      paragraphStyles.find((style) => style.id === frame.paragraphStyleId)?.id ??
+      null
+    )
+  }
   const highlightedStyleId: string | null | undefined = (() => {
     if (!panelHead) return undefined
-    const styleOfParagraph = (index: number) => {
-      const listed = panelHead.paragraphStyleIds?.[index]
-      const named = panelHead.paragraphStyleNames?.[index]
-      return (
-        paragraphStyles.find((style) => style.id === listed)?.id ??
-        paragraphStyles.find((style) => !!named && style.name === named)?.id ??
-        paragraphStyles.find((style) => style.id === panelHead.paragraphStyleId)?.id ??
-        null
-      )
-    }
+    const styleOfParagraph = (index: number) => paragraphStyleIdOf(panelHead, index)
     const inHead = textSel && textSel.headId === panelHead.id ? textSel : null
     const a = Math.min(inHead ? Math.min(inHead.a, inHead.b) : 0, panelHead.text.length)
     const b = Math.min(inHead ? Math.max(inHead.a, inHead.b) : 0, panelHead.text.length)
@@ -3698,6 +3700,17 @@ export function Workspace({
     const nextSeen = new Set(seen).add(id)
     return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
   }
+  // the paragraph style the selection (or caret) is in, and whether its text carries changes of its own beyond that style
+  const styleHasOverrides = (() => {
+    if (!textEditing || !panelHead || typeof highlightedStyleId !== 'string') return false
+    const inHead = textSel && textSel.headId === panelHead.id ? textSel : null
+    if (!inHead) return false
+    const a = Math.min(Math.min(inHead.a, inHead.b), panelHead.text.length)
+    const b = Math.min(Math.max(inHead.a, inHead.b), panelHead.text.length)
+    const look = resolveParagraphStyle(highlightedStyleId)
+    return paragraphsInRange(panelHead.text, a, b).some((index) => Object.keys(paragraphOverrides(panelHead, index, look)).length > 0)
+  })()
+
   const applyParagraphStyleToFrame = (id: string) => {
     const resolved = resolveParagraphStyle(id)
     if (!selectedId) return
@@ -3718,26 +3731,10 @@ export function Workspace({
       )
       return
     }
-    const indexes = paragraphsInRange(head.text, selectedRange.a, selectedRange.b)
-    const ids = head.paragraphStyleIds ? head.paragraphStyleIds.slice() : head.text.split('\n').map(() => head.paragraphStyleId ?? '')
-    const names = head.paragraphStyleNames ? head.paragraphStyleNames.slice() : head.text.split('\n').map(() => '')
-    let runs = normalizeRuns(head.text, head.runs, head)
-    for (const index of indexes) {
-      const [start, end] = paragraphBounds(head.text, index)
-      ids[index] = id
-      names[index] = paragraphStyles.find((style) => style.id === id)?.name ?? names[index]
-      const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
-      runs = styleRange(runs, start, end, charPatch)
-    }
-    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : ids.map(() => ({}))
-    let paraSpaceBefore = head.paraSpaceBefore
-    let paraSpaceAfter = head.paraSpaceAfter
-    for (const index of indexes) {
-      patches[index] = resolved
-      if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
-      if (resolved.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, index, resolved.spaceAfter)
-    }
-    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, runs } : frame), `paragraph-style-selection:${head.id}`)
+    const indexes = paragraphsInRange(head.text, Math.min(selectedRange.a, selectedRange.b), Math.max(selectedRange.a, selectedRange.b))
+    let next: TextFrame = head
+    for (const index of indexes) next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', id)
+    onFramesChange(frames.map((frame) => (frame.id === head.id ? next : frame)), `paragraph-style-selection:${head.id}`)
   }
   const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
     const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
@@ -3773,7 +3770,22 @@ export function Workspace({
   const createParagraphStyle = () => {
     // an id from the clock, not the list length: deleting a style and adding another must never reuse an id
     const id = `paragraph-style-${Date.now()}`
-    setParagraphStyles((current) => [...current, { id, name: `סגנון ${current.length + 1}`, basedOnId: 'body', patch: {} }])
+    const head = panelHead
+    const range = head && textEditing && textSel && textSel.headId === head.id ? textSel : null
+    if (!head || !range) {
+      setParagraphStyles((current) => [...current, { id, name: `סגנון ${current.length + 1}`, basedOnId: 'body', patch: {} }])
+      return
+    }
+    // from text (as InDesign's new style does): the style takes what the paragraph carries beyond its own style, is based on
+    // that style, and is applied to the paragraph - which is why the "+" of the old style goes away
+    const indexes = paragraphsInRange(head.text, Math.min(range.a, range.b), Math.max(range.a, range.b))
+    const baseId = typeof highlightedStyleId === 'string' ? highlightedStyleId : paragraphStyles[0]?.id
+    const base = baseId ? resolveParagraphStyle(baseId) : {}
+    const overrides = indexes.map((index) => paragraphOverrides(head, index, base)).find((found) => Object.keys(found).length > 0) ?? {}
+    const created: ParagraphStyleRecord = { id, name: `סגנון ${paragraphStyles.length + 1}`, ...(baseId ? { basedOnId: baseId } : {}), patch: overrides }
+    const nextStyles = [...paragraphStyles, created]
+    setParagraphStyles(nextStyles)
+    onFramesChange(frames.map((frame) => (frame.id === head.id ? restyleParagraphs(frame, indexes, baseId ?? '', id, true, nextStyles) : frame)), `paragraph-style-create:${id}`)
   }
   const deleteParagraphStyle = (id: string, baseFrames = frames, fallbackId?: string) => {
     if (paragraphStyles.length <= 1) return
@@ -3840,13 +3852,13 @@ export function Workspace({
    * runs, and the paragraph look (leading, spacing, indents, alignment) in the paragraph overrides. A story that has no
    * lists yet gets them here, so the paragraphs that stay on `sourceId` still carry it afterwards.
    */
-  const restyleParagraphs = (frame: TextFrame, indexes: number[], sourceId: string, targetId: string): TextFrame => {
+  const restyleParagraphs = (frame: TextFrame, indexes: number[], sourceId: string, targetId: string, keepLook = false, styles = paragraphStyles): TextFrame => {
     if (indexes.length === 0) return frame
-    const resolved = resolveParagraphStyle(targetId)
+    const resolved = resolveParagraphStyle(targetId, styles)
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
     const charPatch = pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking']) as Partial<CharStyle>
     // what the old style set and the new one leaves alone goes back to plain: bold text swapped to a regular style must not stay bold
-    const leaving = resolveParagraphStyle(sourceId)
+    const leaving = keepLook ? {} : resolveParagraphStyle(sourceId, styles)
     if (leaving.weight !== undefined && charPatch.weight === undefined) charPatch.weight = 400
     if (leaving.italic !== undefined && charPatch.italic === undefined) charPatch.italic = false
     if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
@@ -3855,7 +3867,7 @@ export function Workspace({
     const hadLists = !!frame.paragraphStyleIds?.length
     const carriesSource = hadLists ? new Set<number>() : new Set(paragraphsWithStyle(frame, sourceId))
     const sourceName = paragraphStyles.find((style) => style.id === sourceId)?.name ?? ''
-    const targetName = paragraphStyles.find((style) => style.id === targetId)?.name ?? ''
+    const targetName = styles.find((style) => style.id === targetId)?.name ?? ''
     const ids = Array.from({ length: count }, (_, i) => (hadLists ? frame.paragraphStyleIds![i] ?? '' : carriesSource.has(i) ? sourceId : frame.paragraphStyleId ?? ''))
     const names = Array.from({ length: count }, (_, i) => (hadLists ? frame.paragraphStyleNames?.[i] ?? '' : carriesSource.has(i) ? sourceName : ''))
     const patches = Array.from({ length: count }, (_, i) => frame.paragraphStylePatches?.[i] ?? {})
@@ -3874,13 +3886,15 @@ export function Workspace({
       ids[index] = targetId
       names[index] = targetName
       patches[index] = layout
+      // keepLook: the text already looks the way the style says (a style made from it), it is only tagged
+      if (keepLook) continue
       runs = styleRange(runs, start, end, charPatch)
       paraSpaceBefore = override(paraSpaceBefore, index, layout.spaceBefore)
       paraSpaceAfter = override(paraSpaceAfter, index, layout.spaceAfter)
     }
     // every paragraph moved: the story as a whole is now on the target style too
     const whole = new Set(indexes).size >= count
-    const storyStyle = whole ? (pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
+    const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
     const paragraphStyleId = whole ? targetId : !hadLists || frame.paragraphStyleId === sourceId ? undefined : frame.paragraphStyleId
     return { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, runs }
   }
@@ -4704,7 +4718,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} modified={styleHasOverrides} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
             },
             {
               id: 'style-manager',

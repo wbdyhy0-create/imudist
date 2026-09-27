@@ -717,3 +717,5 @@ svg { display: block; }
 .place-thumb { width: 44px; height: 44px; object-fit: contain; border-radius: 4px; background: repeating-conic-gradient(#3a3030 0 25%, #2b2222 0 50%) 50% / 12px 12px; }
 .file-name { margin: 0 0 4px; word-break: break-all; }
 .low-res { color: var(--danger); }
+/* the mark of a paragraph style whose text has changes of its own (the "+") */
+.style-plus { margin-inline-start: 3px; font-weight: 700; color: var(--accent-line); }
