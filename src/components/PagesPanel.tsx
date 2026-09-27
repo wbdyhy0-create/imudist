@@ -60,6 +60,8 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
   return (
     <section className="pages-panel" aria-label="עמודים">
+      {/* the head and the controls stay put while the thumbnails scroll under them */}
+      <div className="pages-top">
       <div className="pages-head">
         <h2 className="props-title">
           עמודים <span className="muted">({doc.pages})</span>
@@ -116,6 +118,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
             {selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים` : 'מחק עמוד'}
           </button>
         </div>
+      </div>
       </div>
 
       <div className="thumbs">
