@@ -12,6 +12,10 @@ interface Props {
   onBatch: (pairs: { sourceId: string; targetId: string }[]) => void
   onFindStyle: (styleId: string, direction?: -1 | 0 | 1) => number
   onTag: (tag: string, styleId: string, removeTag: boolean, all: boolean) => void
+  /** selects the next/previous/first occurrence of the tag text and scrolls to it; returns how many exist */
+  onFindTag: (tag: string, direction?: -1 | 0 | 1) => number
+  /** gives the occurrence the explorer is on the target style (and removes the tag, if asked); returns how many are left */
+  onSwapOneTag: (tag: string, styleId: string, removeTag: boolean) => number
   onClean: (emptyParagraphs: boolean) => void
 }
 
@@ -19,7 +23,7 @@ type Tab = 'word' | 'swap' | 'create' | 'batch' | 'tools'
 
 const stylePatch = (fontSize: number, leading: number, align: TextStyle['align']): ParagraphStyleRecord['patch'] => ({ fontFamily: 'Segoe UI', fontSize, leading, align, weight: 400, italic: false })
 
-export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOne, onBatch, onFindStyle, onTag, onClean }: Props) {
+export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOne, onBatch, onFindStyle, onTag, onFindTag, onSwapOneTag, onClean }: Props) {
   const [tab, setTab] = useState<Tab>('word')
   const [sourceId, setSourceId] = useState(styles[0]?.id ?? '')
   const [targetId, setTargetId] = useState(styles[1]?.id ?? styles[0]?.id ?? '')
@@ -27,6 +31,7 @@ export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOn
   const [tag, setTag] = useState('$')
   const [tagStyleId, setTagStyleId] = useState(styles[0]?.id ?? '')
   const [deleteTag, setDeleteTag] = useState(true)
+  const [tagFound, setTagFound] = useState<number | null>(null)
   const [newName, setNewName] = useState('סגנון חדש')
   const [newSize, setNewSize] = useState(14)
   const [newLeading, setNewLeading] = useState(17)
@@ -89,10 +94,11 @@ export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOn
 
       {tab === 'tools' && <div className="style-manager-section">
         <h3>סגנון לפי תגית</h3>
-        <label className="field-label">סימן לחיפוש<input className="select" value={tag} onChange={(e) => setTag(e.target.value)} /></label>
+        <label className="field-label">סימן לחיפוש<input className="select" value={tag} onChange={(e) => { setTag(e.target.value); setTagFound(null) }} /></label>
+        <fieldset className="style-manager-explorer"><legend>סייר סימנים</legend><div className="style-manager-actions"><button className="btn" onClick={() => setTagFound(onFindTag(tag, -1))}>« הקודם</button><button className="btn" onClick={() => setTagFound(onFindTag(tag, 0))}>הצג מופע ראשון</button><button className="btn" onClick={() => setTagFound(onFindTag(tag, 1))}>הבא »</button></div><p className="style-manager-status">{tagFound === null ? 'בחר סימן ולחץ על הצג מופע ראשון' : tagFound ? `נמצאו ${tagFound} מופעים לסימן זה.` : 'לא נמצאו מופעים לסימן זה.'}</p></fieldset>
         <label className="field-label">סגנון יעד<select className="select" value={tagStyleId} onChange={(e) => setTagStyleId(e.target.value)}>{optionList}</select></label>
         <label className="dlg-check"><input type="checkbox" checked={deleteTag} onChange={(e) => setDeleteTag(e.target.checked)} />מחק את הסימן לאחר ההמרה</label>
-        <div className="style-manager-actions"><button className="btn" onClick={() => onTag(tag, tagStyleId, deleteTag, false)}>החלף מופע נוכחי</button><button className="btn primary" onClick={() => onTag(tag, tagStyleId, deleteTag, true)}>החלף בכל המסמך</button></div>
+        <div className="style-manager-actions"><button className="btn" disabled={!tag || !tagStyleId} onClick={() => setTagFound(onSwapOneTag(tag, tagStyleId, deleteTag))}>החלף מופע זה</button><button className="btn primary" disabled={!tag || !tagStyleId} onClick={() => { onTag(tag, tagStyleId, deleteTag, true); setTagFound(null) }}>החלף בכל המסמך</button></div>
         <hr />
         <h3>ניקוי מסמך</h3>
         <button className="btn" onClick={() => onClean(false)}>צמצם רווחים כפולים</button><button className="btn danger" onClick={() => onClean(true)}>מחק פסקאות ריקות מיותרות</button>

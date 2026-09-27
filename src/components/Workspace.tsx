@@ -370,6 +370,8 @@ export function Workspace({
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
   const styleSearchIndex = useRef<Record<string, number>>({})
+  /** which occurrence of the tag search (ניהול סגנונות > כלים) the explorer is on, per tag text */
+  const tagSearchIndex = useRef<Record<string, number>>({})
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
@@ -4163,6 +4165,78 @@ export function Workspace({
     onFramesChange(nextFrames, `tag-style:${styleId}`)
   }
 
+  /** every place `tag` appears in the text of any story (its head frame), story by story in reading order - the
+   * same shape as `styleOccurrences`, just matching literal text instead of style membership */
+  const tagOccurrences = (tag: string) => {
+    const out: { frame: TextFrame; start: number; end: number }[] = []
+    if (!tag) return out
+    for (const frame of headFrames(frames)) {
+      if (!frame.text) continue
+      let at = frame.text.indexOf(tag)
+      while (at >= 0) {
+        out.push({ frame, start: at, end: at + tag.length })
+        at = frame.text.indexOf(tag, at + tag.length)
+      }
+    }
+    return out
+  }
+
+  /** Selects the next/previous/first occurrence of `tag` in the document and scrolls to it, the explorer for
+   * "סימן לחיפוש" (ניהול סגנונות > כלים) - identical in spirit to findParagraphStyle, just searching by the tag's
+   * own text instead of by which style a paragraph carries. */
+  const findTagOccurrence = (tag: string, direction: -1 | 0 | 1 = 0) => {
+    const occurrences = tagOccurrences(tag)
+    if (occurrences.length > 0) {
+      const previous = tagSearchIndex.current[tag]
+      const index = direction === 0 ? 0 : previous === undefined ? (direction < 0 ? occurrences.length - 1 : 0) : (previous + direction + occurrences.length) % occurrences.length
+      tagSearchIndex.current[tag] = index
+      const occurrence = occurrences[index]
+      const chain = chainOf(frames, occurrence.frame.id)
+      const target = chain.find((frame) => {
+        const flowPart = flow.get(frame.id)
+        return !!flowPart && occurrence.start < flowPart.end && occurrence.end > flowPart.start
+      }) ?? occurrence.frame
+      const targetFlow = flow.get(target.id)
+      const localStart = targetFlow ? Math.max(0, occurrence.start - targetFlow.start) : 0
+      const localEnd = targetFlow ? Math.min(targetFlow.slice.length, occurrence.end - targetFlow.start) : 0
+      const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
+      setSelectedPage(page)
+      setSelectedId(target.id)
+      setEditingId(target.id)
+      setTextSel({ headId: occurrence.frame.id, a: occurrence.start, b: occurrence.end })
+      askSelection(target.id, localStart, localEnd)
+      goTo(spreadOfPage(page))
+    } else {
+      delete tagSearchIndex.current[tag]
+    }
+    return occurrences.length
+  }
+
+  /** Gives the tag occurrence the explorer is on (the first, when it has not been used) `styleId`, optionally
+   * removing the tag itself; returns how many occurrences are left. Mirrors swapOneParagraphStyle. */
+  const swapOneTagOccurrence = (tag: string, styleId: string, removeTag: boolean) => {
+    if (!tag || !styleId) return 0
+    const occurrences = tagOccurrences(tag)
+    if (occurrences.length === 0) return 0
+    const current = Math.min(tagSearchIndex.current[tag] ?? 0, occurrences.length - 1)
+    const occurrence = occurrences[current]
+    const frame = occurrence.frame
+    let text = frame.text
+    let runs = normalizeRuns(text, frame.runs, frame)
+    if (removeTag) {
+      const edited = editStory(text, runs, occurrence.start, occurrence.end, '', frame)
+      text = edited.text
+      runs = edited.runs
+    }
+    const index = paraIndexAt(frame.text, occurrence.start)
+    const restyled = restyleParagraphs({ ...frame, text, runs }, [index], frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
+    onFramesChange(frames.map((f) => (f.id === frame.id ? restyled : f)), `tag-swap-one:${styleId}`)
+    // the list is one shorter now, and the next occurrence sits where this one was (see swapOneParagraphStyle)
+    if (current > 0) tagSearchIndex.current[tag] = current - 1
+    else delete tagSearchIndex.current[tag]
+    return occurrences.length - 1
+  }
+
   /** a guide can be grabbed with the Selection tool only, and not while something is being placed */
   const guidesLive = tool === 'select' && !space && !placing && placingImages.length === 0 && !linkFrom
   const openRulerMenu = (e: ReactMouseEvent<HTMLElement>) => {
@@ -4900,7 +4974,7 @@ export function Workspace({
             {
               id: 'style-manager',
               label: 'ניהול סגנונות',
-              content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onClean={() => cleanSpacingCmd()} />,
+              content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onFindTag={findTagOccurrence} onSwapOneTag={swapOneTagOccurrence} onClean={() => cleanSpacingCmd()} />,
             },
             {
               id: 'pages',
