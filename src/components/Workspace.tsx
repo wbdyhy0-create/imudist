@@ -3718,14 +3718,19 @@ export function Workspace({
       null
     )
   }
+  // the range a paragraph-style click acts on: the actual text selection/caret while editing, or - with a text frame
+  // simply selected (Selection tool, nothing open for editing) - its whole story. Selecting a frame and clicking a
+  // paragraph style restyles the whole thing, the same as InDesign; a lone frame in this app is almost always meant
+  // to read as a single style throughout, so this is also what decides which style, if any, the frame is shown under.
+  const panelRange: { a: number; b: number } | null = !panelHead
+    ? null
+    : textEditing && textSel && textSel.headId === panelHead.id
+      ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
+      : { a: 0, b: panelHead.text.length }
   const highlightedStyleId: string | null | undefined = (() => {
-    if (!panelHead) return undefined
-    const styleOfParagraph = (index: number) => paragraphStyleIdOf(panelHead, index)
-    const inHead = textSel && textSel.headId === panelHead.id ? textSel : null
-    const a = Math.min(inHead ? Math.min(inHead.a, inHead.b) : 0, panelHead.text.length)
-    const b = Math.min(inHead ? Math.max(inHead.a, inHead.b) : 0, panelHead.text.length)
-    const ids = new Set(paragraphsInRange(panelHead.text, a, b).map(styleOfParagraph))
-    if (ids.size > 1) return null // the selection reaches across several styles: none is "the" style
+    if (!panelHead || !panelRange) return undefined
+    const ids = new Set(paragraphsInRange(panelHead.text, panelRange.a, panelRange.b).map((index) => paragraphStyleIdOf(panelHead, index)))
+    if (ids.size > 1) return null // the range reaches across several styles: none is "the" style
     const only = [...ids][0]
     return only ?? undefined
   })()
@@ -3770,27 +3775,19 @@ export function Workspace({
     onFramesChange(frames.map((frame) => (frame.id === panelHead.id ? next : frame)), `paragraph-style-discard:${highlightedStyleId}`)
   }
 
+  /**
+   * Apply a paragraph style to whatever the panel currently speaks for: the selection or caret's paragraph(s) while
+   * editing text, or - with a text frame merely selected - its whole story (see `panelRange`). Every paragraph goes
+   * through `restyleParagraphs` on its own, so a frame with paragraphs on different styles resets each correctly
+   * (restyleParagraphs itself notices when that covers the whole story and updates the frame's own top-level look too).
+   */
   const applyParagraphStyleToFrame = (id: string) => {
-    const resolved = resolveParagraphStyle(id)
     if (!selectedId) return
     const selected = frames.find((frame) => frame.id === selectedId)
     if (!selected) return
     const head = chainOf(frames, selected.id)[0]
-    // while text is being edited a style goes to the paragraphs of the selection - or, with only a caret, to its paragraph
-    const selectedRange = textSel && textSel.headId === head.id && (textSel.a !== textSel.b || textEditing) ? textSel : null
-    if (!selectedRange) {
-      // the whole story: its style lives on the story's first frame, and the runs carry their own character formatting,
-      // so the character part of the style has to reach them too or existing text would keep its old look
-      const styleKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
-      const storyStyle = Object.fromEntries(styleKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]])) as Partial<TextStyle>
-      const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
-      onFramesChange(
-        frames.map((frame) => (frame.id === head.id ? { ...frame, ...storyStyle, paragraphStyleId: id, runs: styleRange(normalizeRuns(head.text, head.runs, head), 0, head.text.length, charPatch) } : frame)),
-        `paragraph-style:${head.id}`,
-      )
-      return
-    }
-    const indexes = paragraphsInRange(head.text, Math.min(selectedRange.a, selectedRange.b), Math.max(selectedRange.a, selectedRange.b))
+    const range = textEditing && textSel && textSel.headId === head.id ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) } : { a: 0, b: head.text.length }
+    const indexes = paragraphsInRange(head.text, range.a, range.b)
     let next: TextFrame = head
     for (const index of indexes) next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', id)
     onFramesChange(frames.map((frame) => (frame.id === head.id ? next : frame)), `paragraph-style-selection:${head.id}`)
@@ -4780,7 +4777,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} modified={styleHasOverrides} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} />,
             },
             {
               id: 'style-manager',
