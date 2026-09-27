@@ -15,10 +15,10 @@ interface Props {
   spreads: SpreadLayout[]
   /** the spread in the middle of the view */
   currentSpread: number
-  /** the page that insert / delete act on */
-  selected: number
+  /** every selected page (the one insert acts on is among them): a click selects one, Shift a range, Ctrl one more */
+  selectedPages: number[]
   /** select a page and bring it into view */
-  onSelect: (pageIndex: number) => void
+  onSelect: (pageIndex: number, mods?: { shift: boolean; ctrl: boolean }) => void
   onInsert: (count: number, where: InsertWhere) => void
   onDelete: () => void
   onMove: (from: number, to: number) => void
@@ -30,7 +30,7 @@ const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selected, onSelect, onInsert, onDelete, onMove, onView }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onDelete, onMove, onView }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
 
@@ -54,6 +54,8 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
     return byPage
   }, [doc, shapes])
   const rects = useMemo(() => pageRects(doc), [doc])
+  // a document keeps at least one page, so the whole set cannot go
+  const canDelete = selectedPages.length < doc.pages
 
 
   return (
@@ -110,8 +112,8 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           <button className="btn small primary" onClick={() => onInsert(count, where)} disabled={doc.pages >= 9999}>
             הוסף עמודים
           </button>
-          <button className="btn small" onClick={onDelete} disabled={doc.pages <= 1} title="מחק את העמוד הנבחר ואת התיבות שעליו">
-            מחק עמוד
+          <button className="btn small" onClick={onDelete} disabled={!canDelete} title={selectedPages.length > 1 ? 'מחק את העמודים הנבחרים ואת מה שעליהם' : 'מחק את העמוד הנבחר ואת התיבות שעליו'}>
+            {selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים` : 'מחק עמוד'}
           </button>
         </div>
       </div>
@@ -130,11 +132,19 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                 return (
                   <button
                     key={p.index}
-                    className={'thumb' + (p.index === selected ? ' sel' : '')}
+                    className={'thumb' + (selectedPages.includes(p.index) ? ' sel' : '')}
                     draggable
-                    title={`עמוד ${p.number} — גרור כדי לשנות את הסדר`}
-                    aria-pressed={p.index === selected}
-                    onClick={() => onSelect(p.index)}
+                    title={`עמוד ${p.number} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה`}
+                    aria-pressed={selectedPages.includes(p.index)}
+                    onClick={(e) => onSelect(p.index, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
+                    onKeyDown={(e) => {
+                      // Delete here removes the selected pages, not whatever object is selected on the canvas
+                      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (canDelete) onDelete()
+                      }
+                    }}
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', String(p.index))}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {

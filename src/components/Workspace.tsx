@@ -280,6 +280,8 @@ export function Workspace({
   const rects = useMemo(() => pageRects(doc), [doc])
   /** the page that Insert / Delete act on (the last one clicked) */
   const [selectedPage, setSelectedPage] = useState(0)
+  /** the pages selected in the Pages panel; `selectedPage` is the one the selection grows from */
+  const [pageSel, setPageSel] = useState<number[]>([])
   const pendingNav = useRef<number | null>(null)
   const [flowMode, setFlowMode] = useState<FlowMode>('auto')
   /** modifier keys held when the placing click started */
@@ -546,8 +548,24 @@ export function Workspace({
     pendingNav.current = null
   }, [spreads])
 
-  const selectPage = (i: number) => {
-    setSelectedPage(i)
+  // a page picked some other way (a click on the canvas) leaves the panel's set behind: then it is just that page
+  const selectedPages = pageSel.includes(selPage) ? pageSel.filter((i) => i < doc.pages) : [selPage]
+  const selectPage = (i: number, mods?: { shift: boolean; ctrl: boolean }) => {
+    if (mods?.shift) {
+      // every page from the one the selection grew from to this one
+      const from = Math.min(selPage, i)
+      const to = Math.max(selPage, i)
+      setPageSel(Array.from({ length: to - from + 1 }, (_, k) => from + k))
+    } else if (mods?.ctrl) {
+      const has = selectedPages.includes(i)
+      const next = has ? selectedPages.filter((page) => page !== i) : [...selectedPages, i]
+      if (next.length === 0) return
+      setPageSel(next)
+      setSelectedPage(has ? (i === selPage ? next[next.length - 1] : selPage) : i)
+    } else {
+      setPageSel([i])
+      setSelectedPage(i)
+    }
     goTo(spreadOfPage(i))
   }
   const insertPages = (count: number, where: InsertWhere) => {
@@ -559,11 +577,12 @@ export function Workspace({
     pageOps.insert(at, count, where === 'beside')
   }
   const deleteSelectedPage = () => {
-    if (doc.pages <= 1) return
-    const next = Math.min(selPage, doc.pages - 2)
+    if (selectedPages.length >= doc.pages) return
+    const next = Math.min(Math.min(...selectedPages), doc.pages - selectedPages.length - 1)
     pendingNav.current = next
     setSelectedPage(next)
-    pageOps.remove([selPage])
+    setPageSel([next])
+    pageOps.remove(selectedPages)
   }
   const movePage = (from: number, to: number) => {
     if (from === to) return
@@ -4664,7 +4683,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selected={selPage} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} />,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} />,
             },
             {
               id: 'color',
