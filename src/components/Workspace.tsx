@@ -3609,6 +3609,12 @@ export function Workspace({
     panelHead && textSel && textSel.headId === panelHead.id && textSel.a !== textSel.b && textSel.b <= panelHead.text.length
       ? textSel
       : null
+  // a caret with nothing selected while editing: the panel shows the text at the caret - the character before it, as typing
+  // there would carry on that look (at the start of a paragraph, the one after it)
+  const panelCaret =
+    panelHead && !panelSel && !!editingId && selChain.some((f) => f.id === editingId) && textSel && textSel.headId === panelHead.id && textSel.a === textSel.b && textSel.a <= panelHead.text.length
+      ? textSel
+      : null
   // the Paragraph panel: indents/leading/etc. are always the whole story's own settings (never selection-scoped);
   // spaceBefore/spaceAfter show the FIRST paragraph the selection touches (own override if it has one, else the
   // story's own default) when there is a selection, since that is what applyParaSpacing would actually change
@@ -3644,7 +3650,9 @@ export function Workspace({
     ? {
         ...(panelSel
           ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelHead)
-          : charStyleOf(panelHead)),
+          : panelCaret
+            ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelCaret.a > 0 && panelHead.text[panelCaret.a - 1] !== '\n' ? panelCaret.a - 1 : panelCaret.a, panelHead)
+            : charStyleOf(panelHead)),
         align: scopePatch?.align ?? panelHead.align,
         // word-spacing bounds belong to the whole story; leading / alignment show the paragraph in scope (see above)
         leading: scopePatch?.leading ?? panelHead.leading,
@@ -3654,7 +3662,7 @@ export function Workspace({
     : null
 
   // more than one size in the text the panel speaks for: its size field must not pretend one of them is the size
-  const panelSizeMixed = panelHead
+  const panelSizeMixed = panelHead && !panelCaret
     ? new Set(
         (panelSel ? sliceRuns(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelSel.b) : normalizeRuns(panelHead.text, panelHead.runs, panelHead)).map((run) => run.style.fontSize),
       ).size > 1
@@ -4083,6 +4091,7 @@ export function Workspace({
         shape={selShape}
         image={selImage}
         frame={selFrame}
+        textStyle={panelStyle}
         strokeWidth={drawingStrokeWidth}
         colorTarget={colorTarget}
         onColorTarget={setColorTarget}
