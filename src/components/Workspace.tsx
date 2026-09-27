@@ -191,6 +191,8 @@ interface Props {
   onGuidesChange: (guides: Guide[], coalesceKey?: string) => void
   shapes: ShapeFrame[]
   onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string) => void
+  paragraphStyles: ParagraphStyleRecord[]
+  onParagraphStylesChange: (styles: ParagraphStyleRecord[], coalesceKey?: string) => void
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -264,6 +266,8 @@ export function Workspace({
   onGuidesChange,
   shapes,
   onShapesChange,
+  paragraphStyles,
+  onParagraphStylesChange,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -365,7 +369,6 @@ export function Workspace({
   const requestToken = useRef(0)
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
-  const [paragraphStyles, setParagraphStyles] = useState<ParagraphStyleRecord[]>([{ id: 'body', name: 'גוף הטקסט', patch: { fontFamily: 'Segoe UI', fontSize: 14, leading: 17, align: 'right', tracking: 0 } }, { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } }])
   const styleSearchIndex = useRef<Record<string, number>>({})
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
@@ -963,7 +966,7 @@ export function Workspace({
       ids.set(imported.wordId, id)
       if (!existing) nextStyles.push({ id, name: imported.name, patch: imported.patch })
     }
-    if (nextStyles.length !== paragraphStyles.length) setParagraphStyles(nextStyles)
+    if (nextStyles.length !== paragraphStyles.length) onParagraphStylesChange(nextStyles)
     return { ...placed, paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) }
   }
 
@@ -3844,7 +3847,7 @@ export function Workspace({
   }
   const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
     const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
-    setParagraphStyles(nextStyles)
+    onParagraphStylesChange(nextStyles)
     const resolved = resolveParagraphStyle(id, nextStyles)
     const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
     const updateImportedParagraphs = (frame: TextFrame) => {
@@ -3879,7 +3882,7 @@ export function Workspace({
     const head = panelHead
     const range = head && textEditing && textSel && textSel.headId === head.id ? textSel : null
     if (!head || !range) {
-      setParagraphStyles((current) => [...current, { id, name: `סגנון ${current.length + 1}`, basedOnId: 'body', patch: {} }])
+      onParagraphStylesChange([...paragraphStyles, { id, name: `סגנון ${paragraphStyles.length + 1}`, basedOnId: 'body', patch: {} }])
       return
     }
     // from text (as InDesign's new style does): the style takes what the paragraph carries beyond its own style, is based on
@@ -3890,13 +3893,13 @@ export function Workspace({
     const overrides = indexes.map((index) => paragraphOverrides(head, index, base)).find((found) => Object.keys(found).length > 0) ?? {}
     const created: ParagraphStyleRecord = { id, name: `סגנון ${paragraphStyles.length + 1}`, ...(baseId ? { basedOnId: baseId } : {}), patch: overrides }
     const nextStyles = [...paragraphStyles, created]
-    setParagraphStyles(nextStyles)
+    onParagraphStylesChange(nextStyles)
     onFramesChange(frames.map((frame) => (frame.id === head.id ? restyleParagraphs(frame, indexes, baseId ?? '', id, true, nextStyles) : frame)), `paragraph-style-create:${id}`)
   }
   const deleteParagraphStyle = (id: string, baseFrames = frames, fallbackId?: string) => {
     if (paragraphStyles.length <= 1) return
     const fallback = fallbackId ?? paragraphStyles.find((style) => style.id !== id)?.id
-    setParagraphStyles((current) => current.filter((style) => style.id !== id))
+    onParagraphStylesChange(paragraphStyles.filter((style) => style.id !== id))
     const uses = (frame: TextFrame) => frame.paragraphStyleId === id || !!frame.paragraphStyleIds?.includes(id)
     if (fallback && baseFrames.some(uses))
       onFramesChange(
@@ -4072,7 +4075,7 @@ export function Workspace({
 
   const createManagedParagraphStyle = (name: string, patch: ParagraphStyleRecord['patch']) => {
     const id = `paragraph-style-${Date.now()}`
-    setParagraphStyles((current) => [...current, { id, name, patch }])
+    onParagraphStylesChange([...paragraphStyles, { id, name, patch }])
   }
 
   const applyTagStyle = (tag: string, styleId: string, removeTag: boolean, all: boolean) => {

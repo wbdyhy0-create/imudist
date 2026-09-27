@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { TextStyle } from '../document'
+import type { ParagraphStyleRecord } from '../document'
 import { NumberField } from './NumberField'
 import { Group, Labeled } from './PropertiesPanel'
 import type { Unit } from '../units'
@@ -7,14 +7,7 @@ import { FontPicker } from './FontPicker'
 import { useFontCatalog } from '../fonts'
 import { FillPicker } from './FillPicker'
 
-export interface ParagraphStyleRecord {
-  id: string
-  name: string
-  basedOnId?: string
-  /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", InDesign's default */
-  nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
-}
+export type { ParagraphStyleRecord } from '../document'
 
 interface Props {
   styles: ParagraphStyleRecord[]
@@ -67,12 +60,12 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
 
   return (
     <section className="paragraph-styles-panel props-panel" aria-label="סגנונות פסקה">
-      <div className="styles-panel-head"><h2 className="props-title">סגנונות פסקה</h2><button className="icon-button" aria-label="סגנון חדש" onClick={onCreate}>+</button></div>
+      <div className="styles-panel-head"><h2 className="props-title">סגנונות פסקה</h2><button className="icon-button" aria-label="סגנון חדש" onMouseDown={(event) => event.preventDefault()} onClick={onCreate}>+</button></div>
       <div className="paragraph-style-list">
-        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '')} onClick={() => { setActiveId(style.id); onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}{modified && style.id === shownId && <span className="style-plus" title="בטקסט יש שינויים שאינם חלק מהסגנון — סגנון חדש (+) ייצור מהם סגנון">+</span>}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
+        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '')} onMouseDown={(event) => event.preventDefault()} onClick={() => { setActiveId(style.id); onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}{modified && style.id === shownId && <span className="style-plus" title="בטקסט יש שינויים שאינם חלק מהסגנון — סגנון חדש (+) ייצור מהם סגנון">+</span>}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
       </div>
       {editing && <div className="paragraph-style-modal" role="dialog" aria-label="אפשרויות סגנון פסקה" style={modalPosition ? { left: modalPosition.x, top: modalPosition.y, transform: 'none' } : undefined}><div className="paragraph-style-modal-head" onPointerDown={startModalDrag}><strong>⠿ אפשרויות סגנון פסקה</strong><button className="icon-button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setEditing(false)} aria-label="סגור">×</button></div>
-        {modified && active.id === shownId && <div className="paragraph-style-pending"><span>לטקסט שבפסקה יש שינויים שאינם חלק מהסגנון.</span><div className="paragraph-style-pending-actions"><button className="btn small" onClick={onDiscardOverrides}>ביטול</button><button className="btn small primary" onClick={onConfirmOverrides}>אישור</button></div></div>}
+        {modified && active.id === shownId && <div className="paragraph-style-pending"><span>לטקסט שבפסקה יש שינויים שאינם חלק מהסגנון.</span><div className="paragraph-style-pending-actions"><button className="btn small" onMouseDown={(event) => event.preventDefault()} onClick={onDiscardOverrides}>ביטול</button><button className="btn small primary" onMouseDown={(event) => event.preventDefault()} onClick={onConfirmOverrides}>אישור</button></div></div>}
         <div className="paragraph-style-modal-layout"><nav className="paragraph-style-categories" aria-label="קטגוריות סגנון">
         {[['general', 'כללי'], ['basic', 'תווים בסיסיים'], ['middle-east', 'מזרח תיכון'], ['indents', 'הזחות וריווחים'], ['keep', 'שמירה על רצף'], ['lists', 'תבליטים ומספור'], ['color', 'צבע תו'], ['border', 'מסגרת ורקע']].map(([id, label]) => <button key={id} className={category === id ? 'active' : ''} onClick={() => setCategory(id)}>{label}</button>)}
       </nav><div className="paragraph-style-modal-body">{category === 'general' && <Group title="כללי">
@@ -92,7 +85,7 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
         <Labeled label="שורה ראשונה"><NumberField value={value('firstLineIndent', 0)} unit={unit} onChange={(v) => edit({ firstLineIndent: v })} /></Labeled>
         <div className="toggle-group">{(['right', 'center', 'left', 'justify'] as const).map((align) => <button key={align} className={value('align', 'right') === align ? 'on' : ''} onClick={() => edit({ align })}>{align === 'right' ? 'ימין' : align === 'left' ? 'שמאל' : align === 'center' ? 'מרכז' : 'מלא'}</button>)}</div>
       </Group>}{category === 'middle-east' && <Group title="עיצוב למזרח התיכון"><p className="muted">כיוון פסקה ומספרים יתווספו כאן. כיוון התיבה הנוכחי הוא RTL.</p></Group>}{category === 'keep' && <Group title="אפשרויות שמירה"><label className="page-bar-check"><input type="checkbox" />שמור עם הפסקה הבאה</label><label className="page-bar-check"><input type="checkbox" />שמור שורות יחד</label></Group>}{category === 'lists' && <Group title="תבליטים ומספור"><select className="select"><option>ללא רשימה</option><option>תבליטים</option><option>מספור</option></select></Group>}{category === 'color' && <Group title="צבע התו"><FillPicker label="צבע טקסט" value={value('color', '#111111')} onChange={(color) => edit({ color: color ?? '#111111' })} /><label className="field-label" htmlFor="style-color-tint">גוון: {value('tint', 100)}%</label><input id="style-color-tint" className="stroke-range" type="range" min="0" max="100" value={value('tint', 100)} onChange={(event) => edit({ tint: Number(event.target.value) })} /><label className="page-bar-check"><input type="checkbox" checked={!!value('overprintFill', false)} onChange={(event) => edit({ overprintFill: event.target.checked })} />הדפסת־על של מילוי</label><label className="page-bar-check"><input type="checkbox" checked={!!value('overprintStroke', false)} onChange={(event) => edit({ overprintStroke: event.target.checked })} />הדפסת־על של סטרוק</label><Labeled label="עובי סטרוק"><NumberField value={value('strokeWidth', 0)} min={0} max={200} step={0.25} onChange={(v) => edit({ strokeWidth: v })} /></Labeled></Group>}{category === 'border' && <Group title="מסגרת ורקע"><label className="page-bar-check"><input type="checkbox" />רקע לפסקה</label><label className="page-bar-check"><input type="checkbox" />מסגרת סביב פסקה</label></Group>}</div></div></div>}
-      <div className="paragraph-style-actions"><button className="icon-button" aria-label="סגנון חדש" onClick={onCreate}>+</button><button className="icon-button" aria-label="מחק סגנון" disabled={styles.length <= 1} onClick={() => onDelete(active.id)}>⌫</button></div>
+      <div className="paragraph-style-actions"><button className="icon-button" aria-label="סגנון חדש" onMouseDown={(event) => event.preventDefault()} onClick={onCreate}>+</button><button className="icon-button" aria-label="מחק סגנון" disabled={styles.length <= 1} onMouseDown={(event) => event.preventDefault()} onClick={() => onDelete(active.id)}>⌫</button></div>
     </section>
   )
 }

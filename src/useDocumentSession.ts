@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import type { DocSettings, Guide, ImageFrame, ShapeFrame, TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -24,6 +24,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_ASSETS = {}
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
+const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
@@ -97,6 +98,7 @@ export function useDocumentSession() {
   const assets = state?.assets ?? NO_ASSETS
   const guides = state?.guides ?? NO_GUIDES
   const shapes = state?.shapes ?? NO_SHAPES
+  const paragraphStyles = state?.paragraphStyles ?? NO_PARAGRAPH_STYLES
   const file = active?.file ?? null
   const dirty = !!active && active.saved !== active.h.present
   const anyDirty = docs.some((d) => d.saved !== d.h.present)
@@ -171,6 +173,7 @@ export function useDocumentSession() {
   const changeImages = (next: ImageFrame[], key?: string) => change((s) => (next !== s.images ? { ...s, images: next } : s), key)
   const changeShapes = (next: ShapeFrame[], key?: string) => change((s) => (next !== s.shapes ? { ...s, shapes: next } : s), key)
   const changeGuides = (next: Guide[], key?: string) => change((s) => (next !== s.guides ? { ...s, guides: next } : s), key)
+  const changeParagraphStyles = (next: ParagraphStyleRecord[], key?: string) => change((s) => (next !== s.paragraphStyles ? { ...s, paragraphStyles: next } : s), key)
 
   const pages: PageOps = {
     insert: (at, count, beside) =>
@@ -311,7 +314,7 @@ export function useDocumentSession() {
 
   /** New documents open in a new tab; the ones already open stay as they are. */
   const createDocument = (d: DocSettings, onDone?: () => void) => {
-    const blank: DocContent = { doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES, shapes: NO_SHAPES }
+    const blank: DocContent = { doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES, shapes: NO_SHAPES, paragraphStyles: DEFAULT_PARAGRAPH_STYLES }
     // a new document starts with a text frame on the margins of every page
     addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
     onDone?.()
@@ -402,11 +405,13 @@ export function useDocumentSession() {
     assets,
     guides,
     shapes,
+    paragraphStyles,
     history,
     changeFrames,
     changeImages,
     changeGuides,
     changeShapes,
+    changeParagraphStyles,
     pages,
     file,
     dirty,

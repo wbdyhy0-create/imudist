@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
@@ -25,6 +25,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
+const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -316,6 +317,8 @@ export default function App() {
               onShowGuides={() => setShowGuides(true)}
               shapes={preview ? NO_SHAPES : session.shapes}
               onShapesChange={preview ? noop : session.changeShapes}
+              paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
+              onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}

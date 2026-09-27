@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PARAGRAPH_STYLES,
   DEFAULT_TEXT_STYLE,
   DEFAULT_WRAP_OFFSET,
   DEFAULT_SHAPE_FILL,
@@ -25,6 +26,7 @@ import {
   type ImageFit,
   type ImageFrame,
   type PageSize,
+  type ParagraphStyleRecord,
   type PathGeom,
   type PathSide,
   type PathSmoothPoint,
@@ -63,6 +65,8 @@ export interface DocumentFile {
   assets: Assets
   guides: Guide[]
   shapes: ShapeFrame[]
+  /** version 2+ (this field only from a later Imudist build): the document's named paragraph styles */
+  paragraphStyles: ParagraphStyleRecord[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
@@ -70,7 +74,18 @@ export function serializeDocument(c: DocContent): string {
   const used = new Set(c.images.map((i) => i.assetId))
   const assets: Assets = {}
   for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
-  const file: DocumentFile = { format: FORMAT, version: VERSION, savedAt: new Date().toISOString(), settings: c.doc, frames: c.frames, images: c.images, assets, guides: c.guides, shapes: c.shapes }
+  const file: DocumentFile = {
+    format: FORMAT,
+    version: VERSION,
+    savedAt: new Date().toISOString(),
+    settings: c.doc,
+    frames: c.frames,
+    images: c.images,
+    assets,
+    guides: c.guides,
+    shapes: c.shapes,
+    paragraphStyles: c.paragraphStyles,
+  }
   return JSON.stringify(file)
 }
 
@@ -187,6 +202,58 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
       }
     : {}),
 })
+
+/** a paragraph style's own patch: the same properties parseCharStyle/paragraphStyleOf validate, but every one optional (a style may leave anything unset, to inherit it from `basedOnId`) */
+function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
+  const s = isObj(v) ? v : {}
+  return {
+    ...(typeof s.fontFamily === 'string' && s.fontFamily ? { fontFamily: s.fontFamily } : {}),
+    ...(typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? { color: s.color } : {}),
+    ...(typeof s.weight === 'number' && Number.isFinite(s.weight) ? { weight: num(s.weight, 400, 1, 1000) } : {}),
+    ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
+    ...(typeof s.fontSize === 'number' && Number.isFinite(s.fontSize) ? { fontSize: num(s.fontSize, 14, 1, 999) } : {}),
+    ...(typeof s.leading === 'number' && Number.isFinite(s.leading) ? { leading: num(s.leading, 17, 1, MAX_PAGE_PT) } : {}),
+    ...(typeof s.tracking === 'number' && Number.isFinite(s.tracking) ? { tracking: num(s.tracking, 0, -1000, 1000) } : {}),
+    ...((['right', 'center', 'left', 'justify'] as const).includes(s.align as TextAlign) ? { align: s.align as TextAlign } : {}),
+    ...(typeof s.spaceBefore === 'number' && Number.isFinite(s.spaceBefore) ? { spaceBefore: num(s.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
+    ...(typeof s.spaceAfter === 'number' && Number.isFinite(s.spaceAfter) ? { spaceAfter: num(s.spaceAfter, 0, 0, MAX_PAGE_PT) } : {}),
+    ...(typeof s.indentLeft === 'number' && Number.isFinite(s.indentLeft) ? { indentLeft: num(s.indentLeft, 0, 0, MAX_PAGE_PT) } : {}),
+    ...(typeof s.indentRight === 'number' && Number.isFinite(s.indentRight) ? { indentRight: num(s.indentRight, 0, 0, MAX_PAGE_PT) } : {}),
+    ...(typeof s.firstLineIndent === 'number' && Number.isFinite(s.firstLineIndent) ? { firstLineIndent: num(s.firstLineIndent, 0, 0, MAX_PAGE_PT) } : {}),
+    ...(typeof s.tint === 'number' && Number.isFinite(s.tint) ? { tint: num(s.tint, 100, 0, 100) } : {}),
+    ...(typeof s.overprintFill === 'boolean' ? { overprintFill: s.overprintFill } : {}),
+    ...(typeof s.overprintStroke === 'boolean' ? { overprintStroke: s.overprintStroke } : {}),
+    ...(typeof s.strokeWidth === 'number' && Number.isFinite(s.strokeWidth) ? { strokeWidth: num(s.strokeWidth, 0, 0, 200) } : {}),
+  }
+}
+
+/** The document's named paragraph styles (Paragraph Styles panel). Missing (an older file) or empty falls back to the built-in two. */
+function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
+  if (!Array.isArray(v)) return DEFAULT_PARAGRAPH_STYLES
+  const used = new Set<string>()
+  const styles: ParagraphStyleRecord[] = []
+  for (const raw of v) {
+    if (!isObj(raw)) continue
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `paragraph-style-${styles.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    styles.push({
+      id,
+      name: str(raw.name, id),
+      ...(typeof raw.basedOnId === 'string' && raw.basedOnId ? { basedOnId: raw.basedOnId } : {}),
+      ...(typeof raw.nextStyleId === 'string' && raw.nextStyleId ? { nextStyleId: raw.nextStyleId } : {}),
+      patch: parseParagraphStylePatch(raw.patch),
+    })
+  }
+  if (styles.length === 0) return DEFAULT_PARAGRAPH_STYLES
+  // a basedOnId/nextStyleId pointing at a style that isn't (or is no longer) in the list: drop it rather than dangle
+  const ids = new Set(styles.map((s) => s.id))
+  return styles.map((s) => ({
+    ...s,
+    ...(s.basedOnId && !ids.has(s.basedOnId) ? { basedOnId: undefined } : {}),
+    ...(s.nextStyleId && !ids.has(s.nextStyleId) ? { nextStyleId: undefined } : {}),
+  }))
+}
 
 function parseFrames(v: unknown): TextFrame[] {
   if (!Array.isArray(v)) return []
@@ -494,5 +561,13 @@ export function parseDocument(text: string, name: string): DocContent {
   }
   const assets = parseAssets(data.assets)
   const doc = parseSettings(data.settings, name)
-  return { doc, frames: parseFrames(data.frames), images: parseImages(data.images, assets), assets, guides: parseGuides(data.guides, doc.pages), shapes: parseShapes(data.shapes, assets) }
+  return {
+    doc,
+    frames: parseFrames(data.frames),
+    images: parseImages(data.images, assets),
+    assets,
+    guides: parseGuides(data.guides, doc.pages),
+    shapes: parseShapes(data.shapes, assets),
+    paragraphStyles: parseParagraphStyles(data.paragraphStyles),
+  }
 }

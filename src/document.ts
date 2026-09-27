@@ -226,6 +226,23 @@ export interface TextFrame extends TextStyle {
   paraSpaceBefore?: (number | null)[]
   paraSpaceAfter?: (number | null)[]
 }
+
+/** A named, reusable paragraph style (Paragraph Styles panel): a patch of the properties it sets, applied over `basedOnId`'s own resolved ones. */
+export interface ParagraphStyleRecord {
+  id: string
+  name: string
+  basedOnId?: string
+  /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", InDesign's default */
+  nextStyleId?: string
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
+}
+
+/** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */
+export const DEFAULT_PARAGRAPH_STYLES: ParagraphStyleRecord[] = [
+  { id: 'body', name: 'גוף הטקסט', patch: { fontFamily: 'Segoe UI', fontSize: 14, leading: 17, align: 'right', tracking: 0 } },
+  { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } },
+]
+
 /** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
 
