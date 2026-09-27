@@ -738,6 +738,45 @@ export function Workspace({
     if (offset !== null) askSelection(pending.frameId, offset, offset)
   }, [editingId])
 
+  /**
+   * A text-selection drag has carried the pointer above/below its own frame's box (RichEditor's onDragOutside,
+   * fired for as long as the button stays down, wherever the pointer goes next - even once this frame has stopped
+   * being `editingId`). A plain contenteditable has no way to extend a selection into a different element, let
+   * alone one on another page, so this does it by hand: `anchorLocal` is where the drag started (fixed for the
+   * whole gesture, an offset into `frameId`'s own text), and every call re-resolves which frame of the same thread
+   * the pointer is over now, purely from its own box on screen (the same tx/ty/zoom every frame's own position
+   * already uses) - no different from clicking that frame directly. Landing on a frame that isn't the live editor
+   * hands editing to it, exactly like an Up/Down that runs off the end of one frame already does.
+   */
+  const extendSelectionAcrossFrames = (frameId: string, clientX: number, clientY: number, anchorLocal: number) => {
+    const fl = flow.get(frameId)
+    const head = fl && frames.find((f) => f.id === fl.headId)
+    if (!fl || !head) return
+    const anchorGlobal = fl.start + anchorLocal
+    const target = chainOf(frames, head.id).find((f) => {
+      const left = tx + f.x * zoom
+      const top = ty + f.y * zoom
+      return clientX >= left - 4 && clientX <= left + f.w * zoom + 4 && clientY >= top - 4 && clientY <= top + f.h * zoom + 4
+    })
+    const targetFlow = target && flow.get(target.id)
+    if (!target || !targetFlow) return
+    const el = document.querySelector(`[data-frame-id="${target.id}"] .rich-editor, [data-frame-id="${target.id}"] .text-frame-body`)
+    const local = el instanceof HTMLElement ? caretOffsetAt(clientX, clientY, el) : null
+    const localOffset = local ?? (clientY < ty + target.y * zoom ? 0 : targetFlow.slice.length)
+    const globalTarget = targetFlow.start + localOffset
+    const a = Math.min(anchorGlobal, globalTarget)
+    const b = Math.max(anchorGlobal, globalTarget)
+    setTextSel((prev) => (prev && prev.headId === fl.headId && prev.a === a && prev.b === b ? prev : { headId: fl.headId, a, b }))
+    if (editingId !== target.id) {
+      setSelectedId(target.id)
+      setEditingId(target.id)
+      const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
+      setSelectedPage(page)
+      goTo(spreadOfPage(page))
+    }
+    askSelection(target.id, Math.max(0, a - targetFlow.start), Math.min(targetFlow.slice.length, b - targetFlow.start))
+  }
+
   const handleSelect = (frameId: string, a: number, b: number) => {
     const fl = flow.get(frameId)
     if (!fl) return
@@ -4520,6 +4559,7 @@ export function Workspace({
                     onCopyText={() => copyText(f.id)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
                     onLineBoundary={(dir, x) => jumpToLine(f.id, dir, x)}
+                    onDragOutside={(x, y, anchor) => extendSelectionAcrossFrames(f.id, x, y, anchor)}
                     onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}
                   />
                 )

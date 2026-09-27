@@ -108,6 +108,7 @@ interface Props {
   onBackspaceAtStart: () => void
   onStopEditing: () => void
   onLineBoundary?: (dir: 1 | -1, x: number) => void
+  onDragOutside?: (clientX: number, clientY: number, anchor: number) => void
 }
 
 /** Text as read-only spans, with an optional highlighted range. */
@@ -214,6 +215,7 @@ export function TextFrameView(p: Props) {
   return (
     <div
       className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
+      data-frame-id={frame.id}
       style={{
         zIndex: p.z,
         left: p.tx + frame.x * p.zoom,
@@ -274,6 +276,7 @@ export function TextFrameView(p: Props) {
           onCopyText={p.onCopyText}
           onStop={p.onStopEditing}
           onLineBoundary={p.onLineBoundary}
+          onDragOutside={p.onDragOutside}
         />
       ) : (
         <div className="text-frame-body" dir="rtl">

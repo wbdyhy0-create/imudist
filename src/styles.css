@@ -352,13 +352,14 @@ svg { display: block; }
 .paragraph-style-categories button:hover, .paragraph-style-categories button.active { background: var(--accent); }
 .paragraph-style-modal-body { flex: 1; min-width: 0; padding: 0 14px; overflow-y: auto; }
 
-.style-manager-panel { width: 360px; min-height: 420px; padding: 14px; background: var(--bg-panel); }
-.style-manager-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.style-manager-panel { min-height: 420px; padding: 14px; background: var(--bg-panel); }
+.style-manager-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .style-manager-head .props-title { margin: 0; }
-.style-manager-head .muted { margin: 3px 0 0; }
-.style-manager-mark { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--accent-line); color: var(--accent-line); font: 700 16px Georgia, serif; }
-.style-manager-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; margin: 10px 0 14px; background: var(--line); }
-.style-manager-tabs button { min-height: 30px; padding: 4px 5px; background: var(--bg-raised); color: var(--text-dim); font-size: 11px; }
+.style-manager-head .muted { margin: 2px 0 0; font-size: 11px; }
+.style-manager-mark { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--accent-line); color: var(--accent-line); font: 700 12px Georgia, serif; flex: none; }
+/* wraps to a second row instead of squeezing 5 labels into equal columns too narrow for their own text */
+.style-manager-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 10px 0 14px; background: var(--line); }
+.style-manager-tabs button { flex: 1 1 auto; min-width: max-content; min-height: 26px; padding: 4px 8px; background: var(--bg-raised); color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .style-manager-tabs button:hover, .style-manager-tabs button.active { background: var(--accent); color: #fff; }
 .style-manager-section { display: flex; flex-direction: column; gap: 9px; }
 .style-manager-section h3 { margin: 4px 0 0; font-size: 13px; color: #fff; }

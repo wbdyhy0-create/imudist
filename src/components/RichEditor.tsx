@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run } from '../document'
-import { buildParagraphNodes, buildWrapFloats, readSelectionIn, setSelectionIn, type ParagraphPatch } from '../richtext'
+import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, readSelectionIn, setSelectionIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
@@ -40,6 +40,14 @@ interface Props {
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
   onStop: () => void
+  /**
+   * A text-selection drag (button still down) has carried the pointer above/below this frame's own box - `anchor` is
+   * where the drag started, as an offset into THIS frame's own text, unaffected by wherever the drag has gone since.
+   * The story may keep going in a linked frame past this one's own edge, on this page or another; a plain
+   * contenteditable has no way to extend a selection into a different element, let alone one on a different part of
+   * the pasteboard, so the workspace does it by hand from here.
+   */
+  onDragOutside?: (clientX: number, clientY: number, anchor: number) => void
   /**
    * Up/Down at the caret's first/last line, with nowhere further to go in this frame's own text (a native
    * ArrowUp/ArrowDown that didn't move the caret to a different line): `x` is the caret's horizontal position on
@@ -217,6 +225,22 @@ export function RichEditor(p: Props) {
       aria-multiline="true"
       aria-label="תיבת טקסט"
       onBlur={p.onStop}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || !live.current.onDragOutside) return
+        const el = e.currentTarget
+        const anchor = caretOffsetAt(e.clientX, e.clientY, el) ?? live.current.text.length
+        const stop = () => {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', stop)
+        }
+        const onMove = (moveEvent: PointerEvent) => {
+          if (!(moveEvent.buttons & 1)) return stop()
+          const rect = el.getBoundingClientRect()
+          if (moveEvent.clientY < rect.top - 2 || moveEvent.clientY > rect.bottom + 2) live.current.onDragOutside?.(moveEvent.clientX, moveEvent.clientY, anchor)
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', stop)
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.currentTarget.blur()
