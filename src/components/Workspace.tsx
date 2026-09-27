@@ -654,6 +654,40 @@ export function Workspace({
     if (fl && fl.start > 0) applyEdit(fl.headId, fl.start - 1, fl.start, '')
   }
 
+  /** an Up/Down that ran out of lines in `frameId`: hand the caret to the previous/next frame of its thread, same column */
+  const pendingLineJump = useRef<{ frameId: string; x: number; dir: 1 | -1 } | null>(null)
+  const jumpToLine = (frameId: string, dir: 1 | -1, x: number) => {
+    const fl = flow.get(frameId)
+    const head = fl && frames.find((f) => f.id === fl.headId)
+    if (!fl || !head) return
+    const chain = chainOf(frames, head.id)
+    const index = chain.findIndex((f) => f.id === frameId)
+    const target = chain[index + dir]
+    if (!target) return
+    pendingLineJump.current = { frameId: target.id, x, dir }
+    setSelectedId(target.id)
+    setEditingId(target.id)
+    const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
+    setSelectedPage(page)
+    goTo(spreadOfPage(page))
+  }
+  // the target frame's editor mounts only once `editingId` reaches it; then its DOM is up so caretOffsetAt can place
+  // the caret at the requested column, on its first line (arriving from above) or its last (arriving from below) -
+  // the same edge the jump crossed - same as the browser's own Up/Down landing on the nearest offset of that line.
+  // A plain effect, not a layout one: jumpToLine may also have scrolled a new page into view, and that scroll is
+  // applied by the viewport's own layout effect, which must run first for this element's rect to be the final one.
+  useEffect(() => {
+    const pending = pendingLineJump.current
+    if (!pending || pending.frameId !== editingId) return
+    pendingLineJump.current = null
+    const el = document.querySelector('.rich-editor')
+    if (!(el instanceof HTMLElement)) return
+    const rect = el.getBoundingClientRect()
+    const y = pending.dir === 1 ? rect.top + 4 : rect.bottom - 4
+    const offset = caretOffsetAt(pending.x, y, el)
+    if (offset !== null) askSelection(pending.frameId, offset, offset)
+  }, [editingId])
+
   const handleSelect = (frameId: string, a: number, b: number) => {
     const fl = flow.get(frameId)
     if (!fl) return
@@ -4388,6 +4422,7 @@ export function Workspace({
                     onSelect={(a, b) => handleSelect(f.id, a, b)}
                     onCopyText={() => copyText(f.id)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
+                    onLineBoundary={(dir, x) => jumpToLine(f.id, dir, x)}
                     onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}
                   />
                 )

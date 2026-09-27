@@ -107,6 +107,7 @@ interface Props {
   onCopyText: () => string | null
   onBackspaceAtStart: () => void
   onStopEditing: () => void
+  onLineBoundary?: (dir: 1 | -1, x: number) => void
 }
 
 /** Text as read-only spans, with an optional highlighted range. */
@@ -271,6 +272,7 @@ export function TextFrameView(p: Props) {
           onBackspaceAtStart={p.onBackspaceAtStart}
           onCopyText={p.onCopyText}
           onStop={p.onStopEditing}
+          onLineBoundary={p.onLineBoundary}
         />
       ) : (
         <div className="text-frame-body" dir="rtl">

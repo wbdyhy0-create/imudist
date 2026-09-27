@@ -38,6 +38,18 @@ interface Props {
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
   onStop: () => void
+  /**
+   * Up/Down at the caret's first/last line, with nowhere further to go in this frame's own text (a native
+   * ArrowUp/ArrowDown that didn't move the caret to a different line): `x` is the caret's horizontal position on
+   * screen, to land on the same column of the linked frame this jumps to.
+   */
+  onLineBoundary?: (dir: 1 | -1, x: number) => void
+}
+
+/** The caret's own client rect (a collapsed range can report none right at a line wrap; the full range then stands in). */
+function caretRect(range: Range): DOMRect {
+  const rects = range.getClientRects()
+  return rects.length ? rects[0] : range.getBoundingClientRect()
 }
 
 /**
@@ -193,7 +205,29 @@ export function RichEditor(p: Props) {
       aria-label="תיבת טקסט"
       onBlur={p.onStop}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') e.currentTarget.blur()
+        if (e.key === 'Escape') {
+          e.currentTarget.blur()
+          return
+        }
+        // a plain Up/Down (no selection, no modifier) at the edge of this frame's own text: let the browser try to
+        // move the caret first, then check whether it actually changed line - if not, there is nowhere further to
+        // go here, so hand off to the linked frame at the same horizontal position
+        if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && p.onLineBoundary) {
+          const el = e.currentTarget
+          const sel = document.getSelection()
+          const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+          if (range && range.collapsed) {
+            const before = caretRect(range)
+            const dir = e.key === 'ArrowDown' ? 1 : -1
+            const x = (before.left + before.right) / 2
+            requestAnimationFrame(() => {
+              if (document.activeElement !== el) return
+              const s = document.getSelection()
+              const r = s && s.rangeCount > 0 ? s.getRangeAt(0) : null
+              if (r && r.collapsed && Math.abs(caretRect(r).top - before.top) < 1) live.current.onLineBoundary?.(dir, x)
+            })
+          }
+        }
       }}
     />
   )
