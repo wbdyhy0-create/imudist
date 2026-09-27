@@ -4222,6 +4222,7 @@ export function Workspace({
         image={selImage}
         frame={selFrame}
         textStyle={panelStyle}
+        paragraphStyle={paragraphStyle}
         strokeWidth={drawingStrokeWidth}
         colorTarget={colorTarget}
         onColorTarget={setColorTarget}
