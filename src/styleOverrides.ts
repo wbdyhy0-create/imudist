@@ -22,33 +22,10 @@ const paragraphRange = (text: string, index: number): [number, number] => {
   return [start, end < 0 ? text.length : end + 1]
 }
 
-/**
- * How a paragraph deviates from a paragraph style (its resolved look): what the text carries that the style does not
- * say - the "+" of an InDesign style panel. Only what the style sets is compared (plus weight / italic / tracking,
- * where "nothing" means plain), and only what the paragraph actually has. The result is a style patch of the differing
- * values, ready to become a new style based on this one.
- */
-export function paragraphOverrides(head: TextFrame, index: number, style: Look): Look {
-  const out: Record<string, unknown> = {}
-  const [start, end] = paragraphRange(head.text, index)
-  // the character look: the first run in the paragraph that differs, per attribute
-  let pos = 0
-  for (const run of normalizeRuns(head.text, head.runs, head)) {
-    const from = Math.max(pos, start)
-    const to = Math.min(pos + run.len, end)
-    pos += run.len
-    if (to <= from) continue
-    if (to - from === 1 && head.text[from] === '\n') continue // the paragraph break carries the look of the text before it
-    for (const key of CHAR_KEYS) {
-      if (key in out) continue
-      const expected = style[key] ?? CHAR_PLAIN[key]
-      const actual = run.style[key]
-      if (expected !== undefined && actual !== undefined && !same(actual, expected)) out[key] = actual
-    }
-  }
-  // the paragraph look: what its own overrides, or the story's, give it
+/** the paragraph look actually in effect at `index`: its own overrides, falling back to the story's */
+function actualLayout(head: TextFrame, index: number): Record<(typeof LAYOUT_KEYS)[number], unknown> {
   const own = head.paragraphStylePatches?.[index]
-  const actual: Record<(typeof LAYOUT_KEYS)[number], unknown> = {
+  return {
     leading: own?.leading ?? head.leading,
     align: own?.align ?? head.align,
     spaceBefore: head.paraSpaceBefore?.[index] ?? own?.spaceBefore ?? head.spaceBefore,
@@ -57,9 +34,54 @@ export function paragraphOverrides(head: TextFrame, index: number, style: Look):
     indentRight: own?.indentRight ?? head.indentRight,
     firstLineIndent: own?.firstLineIndent ?? head.firstLineIndent,
   }
+}
+
+/** the runs actually covering a paragraph, trimmed to it (its closing "\n" dropped: it carries the look of the text before it) */
+function paragraphRuns(head: TextFrame, index: number) {
+  const [start, end] = paragraphRange(head.text, index)
+  const out: { len: number; style: Record<string, unknown> }[] = []
+  let pos = 0
+  for (const run of normalizeRuns(head.text, head.runs, head)) {
+    const from = Math.max(pos, start)
+    const to = Math.min(pos + run.len, end)
+    pos += run.len
+    if (to <= from) continue
+    if (to - from === 1 && head.text[from] === '\n') continue
+    out.push({ len: to - from, style: Object.fromEntries(CHAR_KEYS.map((key) => [key, run.style[key]])) })
+  }
+  return out
+}
+
+/**
+ * How a paragraph deviates from a paragraph style (its resolved look): what the text carries that the style does not
+ * say - the "+" of an InDesign style panel. Only what the style sets is compared (plus weight / italic / tracking,
+ * where "nothing" means plain), and only what the paragraph actually has. The result is a style patch of the differing
+ * values, ready to become a new style based on this one.
+ */
+export function paragraphOverrides(head: TextFrame, index: number, style: Look): Look {
+  const out: Record<string, unknown> = {}
+  for (const run of paragraphRuns(head, index)) {
+    for (const key of CHAR_KEYS) {
+      if (key in out) continue
+      const expected = style[key] ?? CHAR_PLAIN[key]
+      const actual = run.style[key]
+      if (expected !== undefined && actual !== undefined && !same(actual, expected)) out[key] = actual
+    }
+  }
+  const actual = actualLayout(head, index)
   for (const key of LAYOUT_KEYS) {
     const expected = style[key]
     if (expected !== undefined && actual[key] !== undefined && !same(actual[key], expected)) out[key] = actual[key]
   }
   return out as Look
+}
+
+/**
+ * A fingerprint of a paragraph's actual look (its runs' character formatting and its layout), for noticing when it
+ * CHANGES - not for comparing it to any style. Used to track "has this paragraph been edited since I started looking
+ * at it", regardless of whether it already differed from its assigned style before that (an older document, or one
+ * imported with a paragraph mapped to the wrong style, may already differ - that is not a change made just now).
+ */
+export function paragraphLook(head: TextFrame, index: number): string {
+  return JSON.stringify({ runs: paragraphRuns(head, index), layout: actualLayout(head, index) })
 }

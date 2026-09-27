@@ -25,9 +25,13 @@ interface Props {
   highlightId?: string | null
   /** the text in the highlighted style carries changes of its own: a small "+" after the style's name (InDesign's style override mark) */
   modified?: boolean
+  /** accept the pending changes as they are (stop flagging them), without making a new style */
+  onConfirmOverrides?: () => void
+  /** put the paragraph back exactly as the highlighted style defines it, discarding the pending changes */
+  onDiscardOverrides?: () => void
 }
 
-export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete, highlightId, modified }: Props) {
+export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete, highlightId, modified, onConfirmOverrides, onDiscardOverrides }: Props) {
   const [activeId, setActiveId] = useState(styles[0]?.id ?? '')
   // the style being edited or deleted follows the text: moving the selection into another paragraph moves it too
   const [followed, setFollowed] = useState(highlightId)
@@ -65,7 +69,9 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
       <div className="paragraph-style-list">
         {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '')} onClick={() => { setActiveId(style.id); onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}{modified && style.id === shownId && <span className="style-plus" title="בטקסט יש שינויים שאינם חלק מהסגנון — סגנון חדש (+) ייצור מהם סגנון">+</span>}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
       </div>
-      {editing && <div className="paragraph-style-modal" role="dialog" aria-label="אפשרויות סגנון פסקה" style={modalPosition ? { left: modalPosition.x, top: modalPosition.y, transform: 'none' } : undefined}><div className="paragraph-style-modal-head" onPointerDown={startModalDrag}><strong>⠿ אפשרויות סגנון פסקה</strong><button className="icon-button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setEditing(false)} aria-label="סגור">×</button></div><div className="paragraph-style-modal-layout"><nav className="paragraph-style-categories" aria-label="קטגוריות סגנון">
+      {editing && <div className="paragraph-style-modal" role="dialog" aria-label="אפשרויות סגנון פסקה" style={modalPosition ? { left: modalPosition.x, top: modalPosition.y, transform: 'none' } : undefined}><div className="paragraph-style-modal-head" onPointerDown={startModalDrag}><strong>⠿ אפשרויות סגנון פסקה</strong><button className="icon-button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setEditing(false)} aria-label="סגור">×</button></div>
+        {modified && active.id === shownId && <div className="paragraph-style-pending"><span>לטקסט שבפסקה יש שינויים שאינם חלק מהסגנון.</span><div className="paragraph-style-pending-actions"><button className="btn small" onClick={onDiscardOverrides}>ביטול</button><button className="btn small primary" onClick={onConfirmOverrides}>אישור</button></div></div>}
+        <div className="paragraph-style-modal-layout"><nav className="paragraph-style-categories" aria-label="קטגוריות סגנון">
         {[['general', 'כללי'], ['basic', 'תווים בסיסיים'], ['middle-east', 'מזרח תיכון'], ['indents', 'הזחות וריווחים'], ['keep', 'שמירה על רצף'], ['lists', 'תבליטים ומספור'], ['color', 'צבע תו'], ['border', 'מסגרת ורקע']].map(([id, label]) => <button key={id} className={category === id ? 'active' : ''} onClick={() => setCategory(id)}>{label}</button>)}
       </nav><div className="paragraph-style-modal-body">{category === 'general' && <Group title="כללי">
         <Labeled label="שם הסגנון"><input className="select" value={active.name} onChange={(event) => onChange(active.id, { name: event.target.value })} /></Labeled>

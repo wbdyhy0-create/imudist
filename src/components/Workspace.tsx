@@ -57,7 +57,7 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
-import { paragraphOverrides } from '../styleOverrides'
+import { paragraphLook, paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -3738,15 +3738,37 @@ export function Workspace({
     return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
   }
   // the paragraph style the selection (or caret) is in, and whether its text carries changes of its own beyond that style
-  const styleHasOverrides = (() => {
-    if (!textEditing || !panelHead || typeof highlightedStyleId !== 'string') return false
-    const inHead = textSel && textSel.headId === panelHead.id ? textSel : null
-    if (!inHead) return false
-    const a = Math.min(Math.min(inHead.a, inHead.b), panelHead.text.length)
-    const b = Math.min(Math.max(inHead.a, inHead.b), panelHead.text.length)
-    const look = resolveParagraphStyle(highlightedStyleId)
-    return paragraphsInRange(panelHead.text, a, b).some((index) => Object.keys(paragraphOverrides(panelHead, index, look)).length > 0)
-  })()
+  // "+": the paragraph(s) the selection is in have changed since we started looking at them - not "differ from the
+  // style's own definition" (an older document, or a paragraph a Word import mapped to the wrong style, may already
+  // differ, with nothing just done about it). The baseline resets whenever the tracked paragraph or its style changes,
+  // so switching a paragraph onto a style, or moving to a different paragraph, starts clean; further edits (through
+  // the Properties panel, the toolbar, or a partial selection restyled by hand) show up against that reset point.
+  // a ref, not state: the automatic reset below settles within the render that triggers it, so it never needs one of its
+  // own; the explicit "אישור" action does change what the NEXT render should show without anything else changing, so
+  // it also bumps this plain counter to ask for that render
+  const paragraphBaselineRef = useRef<{ key: string; look: string } | null>(null)
+  const [, bumpOverrideBaseline] = useState(0)
+  const overrideParagraphs = textEditing && panelHead && typeof highlightedStyleId === 'string' && textSel && textSel.headId === panelHead.id ? paragraphsInRange(panelHead.text, Math.min(Math.min(textSel.a, textSel.b), panelHead.text.length), Math.min(Math.max(textSel.a, textSel.b), panelHead.text.length)) : null
+  const overrideKey = overrideParagraphs && panelHead ? `${panelHead.id}:${overrideParagraphs.join(',')}:${highlightedStyleId}` : null
+  const overrideLook = overrideParagraphs && panelHead ? overrideParagraphs.map((index) => paragraphLook(panelHead, index)).join('|') : null
+  // the tracked paragraph or its style just changed: this render's baseline is its current look, so it starts clean
+  if (overrideKey !== paragraphBaselineRef.current?.key) paragraphBaselineRef.current = overrideKey && overrideLook !== null ? { key: overrideKey, look: overrideLook } : null
+  const styleHasOverrides = !!overrideKey && overrideLook !== paragraphBaselineRef.current?.look
+
+  /** "אישור": stop flagging the paragraph's current look as pending - accept it as is, without making a new style */
+  const commitParagraphOverrides = () => {
+    if (overrideKey && overrideLook !== null) {
+      paragraphBaselineRef.current = { key: overrideKey, look: overrideLook }
+      bumpOverrideBaseline((n) => n + 1)
+    }
+  }
+  /** "ביטול": put the paragraph(s) back exactly as their style defines them, discarding what was done since the baseline */
+  const discardParagraphOverrides = () => {
+    if (!panelHead || !overrideParagraphs || typeof highlightedStyleId !== 'string') return
+    let next: TextFrame = panelHead
+    for (const index of overrideParagraphs) next = restyleParagraphs(next, [index], highlightedStyleId, highlightedStyleId)
+    onFramesChange(frames.map((frame) => (frame.id === panelHead.id ? next : frame)), `paragraph-style-discard:${highlightedStyleId}`)
+  }
 
   const applyParagraphStyleToFrame = (id: string) => {
     const resolved = resolveParagraphStyle(id)
@@ -4758,7 +4780,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} modified={styleHasOverrides} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} modified={styleHasOverrides} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} />,
             },
             {
               id: 'style-manager',

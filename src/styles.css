@@ -343,6 +343,9 @@ svg { display: block; }
 .paragraph-style-modal { position: fixed; z-index: 4000000; top: 50%; left: 50%; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; transform: translate(-50%, -50%); padding: 16px; background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: 7px; box-shadow: 0 18px 60px #000b; }
 .paragraph-style-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #fff; }
 .paragraph-style-modal-head { cursor: move; user-select: none; }
+/* banner in the paragraph-style modal: the highlighted style's text has changes of its own pending accept/discard */
+.paragraph-style-pending { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 7px 10px; background: rgba(61, 139, 255, 0.12); border: 1px solid var(--accent-line); border-radius: 5px; color: #fff; font-size: 12px; }
+.paragraph-style-pending-actions { display: flex; gap: 6px; flex: none; }
 .paragraph-style-modal-layout { display: flex; min-height: 420px; direction: rtl; }
 .paragraph-style-categories { width: 150px; flex: none; display: flex; flex-direction: column; gap: 1px; padding: 4px; border-inline-start: 1px solid var(--border); background: #4b4b4b; }
 .paragraph-style-categories button { min-height: 28px; padding: 4px 7px; color: #fff; text-align: start; font-size: 11px; }
