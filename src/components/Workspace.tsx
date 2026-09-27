@@ -3660,6 +3660,28 @@ export function Workspace({
       ).size > 1
     : false
 
+  // the paragraph style the Paragraph Styles panel highlights: the one of the paragraph the selection (or the caret) is in
+  const highlightedStyleId: string | null | undefined = (() => {
+    if (!panelHead) return undefined
+    const styleOfParagraph = (index: number) => {
+      const listed = panelHead.paragraphStyleIds?.[index]
+      const named = panelHead.paragraphStyleNames?.[index]
+      return (
+        paragraphStyles.find((style) => style.id === listed)?.id ??
+        paragraphStyles.find((style) => !!named && style.name === named)?.id ??
+        paragraphStyles.find((style) => style.id === panelHead.paragraphStyleId)?.id ??
+        null
+      )
+    }
+    const inHead = textSel && textSel.headId === panelHead.id ? textSel : null
+    const a = Math.min(inHead ? Math.min(inHead.a, inHead.b) : 0, panelHead.text.length)
+    const b = Math.min(inHead ? Math.max(inHead.a, inHead.b) : 0, panelHead.text.length)
+    const ids = new Set(paragraphsInRange(panelHead.text, a, b).map(styleOfParagraph))
+    if (ids.size > 1) return null // the selection reaches across several styles: none is "the" style
+    const only = [...ids][0]
+    return only ?? undefined
+  })()
+
   const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => {
     if (seen.has(id)) return {}
     const style = source.find((candidate) => candidate.id === id)
@@ -4671,7 +4693,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
             },
             {
               id: 'style-manager',

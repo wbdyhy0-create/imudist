@@ -21,10 +21,18 @@ interface Props {
   onChange: (styleId: string, patch: Partial<ParagraphStyleRecord>) => void
   onCreate: () => void
   onDelete: (styleId: string) => void
+  /** the style of the paragraph the text selection (or caret) is in: shown highlighted. null = the selection spans several styles; missing = nothing selected */
+  highlightId?: string | null
 }
 
-export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete }: Props) {
+export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete, highlightId }: Props) {
   const [activeId, setActiveId] = useState(styles[0]?.id ?? '')
+  // the style being edited or deleted follows the text: moving the selection into another paragraph moves it too
+  const [followed, setFollowed] = useState(highlightId)
+  if (highlightId !== followed) {
+    setFollowed(highlightId)
+    if (highlightId) setActiveId(highlightId)
+  }
   const [editing, setEditing] = useState(false)
   const [category, setCategory] = useState('general')
   const [modalPosition, setModalPosition] = useState<{ x: number; y: number } | null>(null)
@@ -32,6 +40,7 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
   const fontCatalog = useFontCatalog()
   const active = styles.find((style) => style.id === activeId) ?? styles[0]
   if (!active) return null
+  const shownId = highlightId === undefined ? active.id : highlightId
   const value = <K extends keyof ParagraphStyleRecord['patch']>(key: K, fallback: NonNullable<ParagraphStyleRecord['patch'][K]>) => active.patch[key] ?? fallback
   const selectedFamily = fontCatalog.families.find((family) => family.family === value('fontFamily', 'Segoe UI'))
   const selectedFace = `${value('weight', 400)}|${value('italic', false) ? 1 : 0}`
@@ -52,7 +61,7 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
     <section className="paragraph-styles-panel props-panel" aria-label="סגנונות פסקה">
       <div className="styles-panel-head"><h2 className="props-title">סגנונות פסקה</h2><button className="icon-button" aria-label="סגנון חדש" onClick={onCreate}>+</button></div>
       <div className="paragraph-style-list">
-        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === active.id ? ' active' : '')} onClick={() => { setActiveId(style.id); onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
+        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '')} onClick={() => { setActiveId(style.id); onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
       </div>
       {editing && <div className="paragraph-style-modal" role="dialog" aria-label="אפשרויות סגנון פסקה" style={modalPosition ? { left: modalPosition.x, top: modalPosition.y, transform: 'none' } : undefined}><div className="paragraph-style-modal-head" onPointerDown={startModalDrag}><strong>⠿ אפשרויות סגנון פסקה</strong><button className="icon-button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setEditing(false)} aria-label="סגור">×</button></div><div className="paragraph-style-modal-layout"><nav className="paragraph-style-categories" aria-label="קטגוריות סגנון">
         {[['general', 'כללי'], ['basic', 'תווים בסיסיים'], ['middle-east', 'מזרח תיכון'], ['indents', 'הזחות וריווחים'], ['keep', 'שמירה על רצף'], ['lists', 'תבליטים ומספור'], ['color', 'צבע תו'], ['border', 'מסגרת ורקע']].map(([id, label]) => <button key={id} className={category === id ? 'active' : ''} onClick={() => setCategory(id)}>{label}</button>)}
