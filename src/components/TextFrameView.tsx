@@ -265,6 +265,7 @@ export function TextFrameView(p: Props) {
           startParaIndex={p.startParaIndex}
           atParaStart={p.atParaStart}
           firstLineIndent={style.firstLineIndent ?? 0}
+          paragraphPatches={paragraphPatches}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}

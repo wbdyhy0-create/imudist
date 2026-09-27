@@ -186,10 +186,9 @@ const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== und
 
 /**
  * `buildRunNodes`, for a story some of whose paragraphs carry their own layout (`ParagraphPatch`): every paragraph
- * becomes a block with its own line height / side indents / alignment — the same structure TextFrameView draws for
- * reading — so the frame-fitting measurer (textLayout.ts) and the PDF export lay text out exactly like the screen.
- * Text with no such paragraph goes through the flat `buildRunNodes` untouched. The live editor deliberately keeps the
- * flat form: a caret at a paragraph's very start would land at the end of the block before it.
+ * becomes a block with its own line height / side indents / alignment — the same structure the read-only view draws,
+ * and the live editor too, so the frame-fitting measurer (textLayout.ts) and the PDF export lay text out exactly like
+ * both. Text with no such paragraph goes through the flat `buildRunNodes` untouched, in every one of those three.
  *
  * The spacers that follow a paragraph's closing "
 " (`.para-gap`, `.para-indent`) open the NEXT paragraph's block —

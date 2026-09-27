@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run } from '../document'
-import { buildRunNodes, buildWrapFloats, readSelectionIn, setSelectionIn } from '../richtext'
+import { buildParagraphNodes, buildWrapFloats, readSelectionIn, setSelectionIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
@@ -29,6 +29,8 @@ interface Props {
   atParaStart?: boolean
   /** indents the first line of EVERY paragraph (not just the story's very first) by this many points, unscaled */
   firstLineIndent?: number
+  /** leading/indents/alignment a paragraph style (or a change made to it) overrides, one entry per paragraph of the WHOLE story */
+  paragraphPatches?: ParagraphPatch[]
   hasPrev: boolean
   request: SelRequest | null
   /** replace the characters [from, to) of `text` with `insert` */
@@ -68,21 +70,32 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.text}|${JSON.stringify(p.runs)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
       el.replaceChildren(
         ...buildWrapFloats(p.floats, p.scale),
-        buildRunNodes(p.text, p.runs, p.scale, {
-          showMarks: p.showMarks,
-          paraGaps: p.paraGaps,
-          startParaIndex: p.startParaIndex,
-          atParaStart: p.atParaStart,
-          firstLineIndent: p.firstLineIndent,
-        }),
+        buildParagraphNodes(
+          p.text,
+          p.runs,
+          p.scale,
+          {
+            showMarks: p.showMarks,
+            paraGaps: p.paraGaps,
+            startParaIndex: p.startParaIndex,
+            atParaStart: p.atParaStart,
+            firstLineIndent: p.firstLineIndent,
+          },
+          p.paragraphPatches,
+        ),
       )
-      if (p.text.endsWith('\n')) el.appendChild(document.createElement('br')) // keeps the empty last line reachable
+      // keeps the empty last line reachable - inside the last paragraph's own block when there is one (a block-level
+      // sibling after it would start a whole new, unstyled line of its own instead of extending that paragraph)
+      if (p.text.endsWith('\n')) {
+        const lastBlock = el.lastElementChild
+        ;(lastBlock?.tagName === 'DIV' ? lastBlock : el).appendChild(document.createElement('br'))
+      }
       shown.current = sig
     }
     if (document.activeElement !== el) el.focus({ preventScroll: true })
