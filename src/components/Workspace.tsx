@@ -4090,17 +4090,26 @@ export function Workspace({
     onParagraphStylesChange([...paragraphStyles, { id, name, patch }])
   }
 
+  /**
+   * Finds every paragraph carrying `tag` (or just the first, when `all` is off) and gives it `styleId` - through
+   * `restyleParagraphs`, the same path every other "apply this style to these paragraphs" action in this file uses,
+   * so only the tagged paragraphs change (not the whole story's own look) and the character/leading/spacing look
+   * comes out identical to applying the style by hand. Removing the tag text itself never removes a "\n", so the
+   * paragraph each occurrence was found in stays the same paragraph (same index) throughout - the tag can safely be
+   * stripped first and the style applied to the resulting text in one pass.
+   */
   const applyTagStyle = (tag: string, styleId: string, removeTag: boolean, all: boolean) => {
     if (!tag || !styleId) return
-    const target = resolveParagraphStyle(styleId)
     const nextFrames = frames.map((frame) => {
-      if (!frame.text || frame.next || !headFrames(frames).some((head) => head.id === frame.id)) return frame
+      if (!frame.text || !headFrames(frames).some((head) => head.id === frame.id)) return frame
       let text = frame.text
       let runs = normalizeRuns(text, frame.runs, frame)
+      const indexes: number[] = []
       let at = text.indexOf(tag)
       while (at >= 0) {
+        const index = paraIndexAt(text, at)
+        if (!indexes.includes(index)) indexes.push(index)
         const end = at + tag.length
-        runs = styleRange(runs, Math.max(0, at - (text.lastIndexOf('\n', at - 1) + 1)), text.indexOf('\n', at) < 0 ? text.length : text.indexOf('\n', at) + 1, target)
         if (removeTag) {
           const edited = editStory(text, runs, at, end, '', frame)
           text = edited.text
@@ -4109,7 +4118,8 @@ export function Workspace({
         if (!all) break
         at = text.indexOf(tag, removeTag ? at : end)
       }
-      return text === frame.text && runs === frame.runs ? frame : { ...frame, text, runs, paragraphStyleId: styleId }
+      if (indexes.length === 0) return frame
+      return restyleParagraphs({ ...frame, text, runs }, indexes, frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
     })
     onFramesChange(nextFrames, `tag-style:${styleId}`)
   }
