@@ -3611,8 +3611,9 @@ export function Workspace({
       : null
   // a caret with nothing selected while editing: the panel shows the text at the caret - the character before it, as typing
   // there would carry on that look (at the start of a paragraph, the one after it)
+  const textEditing = !!editingId && selChain.some((f) => f.id === editingId)
   const panelCaret =
-    panelHead && !panelSel && !!editingId && selChain.some((f) => f.id === editingId) && textSel && textSel.headId === panelHead.id && textSel.a === textSel.b && textSel.a <= panelHead.text.length
+    panelHead && !panelSel && textEditing && textSel && textSel.headId === panelHead.id && textSel.a === textSel.b && textSel.a <= panelHead.text.length
       ? textSel
       : null
   // the Paragraph panel: indents/leading/etc. are always the whole story's own settings (never selection-scoped);
@@ -3703,7 +3704,8 @@ export function Workspace({
     const selected = frames.find((frame) => frame.id === selectedId)
     if (!selected) return
     const head = chainOf(frames, selected.id)[0]
-    const selectedRange = textSel && textSel.headId === head.id && textSel.a !== textSel.b ? textSel : null
+    // while text is being edited a style goes to the paragraphs of the selection - or, with only a caret, to its paragraph
+    const selectedRange = textSel && textSel.headId === head.id && (textSel.a !== textSel.b || textEditing) ? textSel : null
     if (!selectedRange) {
       // the whole story: its style lives on the story's first frame, and the runs carry their own character formatting,
       // so the character part of the style has to reach them too or existing text would keep its old look
@@ -4702,7 +4704,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={textEditing ? highlightedStyleId : undefined} onApply={(id) => { if (textEditing) applyParagraphStyleToFrame(id) }} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} />,
             },
             {
               id: 'style-manager',
