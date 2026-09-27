@@ -11,6 +11,8 @@ export interface ParagraphStyleRecord {
   id: string
   name: string
   basedOnId?: string
+  /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", InDesign's default */
+  nextStyleId?: string
   patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
 }
 
@@ -77,6 +79,8 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
         <Labeled label="שם הסגנון"><input className="select" value={active.name} onChange={(event) => onChange(active.id, { name: event.target.value })} /></Labeled>
         <label className="field-label">מבוסס על</label>
         <select className="select" value={active.basedOnId ?? ''} onChange={(event) => onChange(active.id, { basedOnId: event.target.value || undefined })}><option value="">ללא</option>{styles.filter((style) => style.id !== active.id).map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select>
+        <label className="field-label">סגנון הבא</label>
+        <select className="select" value={active.nextStyleId ?? ''} onChange={(event) => onChange(active.id, { nextStyleId: event.target.value || undefined })} title="הסגנון שפסקה חדשה תקבל בלחיצת Enter בסוף פסקה בסגנון הזה"><option value="">אותו הסגנון</option>{styles.filter((style) => style.id !== active.id).map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select>
       </Group>}{category === 'basic' && <Group title="עיצוב תווים">
         <Labeled label="גופן"><FontPicker value={value('fontFamily', 'Segoe UI')} families={fontCatalog.families} onChange={(fontFamily) => edit({ fontFamily })} /></Labeled>
         <Labeled label="משקל וסגנון"><select className="select" value={selectedFace} onChange={(event) => { const [weight, italic] = event.target.value.split('|'); edit({ weight: Number(weight), italic: italic === '1' }) }}>{!selectedFamily?.faces.some((face) => `${face.weight}|${face.italic ? 1 : 0}` === selectedFace) && <option value={selectedFace}>נוכחי</option>}{(selectedFamily?.faces ?? [{ weight: 400, italic: false, style: 'Regular' }]).map((face) => <option key={`${face.weight}|${face.italic}`} value={`${face.weight}|${face.italic ? 1 : 0}`}>{face.style}</option>)}</select></Labeled>

@@ -75,13 +75,3 @@ export function paragraphOverrides(head: TextFrame, index: number, style: Look):
   }
   return out as Look
 }
-
-/**
- * A fingerprint of a paragraph's actual look (its runs' character formatting and its layout), for noticing when it
- * CHANGES - not for comparing it to any style. Used to track "has this paragraph been edited since I started looking
- * at it", regardless of whether it already differed from its assigned style before that (an older document, or one
- * imported with a paragraph mapped to the wrong style, may already differ - that is not a change made just now).
- */
-export function paragraphLook(head: TextFrame, index: number): string {
-  return JSON.stringify({ runs: paragraphRuns(head, index), layout: actualLayout(head, index) })
-}

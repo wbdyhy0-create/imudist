@@ -57,14 +57,14 @@ import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
-import { paragraphLook, paragraphOverrides } from '../styleOverrides'
+import { paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
 import { objectLines } from '../snapping'
 import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
 import { flowFrames, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
@@ -627,10 +627,53 @@ export function Workspace({
     const head = frames.find((f) => f.id === headId)
     if (!head) return
     const r = editStory(head.text, head.runs, from, to, insert, head)
-    commitStory(headId, r.text, r.runs, from + insert.length, `type:${headId}`, {
+    // Enter at the end of a paragraph whose style names a different "next style" (InDesign): the new paragraph follows
+    // that one instead of just repeating this one's, and the "\n" just typed is restyled to it too, so whatever gets
+    // typed next already looks right (editStory picks new text's look from the character right before it - the "\n")
+    let base = head
+    let runs = r.runs
+    let nextStyleAt: { index: number; style: ParagraphStyleRecord } | null = null
+    if (insert === '\n' && from === to) {
+      const sourceIndex = paraIndexAt(head.text, from)
+      const sourceId = paragraphStyleIdOf(head, sourceIndex)
+      const source = sourceId ? paragraphStyles.find((style) => style.id === sourceId) : undefined
+      const next = source?.nextStyleId && source.nextStyleId !== source.id ? paragraphStyles.find((style) => style.id === source.nextStyleId) : undefined
+      if (next) {
+        // spliceParagraphStyles needs a real list to splice a new slot into; without one, seed it from what every
+        // paragraph already resolves to, so nothing else changes look and only the new slot gets the next style
+        if (!head.paragraphStyleIds?.length) {
+          const count = head.text.split('\n').length
+          const ids = Array.from({ length: count }, (_, i) => paragraphStyleIdOf(head, i) ?? '')
+          const names = ids.map((id) => paragraphStyles.find((style) => style.id === id)?.name ?? '')
+          base = { ...head, paragraphStyleIds: ids, paragraphStyleNames: names }
+        }
+        nextStyleAt = { index: sourceIndex + 1, style: next }
+        const resolved = resolveParagraphStyle(next.id)
+        const charKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+        const charPatch = Object.fromEntries(charKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]])) as Partial<CharStyle>
+        // what the style being left set and the next one leaves alone goes back to plain, same as clicking a style does
+        const leaving = source ? resolveParagraphStyle(source.id) : {}
+        if (leaving.weight !== undefined && charPatch.weight === undefined) charPatch.weight = 400
+        if (leaving.italic !== undefined && charPatch.italic === undefined) charPatch.italic = false
+        if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
+        runs = styleRange(runs, from, from + 1, charPatch)
+      }
+    }
+    const paragraphLists = spliceParagraphStyles(base, base.text, from, to, insert)
+    if (nextStyleAt) {
+      const { index, style } = nextStyleAt
+      const setAt = <T,>(list: T[] | undefined, value: T): T[] | undefined => list?.map((item, i) => (i === index ? value : item))
+      const resolved = resolveParagraphStyle(style.id)
+      const layoutKeys = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const layoutPatch = Object.fromEntries(layoutKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]]))
+      paragraphLists.paragraphStyleIds = setAt(paragraphLists.paragraphStyleIds, style.id)
+      if (paragraphLists.paragraphStyleNames) paragraphLists.paragraphStyleNames = setAt(paragraphLists.paragraphStyleNames, style.name)
+      paragraphLists.paragraphStylePatches = setAt(paragraphLists.paragraphStylePatches ?? paragraphLists.paragraphStyleIds!.map(() => ({})), layoutPatch)
+    }
+    commitStory(headId, r.text, runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
-      ...spliceParagraphStyles(head, head.text, from, to, insert),
+      ...paragraphLists,
     })
   }
 
@@ -3754,8 +3797,13 @@ export function Workspace({
   const paragraphBaselineRef = useRef<{ key: string; look: string } | null>(null)
   const [, bumpOverrideBaseline] = useState(0)
   const overrideParagraphs = textEditing && panelHead && typeof highlightedStyleId === 'string' && textSel && textSel.headId === panelHead.id ? paragraphsInRange(panelHead.text, Math.min(Math.min(textSel.a, textSel.b), panelHead.text.length), Math.min(Math.max(textSel.a, textSel.b), panelHead.text.length)) : null
+  // what actually diverges from the style right now (never sensitive to how much text there is - typing more of an
+  // already-matching look must not look like a change): its own keys/values are the signature, not the raw text
+  const overrideLook =
+    overrideParagraphs && panelHead && typeof highlightedStyleId === 'string'
+      ? overrideParagraphs.map((index) => JSON.stringify(paragraphOverrides(panelHead, index, resolveParagraphStyle(highlightedStyleId)))).join('|')
+      : null
   const overrideKey = overrideParagraphs && panelHead ? `${panelHead.id}:${overrideParagraphs.join(',')}:${highlightedStyleId}` : null
-  const overrideLook = overrideParagraphs && panelHead ? overrideParagraphs.map((index) => paragraphLook(panelHead, index)).join('|') : null
   // the tracked paragraph or its style just changed: this render's baseline is its current look, so it starts clean
   if (overrideKey !== paragraphBaselineRef.current?.key) paragraphBaselineRef.current = overrideKey && overrideLook !== null ? { key: overrideKey, look: overrideLook } : null
   const styleHasOverrides = !!overrideKey && overrideLook !== paragraphBaselineRef.current?.look
@@ -3771,7 +3819,7 @@ export function Workspace({
   const discardParagraphOverrides = () => {
     if (!panelHead || !overrideParagraphs || typeof highlightedStyleId !== 'string') return
     let next: TextFrame = panelHead
-    for (const index of overrideParagraphs) next = restyleParagraphs(next, [index], highlightedStyleId, highlightedStyleId)
+    for (const index of overrideParagraphs) next = restyleParagraphs(next, [index], highlightedStyleId, highlightedStyleId, false, paragraphStyles, true)
     onFramesChange(frames.map((frame) => (frame.id === panelHead.id ? next : frame)), `paragraph-style-discard:${highlightedStyleId}`)
   }
 
@@ -3910,16 +3958,19 @@ export function Workspace({
    * runs, and the paragraph look (leading, spacing, indents, alignment) in the paragraph overrides. A story that has no
    * lists yet gets them here, so the paragraphs that stay on `sourceId` still carry it afterwards.
    */
-  const restyleParagraphs = (frame: TextFrame, indexes: number[], sourceId: string, targetId: string, keepLook = false, styles = paragraphStyles): TextFrame => {
+  const restyleParagraphs = (frame: TextFrame, indexes: number[], sourceId: string, targetId: string, keepLook = false, styles = paragraphStyles, hardReset = false): TextFrame => {
     if (indexes.length === 0) return frame
     const resolved = resolveParagraphStyle(targetId, styles)
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
     const charPatch = pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking']) as Partial<CharStyle>
-    // what the old style set and the new one leaves alone goes back to plain: bold text swapped to a regular style must not stay bold
+    // what the old style set and the new one leaves alone goes back to plain: bold text swapped to a regular style must
+    // not stay bold. hardReset (discarding a paragraph's own overrides back to its own style) has no "old style" to
+    // compare against - it always fills in plain, since the point is to match the style exactly, run-level formatting
+    // the style never mentions included
     const leaving = keepLook ? {} : resolveParagraphStyle(sourceId, styles)
-    if (leaving.weight !== undefined && charPatch.weight === undefined) charPatch.weight = 400
-    if (leaving.italic !== undefined && charPatch.italic === undefined) charPatch.italic = false
-    if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
+    if ((hardReset || leaving.weight !== undefined) && charPatch.weight === undefined) charPatch.weight = 400
+    if ((hardReset || leaving.italic !== undefined) && charPatch.italic === undefined) charPatch.italic = false
+    if ((hardReset || leaving.tracking !== undefined) && charPatch.tracking === undefined) charPatch.tracking = 0
     const layout = pick(['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
     const count = frame.text.split('\n').length
     const hadLists = !!frame.paragraphStyleIds?.length
