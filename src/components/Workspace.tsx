@@ -3671,6 +3671,8 @@ export function Workspace({
     : false
 
   // the paragraph style the Paragraph Styles panel highlights: the one of the paragraph the selection (or the caret) is in
+  // a paragraph with none of these carries the document's base style (paragraphStyles[0]), same as a frame nobody has
+  // ever touched - there is no such thing as "no paragraph style", only one that was never made explicit
   const paragraphStyleIdOf = (frame: TextFrame, index: number): string | null => {
     const listed = frame.paragraphStyleIds?.[index]
     const named = frame.paragraphStyleNames?.[index]
@@ -3678,6 +3680,7 @@ export function Workspace({
       paragraphStyles.find((style) => style.id === listed)?.id ??
       paragraphStyles.find((style) => !!named && style.name === named)?.id ??
       paragraphStyles.find((style) => style.id === frame.paragraphStyleId)?.id ??
+      paragraphStyles[0]?.id ??
       null
     )
   }
@@ -3818,6 +3821,8 @@ export function Workspace({
   }
 
   const paragraphUsesStyle = (frame: TextFrame, index: number, styleId: string) => {
+    // an id that names no defined style "matches" nothing - resolving it to {} would otherwise match every paragraph
+    if (!paragraphStyles.some((style) => style.id === styleId)) return false
     const style = resolveParagraphStyle(styleId)
     const [start] = paragraphBounds(frame.text, index)
     const run = styleAtChar(normalizeRuns(frame.text, frame.runs, frame), start, frame)
