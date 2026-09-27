@@ -434,6 +434,10 @@ export function Workspace({
   >(null)
   /** the shape's own points that are selected, while the point-editing tool has it open */
   const [pointSel, setPointSel] = useState<{ id: string; indices: number[] } | null>(null)
+  /** the last point pressed and when: a second press on the very same point shortly after is a double click. A point's
+   * own pointerdown must call preventDefault (it starts a drag), and that also suppresses the browser's own dblclick
+   * on it - so double-clicking a point is detected by hand here instead of relying on onDoubleClick. */
+  const lastPointDown = useRef<{ id: string; index: number; time: number } | null>(null)
   /** the point-editing tool, moving or resizing the picture inside a shape (not the shape itself) */
   const contentDrag = useRef<
     | { kind: 'move'; id: string; start: { x: number; y: number }; origBox: ImageBox }
@@ -2599,6 +2603,14 @@ export function Workspace({
     if (!sh) return
     e.stopPropagation()
     e.preventDefault()
+    const now = Date.now()
+    const last = lastPointDown.current
+    const isDoubleClick = !!last && last.id === id && last.index === index && now - last.time < 400
+    lastPointDown.current = isDoubleClick ? null : { id, index, time: now }
+    if (isDoubleClick) {
+      onPointDouble(id)(index)
+      return
+    }
     setSelectedId(id)
     const geomBase = geomOf(sh)
     const box = { x: sh.x, y: sh.y, w: sh.w, h: sh.h }
