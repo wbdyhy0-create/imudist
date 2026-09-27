@@ -48,7 +48,13 @@ export interface DocSettings {
   slug: Sides
 }
 
-export type TextAlign = 'right' | 'center' | 'left' | 'justify'
+/** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
+export type TextAlign = 'right' | 'center' | 'left' | 'justify' | 'justifyCenter'
+
+/** The CSS for an align value: `justifyCenter` isn't a real `text-align` keyword, so it becomes `justify` plus `text-align-last`. */
+export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' | 'left' | 'justify'; textAlignLast?: 'center' } {
+  return align === 'justifyCenter' ? { textAlign: 'justify', textAlignLast: 'center' } : { textAlign: align }
+}
 
 /** Character formatting: can differ from one piece of text to the next. */
 export interface CharStyle {
@@ -138,7 +144,7 @@ export function paraLineHeightOf(style: TextStyle): number | undefined {
  * wraps lines shorter/longer than the real render actually can, silently mis-measuring a frame's fit.
  */
 export function wordSpacingPt(style: TextStyle): number {
-  if (style.align !== 'justify') return 0
+  if (style.align !== 'justify' && style.align !== 'justifyCenter') return 0
   const min = style.wordSpacingMin ?? 90
   const max = style.wordSpacingMax ?? 120
   const percent = (min + max) / 2

@@ -1,5 +1,5 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { defaultLeading, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
+import { cssTextAlign, defaultLeading, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -197,7 +197,7 @@ function RichText({
       ))}
       {paragraphNodes.map((paragraph) => {
         const patch = paragraphPatches?.[paragraph.index]
-        return <div key={`paragraph-${paragraph.index}`} style={{ textAlign: patch?.align, lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
       })}
     </>
   )
@@ -241,7 +241,7 @@ export function TextFrameView(p: Props) {
           fontSize: style.fontSize,
           fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
           lineHeight: `${style.leading ?? defaultLeading(style)}px`,
-          textAlign: style.align,
+          ...cssTextAlign(style.align),
           wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : undefined,
           // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
           // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to

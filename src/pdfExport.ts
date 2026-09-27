@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { defaultLeading, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, defaultLeading, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { styleOf } from './frames'
 import { pageRects, type PageRect } from './pages'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
@@ -121,7 +121,7 @@ async function drawTextDom(
         fontWeight: String(style.weight),
         fontStyle: style.italic ? 'italic' : 'normal',
         lineHeight: `${style.leading ?? defaultLeading(style)}px`,
-        textAlign: style.align,
+        ...cssTextAlign(style.align),
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : '',
         paddingTop: !hasPrev && flow.spaceBeforeFirst ? `${flow.spaceBeforeFirst}px` : '',
         paddingBottom: !hasNext && flow.spaceAfterLast ? `${flow.spaceAfterLast}px` : '',

@@ -30,11 +30,14 @@ interface Props {
   onUnlink: () => void
 }
 
-const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
+/** The five alignments, their tooltip and their toolbar icon (a shared source so every place that offers them - the
+ * context toolbar, the Properties panel, paragraph styles - shows the same five, the same way). */
+export const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'right', label: 'יישור לימין', icon: 'M4 6h16M8 10h12M4 14h16M8 18h12' },
   { id: 'center', label: 'מירכוז', icon: 'M4 6h16M7 10h10M4 14h16M7 18h10' },
   { id: 'left', label: 'יישור לשמאל', icon: 'M4 6h16M4 10h12M4 14h16M4 18h12' },
-  { id: 'justify', label: 'יישור דו-צדדי', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
+  { id: 'justify', label: 'יישור מלא לשני הצדדים', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
+  { id: 'justifyCenter', label: 'יישור מלא לשני הצדדים, שורה אחרונה ממורכזת', icon: 'M4 6h16M4 10h16M4 14h16M7 18h10' },
 ]
 
 
@@ -176,7 +179,7 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             </Labeled>
             <p className="muted">שייך לכל התיבה. ברירת המחדל היא כ־125% מגודל הגופן.</p>
 
-            {style.align === 'justify' && (
+            {(style.align === 'justify' || style.align === 'justifyCenter') && (
               <>
                 <div className="grid2">
                   <Labeled label="ריווח מילים — מינימום">

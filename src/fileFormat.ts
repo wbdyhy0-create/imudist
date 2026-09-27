@@ -197,7 +197,7 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
   ...(Array.isArray(raw.paragraphStylePatches)
     ? {
         paragraphStylePatches: raw.paragraphStylePatches.map((value) =>
-          isObj(value) ? { ...paragraphStyleOf(value), ...(['right', 'center', 'left', 'justify'].includes(value.align as string) ? { align: value.align as TextAlign } : {}) } : {},
+          isObj(value) ? { ...paragraphStyleOf(value), ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}) } : {},
         ),
       }
     : {}),
@@ -214,7 +214,7 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.fontSize === 'number' && Number.isFinite(s.fontSize) ? { fontSize: num(s.fontSize, 14, 1, 999) } : {}),
     ...(typeof s.leading === 'number' && Number.isFinite(s.leading) ? { leading: num(s.leading, 17, 1, MAX_PAGE_PT) } : {}),
     ...(typeof s.tracking === 'number' && Number.isFinite(s.tracking) ? { tracking: num(s.tracking, 0, -1000, 1000) } : {}),
-    ...((['right', 'center', 'left', 'justify'] as const).includes(s.align as TextAlign) ? { align: s.align as TextAlign } : {}),
+    ...((['right', 'center', 'left', 'justify', 'justifyCenter'] as const).includes(s.align as TextAlign) ? { align: s.align as TextAlign } : {}),
     ...(typeof s.spaceBefore === 'number' && Number.isFinite(s.spaceBefore) ? { spaceBefore: num(s.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.spaceAfter === 'number' && Number.isFinite(s.spaceAfter) ? { spaceAfter: num(s.spaceAfter, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.indentLeft === 'number' && Number.isFinite(s.indentLeft) ? { indentLeft: num(s.indentLeft, 0, 0, MAX_PAGE_PT) } : {}),
@@ -275,7 +275,7 @@ function parseFrames(v: unknown): TextFrame[] {
 
     frames.push({
       ...base,
-      align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify'], D.align),
+      align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify', 'justifyCenter'], D.align),
       id,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),

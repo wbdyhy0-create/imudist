@@ -1,4 +1,4 @@
-import type { CharStyle, Run, TextAlign } from './document'
+import { cssTextAlign, type CharStyle, type Run, type TextAlign } from './document'
 import { sliceRuns } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 
@@ -206,7 +206,11 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     const end = nl < 0 ? text.length : nl + 1
     const block = document.createElement('div')
     const patch = patches[paragraph]
-    if (patch?.align) block.style.textAlign = patch.align
+    if (patch?.align) {
+      const css = cssTextAlign(patch.align)
+      block.style.textAlign = css.textAlign
+      if (css.textAlignLast) block.style.textAlignLast = css.textAlignLast
+    }
     if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
     if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
     if (patch?.indentRight) block.style.paddingRight = `${patch.indentRight * scale}px`
