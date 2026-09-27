@@ -24,6 +24,8 @@ export interface MenuContext {
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
   importText: () => void
+  /** load another Imudist file's paragraph styles and merge them into this document's */
+  importParagraphStyles: () => void
   recent: RecentEntry[]
   /** the document lives in a file and has unsaved changes */
   canRevert: boolean
@@ -149,6 +151,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
+        sep,
+        { label: 'ייבוא סגנונות…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
       ],
     },
     {

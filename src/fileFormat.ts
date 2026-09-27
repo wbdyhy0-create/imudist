@@ -571,3 +571,43 @@ export function parseDocument(text: string, name: string): DocContent {
     paragraphStyles: parseParagraphStyles(data.paragraphStyles),
   }
 }
+
+/**
+ * The Paragraph Styles panel's "Load Paragraph Styles…" (ייבוא סגנונות): merge styles read from another
+ * Imudist file into the current document's list.
+ * - a name that doesn't collide with an existing style is added as-is; a name that does collide gets a
+ *   numeric suffix ("טקסט רץ" → "טקסט רץ 2", counting up until it's free)
+ * - every imported style gets a brand-new id, regardless of its name, so it can never collide with one
+ *   already in use (two documents both starting from the built-in defaults would otherwise both use 'body')
+ * - `basedOnId` / `nextStyleId` pointing at another style that was imported alongside it follow that style
+ *   to its new id; a reference to anything outside the imported batch is dropped rather than left dangling
+ *   (parseDocument already guarantees every such reference in a single file's list resolves inside it)
+ */
+export function mergeParagraphStyles(current: ParagraphStyleRecord[], imported: ParagraphStyleRecord[]): ParagraphStyleRecord[] {
+  if (!imported.length) return current
+  const usedNames = new Set(current.map((style) => style.name))
+  const usedIds = new Set(current.map((style) => style.id))
+  const uniqueName = (name: string) => {
+    if (!usedNames.has(name)) return name
+    let n = 2
+    while (usedNames.has(`${name} ${n}`)) n++
+    return `${name} ${n}`
+  }
+  const stamp = Date.now()
+  const idMap = new Map<string, string>()
+  const renamed = imported.map((style, index) => {
+    const name = uniqueName(style.name)
+    usedNames.add(name)
+    let id = `paragraph-style-import-${stamp}-${index}`
+    while (usedIds.has(id)) id += 'x'
+    usedIds.add(id)
+    idMap.set(style.id, id)
+    return { ...style, id, name }
+  })
+  const remapped = renamed.map(({ basedOnId, nextStyleId, ...style }) => ({
+    ...style,
+    ...(basedOnId && idMap.has(basedOnId) ? { basedOnId: idMap.get(basedOnId) } : {}),
+    ...(nextStyleId && idMap.has(nextStyleId) ? { nextStyleId: idMap.get(nextStyleId) } : {}),
+  }))
+  return [...current, ...remapped]
+}

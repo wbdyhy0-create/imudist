@@ -12,8 +12,8 @@ import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
-import { pickFiles } from './fileio'
-import { FILE_EXT } from './fileFormat'
+import { baseName, pickFiles } from './fileio'
+import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
@@ -121,6 +121,18 @@ export default function App() {
     )
     if (files.length > 0) await placeFiles(files)
   }
+  // Paragraph Styles panel's "ייבוא סגנונות" (Load Paragraph Styles…): read another Imudist file and merge
+  // its paragraph styles into this document's, renaming/renumbering ids as needed so nothing collides.
+  const importParagraphStyles = async () => {
+    const [file] = await pickFiles(FILE_EXT)
+    if (!file) return
+    try {
+      const parsed = parseDocument(await file.text(), baseName(file.name))
+      sessionRef.current.changeParagraphStyles(mergeParagraphStyles(sessionRef.current.paragraphStyles, parsed.paragraphStyles))
+    } catch (e) {
+      session.showError('לא ניתן לייבא את הסגנונות', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
+    }
+  }
   const menus = useMemo(
     () =>
       buildMenus({
@@ -139,6 +151,7 @@ export default function App() {
         toggleParagraph: () => setShowParagraph((v) => !v),
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
+        importParagraphStyles: () => void importParagraphStyles(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
         undo: history.undo,
