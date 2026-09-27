@@ -3796,7 +3796,9 @@ export function Workspace({
   // it also bumps this plain counter to ask for that render
   const paragraphBaselineRef = useRef<{ key: string; look: string } | null>(null)
   const [, bumpOverrideBaseline] = useState(0)
-  const overrideParagraphs = textEditing && panelHead && typeof highlightedStyleId === 'string' && textSel && textSel.headId === panelHead.id ? paragraphsInRange(panelHead.text, Math.min(Math.min(textSel.a, textSel.b), panelHead.text.length), Math.min(Math.max(textSel.a, textSel.b), panelHead.text.length)) : null
+  // panelRange already falls back to the whole story for a merely-selected frame (see above), so a frame's "+" works
+  // the same whether you are inside its text editing a word or just have it selected with the Selection tool
+  const overrideParagraphs = panelHead && panelRange && typeof highlightedStyleId === 'string' ? paragraphsInRange(panelHead.text, panelRange.a, panelRange.b) : null
   // what actually diverges from the style right now (never sensitive to how much text there is - typing more of an
   // already-matching look must not look like a change): its own keys/values are the signature, not the raw text
   const overrideLook =
