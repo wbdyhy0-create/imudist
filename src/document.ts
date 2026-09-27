@@ -156,18 +156,25 @@ export function wordSpacingPt(style: TextStyle): number {
  * The gap after the "\n" ending each paragraph of `text` (one entry per paragraph, so `paraGaps(...)[i]` is the
  * gap after paragraph `i` — the last paragraph has no entry, since there's nothing after it to gap from; its own
  * trailing space, if any, is the frame's own padding-bottom, same as the story-wide spaceAfter always was).
- * Resolves, per paragraph boundary: that paragraph's own `spaceAfter` override, else the NEXT paragraph's own
- * `spaceBefore` override, else the story's own `spaceAfter` — so selecting one paragraph and setting its spaceAfter
- * pushes the paragraph after it away, and setting a paragraph's spaceBefore pushes it away from the one before it,
- * exactly the two independent controls asked for. (Paragraph 0's own spaceBefore, if set, has nowhere "before" it
- * to attach to within this per-"\n" mechanism — same as the story-wide spaceBefore, it becomes the first frame's
- * own padding-top instead; see frames.ts's `insetBox` / TextFrameView.tsx.)
+ * Resolves, per paragraph boundary: when only one side of the break asks for space - that paragraph's own
+ * `spaceAfter` override, or else the NEXT paragraph's own `spaceBefore` override - that is the gap, so setting a
+ * paragraph's spaceAfter pushes the paragraph after it away, and setting a paragraph's spaceBefore pushes it away
+ * from the one before it, the two independent controls asked for. When BOTH sides ask for space (e.g. a paragraph
+ * style bakes a spaceAfter into every paragraph it's applied to, and the next paragraph's own style also has a
+ * spaceBefore), the two demands collapse into one gap the way InDesign and CSS margins both do: the LARGER of the
+ * two, not whichever happens to come first - otherwise a paragraph's own spaceAfter (however it got set) would
+ * permanently drown out any spaceBefore the paragraph after it is ever given. Else the story's own `spaceAfter`.
+ * (Paragraph 0's own spaceBefore, if set, has nowhere "before" it to attach to within this per-"\n" mechanism —
+ * same as the story-wide spaceBefore, it becomes the first frame's own padding-top instead; see frames.ts's
+ * `insetBox` / TextFrameView.tsx.)
  */
 export function paraGaps(style: TextStyle, frame: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] }, text: string): (number | undefined)[] {
   const count = (text.match(/\n/g) ?? []).length + 1
   const out: (number | undefined)[] = []
   for (let i = 0; i < count - 1; i++) {
-    const gap = frame.paraSpaceAfter?.[i] ?? frame.paraSpaceBefore?.[i + 1] ?? (style.spaceAfter ?? DEFAULT_SPACE_AFTER)
+    const after = frame.paraSpaceAfter?.[i]
+    const before = frame.paraSpaceBefore?.[i + 1]
+    const gap = after != null && before != null ? Math.max(after, before) : (after ?? before ?? (style.spaceAfter ?? DEFAULT_SPACE_AFTER))
     out.push(gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined)
   }
   return out
