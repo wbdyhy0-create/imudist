@@ -4860,7 +4860,6 @@ export function Workspace({
             {
               id: 'style-manager',
               label: 'ניהול סגנונות',
-              floating: true,
               content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onClean={() => cleanSpacingCmd()} />,
             },
             {
