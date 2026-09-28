@@ -320,7 +320,20 @@ export function useDocumentSession() {
 
   /** New documents open in a new tab; the ones already open stay as they are. */
   const createDocument = (d: DocSettings, onDone?: () => void) => {
-    const blank: DocContent = { doc: d, frames: NO_FRAMES, images: NO_IMAGES, assets: NO_ASSETS, guides: NO_GUIDES, shapes: NO_SHAPES, paragraphStyles: DEFAULT_PARAGRAPH_STYLES, parents: NO_PARENTS, pageParents: NO_PAGE_PARENTS }
+    // every new document starts with one parent ("אב A") already applied to all of its pages, the same way InDesign
+    // always has an "A-Master" - so pages already look uniform from the start, instead of needing it set by hand
+    const parentA: ParentPage = { id: globalThis.crypto?.randomUUID?.() ?? `parent-${Date.now()}`, prefix: 'A', name: 'אב A', w: d.width, h: d.height, frames: [], images: [], shapes: [] }
+    const blank: DocContent = {
+      doc: d,
+      frames: NO_FRAMES,
+      images: NO_IMAGES,
+      assets: NO_ASSETS,
+      guides: NO_GUIDES,
+      shapes: NO_SHAPES,
+      paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
+      parents: [parentA],
+      pageParents: Array<string | null>(d.pages).fill(parentA.id),
+    }
     // a new document starts with a text frame on the margins of every page
     addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
     onDone?.()
