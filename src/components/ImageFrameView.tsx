@@ -18,6 +18,7 @@ interface Props {
   /** frame edges and handles are non-printing: hidden in Preview mode */
   showEdge: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
+  onDoubleClick?: () => void
   onHandleDown: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
   onRotateDown: (corner: RotateCorner, e: ReactPointerEvent<HTMLDivElement>) => void
 }
@@ -25,7 +26,7 @@ interface Props {
 const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' } as const
 
 /** A picture in its frame. The picture is drawn by the browser, scaled to the frame according to `image.fit`. */
-export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onHandleDown, onRotateDown }: Props) {
+export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onDoubleClick, onHandleDown, onRotateDown }: Props) {
   return (
     <div
       className={'image-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
@@ -40,6 +41,7 @@ export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked
         opacity: image.opacity ?? 1,
       }}
       onPointerDown={onPointerDown}
+      onDoubleClick={onDoubleClick}
     >
       {asset ? (
         <img src={asset.dataUrl} alt={asset.name} draggable={false} style={{ objectFit: OBJECT_FIT[image.fit] }} />

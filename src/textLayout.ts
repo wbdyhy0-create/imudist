@@ -159,6 +159,85 @@ function fitEnd(
   return end
 }
 
+/**
+ * How many visual lines `text` wraps into at the measurer's current width/style - by asking the browser (a Range
+ * spanning everything rendered reports one client rect per line it covers), the same way this file already trusts
+ * the browser for height in `fitEnd`, instead of a hand-rolled line-breaker.
+ */
+function countWrappedLines(m: HTMLDivElement, text: string, runs: Run[], paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart'>, patches?: ParagraphPatch[]): number {
+  if (!text) return 0
+  const inner = m.firstElementChild as HTMLElement
+  inner.replaceChildren(buildParagraphNodes(text, runs, 1, paraOpts, patches))
+  const range = document.createRange()
+  range.selectNodeContents(inner)
+  return Math.max(1, range.getClientRects().length)
+}
+
+/**
+ * Keeps a paragraph's own first/last lines (`TextFrame.paraKeepFirstLines`/`paraKeepLastLines`) from splitting off
+ * alone into the next frame (a widow/orphan): `end`, as `fitEnd` found it, may fall inside a paragraph that asked
+ * for this. If cutting there would leave fewer than the wanted number of lines on either side of the cut, the whole
+ * paragraph is pushed into the next frame instead - not just its last few lines, which would need re-measuring the
+ * cut point line by line; simpler, and still what the reader actually notices (no stranded line), at the cost of
+ * sometimes leaving a little more blank room at the bottom of the earlier frame than strictly necessary. Never moves
+ * `end` before `start`: a paragraph that's the very first thing in its frame has nowhere earlier to go, and is left
+ * as `fitEnd` found it rather than emptying the frame.
+ */
+function adjustForKeepLines(
+  m: HTMLDivElement,
+  story: string,
+  runs: Run[],
+  start: number,
+  end: number,
+  box: { w: number; h: number },
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart'>,
+  patches: ParagraphPatch[] | undefined,
+  paraKeepFirstLines: (number | null)[] | undefined,
+  paraKeepLastLines: (number | null)[] | undefined,
+): number {
+  if ((!paraKeepFirstLines?.length && !paraKeepLastLines?.length) || end >= story.length) return end
+  const paraStart = story.lastIndexOf('\n', end - 1) + 1
+  const nextBreak = story.indexOf('\n', end)
+  const paraEnd = nextBreak < 0 ? story.length : nextBreak
+  if (end <= paraStart || end >= paraEnd) return end // the cut already falls on a paragraph boundary
+  const paraIndex = paraIndexAt(story, paraStart)
+  const keepFirst = paraKeepFirstLines?.[paraIndex] ?? 0
+  const keepLast = paraKeepLastLines?.[paraIndex] ?? 0
+  if (keepFirst <= 0 && keepLast <= 0) return end
+  m.style.width = `${box.w}px`
+  const paraOptsAtStart = { ...paraOpts, startParaIndex: paraIndex, atParaStart: true }
+  const totalLines = countWrappedLines(m, story.slice(paraStart, paraEnd), sliceRuns(runs, paraStart, paraEnd), paraOptsAtStart, patches)
+  if (totalLines <= 1) return end
+  const linesBefore = countWrappedLines(m, story.slice(paraStart, end), sliceRuns(runs, paraStart, end), paraOptsAtStart, patches)
+  const linesAfter = totalLines - linesBefore
+  const violatesFirst = keepFirst > 0 && linesBefore < Math.min(keepFirst, totalLines)
+  const violatesLast = keepLast > 0 && linesAfter > 0 && linesAfter < keepLast
+  if (!violatesFirst && !violatesLast) return end
+  return paraStart > start ? paraStart : end
+}
+
+/**
+ * How many words sit on the last wrapped line of `paragraph`, at the given box width - used by the "smart tracking"
+ * tool (טיפוגרפיה) to decide whether a paragraph's last line is short enough to be worth tightening. Finds the line
+ * by growing the suffix word by word from the end until it no longer fits on one line (a paragraph is rarely more
+ * than a few dozen words, and this only ever runs once per paragraph, on demand - not during ordinary layout).
+ * Ignores any run styling within `paragraph` (uses `style` uniformly) - a reasonable approximation for a check
+ * about its last couple of words, which are rarely styled differently from the rest.
+ */
+export function lastLineWordCount(paragraph: string, style: TextStyle, width: number): number {
+  const words = paragraph.trim().split(/\s+/).filter(Boolean)
+  if (words.length <= 1) return words.length
+  const m = getMeasurer()
+  configure(m, style)
+  m.style.width = `${width}px`
+  const paraOpts = { paraLineHeight: paraLineHeightOf(style), firstLineIndent: style.firstLineIndent, startParaIndex: 0, atParaStart: true }
+  for (let k = 1; k <= words.length; k++) {
+    const suffix = words.slice(words.length - k).join(' ')
+    if (countWrappedLines(m, suffix, [{ len: suffix.length, style }], paraOpts) > 1) return Math.max(1, k - 1)
+  }
+  return words.length
+}
+
 /** How much of `story` (from `start`) fits into a box of the given size, with the story's default style. */
 export function fitStoryEnd(
   story: string,
@@ -208,6 +287,7 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
       `${style.wordSpacingMin}|${style.wordSpacingMax}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
+      `${JSON.stringify(head.paraKeepFirstLines)}|${JSON.stringify(head.paraKeepLastLines)}|` +
       `${JSON.stringify(head.paragraphStylePatches)}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${floatsKey(floats[i])}`).join(',')
 
@@ -230,12 +310,15 @@ export function flowFrames(frames: TextFrame[], images: ImageFrame[] = []): Map<
         const box = insetBox(f, style, isFirst ? spaceBeforeFirst : 0, isLast ? spaceAfterLast : 0)
         const startParaIndex = paraIndexAt(story, start)
         const atStart = atParaStart(story, start)
-        const end = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), {
+        const paraOpts = {
           paraGaps: gaps,
           startParaIndex,
           firstLineIndent: style.firstLineIndent,
           atParaStart: atStart,
-        }, head.paragraphStylePatches)
+        }
+        const fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches)
+        // the last frame of the chain has nowhere else to push a kept-together paragraph to - leave it as fitEnd found it
+        const end = isLast ? fitted : adjustForKeepLines(m, story, runs, start, fitted, box, paraOpts, head.paragraphStylePatches, head.paraKeepFirstLines, head.paraKeepLastLines)
         lengths.set(f.id, Math.max(1, end - start))
         flows.push({
           headId: head.id,

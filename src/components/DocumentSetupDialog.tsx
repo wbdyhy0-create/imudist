@@ -26,7 +26,7 @@ interface Props {
   initial: DocSettings
   /** how many empty text frames made automatically on the margins the document has now */
   removableFrames: number
-  onApply: (next: DocSettings, options: { dropEmptyFrames: boolean }) => void
+  onApply: (next: DocSettings, options: { dropEmptyFrames: boolean; resizeTextFrames: boolean }) => void
   onClose: () => void
 }
 
@@ -55,6 +55,7 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
   const [linked, setLinked] = useState<Record<SidesKey, boolean>>({ margins: true, bleed: true, slug: false })
   /** when switching to manual text frames: also delete the empty ones that already exist */
   const [removeEmpty, setRemoveEmpty] = useState(true)
+  const [resizeTextFrames, setResizeTextFrames] = useState(true)
 
   const error = validateDoc(d)
   const patch = (p: Partial<DocSettings>) => setD((s) => ({ ...s, ...p }))
@@ -91,7 +92,7 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
   const preset = matchPreset(shown.w, shown.h)
 
   const apply = () => {
-    if (!error) onApply(normalizeSizes(d), { dropEmptyFrames: !d.primaryTextFrame && removeEmpty && removableFrames > 0 })
+    if (!error) onApply(normalizeSizes(d), { dropEmptyFrames: !d.primaryTextFrame && removeEmpty && removableFrames > 0, resizeTextFrames })
   }
 
   return (
@@ -303,6 +304,10 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                       </button>
                     </div>
                   )}
+                  <label className="dlg-check">
+                    <input type="checkbox" checked={resizeTextFrames} onChange={(event) => setResizeTextFrames(event.target.checked)} />
+                    התאם תיבות טקסט לשוליים החדשים
+                  </label>
                   <div className="setup-row">
                     <Labeled label="עמודות בעמוד">
                       <NumberField value={d.columns} min={1} max={MAX_COLUMNS} onChange={(v) => patch({ columns: v })} />

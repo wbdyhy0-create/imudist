@@ -21,6 +21,10 @@ export interface MenuContext {
   togglePages: () => void
   showParagraph: boolean
   toggleParagraph: () => void
+  dockOpenId: string | null
+  onDockOpenChange: (id: string | null) => void
+  enabledDockPanelIds: string[]
+  onDockPanelToggle: (id: string) => void
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
   importText: () => void
@@ -60,6 +64,16 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     },
   })
   const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = '') => doc(label, shortcut, (ws) => ws.selectTool(id))
+  const dock = (id: string, label: string, shortcut = ''): MenuItem => ({
+    label,
+    shortcut,
+    checked: c.enabledDockPanelIds.includes(id),
+    onClick: () => {
+      const enabled = c.enabledDockPanelIds.includes(id)
+      c.onDockPanelToggle(id)
+      c.onDockOpenChange(enabled ? (c.dockOpenId === id ? null : c.dockOpenId) : id)
+    },
+  })
 
   return [
     {
@@ -151,8 +165,21 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
+        doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
+        doc('הוספת כותרת משתנה…', '', (ws) => ws.insertRunningHeader()),
         sep,
-        doc('הוספת מספר עמוד אוטומטי', '', (ws) => ws.insertPageNumberMarker()),
+        {
+          label: 'הוספת מספר עמוד אוטומטי',
+          submenu: [
+            doc('מספר מסמך', '', (ws) => ws.insertPageNumberMarker('document')),
+            doc('מספר פנימי: 1, 2, 3', '', (ws) => ws.insertPageNumberMarker('internal-number')),
+            doc('מספר חיצוני: 1, 2, 3', '', (ws) => ws.insertPageNumberMarker('external-number')),
+            doc('אות פנימית: א, ב, ג', '', (ws) => ws.insertPageNumberMarker('internal-letter')),
+            doc('אות חיצונית: א, ב, ג', '', (ws) => ws.insertPageNumberMarker('external-letter')),
+          ],
+        },
+        sep,
+        doc('יתומים, אלמנות וכיווץ…', '', (ws) => ws.openSmartLayout()),
         { label: 'ייבוא סגנונות…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
       ],
     },
@@ -233,9 +260,16 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             tool('דוגמיות צבע', 'swatches'),
           ],
         },
-        { label: 'לוח עמודים', shortcut: 'F12', checked: c.showPages, onClick: c.togglePages },
-        { label: 'מאפיינים', checked: c.showProps, onClick: c.toggleProps },
-        { label: 'פסקה', shortcut: 'Ctrl+Alt+L', checked: c.showParagraph, onClick: c.toggleParagraph },
+        dock('pages', 'לוח עמודים', 'F12'),
+        dock('properties', 'מאפיינים'),
+        dock('paragraph', 'פסקה', 'Ctrl+Alt+L'),
+        { separator: true },
+        dock('paragraph-styles', 'סגנונות פסקה'),
+        dock('style-manager', 'ניהול סגנונות'),
+        dock('color', 'צבע'),
+        dock('gradient', 'מעבר צבע'),
+        dock('swatches', 'דוגמיות'),
+        dock('layers', 'שכבות'),
         ...(c.openDocs.length > 0
           ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
           : []),

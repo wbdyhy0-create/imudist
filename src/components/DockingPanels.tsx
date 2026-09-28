@@ -10,6 +10,7 @@ export interface DockPanelDefinition {
 
 interface Props {
   panels: DockPanelDefinition[]
+  enabledPanelIds: string[]
   /** which tab is open, kept by the caller (not here) so it survives this component remounting - editing a parent
    *  page does exactly that, and a panel the user had open shouldn't close just because of it */
   openId: string | null
@@ -26,8 +27,8 @@ interface DragState {
   canFloat: boolean
 }
 
-export function DockingPanels({ panels, openId, onOpenChange }: Props) {
-  const available = panels.filter((panel) => panel.visible !== false)
+export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => panel.id), openId, onOpenChange }: Props) {
+  const available = panels.filter((panel) => panel.visible !== false && enabledPanelIds.includes(panel.id))
   // panels stay mounted (just hidden) once opened: their own state — the Layers panel's list of layers, the selected
   // paragraph style — used to be thrown away every time the tab was closed or another one opened, leaving the
   // workspace (which keeps the layer hidden/locked flags) out of step with what the panel showed

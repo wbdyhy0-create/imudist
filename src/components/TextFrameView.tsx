@@ -1,7 +1,9 @@
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { cssTextAlign, defaultLeading, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
+import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { splitMarks } from '../richtext'
+import { substituteMarker } from '../numbering'
+import { normalizeRuns } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 
@@ -208,6 +210,17 @@ function RichText({
 export function TextFrameView(p: Props) {
   const { frame, style, slice, selected, editing, showEdge, marked, locked } = p
   const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
+  const masterPreview = !editing && (slice.includes(PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_PAGE_NUMBER_MARKER) || slice.includes(EXTERNAL_PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_LETTER_PAGE_NUMBER_MARKER) || slice.includes(LETTER_PAGE_NUMBER_MARKER) || slice.includes(RUNNING_HEADER_MARKER))
+  let masterDisplay = { text: slice, runs: p.runs }
+  if (masterPreview) {
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, PAGE_NUMBER_MARKER, '1')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_PAGE_NUMBER_MARKER, '1')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, EXTERNAL_PAGE_NUMBER_MARKER, '1')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, 'א')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, LETTER_PAGE_NUMBER_MARKER, 'א')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, RUNNING_HEADER_MARKER, 'כותרת')
+    masterDisplay.runs = normalizeRuns(masterDisplay.text, masterDisplay.runs, style)
+  }
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
@@ -281,8 +294,8 @@ export function TextFrameView(p: Props) {
       ) : (
         <div className="text-frame-body" dir="rtl">
           <RichText
-            text={slice}
-            runs={p.runs}
+            text={masterDisplay.text}
+            runs={masterDisplay.runs}
             scale={1}
             highlight={p.highlight}
             floats={p.floats}

@@ -1,0 +1,24 @@
+import { useState } from 'react'
+import type { ParagraphStyleRecord } from './ParagraphStylesPanel'
+
+interface Props {
+  styles: ParagraphStyleRecord[]
+  onApply: (styleId: string, strategy: 'first' | 'last') => void
+  onClose: () => void
+}
+
+export function RunningHeaderDialog({ styles, onApply, onClose }: Props) {
+  const [styleId, setStyleId] = useState(styles[0]?.id ?? '')
+  const [strategy, setStrategy] = useState<'first' | 'last'>('last')
+  return (
+    <div className="modal-backdrop">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="כותרת משתנה" dir="rtl">
+        <h2>כותרת משתנה</h2>
+        <p>הכותרת תוצג בתיבת המאסטר ותשתנה לפי סגנון הפסקה שמופיע בעמוד.</p>
+        <label className="field-label">סגנון פסקה<select className="select" value={styleId} onChange={(event) => setStyleId(event.target.value)}>{styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>
+        <div className="seg" role="radiogroup" aria-label="בחירת כותרת"><button className={strategy === 'first' ? 'on' : ''} onClick={() => setStrategy('first')}>ראשון בעמוד</button><button className={strategy === 'last' ? 'on' : ''} onClick={() => setStrategy('last')}>אחרון בעמוד</button></div>
+        <div className="modal-buttons"><button className="btn primary" disabled={!styleId} onClick={() => { onApply(styleId, strategy); onClose() }}>הוסף כותרת</button><button className="btn" onClick={onClose}>ביטול</button></div>
+      </div>
+    </div>
+  )
+}

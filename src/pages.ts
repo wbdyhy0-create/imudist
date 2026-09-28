@@ -1,7 +1,8 @@
-import { MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, type Assets, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
-import { computeLayout, pageSidesOf, rowGroups } from './layout'
-import { pageNumberLabel, substituteMarker } from './numbering'
+import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
+import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
+import { normalizeRuns } from './story'
 
 /** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
@@ -146,6 +147,8 @@ export function parentShadowContent(
   parents: ParentPage[],
   pageParents: (string | null)[],
   sections: PageSection[],
+  documentFrames: TextFrame[] = [],
+  runningHeader?: (pageIndex: number, styleId: string, strategy: 'first' | 'last') => string,
 ): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
   const rects = pageRects(doc)
   const sides = pageSidesOf(doc)
@@ -171,13 +174,42 @@ export function parentShadowContent(
     const label = pageNumberLabel(sections, pageIndex, doc.startPage)
     for (const f of parent.frames) {
       if (!inHalf(f.x, f.w)) continue
-      const sub = substituteMarker(f.text, f.runs, PAGE_NUMBER_MARKER, label)
+      const pageHeader = f.runningHeaderStyleId ? (runningHeader?.(pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last') ?? runningHeaderForPage(doc, documentFrames, pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last')) : ''
+        const sourceRuns = normalizeRuns(f.text, f.runs, f)
+        const numbered = substituteMarker(f.text, sourceRuns, PAGE_NUMBER_MARKER, label)
+      const internal = substituteMarker(numbered.text, numbered.runs, INTERNAL_PAGE_NUMBER_MARKER, String(pageIndex + 1))
+      const externalNumber = substituteMarker(internal.text, internal.runs, EXTERNAL_PAGE_NUMBER_MARKER, String(pageIndex + 1))
+      const letters = substituteMarker(externalNumber.text, externalNumber.runs, LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
+      const internalLetters = substituteMarker(letters.text, letters.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
+      const sub = substituteMarker(internalLetters.text, internalLetters.runs, RUNNING_HEADER_MARKER, pageHeader)
       out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
     }
     for (const im of parent.images) if (inHalf(im.x, im.w)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
     for (const sh of parent.shapes) if (inHalf(sh.x, sh.w)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
   })
   return out
+}
+
+function runningHeaderForPage(doc: DocSettings, frames: TextFrame[], pageIndex: number, styleId: string, strategy: 'first' | 'last'): string {
+  const rects = pageRects(doc)
+  const candidates: { page: number; y: number; x: number; text: string }[] = []
+  for (const frame of frames) {
+    const framePage = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+    if (framePage > pageIndex) continue
+    if (!frame.text.trim()) continue
+    const paragraphs = frame.text.split('\n')
+    paragraphs.forEach((text, index) => {
+      const matches = frame.paragraphStyleIds?.[index] === styleId || (index === 0 && frame.paragraphStyleId === styleId)
+      if (matches && text.trim()) candidates.push({ page: framePage, y: frame.y + index, x: frame.x, text: text.trim() })
+    })
+  }
+  candidates.sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x)
+  if (!candidates.length) return ''
+  if (strategy === 'first') {
+    const onPage = candidates.filter((candidate) => candidate.page === pageIndex)
+    return (onPage[0] ?? candidates[candidates.length - 1]).text
+  }
+  return candidates[candidates.length - 1].text
 }
 
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */
@@ -264,6 +296,82 @@ export function movePage(c: DocContent, from: number, to: number): DocContent | 
 }
 
 /** Replace the document's settings (size, margins, page count …); objects stay on their pages. */
-export function applySettings(c: DocContent, next: DocSettings): DocContent {
-  return remapContent(c, normalizeSizes(next), (i) => (i < next.pages ? i : null))
+function resizePrimaryTextFrames(original: DocContent, remapped: DocContent, next: DocSettings): DocContent {
+  const oldRects = pageRects(original.doc)
+  const newRects = pageRects(next)
+  const originalById = new Map(original.frames.map((frame) => [frame.id, frame]))
+  const resized = remapped.frames.map((frame) => {
+    const source = originalById.get(frame.id)
+    if (!source) return frame
+    const page = ownerPage(oldRects, source.x + source.w / 2, source.y + source.h / 2)
+    const oldRect = oldRects[page]
+    const newRect = newRects[page]
+    if (!oldRect || !newRect) return frame
+    const layout = computeLayout(original.doc)
+    const pageInfo = layout.spreads.flatMap((spread) => spread.pages).find((candidate) => candidate.index === page)
+    if (!pageInfo) return frame
+    const oldMargins = pageMargins(original.doc, pageInfo.side, page)
+    const newLayout = computeLayout(next)
+    const newPageInfo = newLayout.spreads.flatMap((spread) => spread.pages).find((candidate) => candidate.index === page)
+    if (!newPageInfo) return frame
+    const newMargins = pageMargins(next, newPageInfo.side, page)
+    const oldContentW = Math.max(1, oldRect.w - oldMargins.left - oldMargins.right)
+    const oldContentH = Math.max(1, oldRect.h - oldMargins.top - oldMargins.bottom)
+    const newContentW = Math.max(1, newRect.w - newMargins.left - newMargins.right)
+    const newContentH = Math.max(1, newRect.h - newMargins.top - newMargins.bottom)
+    const scaleX = newContentW / oldContentW
+    const scaleY = newContentH / oldContentH
+    return {
+      ...frame,
+      x: newRect.x + newMargins.left + (source.x - (oldRect.x + oldMargins.left)) * scaleX,
+      y: newRect.y + newMargins.top + (source.y - (oldRect.y + oldMargins.top)) * scaleY,
+      w: Math.max(1, source.w * scaleX),
+      h: Math.max(1, source.h * scaleY),
+    }
+  })
+  return { ...remapped, frames: resized }
+}
+
+function resizeParentObjects(c: DocContent, next: DocSettings): DocContent {
+  const facing = next.facingPages && next.perRow >= 2
+  const resizeObject = <T extends { x: number; y: number; w: number; h: number }>(object: T, parent: ParentPage): T => {
+    const half = facing && object.x + object.w / 2 >= parent.w ? 1 : 0
+    const oldParentDoc = parentEditDoc(c.doc, parent)
+    const newParentDoc = parentEditDoc(next, parent)
+    const oldPage = computeLayout(oldParentDoc).spreads[0]?.pages[half]
+    const newPage = computeLayout(newParentDoc).spreads[0]?.pages[half]
+    if (!oldPage || !newPage) return object
+    const oldMargins = pageMargins(c.doc, oldPage.side, half)
+    const newMargins = pageMargins(next, newPage.side, half)
+    const oldContentW = Math.max(1, parent.w - oldMargins.left - oldMargins.right)
+    const oldContentH = Math.max(1, parent.h - oldMargins.top - oldMargins.bottom)
+    const newContentW = Math.max(1, parent.w - newMargins.left - newMargins.right)
+    const newContentH = Math.max(1, parent.h - newMargins.top - newMargins.bottom)
+    const baseX = half * parent.w
+    const scaleX = newContentW / oldContentW
+    const scaleY = newContentH / oldContentH
+    return {
+      ...object,
+      x: baseX + newMargins.left + (object.x - (baseX + oldMargins.left)) * scaleX,
+      y: newMargins.top + (object.y - oldMargins.top) * scaleY,
+      w: Math.max(1, object.w * scaleX),
+      h: Math.max(1, object.h * scaleY),
+    }
+  }
+  return {
+    ...c,
+    parents: c.parents.map((parent) => ({
+      ...parent,
+      frames: parent.frames.map((frame) => resizeObject(frame, parent)),
+      images: parent.images.map((image) => resizeObject(image, parent)),
+      shapes: parent.shapes.map((shape) => resizeObject(shape, parent)),
+    })),
+  }
+}
+
+export function applySettings(c: DocContent, next: DocSettings, resizeTextFrames = false): DocContent {
+  const normalized = normalizeSizes(next)
+  const applied = remapContent(c, normalized, (i) => (i < normalized.pages ? i : null))
+  if (!resizeTextFrames) return applied
+  return resizeParentObjects(resizePrimaryTextFrames(c, applied, normalized), normalized)
 }

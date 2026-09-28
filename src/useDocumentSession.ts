@@ -35,6 +35,8 @@ const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message :
 export interface SetupOptions {
   /** also delete the empty text frames that were made on the margins automatically (when the user switches to manual frames) */
   dropEmptyFrames?: boolean
+  /** resize automatic margin/column text frames when page margins change */
+  resizeTextFrames?: boolean
 }
 
 /** Operations on the pages and content of the open document. Each one is a single undo step. */
@@ -196,7 +198,7 @@ export function useDocumentSession() {
       change((s) => {
         // decided before the pages move: which empty margin frames there are now
         const drop = options?.dropEmptyFrames ? new Set(emptyPrimaryFrameIds(s.doc, s.frames)) : null
-        const applied = applySettings(s, next)
+        const applied = applySettings(s, next, options?.resizeTextFrames)
         const r = drop && drop.size > 0 ? { ...applied, frames: applied.frames.filter((f) => !drop.has(f.id)) } : applied
         if (!next.primaryTextFrame) return r
         // turning the option on gives every page without a text frame one; otherwise only pages that were added

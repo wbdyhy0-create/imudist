@@ -26,6 +26,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
@@ -58,6 +59,7 @@ export default function App() {
   /** which dock tab (מאפיינים / עמודים / …) is open; kept here for the same reason - entering or leaving
    *  parent-edit mode shouldn't close whatever panel the user had open */
   const [dockOpenId, setDockOpenId] = useState<string | null>(null)
+  const [enabledDockPanelIds, setEnabledDockPanelIds] = useState(ALL_DOCK_PANEL_IDS)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
@@ -92,7 +94,7 @@ export default function App() {
   /** the document's content for PDF export: every page's assigned parent content mixed in, behind its own objects */
   const exportContent = useMemo(() => {
     if (!doc) return null
-    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections)
+    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections, session.frames)
     return {
       frames: [...shadow.frames, ...session.frames],
       images: [...shadow.images, ...session.images],
@@ -186,6 +188,10 @@ export default function App() {
         togglePages: () => setShowPages((v) => !v),
         showParagraph,
         toggleParagraph: () => setShowParagraph((v) => !v),
+        dockOpenId,
+        onDockOpenChange: setDockOpenId,
+        enabledDockPanelIds,
+        onDockPanelToggle: (id) => setEnabledDockPanelIds((current) => current.includes(id) ? current.filter((panelId) => panelId !== id) : [...current, id]),
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
         importParagraphStyles: () => void importParagraphStyles(),
@@ -212,7 +218,7 @@ export default function App() {
         exportPdf: () => setDialog('export'),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
+    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
   )
 
   useEffect(() => {
@@ -364,8 +370,8 @@ export default function App() {
               onImagesChange={editingParent ? (next, key) => updateParent({ images: next }, key) : preview ? noop : session.changeImages}
               placingImages={preview ? NO_PLACED : placingImages}
               onPlacingImagesChange={preview ? noop : setPlacingImages}
-              guides={editingParent ? NO_GUIDES : preview ? NO_GUIDES : session.guides}
-              onGuidesChange={editingParent ? noop : preview ? noop : session.changeGuides}
+              guides={editingParent ? editingParent.guides ?? NO_GUIDES : preview ? NO_GUIDES : session.guides}
+              onGuidesChange={editingParent ? (next, key) => updateParent({ guides: next }, key) : preview ? noop : session.changeGuides}
               onShowGuides={() => setShowGuides(true)}
               shapes={editingParent ? editingParent.shapes : preview ? NO_SHAPES : session.shapes}
               onShapesChange={editingParent ? (next, key) => updateParent({ shapes: next }, key) : preview ? noop : session.changeShapes}
@@ -384,6 +390,7 @@ export default function App() {
               onSelectParent={setActiveParentId}
               dockOpenId={dockOpenId}
               onDockOpenChange={setDockOpenId}
+              enabledDockPanelIds={enabledDockPanelIds}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}

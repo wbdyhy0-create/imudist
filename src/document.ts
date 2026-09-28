@@ -211,6 +211,8 @@ export interface TextFrame extends TextStyle {
   id: string
   /** Objects sharing this id form an editable group. */
   groupId?: string
+  runningHeaderStyleId?: string
+  runningHeaderStrategy?: RunningHeaderStrategy
   paragraphStyleId?: string
   /** Imported paragraph-style ids, one entry per paragraph in the story head. */
   paragraphStyleIds?: string[]
@@ -240,6 +242,14 @@ export interface TextFrame extends TextStyle {
    */
   paraSpaceBefore?: (number | null)[]
   paraSpaceAfter?: (number | null)[]
+  /**
+   * "Keep lines together" (avoids a widow/orphan): the minimum number of the paragraph's own first/last lines that
+   * must stay in the same frame as the rest, instead of splitting off alone into the next one - `null`/0/missing
+   * means no constraint. Same shape and lifecycle as `paraSpaceBefore`/`paraSpaceAfter` (kept in sync by
+   * `spliceParaOverrides`); read by textLayout.ts's `flowFrames`, which is the only thing that ever acts on it.
+   */
+  paraKeepFirstLines?: (number | null)[]
+  paraKeepLastLines?: (number | null)[]
 }
 
 /** A named, reusable paragraph style (Paragraph Styles panel): a patch of the properties it sets, applied over `basedOnId`'s own resolved ones. */
@@ -453,6 +463,7 @@ export interface ParentPage {
   frames: TextFrame[]
   images: ImageFrame[]
   shapes: ShapeFrame[]
+  guides?: Guide[]
 }
 
 /**
@@ -463,6 +474,17 @@ export interface ParentPage {
  * applied (see numbering.ts's substituteMarker, called from pages.ts's parentShadowContent).
  */
 export const PAGE_NUMBER_MARKER = ''
+/** Marker for an internal numeric page number (1, 2, 3…) in a parent page. */
+export const INTERNAL_PAGE_NUMBER_MARKER = ''
+/** Marker for an outer letter page number (A, B, C…) in a parent page. */
+export const LETTER_PAGE_NUMBER_MARKER = ''
+/** Marker for an outer numeric page number. */
+export const EXTERNAL_PAGE_NUMBER_MARKER = ''
+/** Marker for an inner letter page number. */
+export const INTERNAL_LETTER_PAGE_NUMBER_MARKER = ''
+/** Marker inserted into a parent-page frame for a style-driven running header. */
+export const RUNNING_HEADER_MARKER = ''
+export type RunningHeaderStrategy = 'first' | 'last'
 
 /** How a page's number is written. */
 export type NumberFormat = 'decimal' | 'hebrew' | 'roman-upper' | 'roman-lower' | 'latin-upper' | 'latin-lower'

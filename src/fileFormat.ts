@@ -290,6 +290,8 @@ function parseFrames(v: unknown): TextFrame[] {
     frames.push({
       ...base,
       ...groupOf(raw),
+      ...(typeof raw.runningHeaderStyleId === 'string' && raw.runningHeaderStyleId ? { runningHeaderStyleId: raw.runningHeaderStyleId } : {}),
+      ...(raw.runningHeaderStrategy === 'first' || raw.runningHeaderStrategy === 'last' ? { runningHeaderStrategy: raw.runningHeaderStrategy } : {}),
       align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify', 'justifyCenter'], D.align),
       id,
       x: num(raw.x, 0, -1e6, 1e6),
@@ -580,6 +582,7 @@ function parseParents(v: unknown, assets: Assets): ParentPage[] {
       frames: parseFrames(raw.frames),
       images: parseImages(raw.images, assets),
       shapes: parseShapes(raw.shapes, assets),
+      guides: parseGuides(raw.guides, 2),
     })
   }
   return parents

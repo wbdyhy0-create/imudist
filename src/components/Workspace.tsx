@@ -50,9 +50,14 @@ import {
   type TextFrame,
   type TextStyle,
   PAGE_NUMBER_MARKER,
+  INTERNAL_PAGE_NUMBER_MARKER,
+  LETTER_PAGE_NUMBER_MARKER,
+  EXTERNAL_PAGE_NUMBER_MARKER,
+  INTERNAL_LETTER_PAGE_NUMBER_MARKER,
+  RUNNING_HEADER_MARKER,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -71,7 +76,7 @@ import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '
 import { combineShapes, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
-import { flowFrames, type FrameFlow } from '../textLayout'
+import { flowFrames, lastLineWordCount, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
@@ -80,6 +85,7 @@ import { ContextToolbar } from './ContextToolbar'
 import { ColorPickerDialog } from './ColorPickerDialog'
 import type { AlignOp } from './AlignButtons'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
+import { SmartLayoutDialog, type SmartLayoutRequest } from './SmartLayoutDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
@@ -97,6 +103,8 @@ import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
+import { RunningHeaderDialog } from './RunningHeaderDialog'
+import { FirstWordStylerDialog } from './FirstWordStylerDialog'
 import { SpreadView } from './SpreadView'
 import { StrokeSettingsDialog, type PencilSettings } from './StrokeSettingsDialog'
 import { StatusBar, formatZoom } from './StatusBar'
@@ -160,10 +168,14 @@ export interface WorkspaceHandle {
   clearGuides: () => void
   /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
   cleanSpacing: () => void
+  insertRunningHeader: () => void
+  firstWordStyler: () => void
   canReplaceSelectedText: () => boolean
   replaceSelectedText: (placed: PlacedText) => boolean
   /** types the auto-page-number marker at the text caret (טיפוגרפיה > הוספת מספר עמוד אוטומטי) */
-  insertPageNumberMarker: () => void
+  insertPageNumberMarker: (kind?: 'document' | 'internal-number' | 'external-number' | 'internal-letter' | 'external-letter') => void
+  /** opens the dialog for the "יתומים, אלמנות וכיווץ" tools (טיפוגרפיה) */
+  openSmartLayout: () => void
 }
 
 /**
@@ -226,6 +238,7 @@ interface Props {
    *  (entering or leaving parent-edit mode) shouldn't close whatever panel the user had open */
   dockOpenId: string | null
   onDockOpenChange: (id: string | null) => void
+  enabledDockPanelIds: string[]
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -314,6 +327,7 @@ export function Workspace({
   onSelectParent,
   dockOpenId,
   onDockOpenChange,
+  enabledDockPanelIds,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -517,6 +531,8 @@ export function Workspace({
   }, [selectedId, tool])
   /** the settings window of a shape tool (double click on the tool) */
   const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
+  const [runningHeaderDialog, setRunningHeaderDialog] = useState(false)
+  const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(1)
   const [pencilSettings, setPencilSettings] = useState<PencilSettings>({ fidelity: 2.5, smoothness: 65, cap: 'round', editSelected: true, within: 12 })
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
@@ -528,6 +544,7 @@ export function Workspace({
   /** the color new guides get: the last one the user chose */
   const [guideColor, setGuideColor] = useState(DEFAULT_GUIDE_COLOR)
   const [guidesDialog, setGuidesDialog] = useState(false)
+  const [smartLayoutDialog, setSmartLayoutDialog] = useState(false)
   const latestGuides = useRef(guides)
   latestGuides.current = guides
   /** resizing the pages by a handle of the Page tool: the current size and the last pointer position (screen px) */
@@ -674,7 +691,7 @@ export function Workspace({
    * `paraOverrides`, when given, replaces the head frame's per-paragraph spaceBefore/spaceAfter overrides too (see
    * `applyEdit`, the one caller that has them — spliced to stay lined up with the story's new paragraphs).
    */
-  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>) => {
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>) => {
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
     const nf = flowFrames(next, images)
     const chain = chainOf(next, headId)
@@ -740,6 +757,8 @@ export function Workspace({
     commitStory(headId, r.text, runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
+      paraKeepFirstLines: spliceParaOverrides(head.paraKeepFirstLines, head.text, from, to, insert),
+      paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert),
       ...paragraphLists,
     })
   }
@@ -763,11 +782,64 @@ export function Workspace({
    * character (see document.ts's PAGE_NUMBER_MARKER) - only meaningful while typing is possible, i.e. a text frame
    * is actually being edited and has a caret/selection of its own.
    */
-  const insertPageNumberMarker = () => {
+  const insertPageNumberMarker = (kind: 'document' | 'internal-number' | 'external-number' | 'internal-letter' | 'external-letter' = 'document') => {
     // not `editingId`: choosing this from the menu blurs the text frame first (its onStopEditing already cleared
     // that), but leaves `textSel` - the caret it was left at - alone, and that's what the marker should go at
     if (!textSel) return
-    applyEdit(textSel.headId, textSel.a, textSel.b, PAGE_NUMBER_MARKER)
+    const marker = kind === 'internal-number' ? INTERNAL_PAGE_NUMBER_MARKER : kind === 'external-number' ? EXTERNAL_PAGE_NUMBER_MARKER : kind === 'internal-letter' ? INTERNAL_LETTER_PAGE_NUMBER_MARKER : kind === 'external-letter' ? LETTER_PAGE_NUMBER_MARKER : PAGE_NUMBER_MARKER
+    applyEdit(textSel.headId, textSel.a, textSel.b, marker)
+  }
+
+  const insertRunningHeader = () => setRunningHeaderDialog(true)
+  const applyRunningHeader = (styleId: string, strategy: 'first' | 'last') => {
+    if (!selectedId) return
+    const frame = frames.find((candidate) => candidate.id === selectedId)
+    if (!frame) return
+    const baseRuns = normalizeRuns(frame.text, frame.runs, frame)
+    const edited = editStory(frame.text, baseRuns, frame.text.length, frame.text.length, RUNNING_HEADER_MARKER, frame)
+    onFramesChange(frames.map((candidate) => candidate.id === frame.id ? { ...candidate, ...edited, runningHeaderStyleId: styleId, runningHeaderStrategy: strategy } : candidate), `running-header:${frame.id}`)
+  }
+
+  const firstWordRange = (text: string, start: number, end: number): [number, number] | null => {
+    let cursor = start
+    while (cursor < end && /\s/.test(text[cursor])) cursor++
+    if (cursor >= end) return null
+    const tokenEnd = () => { let at = cursor; while (at < end && !/\s/.test(text[at])) at++; return at }
+    let wordEnd = tokenEnd()
+    const token = text.slice(cursor, wordEnd)
+    if (/^[\d\u05D0-\u05EA]+\)$/.test(token) || /^[\(\[\{][\d\u05D0-\u05EA]+$/.test(token)) {
+      cursor = wordEnd
+      while (cursor < end && /\s/.test(text[cursor])) cursor++
+      if (cursor >= end) return null
+      wordEnd = tokenEnd()
+    }
+    return wordEnd > cursor ? [cursor, wordEnd] : null
+  }
+
+  const applyFirstWordStyle = (sourceId: string, targetId: string, scope: 'document' | 'selection') => {
+    const resolved = resolveParagraphStyle(targetId)
+    const charPatch = Object.fromEntries(['fontFamily', 'color', 'fontSize', 'weight', 'italic', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const selectedHead = textSel?.headId
+    const nextFrames = frames.map((frame) => {
+      if (!frame.text || (scope === 'selection' && frame.id !== selectedHead)) return frame
+      const ranges: [number, number][] = []
+      let offset = 0
+      frame.text.split('\n').forEach((paragraph, index) => {
+        const end = offset + paragraph.length
+        const matches = frame.paragraphStyleIds?.[index] === sourceId || (index === 0 && frame.paragraphStyleId === sourceId)
+        const selected = scope === 'document' || (!!textSel && textSel.a < end && textSel.b > offset)
+        if (matches && selected) {
+          const range = firstWordRange(frame.text, offset, end)
+          if (range) ranges.push(range)
+        }
+        offset = end + 1
+      })
+      return ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame)) === frame.runs
+        ? frame
+        : { ...frame, runs: ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame)) }
+    })
+    onFramesChange(nextFrames, 'first-word-style')
+    setFirstWordDialog(false)
   }
 
   /** Backspace at the very start of a threaded frame deletes the last character of the previous frame */
@@ -1023,6 +1095,8 @@ export function Workspace({
                 runs: newRuns,
                 paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, head.text, d.from, d.to, d.insert),
                 paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, head.text, d.from, d.to, d.insert),
+                paraKeepFirstLines: spliceParaOverrides(f.paraKeepFirstLines, head.text, d.from, d.to, d.insert),
+                paraKeepLastLines: spliceParaOverrides(f.paraKeepLastLines, head.text, d.from, d.to, d.insert),
                 ...spliceParagraphStyles(f, head.text, d.from, d.to, d.insert),
               }
             : f,
@@ -1044,6 +1118,8 @@ export function Workspace({
           runs: c.runs,
           paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, f.text, d.from, d.to, d.insert),
           paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, f.text, d.from, d.to, d.insert),
+          paraKeepFirstLines: spliceParaOverrides(f.paraKeepFirstLines, f.text, d.from, d.to, d.insert),
+          paraKeepLastLines: spliceParaOverrides(f.paraKeepLastLines, f.text, d.from, d.to, d.insert),
           ...spliceParagraphStyles(f, f.text, d.from, d.to, d.insert),
         }
       }),
@@ -1625,12 +1701,19 @@ export function Workspace({
   const deleteSelection = (ids: string[], guideIds: string[]) => {
     const gone = new Set(ids)
     const goneGuides = new Set(guideIds)
-    pageOps.commit({
-      frames: ids.reduce((acc, id) => (acc.some((f) => f.id === id) ? removeFrame(acc, id) : acc), frames),
-      images: images.filter((im) => !gone.has(im.id)),
-      shapes: shapes.filter((sh) => !gone.has(sh.id)),
-      guides: goneGuides.size ? guides.filter((g) => !goneGuides.has(g.id)) : guides,
-    })
+    if (ids.length > 0) {
+      const nextFrames = ids.reduce((acc, id) => (acc.some((f) => f.id === id) ? removeFrame(acc, id) : acc), frames)
+      const nextImages = images.filter((im) => !gone.has(im.id))
+      const nextShapes = shapes.filter((sh) => !gone.has(sh.id))
+      if (editingParentId) {
+        onFramesChange(nextFrames, 'delete:objects')
+        onImagesChange(nextImages, 'delete:objects')
+        onShapesChange(nextShapes, 'delete:objects')
+      } else {
+        pageOps.commit({ frames: nextFrames, images: nextImages, shapes: nextShapes })
+      }
+    }
+    if (goneGuides.size > 0) onGuidesChange(guides.filter((g) => !goneGuides.has(g.id)), 'delete:guides')
     setMultiSel([])
     setGuideSel([])
     setSelectedIdRaw(null)
@@ -1740,9 +1823,12 @@ export function Workspace({
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
     },
     cleanSpacing: cleanSpacingCmd,
+    insertRunningHeader,
+    firstWordStyler: () => setFirstWordDialog(true),
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
     insertPageNumberMarker,
+    openSmartLayout: () => setSmartLayoutDialog(true),
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -3496,7 +3582,13 @@ export function Workspace({
       const free = !(e.ctrlKey || e.metaKey)
       // the other objects on the page the dragged one is over
       const page = ownerPage(rects, d.orig.x + raw.x + d.orig.w / 2, d.orig.y + raw.y + d.orig.h / 2)
-      const near = [...frames, ...images, ...shapes].filter((o) => o.id !== d.id && ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2) === page)
+      const currentSpread = spreads.find((spread) => spread.pages.some((candidate) => candidate.index === page))
+      const spreadPages = new Set(currentSpread?.pages.map((candidate) => candidate.index) ?? [page])
+      const near = [...frames, ...images, ...shapes].filter((o) => {
+        if (o.id === d.id) return false
+        const objectPage = ownerPage(rects, o.x + o.w / 2, o.y + o.h / 2)
+        return spreadPages.has(objectPage)
+      })
       // the edges that move are held on the margins, column edges, page edges, guides and the edges and middles of the other objects (Ctrl = free)
       // Alt stretches to both sides at once, around the middle
       const snapped = free ? snapDrag(d.orig, d.mode, resizeRaw.x, resizeRaw.y, e.altKey, objectLines(near)) : null
@@ -3512,10 +3604,17 @@ export function Workspace({
       } else setSpacingShown((cur) => (cur.length ? [] : cur))
       // the lines that hold the object; one along other objects runs across them and the dragged object, to show they are in line
       const now = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
-      setSnapShown((cur) => {
-        if (!snapped || snapped.lines.length === 0) return cur.length ? [] : cur
-        return snapped.lines.map((l) => (l.kind !== 'object' ? l : l.axis === 'v' ? { ...l, from: Math.min(l.from, now.y), to: Math.max(l.to, now.y + now.h) } : { ...l, from: Math.min(l.from, now.x), to: Math.max(l.to, now.x + now.w) }))
-      })
+      const equalLines: SnapLine[] = []
+      const tol = SNAP_PX / live.current.zoom
+      const same = (a: number, b: number) => Math.abs(a - b) <= tol
+      for (const other of near) {
+        const vertical = [now.x, now.x + now.w].find((edge) => [other.x, other.x + other.w].some((candidate) => same(edge, candidate)))
+        const horizontal = [now.y, now.y + now.h].find((edge) => [other.y, other.y + other.h].some((candidate) => same(edge, candidate)))
+        if (vertical !== undefined) equalLines.push({ axis: 'v', at: vertical, from: Math.min(now.y, other.y), to: Math.max(now.y + now.h, other.y + other.h), kind: 'object' })
+        if (horizontal !== undefined) equalLines.push({ axis: 'h', at: horizontal, from: Math.min(now.x, other.x), to: Math.max(now.x + now.w, other.x + other.w), kind: 'object' })
+      }
+      const heldLines = (snapped?.lines ?? []).map((l) => (l.kind !== 'object' ? l : l.axis === 'v' ? { ...l, from: Math.min(l.from, now.y), to: Math.max(l.to, now.y + now.h) } : { ...l, from: Math.min(l.from, now.x), to: Math.max(l.to, now.x + now.w) }))
+      setSnapShown([...heldLines, ...equalLines])
       if (d.kind === 'shape') {
         // Shift keeps the shape's proportions
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
@@ -3800,6 +3899,33 @@ export function Workspace({
   const visibleImages = layerVisible ? images.filter((im) => itemVisibility[im.id] !== false && (alwaysMounted.has(im.id) || inViewY(im.y, im.h))) : []
   const visibleShapes = layerVisible ? shapes.filter((sh) => itemVisibility[sh.id] !== false && (alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))) : []
 
+  const runningHeaderForPage = (pageIndex: number, styleId: string, strategy: 'first' | 'last') => {
+    const candidates: { page: number; index: number; text: string }[] = []
+    const rectList = pageRects(doc)
+    for (const head of headFrames(frames)) {
+      if (!head.text.trim() || !head.paragraphStyleIds) continue
+      const story = head.text
+      const chain = chainOf(frames, head.id)
+      for (const frame of chain) {
+        const part = flow.get(frame.id)
+        const framePage = ownerPage(rectList, frame.x + frame.w / 2, frame.y + frame.h / 2)
+        if (!part || framePage > pageIndex) continue
+        story.split('\n').forEach((text, index) => {
+          const start = story.slice(0, story.split('\n').slice(0, index).join('\n').length + (index ? 1 : 0)).length
+          const end = start + text.length + (index < story.split('\n').length - 1 ? 1 : 0)
+          if (head.paragraphStyleIds?.[index] === styleId && start < part.end && end > part.start && text.trim()) candidates.push({ page: framePage, index, text: text.trim() })
+        })
+      }
+    }
+    candidates.sort((a, b) => a.page - b.page || a.index - b.index)
+    if (!candidates.length) return ''
+    if (strategy === 'first') {
+      const onPage = candidates.filter((candidate) => candidate.page === pageIndex)
+      return (onPage[0] ?? candidates[candidates.length - 1]).text
+    }
+    return candidates[candidates.length - 1].text
+  }
+
   /**
    * Every parent (master) page's objects, translated onto every document page that uses it - behind that page's own
    * objects, and not selectable (see the `parent-shadow` CSS: pointer-events: none lets a click reach whatever is
@@ -3812,8 +3938,8 @@ export function Workspace({
       const rect = rects[pageIndex]
       return rect && inViewY(rect.y, rect.h) ? parentId : null
     })
-    return parentShadowContent(doc, parents, inView, sections)
-  }, [doc, parents, pageParents, sections, rects, editingParentId, scroll.y, vp.h])
+    return parentShadowContent(doc, parents, inView, sections, frames, runningHeaderForPage)
+  }, [doc, parents, pageParents, sections, frames, flow, rects, editingParentId, scroll.y, vp.h])
 
   const viewportClass =
     'viewport' +
@@ -4117,6 +4243,101 @@ export function Workspace({
     }
     const end = text.indexOf('\n', start)
     return [start, end < 0 ? text.length : end + 1] as const
+  }
+
+  // ── "יתומים, אלמנות וכיווץ" (טיפוגרפיה) ──────────────────────────────────────────
+  /** every story touched by the chosen scope, paired with which of its paragraphs are in it: every paragraph of
+   *  every story for "doc"; for "selection", the paragraphs the current text selection spans, or (nothing text-
+   *  selected, but a frame is) that frame's whole story. */
+  const scopedParagraphs = (scope: 'doc' | 'selection'): { head: TextFrame; indexes: number[] }[] => {
+    const allIndexes = (text: string) => Array.from({ length: text.split('\n').length }, (_, i) => i)
+    if (scope === 'doc') return headFrames(frames).map((head) => ({ head, indexes: allIndexes(head.text) }))
+    if (textSel) {
+      const head = frames.find((f) => f.id === textSel.headId)
+      return head ? [{ head, indexes: paragraphsInRange(head.text, Math.min(textSel.a, textSel.b), Math.max(textSel.a, textSel.b)) }] : []
+    }
+    const headId = selectedId ? flow.get(selectedId)?.headId : null
+    const head = headId ? frames.find((f) => f.id === headId) : undefined
+    return head ? [{ head, indexes: allIndexes(head.text) }] : []
+  }
+
+  /** Sets (or clears, with 0) the minimum first/last lines of the scope's paragraphs that must stay together with
+   *  the rest of the paragraph instead of splitting alone into the next frame - see textLayout.ts's `flowFrames`,
+   *  the only thing that actually acts on `paraKeepFirstLines`/`paraKeepLastLines`. */
+  const withKeepLinesTogether = (sourceFrames: TextFrame[], targets: { head: TextFrame; indexes: number[] }[], keepFirst: number, keepLast: number): TextFrame[] =>
+    sourceFrames.map((f) => {
+      const target = targets.find((t) => t.head.id === f.id)
+      if (!target) return f
+      let paraKeepFirstLines = f.paraKeepFirstLines
+      let paraKeepLastLines = f.paraKeepLastLines
+      for (const index of target.indexes) {
+        paraKeepFirstLines = withParaOverride(paraKeepFirstLines, index, keepFirst)
+        paraKeepLastLines = withParaOverride(paraKeepLastLines, index, keepLast)
+      }
+      return { ...f, paraKeepFirstLines, paraKeepLastLines }
+    })
+
+  /** A lone last word left at the bottom of a paragraph (or top of the next frame) reads badly: this swaps the
+   *  space right before each target paragraph's last word for a non-breaking one, the same trick GREP-based "no
+   *  break" tools use - the word can now only wrap together with the one before it. A one-word paragraph, or one
+   *  already ending in a non-breaking space, is left alone. Pure, like `withKeepLinesTogether` above - see
+   *  `applySmartLayout` for why these all return a new array instead of calling `onFramesChange` themselves. */
+  const withNoBreakLastWord = (sourceFrames: TextFrame[], targets: { head: TextFrame; indexes: number[] }[]): TextFrame[] => {
+    const NBSP = ' '
+    return sourceFrames.map((f) => {
+      const target = targets.find((t) => t.head.id === f.id)
+      if (!target) return f
+      let text = f.text
+      for (const index of target.indexes) {
+        const [start, boundEnd] = paragraphBounds(text, index)
+        const end = text[boundEnd - 1] === '\n' ? boundEnd - 1 : boundEnd
+        const trimmed = text.slice(start, end).replace(/\s+$/, '')
+        const lastSpace = trimmed.lastIndexOf(' ')
+        if (lastSpace <= 0) continue // a single word, or nothing earlier to keep it together with
+        text = text.slice(0, start + lastSpace) + NBSP + text.slice(start + lastSpace + 1)
+      }
+      return text === f.text ? f : { ...f, text }
+    })
+  }
+
+  /** Tightens (negative `tracking`, 1/1000 em) any target paragraph whose own last wrapped line is short (at most
+   *  `maxWords` words) and isn't its only line - nudging just enough text back onto that line to avoid a visibly
+   *  short one. Measured at the paragraph's own story's frame width; a story threaded across frames of different
+   *  widths is measured at its first frame's, an accepted approximation. Pure, like the two tools above. */
+  const withSmartTracking = (sourceFrames: TextFrame[], targets: { head: TextFrame; indexes: number[] }[], tracking: number, maxWords: number): TextFrame[] =>
+    sourceFrames.map((f) => {
+      const target = targets.find((t) => t.head.id === f.id)
+      if (!target) return f
+      const style = styleOf(f)
+      const width = insetBox(f, style, 0, 0).w
+      let runs = normalizeRuns(f.text, f.runs, f)
+      for (const index of target.indexes) {
+        const [start, boundEnd] = paragraphBounds(f.text, index)
+        const end = f.text[boundEnd - 1] === '\n' ? boundEnd - 1 : boundEnd
+        const para = f.text.slice(start, end)
+        const totalWords = para.trim().split(/\s+/).filter(Boolean).length
+        if (totalWords <= 1) continue
+        const lastWords = lastLineWordCount(para, style, width)
+        if (lastWords < totalWords && lastWords <= maxWords) runs = styleRange(runs, start, end, { tracking })
+      }
+      return runs === f.runs ? f : { ...f, runs }
+    })
+
+  /** SmartLayoutDialog's "החל": chains every tool that was turned on onto the SAME frames array (each tool above
+   *  is a pure `frames -> frames` step, not an `onFramesChange` of its own), so they combine into one array and
+   *  one `onFramesChange` / undo step instead of each undoing whichever ran before it. */
+  const applySmartLayout = (r: SmartLayoutRequest) => {
+    const targets = scopedParagraphs(r.scope)
+    if (targets.length === 0) {
+      setSmartLayoutDialog(false)
+      return
+    }
+    let next = frames
+    if (r.keepLines) next = withKeepLinesTogether(next, targets, r.keepFirst, r.keepLast)
+    if (r.noBreak) next = withNoBreakLastWord(next, targets)
+    if (r.smartTracking) next = withSmartTracking(next, targets, r.tracking, r.maxWords)
+    if (next !== frames) onFramesChange(next, 'smart-layout')
+    setSmartLayoutDialog(false)
   }
 
   const paragraphUsesStyle = (frame: TextFrame, index: number, styleId: string) => {
@@ -4655,17 +4876,17 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
-              {!previewMode && parentShadows.images.map((im) => (
+              {parentShadows.images.map((im) => (
                 <div className="parent-shadow" key={im.id}>
                   <ImageFrameView image={im} asset={assets[im.assetId]} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} onPointerDown={noop} onHandleDown={noop} onRotateDown={noop} />
                 </div>
               ))}
-              {!previewMode && parentShadows.shapes.map((sh) => (
+              {parentShadows.shapes.map((sh) => (
                 <div className="parent-shadow" key={sh.id}>
                   <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} />
                 </div>
               ))}
-              {!previewMode && parentShadows.frames.map((f) => {
+              {parentShadows.frames.map((f) => {
                 const style = styleOf(f)
                 const runs = normalizeRuns(f.text, f.runs, f)
                 return (
@@ -5141,6 +5362,7 @@ export function Workspace({
           </div>
         </div>
         <DockingPanels
+          enabledPanelIds={enabledDockPanelIds}
           openId={dockOpenId}
           onOpenChange={onDockOpenChange}
           panels={[
@@ -5346,6 +5568,12 @@ export function Workspace({
           onClose={() => setToolDialog(null)}
         />
       )}
+      {runningHeaderDialog && (
+        <RunningHeaderDialog styles={paragraphStyles} onApply={applyRunningHeader} onClose={() => setRunningHeaderDialog(false)} />
+      )}
+      {firstWordDialog && (
+        <FirstWordStylerDialog styles={paragraphStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />
+      )}
       {rulerMenu && (
         <ContextMenu
           x={rulerMenu.x}
@@ -5377,6 +5605,13 @@ export function Workspace({
           existing={guides.length}
           onCreate={applyGuideRequest}
           onClose={() => setGuidesDialog(false)}
+        />
+      )}
+      {smartLayoutDialog && (
+        <SmartLayoutDialog
+          hasSelection={!!textSel || !!(selectedId && flow.get(selectedId))}
+          onApply={applySmartLayout}
+          onClose={() => setSmartLayoutDialog(false)}
         />
       )}
       <StatusBar

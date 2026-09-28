@@ -28,8 +28,9 @@ export function LayersPanel({ frames, images, shapes, selectedId, activeLayerId,
   const [editing, setEditing] = useState<{ kind: 'layer' | 'item'; id: string } | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState(LAYER_COLORS[0])
+  const visibleTextFrames = frames.filter((item) => item.text.trim())
   const allItems = [
-    ...frames.map((item) => ({ id: item.id, layerId: item.layerId, label: item.text.trim().split('\n')[0] || 'תיבת טקסט', type: 'T' })),
+    ...visibleTextFrames.map((item) => ({ id: item.id, layerId: item.layerId, label: item.text.trim().split('\n')[0] || 'תיבת טקסט', type: 'T' })),
     ...images.map((item) => ({ id: item.id, layerId: item.layerId, label: 'תמונה', type: 'IMG' })),
     ...shapes.map((item) => ({ id: item.id, layerId: item.layerId, label: item.kind === 'path' ? 'נתיב' : item.kind === 'rect' ? 'מלבן' : item.kind === 'ellipse' ? 'אליפסה' : 'צורה', type: 'PATH' })),
   ].map((item) => ({ ...item, label: itemNames[item.id] ?? item.label }))

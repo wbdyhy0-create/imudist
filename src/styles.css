@@ -486,6 +486,7 @@ svg { display: block; }
    itself stays unpositioned (position: static) - its child is still absolutely positioned against the same sheet
    it always was; only the child's own box gets the outline, directly, so nothing needs to duplicate its geometry. */
 .parent-shadow > .text-frame, .parent-shadow > .image-frame, .parent-shadow > .shape-frame { outline: 1px dashed var(--accent-line); opacity: 0.88; }
+.viewport.preview .parent-shadow > .text-frame, .viewport.preview .parent-shadow > .image-frame, .viewport.preview .parent-shadow > .shape-frame { outline: none; opacity: 1; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
 /* text is laid out at a fixed 1x scale inside here (world points = css px), then the whole thing is scaled as one
