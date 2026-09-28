@@ -15,6 +15,8 @@ import {
   DEFAULT_GUIDE_COLOR,
   DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
+  frameSpaceAfter,
+  frameSpaceBefore,
   isFacing,
   MAX_GUIDES,
   MAX_PAGE_PT,
@@ -23,6 +25,7 @@ import {
   maxMargin,
   minPageSize,
   pageSize,
+  paraGaps as paraGapsOf,
   validateDoc,
   withPageMargins,
   withPageSize,
@@ -36,6 +39,7 @@ import {
   type PathSmoothPoint,
   type PathText,
   type PathVertex,
+  type ParentPage,
   type ShapeFrame,
   type Sides,
   type ImageFit,
@@ -102,6 +106,8 @@ import type { PageOps, TabView } from '../useDocumentSession'
 /** pasteboard around the pages, screen px */
 const PAD = 120
 const RULER = 20
+/** for handler props a read-only render (a parent page's shadow on a document page) must supply but never fires */
+const noop = () => {}
 const FIT_MARGIN = 40
 /** a dragged guide is held on another guide when it is this close, screen px */
 const SNAP_PX = 6
@@ -193,6 +199,16 @@ interface Props {
   onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string) => void
   paragraphStyles: ParagraphStyleRecord[]
   onParagraphStylesChange: (styles: ParagraphStyleRecord[], coalesceKey?: string) => void
+  /** the document's parent (master) pages */
+  parents: ParentPage[]
+  onParentsChange: (parents: ParentPage[], coalesceKey?: string) => void
+  /** which parent applies to each document page, by index */
+  pageParents: (string | null)[]
+  onPageParentsChange: (pageParents: (string | null)[], coalesceKey?: string) => void
+  /** the parent page open for editing instead of the document itself, or null while editing the document normally */
+  editingParentId: string | null
+  onEditParent: (id: string) => void
+  onExitParentEdit: () => void
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -268,6 +284,13 @@ export function Workspace({
   onShapesChange,
   paragraphStyles,
   onParagraphStylesChange,
+  parents,
+  onParentsChange,
+  pageParents,
+  onPageParentsChange,
+  editingParentId,
+  onEditParent,
+  onExitParentEdit,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -3675,6 +3698,27 @@ export function Workspace({
   const visibleImages = layerVisible ? images.filter((im) => itemVisibility[im.id] !== false && (alwaysMounted.has(im.id) || inViewY(im.y, im.h))) : []
   const visibleShapes = layerVisible ? shapes.filter((sh) => itemVisibility[sh.id] !== false && (alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))) : []
 
+  /**
+   * Every parent (master) page's objects, translated onto every document page that uses it - behind that page's own
+   * objects, and not selectable (see the `parent-shadow` CSS: pointer-events: none lets a click reach whatever is
+   * really on the page, or the pasteboard, right through them). Never shown while editing a parent itself.
+   */
+  const parentShadows = useMemo(() => {
+    const out: { frames: (TextFrame & { pageIndex: number })[]; images: (ImageFrame & { pageIndex: number })[]; shapes: (ShapeFrame & { pageIndex: number })[] } = { frames: [], images: [], shapes: [] }
+    if (editingParentId) return out
+    pageParents.forEach((parentId, pageIndex) => {
+      const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
+      const rect = rects[pageIndex]
+      if (!parent || !rect || !inViewY(rect.y, rect.h)) return
+      const dx = rect.x
+      const dy = rect.y
+      for (const f of parent.frames) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null, pageIndex })
+      for (const im of parent.images) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy, pageIndex })
+      for (const sh of parent.shapes) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy, pageIndex })
+    })
+    return out
+  }, [parents, pageParents, rects, editingParentId, scroll.y, vp.h])
+
   const viewportClass =
     'viewport' +
     (previewMode ? ' preview' : '') +
@@ -4131,6 +4175,69 @@ export function Workspace({
     onParagraphStylesChange([...paragraphStyles, { id, name, patch }])
   }
 
+  // ── parent (master) pages ──────────────────────────────────────────────────────
+  /** A, B, C … Z, then AA, AB … - never reusing a prefix already on another parent */
+  const nextParentPrefix = () => {
+    const used = new Set(parents.map((p) => p.prefix))
+    for (let n = 0; ; n++) {
+      let s = ''
+      let k = n
+      do {
+        s = String.fromCharCode(65 + (k % 26)) + s
+        k = Math.floor(k / 26) - 1
+      } while (k >= 0)
+      if (!used.has(s)) return s
+    }
+  }
+  const createParent = () => {
+    const prefix = nextParentPrefix()
+    const parent: ParentPage = { id: newFrameId(), prefix, name: `אב ${prefix}`, w: doc.width, h: doc.height, frames: [], images: [], shapes: [] }
+    onParentsChange([...parents, parent])
+    onEditParent(parent.id)
+  }
+  /** Removes a parent; every page that used it reverts to none (no parent applied), same as InDesign. */
+  const deleteParent = (id: string) => {
+    onParentsChange(parents.filter((p) => p.id !== id))
+    if (pageParents.some((p) => p === id)) onPageParentsChange(pageParents.map((p) => (p === id ? null : p)))
+    if (editingParentId === id) onExitParentEdit()
+  }
+  /** Applies a parent (or none) to the given document pages. */
+  const applyParentToPages = (parentId: string | null, pageIndices: number[]) => {
+    const set = new Set(pageIndices)
+    const next = doc.pages > pageParents.length ? [...pageParents, ...Array<string | null>(doc.pages - pageParents.length).fill(null)] : pageParents.slice()
+    for (const i of set) next[i] = parentId
+    onPageParentsChange(next)
+  }
+  /**
+   * "Detach": copies every given page's parent's objects onto the page itself, as ordinary editable objects at
+   * fresh ids, then clears that page's own parent - so every page keeps looking the same but stops following its
+   * parent from then on. Every page is folded into the same three new arrays in one pass (not one onFramesChange
+   * call per page), so detaching several pages at once doesn't have each call's stale `frames` overwrite the last.
+   */
+  const detachPagesFromParent = (pageIndices: number[]) => {
+    const newFrames: TextFrame[] = []
+    const newImages: ImageFrame[] = []
+    const newShapes: ShapeFrame[] = []
+    for (const pageIndex of pageIndices) {
+      const parentId = pageParents[pageIndex]
+      const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
+      const rect = rects[pageIndex]
+      if (!parent || !rect) continue
+      const dx = rect.x
+      const dy = rect.y
+      newFrames.push(...parent.frames.map((f) => ({ ...f, id: newFrameId(), x: f.x + dx, y: f.y + dy, next: null })))
+      newImages.push(...parent.images.map((im) => ({ ...im, id: newFrameId(), x: im.x + dx, y: im.y + dy })))
+      newShapes.push(...parent.shapes.map((sh) => ({ ...sh, id: newFrameId(), x: sh.x + dx, y: sh.y + dy })))
+    }
+    if (newFrames.length) onFramesChange([...frames, ...newFrames])
+    if (newImages.length) onImagesChange([...images, ...newImages])
+    if (newShapes.length) onShapesChange([...shapes, ...newShapes])
+    applyParentToPages(null, pageIndices)
+  }
+  /** the Pages panel's own entry points: act on whichever pages are currently selected there */
+  const applyParentToSelectedPages = (parentId: string) => applyParentToPages(parentId, selectedPages)
+  const detachSelectedPagesFromParent = () => detachPagesFromParent(selectedPages)
+
   /**
    * Finds every paragraph carrying `tag` (or just the first, when `all` is off) and gives it `styleId` - through
    * `restyleParagraphs`, the same path every other "apply this style to these paragraphs" action in this file uses,
@@ -4384,6 +4491,15 @@ export function Workspace({
         }}
       />
 
+      {editingParentId && (
+        <div className="parent-edit-bar">
+          <span>עריכת עמוד אב: {parents.find((p) => p.id === editingParentId)?.name ?? ''}</span>
+          <button className="btn small" onClick={onExitParentEdit}>
+            חזרה למסמך
+          </button>
+        </div>
+      )}
+
       <div className="ws-main">
         <Toolbox
           tool={space ? 'hand' : tool}
@@ -4432,6 +4548,62 @@ export function Workspace({
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
+              {!previewMode && parentShadows.images.map((im) => (
+                <div className="parent-shadow" key={im.id}>
+                  <ImageFrameView image={im} asset={assets[im.assetId]} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} onPointerDown={noop} onHandleDown={noop} onRotateDown={noop} />
+                </div>
+              ))}
+              {!previewMode && parentShadows.shapes.map((sh) => (
+                <div className="parent-shadow" key={sh.id}>
+                  <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} />
+                </div>
+              ))}
+              {!previewMode && parentShadows.frames.map((f) => {
+                const style = styleOf(f)
+                const runs = normalizeRuns(f.text, f.runs, f)
+                return (
+                  <div className="parent-shadow" key={f.id}>
+                  <TextFrameView
+                    frame={f}
+                    style={style}
+                    slice={f.text}
+                    runs={runs}
+                    highlight={null}
+                    floats={[]}
+                    z={0}
+                    overflow={false}
+                    hasPrev={false}
+                    zoom={zoom}
+                    tx={tx}
+                    ty={ty}
+                    selected={false}
+                    locked
+                    editing={false}
+                    armed={false}
+                    showEdge={false}
+                    showHidden={false}
+                    paraGaps={paraGapsOf(style, f, f.text)}
+                    startParaIndex={0}
+                    atParaStart={true}
+                    paragraphPatches={f.paragraphStylePatches}
+                    spaceBeforeFirst={frameSpaceBefore(style, f)}
+                    spaceAfterLast={frameSpaceAfter(style, f, f.text)}
+                    request={null}
+                    onPointerDown={noop}
+                    onDoubleClick={noop}
+                    onHandleDown={noop}
+                    onRotateDown={noop}
+                    onOutPortDown={noop}
+                    onInPortDown={noop}
+                    onEdit={noop}
+                    onSelect={noop}
+                    onCopyText={() => null}
+                    onBackspaceAtStart={noop}
+                    onStopEditing={noop}
+                  />
+                  </div>
+                )
+              })}
               {groupSelection && !previewMode && !placing && placingImages.length === 0 && tool === 'select' && (
                 <div
                   className="group-selection"
@@ -4980,7 +5152,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} />,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
             },
             {
               id: 'color',

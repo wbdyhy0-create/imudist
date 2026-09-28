@@ -247,6 +247,9 @@ svg { display: block; }
 .context-paragraph-controls label { display: inline-flex; align-items: center; gap: 3px; color: var(--text-dim); font-size: 10px; white-space: nowrap; }
 .context-paragraph-controls input { width: 45px; height: 25px; padding: 0 3px; background: var(--bg-field); border: 1px solid var(--border); color: var(--text); }
 
+.parent-edit-bar { flex: none; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 6px 12px; background: var(--accent); color: #fff; font-weight: 600; }
+.parent-edit-bar .btn { height: 26px; padding: 0 14px; background: rgba(255, 255, 255, 0.18); color: #fff; }
+.parent-edit-bar .btn:hover { background: rgba(255, 255, 255, 0.3); }
 .ws-main { flex: 1; min-height: 0; display: flex; direction: ltr; }
 .toolbox {
   position: relative; z-index: 1000000; width: 42px; flex: none; display: flex; flex-direction: column; align-items: center; padding: 4px 0;
@@ -472,6 +475,11 @@ svg { display: block; }
 .viewport.linking .text-frame { cursor: copy; }
 .text-frame { position: absolute; box-sizing: border-box; color: #111; line-height: 1.25; text-rendering: geometricPrecision; }
 .shape-frame.locked, .image-frame.locked, .text-frame.locked { pointer-events: none; }
+/* a parent (master) page's own objects, shown through on a document page: a light dashed outline sets them apart
+   from the page's own content, matching how a page-layout tool marks items that come from a template. The wrapper
+   itself stays unpositioned (position: static) - its child is still absolutely positioned against the same sheet
+   it always was; only the child's own box gets the outline, directly, so nothing needs to duplicate its geometry. */
+.parent-shadow > .text-frame, .parent-shadow > .image-frame, .parent-shadow > .shape-frame { outline: 1px dashed var(--accent-line); opacity: 0.88; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
 /* text is laid out at a fixed 1x scale inside here (world points = css px), then the whole thing is scaled as one
@@ -696,6 +704,17 @@ svg { display: block; }
 .thumb.sel { border-color: var(--accent-line); }
 .thumb-num { font-size: 11px; color: var(--text-dim); }
 .thumb.sel .thumb-num { color: #fff; }
+.thumb-parent { position: absolute; margin-inline-start: 34px; margin-top: -3px; width: 13px; height: 13px; display: grid; place-items: center; background: var(--accent); color: #fff; border-radius: 2px; font-size: 9px; font-weight: 700; }
+
+/* ── parent (master) pages, in the Pages panel ───────────────── */
+.parents-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.parents-list { display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow-y: auto; }
+.parent-row { display: flex; align-items: center; gap: 4px; }
+.parent-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border-radius: 3px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parent-name:hover { background: var(--hover); }
+.parent-prefix { flex: none; width: 16px; height: 16px; display: grid; place-items: center; background: var(--accent); color: #fff; border-radius: 2px; font-size: 10px; font-weight: 700; }
+.parents-apply { display: flex; flex-direction: column; gap: 6px; }
+.parents-apply .field-label { display: flex; flex-direction: column; gap: 4px; }
 .btn.small.primary { background: var(--accent); color: #fff; }
 /* ── placing text (loaded cursor) ────────────────────────── */
 .viewport.placing, .viewport.placing .text-frame { cursor: crosshair; }

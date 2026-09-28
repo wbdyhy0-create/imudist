@@ -432,6 +432,25 @@ export interface ShapeFrame {
   rotation?: number
 }
 
+/**
+ * A reusable page template (Pages panel's "עמודי אב"): its own small set of objects, in the same coordinate space a
+ * page of `w` × `h` would use (0,0 at the page's own top-left) - not the document's shared world space, since one
+ * parent can apply to pages anywhere in the document. A document page that has one applied (`DocContent.pageParents`)
+ * shows every one of these objects automatically, translated onto its own position, behind its own objects and not
+ * selectable - editing the parent page itself is what everyone using it then shows.
+ */
+export interface ParentPage {
+  id: string
+  /** up to ~4 characters, shown next to a document page that uses it */
+  prefix: string
+  name: string
+  w: number
+  h: number
+  frames: TextFrame[]
+  images: ImageFrame[]
+  shapes: ShapeFrame[]
+}
+
 /** The data of an imported picture. Several frames can show the same asset. */
 export interface Asset {
   /** the file's name, for the user */

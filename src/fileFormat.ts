@@ -27,6 +27,7 @@ import {
   type ImageFrame,
   type PageSize,
   type ParagraphStyleRecord,
+  type ParentPage,
   type PathGeom,
   type PathSide,
   type PathSmoothPoint,
@@ -67,11 +68,16 @@ export interface DocumentFile {
   shapes: ShapeFrame[]
   /** version 2+ (this field only from a later Imudist build): the document's named paragraph styles */
   paragraphStyles: ParagraphStyleRecord[]
+  /** version 2+ (this field only from a later Imudist build): the document's parent (master) pages */
+  parents: ParentPage[]
+  /** which parent page applies to each document page, by index */
+  pageParents: (string | null)[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
 export function serializeDocument(c: DocContent): string {
-  const used = new Set(c.images.map((i) => i.assetId))
+  // a parent page's own pictures need their assets kept too, not just the document pages' own
+  const used = new Set([...c.images, ...c.parents.flatMap((p) => p.images)].map((i) => i.assetId))
   const assets: Assets = {}
   for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
   const file: DocumentFile = {
@@ -85,6 +91,8 @@ export function serializeDocument(c: DocContent): string {
     guides: c.guides,
     shapes: c.shapes,
     paragraphStyles: c.paragraphStyles,
+    parents: c.parents,
+    pageParents: c.pageParents,
   }
   return JSON.stringify(file)
 }
@@ -544,6 +552,37 @@ function parseGuides(v: unknown, pages: number): Guide[] {
   return out
 }
 
+/** A parent (master) page: its own small set of objects, own id/prefix/name/size. */
+function parseParents(v: unknown, assets: Assets): ParentPage[] {
+  if (!Array.isArray(v)) return []
+  const used = new Set<string>()
+  const parents: ParentPage[] = []
+  for (const raw of v) {
+    if (!isObj(raw)) continue
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `parent-${parents.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    parents.push({
+      id,
+      prefix: str(raw.prefix, 'A').slice(0, 4),
+      name: str(raw.name, id),
+      w: num(raw.w, 595, MIN_PAGE_PT, MAX_PAGE_PT),
+      h: num(raw.h, 842, MIN_PAGE_PT, MAX_PAGE_PT),
+      frames: parseFrames(raw.frames),
+      images: parseImages(raw.images, assets),
+      shapes: parseShapes(raw.shapes, assets),
+    })
+  }
+  return parents
+}
+
+/** Which parent applies to each page, by index - a reference to a parent that no longer exists (or isn't a string) drops to none. */
+function parsePageParents(v: unknown, parents: ParentPage[], pages: number): (string | null)[] {
+  const ids = new Set(parents.map((p) => p.id))
+  const raw = Array.isArray(v) ? v : []
+  return Array.from({ length: pages }, (_, i) => (typeof raw[i] === 'string' && ids.has(raw[i] as string) ? (raw[i] as string) : null))
+}
+
 /**
  * Read the text of a file. The document takes its name from the file (like other desktop programs),
  * so `name` is the file's name without the extension.
@@ -561,6 +600,7 @@ export function parseDocument(text: string, name: string): DocContent {
   }
   const assets = parseAssets(data.assets)
   const doc = parseSettings(data.settings, name)
+  const parents = parseParents(data.parents, assets)
   return {
     doc,
     frames: parseFrames(data.frames),
@@ -569,6 +609,8 @@ export function parseDocument(text: string, name: string): DocContent {
     guides: parseGuides(data.guides, doc.pages),
     shapes: parseShapes(data.shapes, assets),
     paragraphStyles: parseParagraphStyles(data.paragraphStyles),
+    parents,
+    pageParents: parsePageParents(data.pageParents, parents, doc.pages),
   }
 }
 

@@ -1,4 +1,4 @@
-import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout, rowGroups } from './layout'
 
@@ -24,6 +24,10 @@ export interface DocContent {
   shapes: ShapeFrame[]
   /** named paragraph styles (Paragraph Styles panel); every document has at least one */
   paragraphStyles: ParagraphStyleRecord[]
+  /** the document's parent (master) pages */
+  parents: ParentPage[]
+  /** which parent page applies to each document page, by index (null / missing = none) */
+  pageParents: (string | null)[]
 }
 
 /** World rectangle of every page, indexed by page index. */
@@ -85,7 +89,17 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     const n = map(g.page)
     return n === null || n >= newDoc.pages ? [] : [n === g.page ? g : { ...g, page: n }]
   })
-  return { doc: newDoc, frames, images, assets: c.assets, guides, shapes, paragraphStyles: c.paragraphStyles }
+  return {
+    doc: newDoc,
+    frames,
+    images,
+    assets: c.assets,
+    guides,
+    shapes,
+    paragraphStyles: c.paragraphStyles,
+    parents: c.parents,
+    pageParents: remapList(c.pageParents, newDoc.pages, map),
+  }
 }
 
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */

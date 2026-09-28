@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { DocSettings, ImageFrame, ShapeFrame, TextFrame } from '../document'
+import type { DocSettings, ImageFrame, ParentPage, ShapeFrame, TextFrame } from '../document'
 import { shapePath } from '../shapes'
 import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
@@ -24,15 +24,30 @@ interface Props {
   onMove: (from: number, to: number) => void
   /** show the pages one to a row, or in pairs (1-2, 3-4 …) */
   onView: (perRow: 1 | 2) => void
+  /** the document's parent (master) pages */
+  parents: ParentPage[]
+  /** which parent applies to each document page, by index */
+  pageParents: (string | null)[]
+  onCreateParent: () => void
+  onDeleteParent: (id: string) => void
+  /** opens a parent page for editing instead of the document itself */
+  onEditParent: (id: string) => void
+  /** applies a parent to every currently selected document page */
+  onApplyParent: (parentId: string) => void
+  /** copies the currently selected pages' parent objects onto them and clears their own parent */
+  onDetachParent: () => void
 }
 
 const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onDelete, onMove, onView }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onDelete, onMove, onView, parents, pageParents, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
+  const [applyParentId, setApplyParentId] = useState('')
+  // the selected pages' own current parent, when they all share one (blank when they differ, or there are none)
+  const selectedParentId = selectedPages.every((i) => pageParents[i] === pageParents[selectedPages[0]]) ? (pageParents[selectedPages[0]] ?? '') : ''
 
   // which frames sit on which page, for the thumbnails
   const framesByPage = useMemo(() => {
@@ -119,6 +134,45 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           </button>
         </div>
       </div>
+
+      <div className="parents-section">
+        <div className="field-label">עמודי אב</div>
+        <div className="parents-list">
+          {parents.map((p) => (
+            <div className="parent-row" key={p.id}>
+              <button className="parent-name" title={`עריכת עמוד האב ${p.name}`} onClick={() => onEditParent(p.id)}>
+                <span className="parent-prefix">{p.prefix}</span>
+                {p.name}
+              </button>
+              <button className="icon-button" aria-label={`מחק את עמוד האב ${p.name}`} title="מחק עמוד אב" onClick={() => onDeleteParent(p.id)}>
+                ⌫
+              </button>
+            </div>
+          ))}
+          {parents.length === 0 && <p className="muted">אין עדיין עמודי אב.</p>}
+        </div>
+        <button className="btn small" onClick={onCreateParent}>
+          עמוד אב חדש
+        </button>
+        {parents.length > 0 && (
+          <div className="parents-apply">
+            <label className="field-label">
+              שיוך העמוד הנבחר לעמוד אב
+              <select className="select" value={selectedParentId || applyParentId} onChange={(e) => { setApplyParentId(e.target.value); if (e.target.value) onApplyParent(e.target.value) }}>
+                <option value="">ללא</option>
+                {parents.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="btn small" disabled={!selectedParentId} onClick={onDetachParent} title="שומר את מה שמופיע כרגע על העמוד, אבל מפסיק לעדכן אותו לפי עמוד האב">
+              נתק מעמוד אב
+            </button>
+          </div>
+        )}
+      </div>
       </div>
 
       <div className="thumbs">
@@ -196,6 +250,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                       ))}
                     </svg>
                     <span className="thumb-num">{p.number}</span>
+                    {pageParents[p.index] && <span className="thumb-parent" title={parents.find((par) => par.id === pageParents[p.index])?.name}>{parents.find((par) => par.id === pageParents[p.index])?.prefix}</span>}
                   </button>
                 )
               })}

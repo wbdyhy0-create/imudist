@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
@@ -26,6 +26,8 @@ const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
+const NO_PARENTS: ParentPage[] = []
+const NO_PAGE_PARENTS: (string | null)[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -45,6 +47,8 @@ export default function App() {
   const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | null>(null)
   const dialogOpen = dialog !== null
   const [preview, setPreview] = useState<DocSettings | null>(null)
+  /** the parent (master) page open for editing instead of the document itself, if any */
+  const [editingParentId, setEditingParentId] = useState<string | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
@@ -61,7 +65,21 @@ export default function App() {
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const ws = useRef<WorkspaceHandle>(null)
 
-  const shown = preview ?? doc
+  const editingParent = editingParentId ? (session.parents.find((p) => p.id === editingParentId) ?? null) : null
+  // the parent being edited was deleted (from another tab, or Ctrl+Z): fall back to the document itself
+  useEffect(() => {
+    if (editingParentId && !editingParent) setEditingParentId(null)
+  }, [editingParentId, editingParent])
+  /** a one-page pseudo document matching the parent's own size, so Workspace can edit it exactly like a real page */
+  const parentDoc: DocSettings | null = editingParent
+    ? { ...defaultDocSettings(editingParent.name), width: editingParent.w, height: editingParent.h, unit: doc?.unit ?? 'mm', binding: doc?.binding ?? 'rtl', primaryTextFrame: false }
+    : null
+  const updateParent = (patch: Partial<ParentPage>, key?: string) => {
+    if (!editingParentId) return
+    session.changeParents(session.parents.map((p) => (p.id === editingParentId ? { ...p, ...patch } : p)), key)
+  }
+
+  const shown = editingParent ? parentDoc : (preview ?? doc)
 
   /**
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
@@ -292,9 +310,11 @@ export default function App() {
   // the empty frames made automatically on the margins, counted only while the settings window is open
   const emptyFrames = useMemo(() => (dialog === 'setup' && doc ? emptyPrimaryFrameIds(doc, session.frames).length : 0), [dialog, doc, session.frames])
 
-  const fitKey = preview
-    ? [preview.width, preview.height, preview.perRow, preview.rowsCustom, JSON.stringify(preview.pageJoins), JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
-    : String(session.docId)
+  const fitKey = editingParentId
+    ? `parent:${editingParentId}`
+    : preview
+      ? [preview.width, preview.height, preview.perRow, preview.rowsCustom, JSON.stringify(preview.pageJoins), JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
+      : String(session.docId)
 
   return (
     <div className="app">
@@ -303,7 +323,7 @@ export default function App() {
         <div className="stage">
           {shown ? (
             <Workspace
-              key={preview ? 'preview' : session.docId}
+              key={editingParentId ? `parent:${editingParentId}` : preview ? 'preview' : session.docId}
               ref={ws}
               doc={shown}
               fitKey={fitKey}
@@ -315,23 +335,30 @@ export default function App() {
               showParagraph={showParagraph}
               previewMode={previewMode}
               onPreviewMode={setPreviewMode}
-              frames={preview ? NO_FRAMES : session.frames}
-              onFramesChange={preview ? noop : session.changeFrames}
-              pageOps={preview ? NO_PAGE_OPS : session.pages}
+              frames={editingParent ? editingParent.frames : preview ? NO_FRAMES : session.frames}
+              onFramesChange={editingParent ? (next, key) => updateParent({ frames: next }, key) : preview ? noop : session.changeFrames}
+              pageOps={editingParent ? NO_PAGE_OPS : preview ? NO_PAGE_OPS : session.pages}
               placing={preview ? null : placing}
               onPlacingChange={preview ? noop : setPlacing}
-              images={preview ? NO_IMAGES : session.images}
+              images={editingParent ? editingParent.images : preview ? NO_IMAGES : session.images}
               assets={session.assets}
-              onImagesChange={preview ? noop : session.changeImages}
+              onImagesChange={editingParent ? (next, key) => updateParent({ images: next }, key) : preview ? noop : session.changeImages}
               placingImages={preview ? NO_PLACED : placingImages}
               onPlacingImagesChange={preview ? noop : setPlacingImages}
-              guides={preview ? NO_GUIDES : session.guides}
-              onGuidesChange={preview ? noop : session.changeGuides}
+              guides={editingParent ? NO_GUIDES : preview ? NO_GUIDES : session.guides}
+              onGuidesChange={editingParent ? noop : preview ? noop : session.changeGuides}
               onShowGuides={() => setShowGuides(true)}
-              shapes={preview ? NO_SHAPES : session.shapes}
-              onShapesChange={preview ? noop : session.changeShapes}
+              shapes={editingParent ? editingParent.shapes : preview ? NO_SHAPES : session.shapes}
+              onShapesChange={editingParent ? (next, key) => updateParent({ shapes: next }, key) : preview ? noop : session.changeShapes}
               paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
               onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}
+              parents={preview ? NO_PARENTS : session.parents}
+              onParentsChange={preview ? noop : session.changeParents}
+              pageParents={preview ? NO_PAGE_PARENTS : session.pageParents}
+              onPageParentsChange={preview ? noop : session.changePageParents}
+              editingParentId={editingParentId}
+              onEditParent={setEditingParentId}
+              onExitParentEdit={() => setEditingParentId(null)}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}
