@@ -18,7 +18,7 @@ import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
-import { parentShadowContent } from './pages'
+import { parentEditDoc, parentShadowContent } from './pages'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -78,25 +78,9 @@ export default function App() {
   useEffect(() => {
     if (editingParentId && !editingParent) setEditingParentId(null)
   }, [editingParentId, editingParent])
-  /** a one-page pseudo document matching the parent's own size, so Workspace can edit it exactly like a real page -
-   *  built from the real document's own settings (margins, columns, unit…), so its guides match the document's */
-  const parentDoc: DocSettings | null = editingParent
-    ? {
-        ...(doc ?? defaultDocSettings('')),
-        name: editingParent.name,
-        width: editingParent.w,
-        height: editingParent.h,
-        pages: 1,
-        startPage: 1,
-        facingPages: false,
-        primaryTextFrame: false,
-        pageSizes: [],
-        pageMargins: [],
-        pageJoins: [],
-        rowsCustom: false,
-        perRow: 1,
-      }
-    : null
+  /** a pseudo document matching the parent's own size, so Workspace can edit it exactly like real pages - see
+   *  parentEditDoc (pages.ts) for why it's a two-page spread whenever the document has facing pages. */
+  const parentDoc: DocSettings | null = editingParent ? parentEditDoc(doc ?? defaultDocSettings(''), editingParent) : null
   const updateParent = (patch: Partial<ParentPage>, key?: string) => {
     if (!editingParentId) return
     session.changeParents(session.parents.map((p) => (p.id === editingParentId ? { ...p, ...patch } : p)), key)

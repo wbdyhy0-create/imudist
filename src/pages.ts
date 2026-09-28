@@ -1,6 +1,6 @@
 import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
-import { computeLayout, rowGroups } from './layout'
+import { computeLayout, pageSidesOf, rowGroups } from './layout'
 
 /** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
@@ -108,22 +108,59 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
  * (which additionally culls to the visible viewport) and by PDF export (which needs every page, not just the
  * ones currently on screen).
  */
+/**
+ * The pseudo document used to edit a parent (master) page: matches the real document's own settings (margins,
+ * columns, unit…) so its guides match, and is a two-page spread - joined explicitly, not left to page-number
+ * parity, which a pseudo document has none of - whenever the real document has facing pages, so the parent can be
+ * designed differently for the left side of a real spread than for the right, exactly like the document's own
+ * inside/outside margins already work. `parentShadowContent` below picks the matching side back out.
+ */
+export function parentEditDoc(doc: DocSettings, parent: ParentPage): DocSettings {
+  return {
+    ...doc,
+    name: parent.name,
+    width: parent.w,
+    height: parent.h,
+    pages: doc.facingPages ? 2 : 1,
+    startPage: 1,
+    primaryTextFrame: false,
+    pageSizes: [],
+    pageMargins: [],
+    pageJoins: doc.facingPages ? [null, true] : [],
+    rowsCustom: doc.facingPages,
+    perRow: doc.facingPages ? 2 : 1,
+  }
+}
+
 export function parentShadowContent(
   doc: DocSettings,
   parents: ParentPage[],
   pageParents: (string | null)[],
 ): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
   const rects = pageRects(doc)
+  const sides = pageSidesOf(doc)
   const out: { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } = { frames: [], images: [], shapes: [] }
   pageParents.forEach((parentId, pageIndex) => {
     const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
     const rect = rects[pageIndex]
     if (!parent || !rect) return
-    const dx = rect.x
+    const side = sides[pageIndex]
+    // a facing document: only the half of the parent's own spread that matches this page's side (left/right),
+    // translated from where it sits in that spread onto the real page - not the whole (two-page-wide) parent. A
+    // page that isn't really part of a facing pair (side "single") gets the parent's first half, same as when the
+    // document has no facing pages at all.
+    let srcX = 0
+    if (doc.facingPages && side !== 'single') {
+      const spread = computeLayout(parentEditDoc(doc, parent)).spreads[0]
+      const half = spread?.pages.find((p) => p.side === side)
+      if (half) srcX = half.x
+    }
+    const dx = rect.x - srcX
     const dy = rect.y
-    for (const f of parent.frames) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
-    for (const im of parent.images) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
-    for (const sh of parent.shapes) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
+    const inHalf = (x: number, w: number) => x + w / 2 >= srcX && x + w / 2 < srcX + parent.w
+    for (const f of parent.frames) if (inHalf(f.x, f.w)) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
+    for (const im of parent.images) if (inHalf(im.x, im.w)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
+    for (const sh of parent.shapes) if (inHalf(sh.x, sh.w)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
   })
   return out
 }
