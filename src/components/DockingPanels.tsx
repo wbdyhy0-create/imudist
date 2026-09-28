@@ -10,6 +10,10 @@ export interface DockPanelDefinition {
 
 interface Props {
   panels: DockPanelDefinition[]
+  /** which tab is open, kept by the caller (not here) so it survives this component remounting - editing a parent
+   *  page does exactly that, and a panel the user had open shouldn't close just because of it */
+  openId: string | null
+  onOpenChange: (id: string | null) => void
 }
 
 interface DragState {
@@ -22,13 +26,12 @@ interface DragState {
   canFloat: boolean
 }
 
-export function DockingPanels({ panels }: Props) {
+export function DockingPanels({ panels, openId, onOpenChange }: Props) {
   const available = panels.filter((panel) => panel.visible !== false)
-  const [openId, setOpenId] = useState<string | null>(null)
   // panels stay mounted (just hidden) once opened: their own state — the Layers panel's list of layers, the selected
   // paragraph style — used to be thrown away every time the tab was closed or another one opened, leaving the
   // workspace (which keeps the layer hidden/locked flags) out of step with what the panel showed
-  const [mounted, setMounted] = useState<string[]>([])
+  const [mounted, setMounted] = useState<string[]>(() => (openId ? [openId] : []))
   // a floating panel (the style manager) opens from its tab, never by itself: on start it used to sit open over the canvas
   const [floatingId, setFloatingId] = useState<string | null>(null)
   const [floatingPos, setFloatingPos] = useState({ x: 0, y: 60 })
@@ -57,7 +60,7 @@ export function DockingPanels({ panels }: Props) {
   })
 
   const openPanel = (id: string) => {
-    setOpenId(id)
+    onOpenChange(id)
     setMounted((current) => (current.includes(id) ? current : [...current, id]))
   }
 
@@ -108,7 +111,7 @@ export function DockingPanels({ panels }: Props) {
       openPanel(id)
       return
     }
-    if (openId === id) setOpenId(null)
+    if (openId === id) onOpenChange(null)
     else openPanel(id)
   }
 
@@ -146,7 +149,7 @@ export function DockingPanels({ panels }: Props) {
           ))}
         {floating && (
           <section className="dock-floating" style={{ left: floatingPos.x, top: floatingPos.y }}>
-            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => { setFloatingId(null); setOpenId(null) }}>
+            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => { setFloatingId(null); onOpenChange(null) }}>
               <span>{floating.label}</span>
               <span aria-hidden="true">×</span>
             </button>

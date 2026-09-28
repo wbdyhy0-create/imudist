@@ -54,6 +54,9 @@ export default function App() {
    *  Workspace, because editing a parent remounts Workspace (its `key` changes) - state kept there would be lost
    *  the moment a parent is opened for editing and again the moment it's closed. */
   const [activeParentId, setActiveParentId] = useState<string | null>(null)
+  /** which dock tab (מאפיינים / עמודים / …) is open; kept here for the same reason - entering or leaving
+   *  parent-edit mode shouldn't close whatever panel the user had open */
+  const [dockOpenId, setDockOpenId] = useState<string | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
@@ -75,9 +78,24 @@ export default function App() {
   useEffect(() => {
     if (editingParentId && !editingParent) setEditingParentId(null)
   }, [editingParentId, editingParent])
-  /** a one-page pseudo document matching the parent's own size, so Workspace can edit it exactly like a real page */
+  /** a one-page pseudo document matching the parent's own size, so Workspace can edit it exactly like a real page -
+   *  built from the real document's own settings (margins, columns, unit…), so its guides match the document's */
   const parentDoc: DocSettings | null = editingParent
-    ? { ...defaultDocSettings(editingParent.name), width: editingParent.w, height: editingParent.h, unit: doc?.unit ?? 'mm', binding: doc?.binding ?? 'rtl', primaryTextFrame: false }
+    ? {
+        ...(doc ?? defaultDocSettings('')),
+        name: editingParent.name,
+        width: editingParent.w,
+        height: editingParent.h,
+        pages: 1,
+        startPage: 1,
+        facingPages: false,
+        primaryTextFrame: false,
+        pageSizes: [],
+        pageMargins: [],
+        pageJoins: [],
+        rowsCustom: false,
+        perRow: 1,
+      }
     : null
   const updateParent = (patch: Partial<ParentPage>, key?: string) => {
     if (!editingParentId) return
@@ -377,6 +395,8 @@ export default function App() {
               onExitParentEdit={() => setEditingParentId(null)}
               activeParentId={activeParentId}
               onSelectParent={setActiveParentId}
+              dockOpenId={dockOpenId}
+              onDockOpenChange={setDockOpenId}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}

@@ -213,6 +213,10 @@ interface Props {
    *  because editing a parent remounts this component (its `key` changes with `editingParentId`). */
   activeParentId: string | null
   onSelectParent: (id: string) => void
+  /** which dock tab (מאפיינים / עמודים / …) is open, kept in App for the same reason: this component remounting
+   *  (entering or leaving parent-edit mode) shouldn't close whatever panel the user had open */
+  dockOpenId: string | null
+  onDockOpenChange: (id: string | null) => void
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -297,6 +301,8 @@ export function Workspace({
   onExitParentEdit,
   activeParentId,
   onSelectParent,
+  dockOpenId,
+  onDockOpenChange,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -5037,6 +5043,8 @@ export function Workspace({
           </div>
         </div>
         <DockingPanels
+          openId={dockOpenId}
+          onOpenChange={onDockOpenChange}
           panels={[
             {
               id: 'properties',
