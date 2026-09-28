@@ -209,6 +209,10 @@ interface Props {
   editingParentId: string | null
   onEditParent: (id: string) => void
   onExitParentEdit: () => void
+  /** the parent a click in "עמודי אב" marked "current": new pages get it automatically. Kept in App, not here,
+   *  because editing a parent remounts this component (its `key` changes with `editingParentId`). */
+  activeParentId: string | null
+  onSelectParent: (id: string) => void
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -291,6 +295,8 @@ export function Workspace({
   editingParentId,
   onEditParent,
   onExitParentEdit,
+  activeParentId,
+  onSelectParent,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -310,6 +316,9 @@ export function Workspace({
   const [selectedPage, setSelectedPage] = useState(0)
   /** the pages selected in the Pages panel; `selectedPage` is the one the selection grows from */
   const [pageSel, setPageSel] = useState<number[]>([])
+  // `activeParentId` falls back to the first parent whenever it no longer exists (deleted, or none was ever
+  // picked), instead of leaving new pages without a master for no visible reason.
+  const effectiveActiveParent = activeParentId && parents.some((p) => p.id === activeParentId) ? activeParentId : (parents[0]?.id ?? null)
   const pendingNav = useRef<number | null>(null)
   const [flowMode, setFlowMode] = useState<FlowMode>('auto')
   /** modifier keys held when the placing click started */
@@ -602,16 +611,16 @@ export function Workspace({
     goTo(spreadOfPage(i))
   }
   /**
-   * `master`: which parent to give the new pages. Left out, they inherit whatever the neighbouring page they're
-   * added next to already has - so adding page after page keeps using the same master without picking it each time.
-   * Passed explicitly (including `null` for "none"), that choice is used instead.
+   * `master`: which parent to give the new pages. Left out, they get whichever parent is currently marked "current"
+   * in "עמודי אב" (a click there, not a click on a document page) - so a run of added pages keeps using the same
+   * master without picking it again each time. Passed explicitly (including `null` for "none"), that choice is
+   * used instead.
    */
   const insertPages = (count: number, where: InsertWhere, master?: string | null) => {
     if (doc.pages >= 9999) return
     // "beside": the new page stands in the row of the selected page (to its left in a right-to-left document)
     const at = where === 'end' ? doc.pages : where === 'before' ? selPage : selPage + 1
-    const refPage = where === 'end' ? doc.pages - 1 : selPage
-    const parentId = master !== undefined ? master : (pageParents[refPage] ?? null)
+    const parentId = master !== undefined ? master : effectiveActiveParent
     pendingNav.current = at
     setSelectedPage(at)
     pageOps.insert(at, count, where === 'beside', parentId)
@@ -4194,6 +4203,7 @@ export function Workspace({
     const prefix = nextParentPrefix()
     const parent: ParentPage = { id: newFrameId(), prefix, name: `אב ${prefix}`, w: doc.width, h: doc.height, frames: [], images: [], shapes: [] }
     onParentsChange([...parents, parent])
+    onSelectParent(parent.id)
     onEditParent(parent.id)
   }
   /** Removes a parent; every page that used it reverts to none (no parent applied), same as InDesign. */
@@ -5153,7 +5163,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
             },
             {
               id: 'color',

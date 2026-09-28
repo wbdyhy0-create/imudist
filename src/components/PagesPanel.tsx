@@ -31,9 +31,13 @@ interface Props {
   parents: ParentPage[]
   /** which parent applies to each document page, by index */
   pageParents: (string | null)[]
+  /** the parent a single click in this list marked "current": what new pages get automatically */
+  activeParentId: string | null
+  /** a single click in this list: marks a parent "current", instead of applying it to any document page */
+  onSelectParent: (id: string) => void
   onCreateParent: () => void
   onDeleteParent: (id: string) => void
-  /** opens a parent page for editing instead of the document itself */
+  /** opens a parent page for editing instead of the document itself (a double click in this list) */
   onEditParent: (id: string) => void
   /** applies a parent to every currently selected document page */
   onApplyParent: (parentId: string) => void
@@ -45,7 +49,7 @@ const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onInsertWithMaster, onDelete, onMove, onView, parents, pageParents, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onInsertWithMaster, onDelete, onMove, onView, parents, pageParents, activeParentId, onSelectParent, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
   const [applyParentId, setApplyParentId] = useState('')
@@ -146,7 +150,13 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
         <div className="parents-list">
           {parents.map((p) => (
             <div className="parent-row" key={p.id}>
-              <button className="parent-name" title={`עריכת עמוד האב ${p.name}`} onClick={() => onEditParent(p.id)}>
+              <button
+                className={'parent-name' + (p.id === activeParentId ? ' active' : '')}
+                aria-pressed={p.id === activeParentId}
+                title={`${p.name} — לחיצה מסמנת אותו כברירת המחדל לעמודים חדשים, לחיצה כפולה לעריכה`}
+                onClick={() => onSelectParent(p.id)}
+                onDoubleClick={() => onEditParent(p.id)}
+              >
                 <span className="parent-prefix">{p.prefix}</span>
                 {p.name}
               </button>

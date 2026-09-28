@@ -50,6 +50,10 @@ export default function App() {
   const [preview, setPreview] = useState<DocSettings | null>(null)
   /** the parent (master) page open for editing instead of the document itself, if any */
   const [editingParentId, setEditingParentId] = useState<string | null>(null)
+  /** the parent a click in "עמודי אב" marked "current": new pages get it automatically. Lives here, not in
+   *  Workspace, because editing a parent remounts Workspace (its `key` changes) - state kept there would be lost
+   *  the moment a parent is opened for editing and again the moment it's closed. */
+  const [activeParentId, setActiveParentId] = useState<string | null>(null)
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
@@ -371,6 +375,8 @@ export default function App() {
               editingParentId={editingParentId}
               onEditParent={setEditingParentId}
               onExitParentEdit={() => setEditingParentId(null)}
+              activeParentId={activeParentId}
+              onSelectParent={setActiveParentId}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}

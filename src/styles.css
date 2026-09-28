@@ -712,8 +712,10 @@ svg { display: block; }
 .parents-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .parents-list { display: flex; flex-direction: column; gap: 2px; max-height: 120px; overflow-y: auto; }
 .parent-row { display: flex; align-items: center; gap: 4px; }
-.parent-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border-radius: 3px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parent-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 3px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parent-name:hover { background: var(--hover); }
+/* the "current" parent - new pages get it automatically until another one is clicked */
+.parent-name.active { background: var(--hover); border-color: var(--accent-line); }
 .parent-prefix { flex: none; width: 16px; height: 16px; display: grid; place-items: center; background: var(--accent); color: #fff; border-radius: 2px; font-size: 10px; font-weight: 700; }
 .parents-apply { display: flex; flex-direction: column; gap: 6px; }
 .parents-apply .field-label { display: flex; flex-direction: column; gap: 4px; }
