@@ -56,7 +56,7 @@ import { countWords, type ImportedParagraphStyle, type PlacedText } from '../imp
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, pourText, type FlowMode } from '../placeText'
-import { ownerPage, pageRects } from '../pages'
+import { ownerPage, pageRects, parentShadowContent } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
@@ -3704,20 +3704,14 @@ export function Workspace({
    * really on the page, or the pasteboard, right through them). Never shown while editing a parent itself.
    */
   const parentShadows = useMemo(() => {
-    const out: { frames: (TextFrame & { pageIndex: number })[]; images: (ImageFrame & { pageIndex: number })[]; shapes: (ShapeFrame & { pageIndex: number })[] } = { frames: [], images: [], shapes: [] }
-    if (editingParentId) return out
-    pageParents.forEach((parentId, pageIndex) => {
-      const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
+    if (editingParentId) return { frames: [], images: [], shapes: [] }
+    // only the pages actually on screen need their parent content computed
+    const inView = pageParents.map((parentId, pageIndex) => {
       const rect = rects[pageIndex]
-      if (!parent || !rect || !inViewY(rect.y, rect.h)) return
-      const dx = rect.x
-      const dy = rect.y
-      for (const f of parent.frames) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null, pageIndex })
-      for (const im of parent.images) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy, pageIndex })
-      for (const sh of parent.shapes) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy, pageIndex })
+      return rect && inViewY(rect.y, rect.h) ? parentId : null
     })
-    return out
-  }, [parents, pageParents, rects, editingParentId, scroll.y, vp.h])
+    return parentShadowContent(doc, parents, inView)
+  }, [doc, parents, pageParents, rects, editingParentId, scroll.y, vp.h])
 
   const viewportClass =
     'viewport' +

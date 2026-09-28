@@ -102,6 +102,32 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
   }
 }
 
+/**
+ * Every parent (master) page's objects, translated onto every document page that uses it - one copy per page,
+ * with a synthetic id (so it never collides with a real object). Shared by the on-screen "shadow" rendering
+ * (which additionally culls to the visible viewport) and by PDF export (which needs every page, not just the
+ * ones currently on screen).
+ */
+export function parentShadowContent(
+  doc: DocSettings,
+  parents: ParentPage[],
+  pageParents: (string | null)[],
+): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
+  const rects = pageRects(doc)
+  const out: { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } = { frames: [], images: [], shapes: [] }
+  pageParents.forEach((parentId, pageIndex) => {
+    const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
+    const rect = rects[pageIndex]
+    if (!parent || !rect) return
+    const dx = rect.x
+    const dy = rect.y
+    for (const f of parent.frames) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
+    for (const im of parent.images) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
+    for (const sh of parent.shapes) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
+  })
+  return out
+}
+
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */
 function remapList<T>(list: (T | null)[], pages: number, map: (i: number) => number | null): (T | null)[] {
   const out: (T | null)[] = new Array(pages).fill(null)

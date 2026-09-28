@@ -18,6 +18,7 @@ import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
+import { parentShadowContent } from './pages'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -80,6 +81,17 @@ export default function App() {
   }
 
   const shown = editingParent ? parentDoc : (preview ?? doc)
+
+  /** the document's content for PDF export: every page's assigned parent content mixed in, behind its own objects */
+  const exportContent = useMemo(() => {
+    if (!doc) return null
+    const shadow = parentShadowContent(doc, session.parents, session.pageParents)
+    return {
+      frames: [...shadow.frames, ...session.frames],
+      images: [...shadow.images, ...session.images],
+      shapes: [...shadow.shapes, ...session.shapes],
+    }
+  }, [doc, session.parents, session.pageParents, session.frames, session.images, session.shapes])
 
   /**
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
@@ -417,8 +429,8 @@ export default function App() {
             onPreview={setPreview}
           />
         )}
-        {dialog === 'export' && doc && (
-          <ExportPdfDialog doc={doc} frames={session.frames} images={session.images} shapes={session.shapes} assets={session.assets} onClose={closeDialog} />
+        {dialog === 'export' && doc && exportContent && (
+          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} onClose={closeDialog} />
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
