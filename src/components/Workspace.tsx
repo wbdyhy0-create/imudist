@@ -44,10 +44,12 @@ import {
   type Sides,
   type ImageFit,
   type ImageFrame,
+  type PageSection,
   type Run,
   type TextAlign,
   type TextFrame,
   type TextStyle,
+  PAGE_NUMBER_MARKER,
 } from '../document'
 import { isTyping } from '../dom'
 import { HANDLES, angleOf, chainOf, dragBox, headFrames, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
@@ -143,6 +145,8 @@ export interface WorkspaceHandle {
   arrange: (op: ArrangeOp) => void
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
   shapeOp: (op: BoolOp) => void
+  group: () => void
+  ungroup: () => void
   /** copy / cut / paste the selected objects, and a copy right on top of them */
   copy: () => void
   cut: () => void
@@ -158,6 +162,8 @@ export interface WorkspaceHandle {
   cleanSpacing: () => void
   canReplaceSelectedText: () => boolean
   replaceSelectedText: (placed: PlacedText) => boolean
+  /** types the auto-page-number marker at the text caret (טיפוגרפיה > הוספת מספר עמוד אוטומטי) */
+  insertPageNumberMarker: () => void
 }
 
 /**
@@ -205,6 +211,9 @@ interface Props {
   /** which parent applies to each document page, by index */
   pageParents: (string | null)[]
   onPageParentsChange: (pageParents: (string | null)[], coalesceKey?: string) => void
+  /** independently-numbered runs of pages (Section Options) */
+  sections: PageSection[]
+  onSectionsChange: (sections: PageSection[], coalesceKey?: string) => void
   /** the parent page open for editing instead of the document itself, or null while editing the document normally */
   editingParentId: string | null
   onEditParent: (id: string) => void
@@ -296,6 +305,8 @@ export function Workspace({
   onParentsChange,
   pageParents,
   onPageParentsChange,
+  sections,
+  onSectionsChange,
   editingParentId,
   onEditParent,
   onExitParentEdit,
@@ -343,6 +354,7 @@ export function Workspace({
   const drag = useRef<{ x: number; y: number } | null>(null)
   /** the selected text frame or picture (guides have their own, multiple, selection) */
   const [selectedId, setSelectedIdRaw] = useState<string | null>(null)
+  const [isolatedGroupId, setIsolatedGroupId] = useState<string | null>(null)
   const [layerVisible, setLayerVisible] = useState(true)
   const [layerLocked, setLayerLocked] = useState(false)
   const [activeLayerId, setActiveLayerId] = useState('layer-1')
@@ -399,6 +411,7 @@ export function Workspace({
     } | null>(null)
   /** the right-click menu of the rulers (units), at a screen position */
   const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null)
+  const [objectMenu, setObjectMenu] = useState<{ x: number; y: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   /** an out-port was clicked: the next click on a frame continues the text there */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
@@ -743,6 +756,18 @@ export function Workspace({
       b = textSel.b
     }
     applyEdit(fl.headId, a, b, insert)
+  }
+
+  /**
+   * טיפוגרפיה > הוספת מספר עמוד אוטומטי: types the auto-page-number marker at the caret, exactly like any other
+   * character (see document.ts's PAGE_NUMBER_MARKER) - only meaningful while typing is possible, i.e. a text frame
+   * is actually being edited and has a caret/selection of its own.
+   */
+  const insertPageNumberMarker = () => {
+    // not `editingId`: choosing this from the menu blurs the text frame first (its onStopEditing already cleared
+    // that), but leaves `textSel` - the caret it was left at - alone, and that's what the marker should go at
+    if (!textSel) return
+    applyEdit(textSel.headId, textSel.a, textSel.b, PAGE_NUMBER_MARKER)
   }
 
   /** Backspace at the very start of a threaded frame deletes the last character of the previous frame */
@@ -1348,6 +1373,35 @@ export function Workspace({
   /** the selected text frames, pictures and shapes (not guides) */
   const selectedObjectIds = () => (selectedId ? [selectedId] : multiSel).filter((id) => frames.some((f) => f.id === id) || images.some((im) => im.id === id) || shapes.some((sh) => sh.id === id))
 
+  const objectGroupId = (id: string) => frames.find((f) => f.id === id)?.groupId ?? images.find((im) => im.id === id)?.groupId ?? shapes.find((sh) => sh.id === id)?.groupId
+  const objectsInGroup = (groupId: string) => [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId).map((object) => object.id)
+  const enterGroupIsolation = (id: string) => {
+    const groupId = objectGroupId(id)
+    if (!groupId) return false
+    setIsolatedGroupId(groupId)
+    setSelectedId(id)
+    setMultiSel([])
+    return true
+  }
+  const groupSelectedObjects = () => {
+    const ids = selectedObjectIds()
+    if (ids.length < 2) return
+    const groupId = newFrameId()
+    const chosen = new Set(ids)
+    onFramesChange(frames.map((frame) => chosen.has(frame.id) ? { ...frame, groupId } : frame), 'group:create')
+    onImagesChange(images.map((image) => chosen.has(image.id) ? { ...image, groupId } : image), 'group:create')
+    onShapesChange(shapes.map((shape) => chosen.has(shape.id) ? { ...shape, groupId } : shape), 'group:create')
+  }
+  const ungroupSelectedObjects = () => {
+    const ids = selectedObjectIds()
+    const groups = new Set(ids.map(objectGroupId).filter((id): id is string => !!id))
+    if (groups.size === 0) return
+    const chosen = new Set(ids.flatMap((id) => { const group = objectGroupId(id); return group ? objectsInGroup(group) : [id] }))
+    onFramesChange(frames.map((frame) => chosen.has(frame.id) ? { ...frame, groupId: undefined } : frame), 'group:release')
+    onImagesChange(images.map((image) => chosen.has(image.id) ? { ...image, groupId: undefined } : image), 'group:release')
+    onShapesChange(shapes.map((shape) => chosen.has(shape.id) ? { ...shape, groupId: undefined } : shape), 'group:release')
+  }
+
   const inferRepeatOffset = (ids: string[]): { x: number; y: number } | null => {
     if (ids.length !== 1) return null
     const id = ids[0]
@@ -1588,6 +1642,21 @@ export function Workspace({
    */
   const handleMultiPointer = (id: string, e: ReactPointerEvent<Element>): boolean => {
     if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) return altDuplicateDrag(id, e)
+    const groupId = objectGroupId(id)
+    if (tool === 'select' && groupId && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      e.stopPropagation()
+      e.preventDefault()
+      setGuideSel([])
+      setEditingId(null)
+      setMultiSel(objectsInGroup(groupId))
+      setSelectedIdRaw(null)
+      const groupObjects = [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId)
+      const origins = new Map(groupObjects.map((object) => [object.id, { x: object.x, y: object.y }]))
+      dragSeq.current += 1
+      groupDrag.current = { origins, start: toWorld(e.clientX, e.clientY), key: `group:${dragSeq.current}` }
+      vpRef.current?.setPointerCapture(e.pointerId)
+      return true
+    }
     const current = selectedId ? [selectedId] : multiSel
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       e.stopPropagation()
@@ -1659,6 +1728,8 @@ export function Workspace({
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
     shapeOp: (op) => combineSelectedShapes(op),
+    group: groupSelectedObjects,
+    ungroup: ungroupSelectedObjects,
     copy: () => void copyToClipboard(false),
     cut: () => void copyToClipboard(true),
     paste: () => pasteFromClipboard(),
@@ -1671,6 +1742,7 @@ export function Workspace({
     cleanSpacing: cleanSpacingCmd,
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
+    insertPageNumberMarker,
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -3168,7 +3240,15 @@ export function Workspace({
 
   const panMode = tool === 'hand' || space
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && tool !== 'pen' && tool !== 'pencil') return // scrollbars
+    const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
+    if (clickedCanvas && tool !== 'pen' && tool !== 'pencil') {
+      if (isolatedGroupId) {
+        setIsolatedGroupId(null)
+        setSelectedIdRaw(null)
+        setMultiSel(objectsInGroup(isolatedGroupId))
+      }
+      return // scrollbars
+    }
     if (layerLocked && !panMode && tool !== 'zoom') return
     if (linkFrom && !panMode) {
       setLinkFrom(null) // clicked away from any frame
@@ -3732,8 +3812,8 @@ export function Workspace({
       const rect = rects[pageIndex]
       return rect && inViewY(rect.y, rect.h) ? parentId : null
     })
-    return parentShadowContent(doc, parents, inView)
-  }, [doc, parents, pageParents, rects, editingParentId, scroll.y, vp.h])
+    return parentShadowContent(doc, parents, inView, sections)
+  }, [doc, parents, pageParents, sections, rects, editingParentId, scroll.y, vp.h])
 
   const viewportClass =
     'viewport' +
@@ -4252,7 +4332,8 @@ export function Workspace({
     applyParentToPages(null, pageIndices)
   }
   /** the Pages panel's own entry points: act on whichever pages are currently selected there */
-  const applyParentToSelectedPages = (parentId: string) => applyParentToPages(parentId, selectedPages)
+  const applyParentToSelectedPages = (parentId: string | null) => applyParentToPages(parentId, selectedPages)
+  const applyParentToPage = (parentId: string | null, pageIndex: number) => applyParentToPages(parentId, [pageIndex])
   const detachSelectedPagesFromParent = () => detachPagesFromParent(selectedPages)
 
   /**
@@ -4366,6 +4447,14 @@ export function Workspace({
   const openRulerMenu = (e: ReactMouseEvent<HTMLElement>) => {
     e.preventDefault()
     setRulerMenu({ x: e.clientX, y: e.clientY })
+  }
+  const openObjectMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const ids = selectedObjectIds()
+    const hasGroup = ids.some((id) => !!objectGroupId(id))
+    if (ids.length < 2 && !hasGroup) return
+    event.preventDefault()
+    event.stopPropagation()
+    setObjectMenu({ x: event.clientX, y: event.clientY })
   }
   const setRulerUnit = (unit: Unit) => {
     if (unit !== doc.unit) pageOps.setup({ ...doc, unit }, 'unit')
@@ -4547,6 +4636,7 @@ export function Workspace({
           <div
             ref={vpRef}
             className={viewportClass}
+            onContextMenu={openObjectMenu}
             onScroll={(e) => setScroll({ x: getScrollX(e.currentTarget), y: e.currentTarget.scrollTop })}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -4650,6 +4740,7 @@ export function Workspace({
                   marked={!previewMode && multiSel.includes(im.id)}
                   showEdge={!previewMode}
                   onPointerDown={onImagePointerDown(im.id)}
+                  onDoubleClick={() => { enterGroupIsolation(im.id) }}
                   onHandleDown={onHandleDown(im.id)}
                   onRotateDown={onRotateDown(im.id)}
                 />
@@ -4677,6 +4768,12 @@ export function Workspace({
                   onRotateDown={onRotateDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
                   onDoubleClick={() => {
+                    if (enterGroupIsolation(sh.id)) {
+                      if (tool === 'select') setTool('direct')
+                      setSelectedId(sh.id)
+                      if (sh.pathText && tool === 'select') setPathEdit(sh.id)
+                      return
+                    }
                     if (sh.pathText && tool === 'select') {
                       setSelectedId(sh.id)
                       setPathEdit(sh.id)
@@ -4809,6 +4906,7 @@ export function Workspace({
                     onPointerDown={onFramePointerDown(f.id)}
                     onDoubleClick={() => {
                       if (!panMode) {
+                        enterGroupIsolation(f.id)
                         setSelectedId(f.id)
                         setEditingId(f.id)
                       }
@@ -5171,7 +5269,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onApplyParentToPage={applyParentToPage} onDetachParent={detachSelectedPagesFromParent} sections={sections} onSectionsChange={onSectionsChange} canEditPages={!editingParentId} />,
             },
             {
               id: 'color',
@@ -5257,6 +5355,17 @@ export function Workspace({
             { label: 'יחידות מידה', disabled: true },
             { separator: true },
             ...UNIT_OPTIONS.map((u) => ({ label: u.label, checked: doc.unit === u.value, onClick: () => setRulerUnit(u.value) })),
+          ]}
+        />
+      )}
+      {objectMenu && (
+        <ContextMenu
+          x={objectMenu.x}
+          y={objectMenu.y}
+          onClose={() => setObjectMenu(null)}
+          items={[
+            { label: 'צור גרופ', disabled: selectedObjectIds().length < 2, onClick: groupSelectedObjects },
+            { label: 'שחרר גרופ', disabled: !selectedObjectIds().some((id) => !!objectGroupId(id)), onClick: ungroupSelectedObjects },
           ]}
         />
       )}

@@ -25,6 +25,8 @@ import {
   type Guide,
   type ImageFit,
   type ImageFrame,
+  type NumberFormat,
+  type PageSection,
   type PageSize,
   type ParagraphStyleRecord,
   type ParentPage,
@@ -72,6 +74,8 @@ export interface DocumentFile {
   parents: ParentPage[]
   /** which parent page applies to each document page, by index */
   pageParents: (string | null)[]
+  /** version 2+ (this field only from a later Imudist build): independently-numbered runs of pages */
+  sections: PageSection[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
@@ -93,6 +97,7 @@ export function serializeDocument(c: DocContent): string {
     paragraphStyles: c.paragraphStyles,
     parents: c.parents,
     pageParents: c.pageParents,
+    sections: c.sections,
   }
   return JSON.stringify(file)
 }
@@ -174,6 +179,7 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
 const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 'number' && Number.isFinite(raw.z) ? { z: int(raw.z, 0, -1e9, 1e9) } : {})
 const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
   typeof raw.rotation === 'number' && Number.isFinite(raw.rotation) && raw.rotation !== 0 ? { rotation: normalizeDeg(raw.rotation) } : {}
+const groupOf = (raw: Record<string, unknown>): { groupId?: string } => typeof raw.groupId === 'string' && raw.groupId ? { groupId: raw.groupId } : {}
 /** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
 type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
 const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields> => ({
@@ -283,6 +289,7 @@ function parseFrames(v: unknown): TextFrame[] {
 
     frames.push({
       ...base,
+      ...groupOf(raw),
       align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify', 'justifyCenter'], D.align),
       id,
       x: num(raw.x, 0, -1e6, 1e6),
@@ -357,6 +364,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
     used.add(id)
     out.push({
       id,
+      ...groupOf(raw),
       assetId,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -500,6 +508,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
     const minWH = kind === 'line' ? 0 : kind === 'path' ? MIN_FRAME_PT / 20 : MIN_FRAME_PT
     out.push({
       id,
+      ...groupOf(raw),
       kind,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -583,6 +592,26 @@ function parsePageParents(v: unknown, parents: ParentPage[], pages: number): (st
   return Array.from({ length: pages }, (_, i) => (typeof raw[i] === 'string' && ids.has(raw[i] as string) ? (raw[i] as string) : null))
 }
 
+const NUMBER_FORMATS: NumberFormat[] = ['decimal', 'hebrew', 'roman-upper', 'roman-lower', 'latin-upper', 'latin-lower']
+
+/** Independently-numbered runs of pages (Section Options) - one out of range, or with a startPage that no longer exists, is dropped. */
+function parseSections(v: unknown, pages: number): PageSection[] {
+  if (!Array.isArray(v)) return []
+  const used = new Set<string>()
+  const sections: PageSection[] = []
+  for (const raw of v) {
+    if (!isObj(raw)) continue
+    const startPage = Math.round(num(raw.startPage, -1, -1, pages - 1))
+    if (startPage < 0) continue
+    let id = str(raw.id, '')
+    if (!id || used.has(id)) id = `section-${sections.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    const format = NUMBER_FORMATS.includes(raw.format as NumberFormat) ? (raw.format as NumberFormat) : 'decimal'
+    sections.push({ id, startPage, format, prefix: str(raw.prefix, '').slice(0, 40) })
+  }
+  return sections
+}
+
 /**
  * Read the text of a file. The document takes its name from the file (like other desktop programs),
  * so `name` is the file's name without the extension.
@@ -611,6 +640,7 @@ export function parseDocument(text: string, name: string): DocContent {
     paragraphStyles: parseParagraphStyles(data.paragraphStyles),
     parents,
     pageParents: parsePageParents(data.pageParents, parents, doc.pages),
+    sections: parseSections(data.sections, doc.pages),
   }
 }
 

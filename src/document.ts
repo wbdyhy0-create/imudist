@@ -209,6 +209,8 @@ export interface Run {
  */
 export interface TextFrame extends TextStyle {
   id: string
+  /** Objects sharing this id form an editable group. */
+  groupId?: string
   paragraphStyleId?: string
   /** Imported paragraph-style ids, one entry per paragraph in the story head. */
   paragraphStyleIds?: string[]
@@ -279,6 +281,7 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
+  groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number
@@ -385,6 +388,7 @@ export interface ShapeImage {
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
+  groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   kind: ShapeKind
@@ -449,6 +453,41 @@ export interface ParentPage {
   frames: TextFrame[]
   images: ImageFrame[]
   shapes: ShapeFrame[]
+}
+
+/**
+ * A private-use character standing in, inside a text frame's `text`, for "whatever page this ends up on" - typed
+ * (via טיפוגרפיה > הוספת מספר עמוד אוטומטי) into a parent page's own text, same as InDesign's own auto-page-number
+ * special character. It flows through editing, selection and wrapping exactly like any other character (it *is*
+ * one); only rendering treats it specially, replacing it with the real page's number where the parent is actually
+ * applied (see numbering.ts's substituteMarker, called from pages.ts's parentShadowContent).
+ */
+export const PAGE_NUMBER_MARKER = ''
+
+/** How a page's number is written. */
+export type NumberFormat = 'decimal' | 'hebrew' | 'roman-upper' | 'roman-lower' | 'latin-upper' | 'latin-lower'
+
+export const NUMBER_FORMAT_LABELS: Record<NumberFormat, string> = {
+  decimal: '1, 2, 3…',
+  hebrew: 'א, ב, ג…',
+  'roman-upper': 'I, II, III…',
+  'roman-lower': 'i, ii, iii…',
+  'latin-upper': 'A, B, C…',
+  'latin-lower': 'a, b, c…',
+}
+
+/**
+ * A run of the document's pages that numbers itself independently - its own format, its own count starting back
+ * at 1, an optional prefix (e.g. "נספח "). A document with none defined just numbers every page 1, 2, 3… from
+ * doc.startPage, the same as before this existed.
+ */
+export interface PageSection {
+  id: string
+  /** the physical page index (0-based) where this section begins */
+  startPage: number
+  format: NumberFormat
+  /** written immediately before the number, e.g. "נספח " - empty for none */
+  prefix: string
 }
 
 /** The data of an imported picture. Several frames can show the same asset. */

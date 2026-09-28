@@ -1,6 +1,7 @@
-import { MAX_PAGES, normalizeSizes, type Assets, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, type Assets, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout, pageSidesOf, rowGroups } from './layout'
+import { pageNumberLabel, substituteMarker } from './numbering'
 
 /** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
@@ -28,6 +29,8 @@ export interface DocContent {
   parents: ParentPage[]
   /** which parent page applies to each document page, by index (null / missing = none) */
   pageParents: (string | null)[]
+  /** independently-numbered runs of pages (Section Options); empty = the whole document numbers itself plainly */
+  sections: PageSection[]
 }
 
 /** World rectangle of every page, indexed by page index. */
@@ -89,6 +92,11 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     const n = map(g.page)
     return n === null || n >= newDoc.pages ? [] : [n === g.page ? g : { ...g, page: n }]
   })
+  // a section follows the page it started on; one whose page is gone is gone too
+  const sections = c.sections.flatMap((s) => {
+    const n = map(s.startPage)
+    return n === null || n >= newDoc.pages ? [] : [n === s.startPage ? s : { ...s, startPage: n }]
+  })
   return {
     doc: newDoc,
     frames,
@@ -99,15 +107,10 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     paragraphStyles: c.paragraphStyles,
     parents: c.parents,
     pageParents: remapList(c.pageParents, newDoc.pages, map),
+    sections,
   }
 }
 
-/**
- * Every parent (master) page's objects, translated onto every document page that uses it - one copy per page,
- * with a synthetic id (so it never collides with a real object). Shared by the on-screen "shadow" rendering
- * (which additionally culls to the visible viewport) and by PDF export (which needs every page, not just the
- * ones currently on screen).
- */
 /**
  * The pseudo document used to edit a parent (master) page: matches the real document's own settings (margins,
  * columns, unit…) so its guides match, and is a two-page spread - joined explicitly, not left to page-number
@@ -132,10 +135,17 @@ export function parentEditDoc(doc: DocSettings, parent: ParentPage): DocSettings
   }
 }
 
+/**
+ * Every parent (master) page's objects, translated onto every document page that uses it - one copy per page, with
+ * a synthetic id (so it never collides with a real object), and any auto-page-number marker in its text replaced
+ * with that specific page's own number label. Shared by the on-screen "shadow" rendering (which additionally culls
+ * to the visible viewport) and by PDF export (which needs every page, not just the ones currently on screen).
+ */
 export function parentShadowContent(
   doc: DocSettings,
   parents: ParentPage[],
   pageParents: (string | null)[],
+  sections: PageSection[],
 ): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
   const rects = pageRects(doc)
   const sides = pageSidesOf(doc)
@@ -158,7 +168,12 @@ export function parentShadowContent(
     const dx = rect.x - srcX
     const dy = rect.y
     const inHalf = (x: number, w: number) => x + w / 2 >= srcX && x + w / 2 < srcX + parent.w
-    for (const f of parent.frames) if (inHalf(f.x, f.w)) out.frames.push({ ...f, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
+    const label = pageNumberLabel(sections, pageIndex, doc.startPage)
+    for (const f of parent.frames) {
+      if (!inHalf(f.x, f.w)) continue
+      const sub = substituteMarker(f.text, f.runs, PAGE_NUMBER_MARKER, label)
+      out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
+    }
     for (const im of parent.images) if (inHalf(im.x, im.w)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
     for (const sh of parent.shapes) if (inHalf(sh.x, sh.w)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
   })

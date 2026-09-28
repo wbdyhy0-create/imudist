@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -27,6 +27,7 @@ const NO_SHAPES: ShapeFrame[] = []
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
+const NO_SECTIONS: PageSection[] = []
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
@@ -103,6 +104,7 @@ export function useDocumentSession() {
   const paragraphStyles = state?.paragraphStyles ?? NO_PARAGRAPH_STYLES
   const parents = state?.parents ?? NO_PARENTS
   const pageParents = state?.pageParents ?? NO_PAGE_PARENTS
+  const sections = state?.sections ?? NO_SECTIONS
   const file = active?.file ?? null
   const dirty = !!active && active.saved !== active.h.present
   const anyDirty = docs.some((d) => d.saved !== d.h.present)
@@ -180,6 +182,7 @@ export function useDocumentSession() {
   const changeParagraphStyles = (next: ParagraphStyleRecord[], key?: string) => change((s) => (next !== s.paragraphStyles ? { ...s, paragraphStyles: next } : s), key)
   const changeParents = (next: ParentPage[], key?: string) => change((s) => (next !== s.parents ? { ...s, parents: next } : s), key)
   const changePageParents = (next: (string | null)[], key?: string) => change((s) => (next !== s.pageParents ? { ...s, pageParents: next } : s), key)
+  const changeSections = (next: PageSection[], key?: string) => change((s) => (next !== s.sections ? { ...s, sections: next } : s), key)
 
   const pages: PageOps = {
     insert: (at, count, beside, parentId) =>
@@ -333,6 +336,7 @@ export function useDocumentSession() {
       paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
       parents: [parentA],
       pageParents: Array<string | null>(d.pages).fill(parentA.id),
+      sections: NO_SECTIONS,
     }
     // a new document starts with a text frame on the margins of every page
     addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
@@ -427,6 +431,7 @@ export function useDocumentSession() {
     paragraphStyles,
     parents,
     pageParents,
+    sections,
     history,
     changeFrames,
     changeImages,
@@ -435,6 +440,7 @@ export function useDocumentSession() {
     changeParagraphStyles,
     changeParents,
     changePageParents,
+    changeSections,
     pages,
     file,
     dirty,

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { DocSettings, ImageFrame, ParentPage, ShapeFrame, TextFrame } from '../document'
+import { NUMBER_FORMAT_LABELS, type DocSettings, type ImageFrame, type NumberFormat, type PageSection, type ParentPage, type ShapeFrame, type TextFrame } from '../document'
+import { pageNumberLabel } from '../numbering'
 import { shapePath } from '../shapes'
 import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
@@ -40,24 +41,33 @@ interface Props {
   /** opens a parent page for editing instead of the document itself (a double click in this list) */
   onEditParent: (id: string) => void
   /** applies a parent to every currently selected document page */
-  onApplyParent: (parentId: string) => void
+  onApplyParent: (parentId: string | null) => void
+  onApplyParentToPage: (parentId: string | null, pageIndex: number) => void
   /** copies the currently selected pages' parent objects onto them and clears their own parent */
   onDetachParent: () => void
+  /** independently-numbered runs of pages (Section Options) */
+  sections: PageSection[]
+  onSectionsChange: (sections: PageSection[]) => void
+  canEditPages?: boolean
 }
 
 const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onInsertWithMaster, onDelete, onMove, onView, parents, pageParents, activeParentId, onSelectParent, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onInsertWithMaster, onDelete, onMove, onView, parents, pageParents, activeParentId, onSelectParent, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onApplyParentToPage, onDetachParent, sections, onSectionsChange, canEditPages = true }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
+  const [menuOpen, setMenuOpen] = useState(false)
   const [applyParentId, setApplyParentId] = useState('')
   // the selected pages' own current parent, when they all share one (blank when they differ, or there are none)
   const selectedParentId = selectedPages.every((i) => pageParents[i] === pageParents[selectedPages[0]]) ? (pageParents[selectedPages[0]] ?? '') : ''
   // a right click on a thumbnail: its own small menu, offering "הוספת עמודים…" with an explicit master choice
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; pageIndex: number } | null>(null)
   const [insertDialog, setInsertDialog] = useState<{ pageIndex: number; count: number; where: InsertWhere; master: string } | null>(null)
+  // a section being added (id null) or edited, as 1-based "מעמוד" for the user; ==null when the dialog is closed
+  const [sectionDialog, setSectionDialog] = useState<{ id: string | null; startPage: number; format: NumberFormat; prefix: string } | null>(null)
+  const sortedSections = useMemo(() => [...sections].sort((a, b) => a.startPage - b.startPage), [sections])
 
   // which frames sit on which page, for the thumbnails
   const framesByPage = useMemo(() => {
@@ -88,6 +98,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
       {/* the head and the controls stay put while the thumbnails scroll under them */}
       <div className="pages-top">
       <div className="pages-head">
+        <button className={'pages-menu-button' + (menuOpen ? ' on' : '')} aria-label="אפשרויות עמודים" aria-expanded={menuOpen} title="אפשרויות עמודים" onClick={() => setMenuOpen((open) => !open)}>☰</button>
         <h2 className="props-title">
           עמודים <span className="muted">({doc.pages})</span>
         </h2>
@@ -119,7 +130,46 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
         </div>
       </div>
 
-      <div className="pages-controls">
+      <div className="parents-section pages-parents-visible">
+        <div className="field-label">עמודי אב</div>
+        <div className="parents-list">
+          <div className="parent-row parent-none-row">
+            <button
+              className="parent-name parent-none"
+              draggable
+              title="גרור אל עמוד כדי להסיר ממנו את עמוד האב"
+              onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('application/x-imudist-parent', 'none') }}
+            >
+              <span className="parent-page-icon" aria-hidden="true" />
+              עמוד ללא אב
+            </button>
+          </div>
+          {parents.map((p) => (
+            <div className="parent-row" key={p.id}>
+              <button
+                className={'parent-name' + (p.id === activeParentId ? ' active' : '')}
+                draggable
+                aria-pressed={p.id === activeParentId}
+                title={`${p.name} — לחיצה מסמנת אותו כברירת המחדל לעמודים חדשים, לחיצה כפולה לעריכה`}
+                onClick={() => onSelectParent(p.id)}
+                onDoubleClick={() => onEditParent(p.id)}
+                onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('application/x-imudist-parent', p.id) }}
+              >
+                <span className="parent-master-preview" aria-hidden="true">
+                  <span className="parent-prefix">{p.prefix}</span>
+                  {doc.facingPages && <span className="parent-prefix parent-prefix-secondary">{p.prefix}</span>}
+                </span>
+                {p.name}
+              </button>
+              <button className="icon-button" aria-label={`מחק את עמוד האב ${p.name}`} title="מחק עמוד אב" onClick={() => onDeleteParent(p.id)}>⌫</button>
+            </div>
+          ))}
+          {parents.length === 0 && <p className="muted">אין עדיין עמודי אב.</p>}
+        </div>
+      </div>
+
+      {menuOpen && <div className="pages-menu" role="menu" aria-label="אפשרויות עמודים">
+      <div className="pages-controls" role="group" aria-label="הוספה ומחיקה">
         <div className="grid2">
           <div className="field">
             <div className="field-label">כמות</div>
@@ -136,10 +186,10 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           </div>
         </div>
         <div className="props-buttons">
-          <button className="btn small primary" onClick={() => onInsert(count, where)} disabled={doc.pages >= 9999}>
+          <button className="btn small primary" onClick={() => onInsert(count, where)} disabled={!canEditPages || doc.pages >= 9999}>
             הוסף עמודים
           </button>
-          <button className="btn small" onClick={onDelete} disabled={!canDelete} title={selectedPages.length > 1 ? 'מחק את העמודים הנבחרים ואת מה שעליהם' : 'מחק את העמוד הנבחר ואת התיבות שעליו'}>
+          <button className="btn small" onClick={onDelete} disabled={!canEditPages || !canDelete} title={selectedPages.length > 1 ? 'מחק את העמודים הנבחרים ואת מה שעליהם' : 'מחק את העמוד הנבחר ואת התיבות שעליו'}>
             {selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים` : 'מחק עמוד'}
           </button>
         </div>
@@ -147,26 +197,6 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
       <div className="parents-section">
         <div className="field-label">עמודי אב</div>
-        <div className="parents-list">
-          {parents.map((p) => (
-            <div className="parent-row" key={p.id}>
-              <button
-                className={'parent-name' + (p.id === activeParentId ? ' active' : '')}
-                aria-pressed={p.id === activeParentId}
-                title={`${p.name} — לחיצה מסמנת אותו כברירת המחדל לעמודים חדשים, לחיצה כפולה לעריכה`}
-                onClick={() => onSelectParent(p.id)}
-                onDoubleClick={() => onEditParent(p.id)}
-              >
-                <span className="parent-prefix">{p.prefix}</span>
-                {p.name}
-              </button>
-              <button className="icon-button" aria-label={`מחק את עמוד האב ${p.name}`} title="מחק עמוד אב" onClick={() => onDeleteParent(p.id)}>
-                ⌫
-              </button>
-            </div>
-          ))}
-          {parents.length === 0 && <p className="muted">אין עדיין עמודי אב.</p>}
-        </div>
         <button className="btn small" onClick={onCreateParent}>
           עמוד אב חדש
         </button>
@@ -174,7 +204,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           <div className="parents-apply">
             <label className="field-label">
               שיוך העמוד הנבחר לעמוד אב
-              <select className="select" value={selectedParentId || applyParentId} onChange={(e) => { setApplyParentId(e.target.value); if (e.target.value) onApplyParent(e.target.value) }}>
+              <select className="select" value={selectedParentId || applyParentId} onChange={(e) => { setApplyParentId(e.target.value); onApplyParent(e.target.value || null) }}>
                 <option value="">ללא</option>
                 {parents.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -189,6 +219,36 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           </div>
         )}
       </div>
+
+      <div className="parents-section">
+        <div className="field-label">מקטעי מספור עמודים</div>
+        <div className="parents-list">
+          {sortedSections.map((s) => (
+            <div className="parent-row" key={s.id}>
+              <button
+                className="parent-name"
+                title="לחיצה לעריכת המקטע"
+                onClick={() => setSectionDialog({ id: s.id, startPage: s.startPage, format: s.format, prefix: s.prefix })}
+              >
+                <span className="parent-prefix">{pageNumberLabel([s], s.startPage, doc.startPage)}</span>
+                {`מעמוד ${s.startPage + 1} — ${NUMBER_FORMAT_LABELS[s.format]}`}
+              </button>
+              <button className="icon-button" aria-label="מחק מקטע" title="מחק מקטע" onClick={() => onSectionsChange(sections.filter((x) => x.id !== s.id))}>
+                ⌫
+              </button>
+            </div>
+          ))}
+          {sections.length === 0 && <p className="muted">כל המסמך ממוספר ברצף אחיד, לפי "מספר עמוד ראשון" בהגדרות המסמך.</p>}
+        </div>
+        <button
+          className="btn small"
+          disabled={doc.pages === 0}
+          onClick={() => setSectionDialog({ id: null, startPage: Math.min(selectedPages[0] ?? 0, doc.pages - 1), format: 'decimal', prefix: '' })}
+        >
+          מקטע חדש
+        </button>
+      </div>
+      </div>}
       </div>
 
       <div className="thumbs">
@@ -212,7 +272,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                     onClick={(e) => onSelect(p.index, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                     onContextMenu={(e) => {
                       e.preventDefault()
-                      onSelect(p.index)
+                      if (!selectedPages.includes(p.index)) onSelect(p.index)
                       setCtxMenu({ x: e.clientX, y: e.clientY, pageIndex: p.index })
                     }}
                     onKeyDown={(e) => {
@@ -227,6 +287,11 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
                       e.preventDefault()
+                      const parentDrop = e.dataTransfer.getData('application/x-imudist-parent')
+                      if (parentDrop) {
+                        onApplyParentToPage(parentDrop === 'none' ? null : parentDrop, p.index)
+                        return
+                      }
                       const from = Number(e.dataTransfer.getData('text/plain'))
                       if (Number.isInteger(from)) onMove(from, p.index)
                     }}
@@ -289,6 +354,11 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
               label: 'הוספת עמודים…',
               onClick: () => setInsertDialog({ pageIndex: ctxMenu.pageIndex, count: 1, where: 'after', master: pageParents[ctxMenu.pageIndex] ?? '' }),
             },
+            {
+              label: selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים נבחרים` : 'מחק עמוד נבחר',
+              disabled: !canDelete,
+              onClick: onDelete,
+            },
           ]}
         />
       )}
@@ -334,6 +404,64 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                 הוסף עמודים
               </button>
               <button className="btn" onClick={() => setInsertDialog(null)}>
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sectionDialog && (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true" aria-label="מקטע מספור">
+            <h2>{sectionDialog.id ? 'עריכת מקטע מספור' : 'מקטע מספור חדש'}</h2>
+            <div className="grid2">
+              <div className="field">
+                <div className="field-label">מעמוד</div>
+                <NumberField
+                  value={sectionDialog.startPage + 1}
+                  min={1}
+                  max={Math.max(1, doc.pages)}
+                  onChange={(v) => setSectionDialog({ ...sectionDialog, startPage: v - 1 })}
+                  ariaLabel="העמוד שממנו מתחיל המקטע"
+                />
+              </div>
+              <div className="field">
+                <div className="field-label">סגנון מספור</div>
+                <select className="select" value={sectionDialog.format} onChange={(e) => setSectionDialog({ ...sectionDialog, format: e.target.value as NumberFormat })}>
+                  {(Object.keys(NUMBER_FORMAT_LABELS) as NumberFormat[]).map((f) => (
+                    <option key={f} value={f}>
+                      {NUMBER_FORMAT_LABELS[f]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <div className="field-label">קידומת (רשות)</div>
+              <input
+                className="text-input"
+                type="text"
+                value={sectionDialog.prefix}
+                onChange={(e) => setSectionDialog({ ...sectionDialog, prefix: e.target.value })}
+                placeholder="למשל: נספח "
+              />
+            </div>
+            <p className="muted">העמוד הראשון של המקטע יוצג כ־"{sectionDialog.prefix}{pageNumberLabel([{ ...sectionDialog, id: '' }], sectionDialog.startPage, doc.startPage)}".</p>
+            <div className="modal-buttons">
+              <button
+                className="btn primary"
+                onClick={() => {
+                  const next = sectionDialog.id
+                    ? sections.map((s) => (s.id === sectionDialog.id ? { ...s, startPage: sectionDialog.startPage, format: sectionDialog.format, prefix: sectionDialog.prefix } : s))
+                    : [...sections, { id: `section-${Date.now()}`, startPage: sectionDialog.startPage, format: sectionDialog.format, prefix: sectionDialog.prefix }]
+                  onSectionsChange(next)
+                  setSectionDialog(null)
+                }}
+              >
+                שמירה
+              </button>
+              <button className="btn" onClick={() => setSectionDialog(null)}>
                 ביטול
               </button>
             </div>

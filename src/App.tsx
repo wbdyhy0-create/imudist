@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
@@ -29,6 +29,7 @@ const NO_SHAPES: ShapeFrame[] = []
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
+const NO_SECTIONS: PageSection[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
@@ -91,13 +92,13 @@ export default function App() {
   /** the document's content for PDF export: every page's assigned parent content mixed in, behind its own objects */
   const exportContent = useMemo(() => {
     if (!doc) return null
-    const shadow = parentShadowContent(doc, session.parents, session.pageParents)
+    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections)
     return {
       frames: [...shadow.frames, ...session.frames],
       images: [...shadow.images, ...session.images],
       shapes: [...shadow.shapes, ...session.shapes],
     }
-  }, [doc, session.parents, session.pageParents, session.frames, session.images, session.shapes])
+  }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes])
 
   /**
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
@@ -374,6 +375,8 @@ export default function App() {
               onParentsChange={preview ? noop : session.changeParents}
               pageParents={preview ? NO_PAGE_PARENTS : session.pageParents}
               onPageParentsChange={preview ? noop : session.changePageParents}
+              sections={preview ? NO_SECTIONS : session.sections}
+              onSectionsChange={preview ? noop : session.changeSections}
               editingParentId={editingParentId}
               onEditParent={setEditingParentId}
               onExitParentEdit={() => setEditingParentId(null)}
