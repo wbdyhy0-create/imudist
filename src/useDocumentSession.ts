@@ -38,8 +38,8 @@ export interface SetupOptions {
 
 /** Operations on the pages and content of the open document. Each one is a single undo step. */
 export interface PageOps {
-  /** `beside`: the new pages join the row of the page before them */
-  insert: (at: number, count: number, beside?: boolean) => void
+  /** `beside`: the new pages join the row of the page before them; `parentId`: master to assign the new pages (null = none) */
+  insert: (at: number, count: number, beside?: boolean, parentId?: string | null) => void
   remove: (indices: number[]) => void
   move: (from: number, to: number) => void
   /** replace the document's settings (Document Setup); `coalesceKey`: repeated calls with it become one undo step */
@@ -182,9 +182,9 @@ export function useDocumentSession() {
   const changePageParents = (next: (string | null)[], key?: string) => change((s) => (next !== s.pageParents ? { ...s, pageParents: next } : s), key)
 
   const pages: PageOps = {
-    insert: (at, count, beside) =>
+    insert: (at, count, beside, parentId) =>
       change((s) => {
-        const r = insertPages(s, at, count, beside)
+        const r = insertPages(s, at, count, beside, parentId ?? null)
         return r ? (r.doc.primaryTextFrame ? withPrimaryFrames(r, Array.from({ length: r.doc.pages - s.doc.pages }, (_, i) => at + i)) : r) : s
       }),
     remove: (indices) => change((s) => deletePages(s, indices) || s),

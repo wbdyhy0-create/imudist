@@ -3,6 +3,7 @@ import type { DocSettings, ImageFrame, ParentPage, ShapeFrame, TextFrame } from 
 import { shapePath } from '../shapes'
 import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
+import { ContextMenu } from './ContextMenu'
 import { NumberField } from './NumberField'
 
 export type InsertWhere = 'after' | 'before' | 'end' | 'beside'
@@ -20,6 +21,8 @@ interface Props {
   /** select a page and bring it into view */
   onSelect: (pageIndex: number, mods?: { shift: boolean; ctrl: boolean }) => void
   onInsert: (count: number, where: InsertWhere) => void
+  /** same as onInsert, but with an explicit master (or none) for the new pages, instead of inheriting one */
+  onInsertWithMaster: (count: number, where: InsertWhere, master: string | null) => void
   onDelete: () => void
   onMove: (from: number, to: number) => void
   /** show the pages one to a row, or in pairs (1-2, 3-4 …) */
@@ -42,12 +45,15 @@ const THUMB_W = 46
 const THUMB_H = 64
 
 /** The Pages panel: every page as a thumbnail, grouped in spreads, with add / delete / drag-to-reorder. */
-export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onDelete, onMove, onView, parents, pageParents, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
+export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread, selectedPages, onSelect, onInsert, onInsertWithMaster, onDelete, onMove, onView, parents, pageParents, onCreateParent, onDeleteParent, onEditParent, onApplyParent, onDetachParent }: Props) {
   const [count, setCount] = useState(1)
   const [where, setWhere] = useState<InsertWhere>('after')
   const [applyParentId, setApplyParentId] = useState('')
   // the selected pages' own current parent, when they all share one (blank when they differ, or there are none)
   const selectedParentId = selectedPages.every((i) => pageParents[i] === pageParents[selectedPages[0]]) ? (pageParents[selectedPages[0]] ?? '') : ''
+  // a right click on a thumbnail: its own small menu, offering "הוספת עמודים…" with an explicit master choice
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; pageIndex: number } | null>(null)
+  const [insertDialog, setInsertDialog] = useState<{ pageIndex: number; count: number; where: InsertWhere; master: string } | null>(null)
 
   // which frames sit on which page, for the thumbnails
   const framesByPage = useMemo(() => {
@@ -194,6 +200,11 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                     title={`עמוד ${p.number} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה`}
                     aria-pressed={selectedPages.includes(p.index)}
                     onClick={(e) => onSelect(p.index, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      onSelect(p.index)
+                      setCtxMenu({ x: e.clientX, y: e.clientY, pageIndex: p.index })
+                    }}
                     onKeyDown={(e) => {
                       // Delete here removes the selected pages, not whatever object is selected on the canvas
                       if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -257,6 +268,68 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           </div>
         ))}
       </div>
+
+      {ctxMenu && (
+        <ContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+          items={[
+            {
+              label: 'הוספת עמודים…',
+              onClick: () => setInsertDialog({ pageIndex: ctxMenu.pageIndex, count: 1, where: 'after', master: pageParents[ctxMenu.pageIndex] ?? '' }),
+            },
+          ]}
+        />
+      )}
+
+      {insertDialog && (
+        <div className="modal-backdrop">
+          <div className="modal" role="dialog" aria-modal="true" aria-label="הוספת עמודים">
+            <h2>הוספת עמודים</h2>
+            <div className="grid2">
+              <div className="field">
+                <div className="field-label">כמות</div>
+                <NumberField value={insertDialog.count} min={1} max={99} onChange={(v) => setInsertDialog({ ...insertDialog, count: v })} ariaLabel="כמות עמודים להוספה" />
+              </div>
+              <div className="field">
+                <div className="field-label">מיקום</div>
+                <select className="select" value={insertDialog.where} onChange={(e) => setInsertDialog({ ...insertDialog, where: e.target.value as InsertWhere })}>
+                  <option value="after">אחרי העמוד הנבחר</option>
+                  <option value="before">לפני העמוד הנבחר</option>
+                  <option value="beside">בצד העמוד הנבחר (באותה שורה)</option>
+                  <option value="end">בסוף המסמך</option>
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <div className="field-label">מאסטר</div>
+              <select className="select" value={insertDialog.master} onChange={(e) => setInsertDialog({ ...insertDialog, master: e.target.value })}>
+                <option value="">ללא</option>
+                {parents.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="modal-buttons">
+              <button
+                className="btn primary"
+                onClick={() => {
+                  onInsertWithMaster(insertDialog.count, insertDialog.where, insertDialog.master || null)
+                  setInsertDialog(null)
+                }}
+              >
+                הוסף עמודים
+              </button>
+              <button className="btn" onClick={() => setInsertDialog(null)}>
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

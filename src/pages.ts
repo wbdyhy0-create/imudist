@@ -159,8 +159,11 @@ function withCustomRows(doc: DocSettings): DocSettings {
 /**
  * Insert `count` blank pages so the first new one gets index `at` (0 … pages).
  * `beside`: the new pages join the row of the page before them (the row grows), instead of starting rows of their own.
+ * `parentId`: the parent (master) page the new pages start out assigned to (null = none); the caller decides this,
+ * typically by inheriting whatever the neighbouring page already has, so a run of added pages keeps the same master
+ * without it having to be set by hand on every one of them.
  */
-export function insertPages(c: DocContent, at: number, count: number, beside = false): DocContent | null {
+export function insertPages(c: DocContent, at: number, count: number, beside = false, parentId: string | null = null): DocContent | null {
   count = Math.min(count, MAX_PAGES - c.doc.pages)
   if (count < 1) return null
   at = Math.max(0, Math.min(at, c.doc.pages))
@@ -175,7 +178,12 @@ export function insertPages(c: DocContent, at: number, count: number, beside = f
     if (!(beside && at > 0) && at + count < pages) joins[at + count] = null
     doc = { ...doc, pageJoins: joins }
   }
-  return remapContent(c, doc, map)
+  const r = remapContent(c, doc, map)
+  if (!parentId) return r
+  const pageParents = [...r.pageParents]
+  while (pageParents.length < pages) pageParents.push(null)
+  for (let k = 0; k < count; k++) pageParents[at + k] = parentId
+  return { ...r, pageParents }
 }
 
 /** Delete pages (and what is on them). A document keeps at least one page. */

@@ -601,13 +601,20 @@ export function Workspace({
     }
     goTo(spreadOfPage(i))
   }
-  const insertPages = (count: number, where: InsertWhere) => {
+  /**
+   * `master`: which parent to give the new pages. Left out, they inherit whatever the neighbouring page they're
+   * added next to already has - so adding page after page keeps using the same master without picking it each time.
+   * Passed explicitly (including `null` for "none"), that choice is used instead.
+   */
+  const insertPages = (count: number, where: InsertWhere, master?: string | null) => {
     if (doc.pages >= 9999) return
     // "beside": the new page stands in the row of the selected page (to its left in a right-to-left document)
     const at = where === 'end' ? doc.pages : where === 'before' ? selPage : selPage + 1
+    const refPage = where === 'end' ? doc.pages - 1 : selPage
+    const parentId = master !== undefined ? master : (pageParents[refPage] ?? null)
     pendingNav.current = at
     setSelectedPage(at)
-    pageOps.insert(at, count, where === 'beside')
+    pageOps.insert(at, count, where === 'beside', parentId)
   }
   const deleteSelectedPage = () => {
     if (selectedPages.length >= doc.pages) return
@@ -5146,7 +5153,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
+              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={spreads} currentSpread={cur} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onDetachParent={detachSelectedPagesFromParent} />,
             },
             {
               id: 'color',
