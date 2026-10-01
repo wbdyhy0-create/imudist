@@ -91,16 +91,80 @@ export function primaryFrames(doc: DocSettings, pageIndices: number[]): TextFram
   )
 }
 
+export function primaryTextFrameOrder(doc: DocSettings, frames: TextFrame[]): string[] {
+  const rects = pageRects(doc)
+  const sides = pageSides(doc)
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+  return rects.flatMap((rect, page) =>
+    columnBoxes(doc, rect, sides[page], page).flatMap((box) => {
+      const frame = frames.find((candidate) => near(candidate.x, box.x) && near(candidate.y, box.y) && near(candidate.w, box.w) && near(candidate.h, box.h))
+      return frame ? [frame.id] : []
+    }),
+  )
+}
+
+/** Expand existing automatic primary frames into per-column frames when a document gains columns. */
+export function expandPrimaryFramesForColumns(content: DocContent, previousDoc: DocSettings, previousFrames: TextFrame[]): DocContent {
+  if (content.doc.columns <= previousDoc.columns) return content
+  const oldPrimaryIds = new Set(primaryTextFrameOrder(previousDoc, previousFrames))
+  if (oldPrimaryIds.size === 0) return content
+  const oldRects = pageRects(previousDoc)
+  const newRects = pageRects(content.doc)
+  const oldSides = pageSides(previousDoc)
+  const newSides = pageSides(content.doc)
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+  let frames = content.frames
+  let changed = false
+
+  for (let page = 0; page < Math.min(oldRects.length, newRects.length); page++) {
+    const oldBoxes = columnBoxes(previousDoc, oldRects[page], oldSides[page], page)
+    const newBoxes = columnBoxes(content.doc, newRects[page], newSides[page], page)
+    if (newBoxes.length <= oldBoxes.length) continue
+    const occupied = new Set<number>()
+    for (let index = 0; index < oldBoxes.length; index++) {
+      const oldBox = oldBoxes[index]
+      const source = previousFrames.find((frame) => oldPrimaryIds.has(frame.id) && near(frame.x, oldBox.x) && near(frame.y, oldBox.y) && near(frame.w, oldBox.w) && near(frame.h, oldBox.h))
+      const target = source && frames.find((frame) => frame.id === source.id)
+      if (!source || !target || !newBoxes[index]) continue
+      occupied.add(index)
+      const box = newBoxes[index]
+      frames = frames.map((frame) => frame.id === target.id
+        ? { ...frame, ...box, textFlowBox: undefined, textScale: undefined }
+        : frame)
+      changed = true
+    }
+    const generated = primaryFrames(content.doc, [page])
+    newBoxes.forEach((box, index) => {
+      if (occupied.has(index)) return
+      const frame = generated[index]
+      if (frame) {
+        frames = [...frames, { ...frame, ...box }]
+        changed = true
+      }
+    })
+  }
+  return changed ? { ...content, frames } : content
+}
+
 /**
  * The content with margin text frames added to `pages` (or all pages) that have no text frame at all yet, so a page
  * that already has its own frames is never given a second one.
  */
 export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocContent {
-  if (pages !== 'all' && pages.length === 0) return c
   const rects = pageRects(c.doc)
   const occupied = new Set(c.frames.map((f) => ownerPage(rects, f.x + f.w / 2, f.y + f.h / 2)))
   const targets = (pages === 'all' ? rects.map((_, i) => i) : pages).filter((i) => !occupied.has(i))
-  return targets.length === 0 ? c : { ...c, frames: [...c.frames, ...primaryFrames(c.doc, targets)] }
+  const frames = [...c.frames, ...primaryFrames(c.doc, targets)]
+  const order = primaryTextFrameOrder(c.doc, frames)
+  const nextById = new Map(order.map((id, index) => [id, order[index + 1] ?? null]))
+  let changed = frames.length !== c.frames.length
+  const threaded = frames.map((frame) => {
+    const next = nextById.get(frame.id)
+    if (next === undefined || frame.next === next) return frame
+    changed = true
+    return { ...frame, next }
+  })
+  return changed ? { ...c, frames: threaded } : c
 }
 
 /** The empty, unlinked text frames that sit exactly on the margins / columns of their page: the ones made automatically and never used. */
@@ -147,7 +211,8 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
     headId = head.id
   } else {
     const runs = normalizeRuns(placed.text, placed.runs, placed.style)
-    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, paragraphStyleIds: placed.paragraphStyleIds, paragraphStyleNames: placed.paragraphStyleNames, next: null, z }]
+    const footnotes = placed.footnotes?.map((note) => ({ ...note, id: newId() }))
+    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, paragraphStyleIds: placed.paragraphStyleIds, paragraphStyleNames: placed.paragraphStyleNames, ...(footnotes?.length ? { footnotes } : {}), next: null, z }]
     headId = id
   }
 
@@ -242,6 +307,7 @@ export function pourText(
     // the whole story lives in the first frame; the other frames only display their share
     text: i === 0 ? story : '',
     runs: i === 0 ? runs : [],
+    ...(i === 0 && placed.footnotes?.length ? { footnotes: placed.footnotes.map((note) => ({ ...note, id: newId() })) } : {}),
     paragraphStyleIds: i === 0 ? placed.paragraphStyleIds : undefined,
     paragraphStyleNames: i === 0 ? placed.paragraphStyleNames : undefined,
     next: i < boxes.length - 1 ? ids[i + 1] : null,

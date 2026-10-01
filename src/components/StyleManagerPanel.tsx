@@ -76,10 +76,10 @@ export function StyleManagerPanel({ styles, onChange, onCreate, onSwap, onSwapOn
       {tab === 'create' && <div className="style-manager-section">
         <h3>יצירת סגנון חדש</h3>
         <label className="field-label">שם<input className="select" value={newName} onChange={(e) => setNewName(e.target.value)} /></label>
-        <div className="grid2"><label className="field-label">גודל<input className="select" type="number" min="1" value={newSize} onChange={(e) => setNewSize(Number(e.target.value))} /></label><label className="field-label">שורה<input className="select" type="number" min="1" value={newLeading} onChange={(e) => setNewLeading(Number(e.target.value))} /></label></div>
+        <div className="grid2"><label className="field-label">גודל<input className="select" type="number" min="1" value={newSize} onChange={(e) => setNewSize(Number(e.target.value))} /></label><label className="field-label">שורה<input className="select" type="number" min="0" value={newLeading} onChange={(e) => setNewLeading(Number(e.target.value))} /></label></div>
         <label className="field-label">יישור</label>
         <div className="toggle-group">{ALIGNS.map((a) => <button key={a.id} className={newAlign === a.id ? 'on' : ''} title={a.label} aria-label={a.label} onClick={() => setNewAlign(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}</div>
-        <button className="btn primary" onClick={() => onCreate(newName.trim() || 'סגנון חדש', stylePatch(newSize || 14, newLeading || 17, newAlign))}>צור סגנון</button>
+        <button className="btn primary" onClick={() => onCreate(newName.trim() || 'סגנון חדש', stylePatch(newSize || 14, Number.isFinite(newLeading) ? newLeading : 17, newAlign))}>צור סגנון</button>
         <hr />
         <h3>עריכת סגנון קיים</h3>
         <select className="select" value={editId} onChange={(e) => selectEdit(e.target.value)}>{optionList}</select>

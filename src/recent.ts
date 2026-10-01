@@ -1,11 +1,11 @@
 /**
- * "Recent files": file handles kept in IndexedDB (they can be stored there, unlike in localStorage).
- * Only browsers with the File System Access API produce handles, so elsewhere the list stays empty.
+ * "Recent files": browser handles and desktop paths kept in IndexedDB.
  */
 
 export interface RecentEntry {
   name: string
-  handle: FileSystemFileHandle
+  handle: FileSystemFileHandle | null
+  path?: string
   /** last opened / saved, ms since epoch */
   at: number
 }
@@ -56,8 +56,21 @@ export async function listRecent(): Promise<RecentEntry[]> {
 export async function addRecent(handle: FileSystemFileHandle): Promise<RecentEntry[]> {
   try {
     const rest: RecentEntry[] = []
-    for (const e of await read()) if (!(await e.handle.isSameEntry(handle))) rest.push(e)
+    for (const e of await read()) if (!e.handle || !(await e.handle.isSameEntry(handle))) rest.push(e)
     const list = [{ name: handle.name, handle, at: Date.now() }, ...rest].slice(0, MAX)
+    await write(list)
+    return list
+  } catch {
+    return listRecent()
+  }
+}
+
+/** Put a desktop file path at the top of the list. */
+export async function addRecentPath(path: string, name: string): Promise<RecentEntry[]> {
+  try {
+    const key = path.replace(/\\/g, '/').toLowerCase()
+    const rest = (await read()).filter((entry) => !entry.path || entry.path.replace(/\\/g, '/').toLowerCase() !== key)
+    const list = [{ name, handle: null, path, at: Date.now() }, ...rest].slice(0, MAX)
     await write(list)
     return list
   } catch {
@@ -67,7 +80,10 @@ export async function addRecent(handle: FileSystemFileHandle): Promise<RecentEnt
 
 export async function removeRecent(entry: RecentEntry): Promise<RecentEntry[]> {
   try {
-    const list = (await read()).filter((e) => e.handle !== entry.handle && e.name !== entry.name)
+    const list = (await read()).filter((e) => {
+      if (entry.path) return !e.path || e.path.replace(/\\/g, '/').toLowerCase() !== entry.path!.replace(/\\/g, '/').toLowerCase()
+      return e.handle !== entry.handle && e.name !== entry.name
+    })
     await write(list)
     return list
   } catch {

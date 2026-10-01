@@ -1,3 +1,5 @@
+import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
+import { footnoteTextStyle, formatFootnoteNumber, numberFootnotes } from '../footnoteLayout'
 import {
   useEffect,
   useImperativeHandle,
@@ -11,10 +13,13 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
+import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
 import {
   DEFAULT_GUIDE_COLOR,
+  DEFAULT_FOOTNOTE_CONFIG,
   DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
+  FOOTNOTE_MARKER,
   frameSpaceAfter,
   frameSpaceBefore,
   isFacing,
@@ -29,11 +34,14 @@ import {
   validateDoc,
   withPageMargins,
   withPageSize,
+  type Asset,
   type Assets,
   type CharStyle,
   type DocSettings,
   type Guide,
   type GuideAxis,
+  type FootnoteItem,
+  type FootnoteLayoutConfig,
   type DrawKind,
   type PathGeom,
   type PathSmoothPoint,
@@ -62,7 +70,7 @@ import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
-import { boxAtClick, pourText, type FlowMode } from '../placeText'
+import { boxAtClick, pourText, primaryTextFrameOrder, type FlowMode } from '../placeText'
 import { ownerPage, pageRects, parentShadowContent } from '../pages'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
@@ -70,26 +78,27 @@ import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineE
 import { spacing, type SpacingMark } from '../spacing'
 import { paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
-import { objectLines } from '../snapping'
-import { snapEdges, snapLinesOf, type SnapLine } from '../snapping'
+import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
-import { combineShapes, type BoolOp } from '../shapeOps'
+import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacing, diffEdit, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
-import { flowFrames, lastLineWordCount, type FrameFlow } from '../textLayout'
+import { charStyleOf, cleanSpacing, cleanSpacingOffset, diffEdit, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, type FrameFlow } from '../textLayout'
 import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
 import { ColorToolsPanel } from './ColorToolsPanel'
 import { ContextToolbar } from './ContextToolbar'
 import { ColorPickerDialog } from './ColorPickerDialog'
-import type { AlignOp } from './AlignButtons'
+import { AlignButtons, type AlignOp } from './AlignButtons'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
 import { SmartLayoutDialog, type SmartLayoutRequest } from './SmartLayoutDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
+import { NumberField } from './NumberField'
+import { FootnoteEditorDialog, FootnoteOptionsDialog } from './FootnoteDialogs'
 import { ParagraphPanel } from './ParagraphPanel'
 import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStylesPanel'
 import { StyleManagerPanel } from './StyleManagerPanel'
@@ -126,6 +135,28 @@ const MARGIN_HIT = 9
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 40
 const ZOOM_STEPS = [0.05, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 40]
+
+interface MarqueeTarget {
+  id: string
+  kind: 'frame' | 'image' | 'shape'
+  element: HTMLElement
+  bounds: ScreenBox
+  layerId?: string
+  z: number
+  name: string
+}
+
+interface MarqueeGesture {
+  kind: MarqueeKind
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  clientX0: number
+  clientY0: number
+  clientX1: number
+  clientY1: number
+}
 
 const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 const stepZoom = (z: number, dir: 1 | -1) =>
@@ -176,6 +207,8 @@ export interface WorkspaceHandle {
   insertPageNumberMarker: (kind?: 'document' | 'internal-number' | 'external-number' | 'internal-letter' | 'external-letter') => void
   /** opens the dialog for the "יתומים, אלמנות וכיווץ" tools (טיפוגרפיה) */
   openSmartLayout: () => void
+  insertFootnote: () => void
+  openFootnoteOptions: () => void
 }
 
 /**
@@ -271,6 +304,13 @@ interface TextSel {
   b: number
 }
 
+interface FootnoteSel {
+  headId: string
+  noteId: string
+  a: number
+  b: number
+}
+
 interface WorldPathPoint {
   x: number
   y: number
@@ -339,10 +379,43 @@ export function Workspace({
   ref,
 }: Props) {
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
-  const flow = useMemo(() => flowFrames(frames, images), [frames, images])
+  const rects = useMemo(() => pageRects(doc), [doc])
+  const footnoteConfig = doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
+  const provisionalFlow = useMemo(() => flowFrames(frames, images, footnoteConfig, undefined, new Map(), paragraphStyles), [frames, images, footnoteConfig, paragraphStyles])
+  const footnoteNumbers = useMemo(() => {
+    const byId = new Map(frames.map((frame) => [frame.id, frame]))
+    const entries = [...provisionalFlow].flatMap(([frameId, frameFlow]) => {
+      const frame = byId.get(frameId)
+      if (!frame) return []
+      const page = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+      const pageRect = rects[page]
+      const spread = pageRect ? Math.round(pageRect.y * 1000) : page
+      return frameFlow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
+    })
+    return numberFootnotes(entries, footnoteConfig, doc.binding)
+  }, [frames, provisionalFlow, rects, footnoteConfig, doc.binding])
+  const primaryFrameIds = useMemo(() => primaryTextFrameOrder(doc, frames), [doc, frames])
+  useEffect(() => {
+    if (!doc.primaryTextFrame || previewMode || editingParentId || primaryFrameIds.length < 2) return
+    const primaryFrames = primaryFrameIds.map((id) => frames.find((frame) => frame.id === id)).filter((frame): frame is TextFrame => !!frame)
+    if (primaryFrames.filter((frame) => !!frame.text || !!frame.footnotes?.length).length > 1) return
+
+    let nextFrames = frames
+    for (let index = 0; index + 1 < primaryFrameIds.length; index++) {
+      const fromId = primaryFrameIds[index]
+      const toId = primaryFrameIds[index + 1]
+      const from = nextFrames.find((frame) => frame.id === fromId)
+      const to = nextFrames.find((frame) => frame.id === toId)
+      if (!from || !to || from.next || to.text || to.footnotes?.length || nextFrames.some((frame) => frame.next === toId)) continue
+      nextFrames = nextFrames.map((frame) => frame.id === fromId ? { ...frame, next: toId } : frame)
+    }
+    if (nextFrames !== frames) onFramesChange(nextFrames, 'primary-thread-migration')
+  }, [doc.primaryTextFrame, previewMode, editingParentId, primaryFrameIds, frames, onFramesChange])
+  const flow = useMemo(() => footnoteNumbers.size
+    ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles)
+    : provisionalFlow, [frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, provisionalFlow])
   /** stacking rank of every object (1 = the back) */
   const rank = useMemo(() => new Map(stackOrder(frames, images, shapes).map((o, i) => [o.id, i + 1])), [frames, images, shapes])
-  const rects = useMemo(() => pageRects(doc), [doc])
   /** the page that Insert / Delete act on (the last one clicked) */
   const [selectedPage, setSelectedPage] = useState(0)
   /** the pages selected in the Pages panel; `selectedPage` is the one the selection grows from */
@@ -390,6 +463,8 @@ export function Workspace({
   }
   /** rubber band (world pt) while dragging over the canvas with the Selection tool: it selects the guides it touches */
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const [marqueeCut, setMarqueeCut] = useState<MarqueeGesture | null>(null)
+  const marqueeCutRef = useRef<MarqueeGesture | null>(null)
   /** the snapping lines of the document, and the ones an object is held on right now (drawn while dragging) */
   const snapLines = useMemo(() => snapLinesOf(doc, guides), [doc, guides])
   const snapLinesRef = useRef(snapLines)
@@ -406,6 +481,7 @@ export function Workspace({
   const [scissorHover, setScissorHover] = useState(false)
   const eraserDragging = useRef(false)
   const eraserTouched = useRef(new Set<string>())
+  const repairStroke = useRef<{ id: string; assetId: string; points: ImagePixelPoint[]; radius: number } | null>(null)
   const [eraserRadius, setEraserRadius] = useState(12)
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   /** dragging a peg of the text on an outline */
@@ -434,6 +510,11 @@ export function Workspace({
   const requestToken = useRef(0)
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
+  const [footnoteSel, setFootnoteSel] = useState<FootnoteSel | null>(null)
+  const [editingFootnoteId, setEditingFootnoteId] = useState<string | null>(null)
+  const [editingFootnoteFrameId, setEditingFootnoteFrameId] = useState<string | null>(null)
+  const [editingFootnoteOffset, setEditingFootnoteOffset] = useState<number | null>(null)
+  const [footnoteRequest, setFootnoteRequest] = useState<{ noteId: string; frameId: string; a: number; b: number; token: number } | null>(null)
   const styleSearchIndex = useRef<Record<string, number>>({})
   /** which occurrence of the tag search (ניהול סגנונות > כלים) the explorer is on, per tag text */
   const tagSearchIndex = useRef<Record<string, number>>({})
@@ -533,6 +614,8 @@ export function Workspace({
   const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
   const [runningHeaderDialog, setRunningHeaderDialog] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
+  const [footnoteDialog, setFootnoteDialog] = useState<{ headId: string; from: number; to: number; noteId?: string; initial: string; initialRuns?: Run[] } | null>(null)
+  const [footnoteOptionsOpen, setFootnoteOptionsOpen] = useState(false)
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(1)
   const [pencilSettings, setPencilSettings] = useState<PencilSettings>({ fidelity: 2.5, smoothness: 65, cap: 'round', editSelected: true, within: 12 })
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
@@ -685,15 +768,25 @@ export function Workspace({
     setRequest({ frameId, a, b, token: requestToken.current })
   }
 
+  const alignFootnotesToMarkers = (text: string, notes: FootnoteItem[]) => {
+    const markers: number[] = []
+    for (let index = 0; index < text.length; index++) if (text[index] === FOOTNOTE_MARKER) markers.push(index)
+    return notes
+      .slice()
+      .sort((a, b) => a.anchor - b.anchor)
+      .slice(0, markers.length)
+      .map((note, index) => ({ ...note, anchor: markers[index] }))
+  }
+
   /**
    * Store a story's new text and runs. `abs` is where the caret goes, as an offset into the new story. The text may
    * have reflowed, so the caret (and the editing focus) moves to whichever frame now contains that offset.
    * `paraOverrides`, when given, replaces the head frame's per-paragraph spaceBefore/spaceAfter overrides too (see
    * `applyEdit`, the one caller that has them — spliced to stay lined up with the story's new paragraphs).
    */
-  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>) => {
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches' | 'footnotes'>) => {
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
-    const nf = flowFrames(next, images)
+    const nf = flowFrames(next, images, doc.footnotes, undefined, new Map(), paragraphStyles)
     const chain = chainOf(next, headId)
     const target =
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
@@ -707,7 +800,7 @@ export function Workspace({
   }
 
   /** Replace [from, to) of a story with `insert`. */
-  const applyEdit = (headId: string, from: number, to: number, insert: string) => {
+  const applyEdit = (headId: string, from: number, to: number, insert: string, newFootnote?: Omit<FootnoteItem, 'anchor'>) => {
     const head = frames.find((f) => f.id === headId)
     if (!head) return
     const r = editStory(head.text, head.runs, from, to, insert, head)
@@ -744,6 +837,13 @@ export function Workspace({
       }
     }
     const paragraphLists = spliceParagraphStyles(base, base.text, from, to, insert)
+    const shift = insert.length - (to - from)
+    const footnotes = (head.footnotes ?? []).flatMap((note) => {
+      if (note.anchor >= from && note.anchor < to) return []
+      const moves = note.anchor >= to || (from === to && note.anchor >= from)
+      return [{ ...note, anchor: note.anchor + (moves ? shift : 0) }]
+    })
+    if (newFootnote) footnotes.push({ ...newFootnote, anchor: from })
     if (nextStyleAt) {
       const { index, style } = nextStyleAt
       const setAt = <T,>(list: T[] | undefined, value: T): T[] | undefined => list?.map((item, i) => (i === index ? value : item))
@@ -760,7 +860,114 @@ export function Workspace({
       paraKeepFirstLines: spliceParaOverrides(head.paraKeepFirstLines, head.text, from, to, insert),
       paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert),
       ...paragraphLists,
+      footnotes: alignFootnotesToMarkers(r.text, footnotes),
     })
+  }
+
+  const insertFootnote = () => {
+    if (!textSel) return
+    const head = frames.find((frame) => frame.id === textSel.headId)
+    if (!head) return
+    setFootnoteDialog({ headId: head.id, from: textSel.a, to: textSel.b, initial: '' })
+  }
+
+  const editFootnote = (headId: string, noteId: string, frameId: string, localOffset: number, fragmentOffset: number) => {
+    const note = frames.find((frame) => frame.id === headId)?.footnotes?.find((item) => item.id === noteId)
+    if (!note) return
+    const caret = Math.max(0, Math.min(localOffset, note.content.length - fragmentOffset))
+    requestToken.current += 1
+    setLinkFrom(null)
+    setTool('type')
+    setSelectedId(headId)
+    setEditingId(null)
+    setTextSel(null)
+    setFootnoteSel({ headId, noteId, a: fragmentOffset + caret, b: fragmentOffset + caret })
+    setEditingFootnoteId(noteId)
+    setEditingFootnoteFrameId(frameId)
+    setEditingFootnoteOffset(fragmentOffset)
+    setFootnoteRequest({ noteId, frameId, a: caret, b: caret, token: requestToken.current })
+  }
+
+  const selectAllFootnote = (noteId: string) => {
+    if (!footnoteSel) return
+    const head = frames.find((frame) => frame.id === footnoteSel.headId)
+    const note = head?.footnotes?.find((item) => item.id === noteId)
+    if (head && note) setFootnoteSel({ headId: head.id, noteId, a: 0, b: note.content.length })
+  }
+
+  const applyFootnoteEdit = (headId: string, noteId: string, from: number, to: number, insert: string) => {
+    const head = frames.find((frame) => frame.id === headId)
+    const note = head?.footnotes?.find((item) => item.id === noteId)
+    if (!head || !note) return
+    const baseStyle = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+    const result = editStory(note.content, note.runs ?? [], from, to, insert, baseStyle)
+    const caret = from + insert.length
+    updateFrame(head.id, { footnotes: head.footnotes?.map((item) => item.id === noteId ? { ...item, content: result.text, runs: result.runs } : item) }, `footnote:${noteId}`)
+    setFootnoteSel({ headId, noteId, a: caret, b: caret })
+  }
+
+  const applyFootnoteCharStyle = (patch: Partial<CharStyle>) => {
+    if (!footnoteSel) return
+    const head = frames.find((frame) => frame.id === footnoteSel.headId)
+    const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+    if (!head || !note) return
+    const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+    const runs = normalizeRuns(note.content, note.runs, base)
+    const selected = footnoteSel.a !== footnoteSel.b
+    const from = selected ? Math.min(footnoteSel.a, footnoteSel.b) : 0
+    const to = selected ? Math.max(footnoteSel.a, footnoteSel.b) : note.content.length
+    const nextRuns = styleRange(runs, from, to, patch)
+    const nextStyle = selected ? note.style : { ...base, ...patch }
+    updateFrame(head.id, { footnotes: head.footnotes?.map((item) => item.id === note.id ? { ...item, runs: nextRuns, ...(nextStyle ? { style: nextStyle } : {}) } : item) }, `footnote-style:${note.id}:${Object.keys(patch).join(',')}`)
+  }
+
+  const stepFootnoteFontSize = (delta: number) => {
+    if (!footnoteSel) return
+    const head = frames.find((frame) => frame.id === footnoteSel.headId)
+    const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+    if (!head || !note) return
+    const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+    const runs = normalizeRuns(note.content, note.runs, base)
+    const selected = footnoteSel.a !== footnoteSel.b
+    const from = selected ? Math.min(footnoteSel.a, footnoteSel.b) : 0
+    const to = selected ? Math.max(footnoteSel.a, footnoteSel.b) : note.content.length
+    const size = (value: number) => Math.max(1, Math.min(999, value + delta))
+    const nextRuns = restyleRange(runs, from, to, (style) => ({ fontSize: size(style.fontSize) }))
+    const nextStyle = selected ? note.style : { ...base, fontSize: size(base.fontSize) }
+    updateFrame(head.id, { footnotes: head.footnotes?.map((item) => item.id === note.id ? { ...item, runs: nextRuns, ...(nextStyle ? { style: nextStyle } : {}) } : item) }, `footnote-style:${note.id}:fontSizeStep`)
+  }
+
+  const applyFootnoteParagraphStyle = (patch: Partial<TextStyle>) => {
+    if (!footnoteSel) return
+    const head = frames.find((frame) => frame.id === footnoteSel.headId)
+    const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+    if (!head || !note) return
+    const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+    updateFrame(head.id, { footnotes: head.footnotes?.map((item) => item.id === note.id ? { ...item, style: { ...base, ...patch } } : item) }, `footnote-paragraph:${note.id}`)
+  }
+
+  const saveFootnote = (content: string, runs: Run[]) => {
+    if (!footnoteDialog) return
+    if (footnoteDialog.noteId) {
+      const head = frames.find((frame) => frame.id === footnoteDialog.headId)
+      if (head) updateFrame(head.id, { footnotes: head.footnotes?.map((note) => note.id === footnoteDialog.noteId ? { ...note, content, runs } : note) })
+    } else {
+      applyEdit(footnoteDialog.headId, footnoteDialog.from, footnoteDialog.to, FOOTNOTE_MARKER, { id: newFrameId(), content, runs })
+    }
+    setFootnoteDialog(null)
+  }
+
+  const deleteFootnote = () => {
+    if (!footnoteDialog?.noteId) return
+    const head = frames.find((frame) => frame.id === footnoteDialog.headId)
+    const note = head?.footnotes?.find((item) => item.id === footnoteDialog.noteId)
+    if (head && note) applyEdit(head.id, note.anchor, note.anchor + 1, '')
+    setFootnoteDialog(null)
+  }
+
+  const saveFootnoteOptions = (config: FootnoteLayoutConfig) => {
+    pageOps.setup({ ...doc, footnotes: config }, 'footnotes:options')
+    setFootnoteOptionsOpen(false)
   }
 
   /** an edit reported by a frame's editor: offsets are inside that frame's part of the story */
@@ -834,9 +1041,9 @@ export function Workspace({
         }
         offset = end + 1
       })
-      return ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame)) === frame.runs
-        ? frame
-        : { ...frame, runs: ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame)) }
+      if (ranges.length === 0) return frame
+      const nextRuns = ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame))
+      return { ...frame, runs: nextRuns }
     })
     onFramesChange(nextFrames, 'first-word-style')
     setFirstWordDialog(false)
@@ -924,6 +1131,7 @@ export function Workspace({
   const handleSelect = (frameId: string, a: number, b: number) => {
     const fl = flow.get(frameId)
     if (!fl) return
+    setFootnoteSel(null)
     // keep a whole-story selection (Ctrl+A) while the browser reports only this frame's part of it
     if (
       textSel &&
@@ -952,7 +1160,23 @@ export function Workspace({
     return null
   }
 
+  const selectAllStory = (frameId: string) => {
+    const fl = flow.get(frameId)
+    if (!fl) return
+    setFootnoteSel(null)
+    setTextSel({ headId: fl.headId, a: 0, b: fl.story.length })
+    askSelection(frameId, 0, fl.slice.length)
+  }
+
   const selectAllText = () => {
+    if (editingFootnoteId && footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      if (head && note) {
+        setFootnoteSel({ headId: head.id, noteId: note.id, a: 0, b: note.content.length })
+        return
+      }
+    }
     if (!editingId) {
       // not editing text: select every object of the document
       const ids = [...frames, ...images, ...shapes].map((o) => o.id)
@@ -966,10 +1190,7 @@ export function Workspace({
       }
       return
     }
-    const fl = flow.get(editingId)
-    if (!fl) return
-    setTextSel({ headId: fl.headId, a: 0, b: fl.story.length })
-    askSelection(editingId, 0, fl.slice.length)
+    selectAllStory(editingId)
   }
 
   /** Character style change from the panel: applies to the selected text, or to the whole story if none is selected. */
@@ -1024,17 +1245,17 @@ export function Workspace({
     setSampledTextStyle(style)
   }
 
-  /** alignment belongs to the whole story */
   const applyAlign = (id: string, align: TextAlign) => {
-    const ids = new Set(chainOf(frames, id).map((f) => f.id))
-    // a paragraph's own alignment (from a paragraph style) would otherwise still win over what was just chosen
-    const withoutAlign = (patches: NonNullable<TextFrame['paragraphStylePatches']>) =>
-      patches.map((patch) => {
-        const next = { ...patch }
-        delete next.align
-        return next
-      })
-    onFramesChange(frames.map((f) => (ids.has(f.id) ? { ...f, align, ...(f.paragraphStylePatches ? { paragraphStylePatches: withoutAlign(f.paragraphStylePatches) } : {}) } : f)), `align:${id}`)
+    const frameFlow = flow.get(id)
+    const head = frameFlow && frames.find((frame) => frame.id === frameFlow.headId)
+    if (!frameFlow || !head) return
+    const range = textSel?.headId === head.id
+      ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
+      : { a: frameFlow.start, b: Math.max(frameFlow.start + 1, frameFlow.end) }
+    const indexes = paragraphsInRange(head.text, range.a, range.b)
+    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
+    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), align }
+    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `align:${head.id}:${indexes.join(',')}`)
   }
 
   /** Apply paragraph layout to the selected text, or to the paragraphs shown by the selected frame. */
@@ -1045,8 +1266,10 @@ export function Workspace({
     const flowPart = flow.get(id)
     const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
     if (!flowPart || !head) return
-    const selected = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
-    const indexes = selected ? paragraphsInRange(head.text, selected.a, selected.b) : paragraphsInRange(head.text, flowPart.start, Math.max(flowPart.start + 1, flowPart.end))
+    const range = textSel?.headId === head.id && textSel.b <= head.text.length
+      ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
+      : { a: flowPart.start, b: Math.max(flowPart.start + 1, flowPart.end) }
+    const indexes = paragraphsInRange(head.text, range.a, range.b)
     const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
     for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...patch }
     onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
@@ -1062,10 +1285,12 @@ export function Workspace({
     const flowPart = flow.get(id)
     const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
     if (!head) return
-    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const range = textSel?.headId === head.id && textSel.b <= head.text.length
+      ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
+      : { a: flowPart.start, b: Math.max(flowPart.start + 1, flowPart.end) }
     let paraSpaceBefore = head.paraSpaceBefore
     let paraSpaceAfter = head.paraSpaceAfter
-    const indexes = sel ? paragraphsInRange(head.text, sel.a, sel.b) : paragraphsInRange(head.text, flowPart.start, Math.max(flowPart.start + 1, flowPart.end))
+    const indexes = paragraphsInRange(head.text, range.a, range.b)
     for (const i of indexes) {
       if (patch.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, i, patch.spaceBefore)
       if (patch.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, i, patch.spaceAfter)
@@ -1084,7 +1309,12 @@ export function Workspace({
       const head = frames.find((f) => f.id === textSel.headId)
       if (!head) return
       const runs = normalizeRuns(head.text, head.runs, head)
-      const { text, runs: newRuns } = cleanSpacing(head.text, runs, head, textSel.a, Math.min(textSel.b, head.text.length))
+      const from = Math.min(textSel.a, head.text.length)
+      const to = Math.min(textSel.b, head.text.length)
+      const { text, runs: newRuns } = cleanSpacing(head.text, runs, head, from, to)
+      const footnotes = (head.footnotes ?? [])
+        .map((note) => ({ ...note, anchor: cleanSpacingOffset(head.text, note.anchor, from, to) }))
+        .filter((note) => text[note.anchor] === FOOTNOTE_MARKER)
       const d = diffEdit(head.text, text)
       onFramesChange(
         frames.map((f) =>
@@ -1093,6 +1323,7 @@ export function Workspace({
                 ...f,
                 text,
                 runs: newRuns,
+                footnotes,
                 paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, head.text, d.from, d.to, d.insert),
                 paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, head.text, d.from, d.to, d.insert),
                 paraKeepFirstLines: spliceParaOverrides(f.paraKeepFirstLines, head.text, d.from, d.to, d.insert),
@@ -1112,10 +1343,14 @@ export function Workspace({
         const c = cleaned.get(f.id)
         if (!c) return f
         const d = diffEdit(f.text, c.text)
+        const footnotes = (f.footnotes ?? [])
+          .map((note) => ({ ...note, anchor: cleanSpacingOffset(f.text, note.anchor) }))
+          .filter((note) => c.text[note.anchor] === FOOTNOTE_MARKER)
         return {
           ...f,
           text: c.text,
           runs: c.runs,
+          footnotes,
           paraSpaceBefore: spliceParaOverrides(f.paraSpaceBefore, f.text, d.from, d.to, d.insert),
           paraSpaceAfter: spliceParaOverrides(f.paraSpaceAfter, f.text, d.from, d.to, d.insert),
           paraKeepFirstLines: spliceParaOverrides(f.paraKeepFirstLines, f.text, d.from, d.to, d.insert),
@@ -1147,7 +1382,7 @@ export function Workspace({
   }
 
   const preparePlacedText = (placed: PlacedText): PlacedText => {
-    if (!placed.paragraphStyles?.length || !placed.paragraphStyleIds?.length) return placed
+    if (!placed.paragraphStyles?.length) return placed
     const nextStyles = [...paragraphStyles]
     const used = new Set(nextStyles.map((style) => style.id))
     const ids = new Map<string, string>()
@@ -1158,7 +1393,11 @@ export function Workspace({
       if (!existing) nextStyles.push({ id, name: imported.name, patch: imported.patch })
     }
     if (nextStyles.length !== paragraphStyles.length) onParagraphStylesChange(nextStyles)
-    return { ...placed, paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) }
+    return {
+      ...placed,
+      ...(placed.paragraphStyleIds?.length ? { paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) } : {}),
+      ...(placed.footnotes?.length ? { footnotes: placed.footnotes.map((note) => ({ ...note, ...(note.paragraphStyleId ? { paragraphStyleId: ids.get(note.paragraphStyleId) ?? note.paragraphStyleId } : {}) })) } : {}),
+    }
   }
 
 
@@ -1236,11 +1475,15 @@ export function Workspace({
 
   /** clicking a picture: the Selection tool selects it and starts moving it (other tools pass the click on) */
   const onImagePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'transform' && tool !== 'direct')) return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'transform' && tool !== 'direct' && tool !== 'heal')) return
     if (layerLocked || itemLocks[id]) return
     if (layerLocked) return
     const im = images.find((x) => x.id === id)
     if (!im) return
+    if (tool === 'heal') {
+      beginRepairStroke(im, e)
+      return
+    }
     if (handleMultiPointer(id, e)) return
     e.stopPropagation()
     e.preventDefault()
@@ -1531,12 +1774,18 @@ export function Workspace({
     const ni = data.images.map(moved)
     const ns = data.shapes.map(moved)
     const missing = Object.fromEntries(Object.entries(data.assets).filter(([id]) => !assets[id]))
-    pageOps.commit({
-      frames: [...frames, ...nf],
-      images: [...images, ...ni],
-      shapes: [...shapes, ...ns],
-      ...(Object.keys(missing).length > 0 ? { assets: { ...assets, ...missing } } : {}),
-    })
+    if (editingParentId) {
+      onParentsChange(parents.map((parent) => parent.id === editingParentId
+        ? { ...parent, frames: [...parent.frames, ...nf], images: [...parent.images, ...ni], shapes: [...parent.shapes, ...ns] }
+        : parent), 'parent:clipboard-insert')
+    } else {
+      pageOps.commit({
+        frames: [...frames, ...nf],
+        images: [...images, ...ni],
+        shapes: [...shapes, ...ns],
+        ...(Object.keys(missing).length > 0 ? { assets: { ...assets, ...missing } } : {}),
+      })
+    }
     const ids = [...nf, ...ni, ...ns].map((o) => o.id)
     setGuideSel([])
     setEditingId(null)
@@ -1697,6 +1946,105 @@ export function Workspace({
     setSelectedIdRaw(shape.id)
   }
 
+  const selectedImagesToMerge = multiSel.length === 2 ? images.filter((image) => multiSel.includes(image.id)) : []
+  const canMergeImages = selectedImagesToMerge.length === 2 && selectedImagesToMerge.every((image) => !!assets[image.assetId])
+  const mergeSelectedImages = async () => {
+    if (!canMergeImages) return
+    const ordered = [...selectedImagesToMerge].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+    const loaded = await Promise.all(ordered.map((image) => new Promise<{ image: ImageFrame; asset: Asset; bitmap: HTMLImageElement }>((resolve, reject) => {
+      const asset = assets[image.assetId]
+      const bitmap = new Image()
+      bitmap.onload = () => resolve({ image, asset, bitmap })
+      bitmap.onerror = () => reject(new Error('image failed to load'))
+      bitmap.src = asset.dataUrl
+    })))
+    const corners = loaded.flatMap(({ image }) => {
+      const cx = image.x + image.w / 2
+      const cy = image.y + image.h / 2
+      const angle = ((image.rotation ?? 0) * Math.PI) / 180
+      return [[image.x, image.y], [image.x + image.w, image.y], [image.x + image.w, image.y + image.h], [image.x, image.y + image.h]].map(([x, y]) => ({
+        x: cx + (x - cx) * Math.cos(angle) - (y - cy) * Math.sin(angle),
+        y: cy + (x - cx) * Math.sin(angle) + (y - cy) * Math.cos(angle),
+      }))
+    })
+    const left = Math.min(...corners.map((point) => point.x))
+    const top = Math.min(...corners.map((point) => point.y))
+    const right = Math.max(...corners.map((point) => point.x))
+    const bottom = Math.max(...corners.map((point) => point.y))
+    const worldWidth = right - left
+    const worldHeight = bottom - top
+    const density = Math.max(1, ...loaded.flatMap(({ image, asset }) => [asset.width / image.w, asset.height / image.h]))
+    const scale = Math.min(density, 12000 / worldWidth, 12000 / worldHeight, Math.sqrt(40_000_000 / (worldWidth * worldHeight)))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.ceil(worldWidth * scale))
+    canvas.height = Math.max(1, Math.ceil(worldHeight * scale))
+    const context = canvas.getContext('2d')
+    if (!context) return
+    for (const { image, bitmap } of loaded) {
+      const width = image.w * scale
+      const height = image.h * scale
+      context.save()
+      context.translate((image.x + image.w / 2 - left) * scale, (image.y + image.h / 2 - top) * scale)
+      context.rotate(((image.rotation ?? 0) * Math.PI) / 180)
+      context.scale(image.flipX ? -1 : 1, image.flipY ? -1 : 1)
+      context.beginPath()
+      context.rect(-width / 2, -height / 2, width, height)
+      context.clip()
+      context.globalAlpha = image.opacity ?? 1
+      let drawWidth = width
+      let drawHeight = height
+      if (image.fit !== 'stretch') {
+        const fitScale = image.fit === 'fit'
+          ? Math.min(width / bitmap.naturalWidth, height / bitmap.naturalHeight)
+          : Math.max(width / bitmap.naturalWidth, height / bitmap.naturalHeight)
+        drawWidth = bitmap.naturalWidth * fitScale
+        drawHeight = bitmap.naturalHeight * fitScale
+      }
+      context.drawImage(bitmap, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
+      context.restore()
+    }
+    bridgeTransparentSeams(canvas)
+    const trimmed = trimTransparentBounds(canvas)
+    if (!trimmed) return
+    const topmost = ordered[ordered.length - 1]
+    const mergedAssetId = newFrameId()
+    const mergedAsset: Asset = {
+      name: `מיזוג — ${loaded.map(({ asset }) => asset.name).join(' + ')}`,
+      mime: 'image/png',
+      dataUrl: canvasDataUrl(trimmed.canvas),
+      width: trimmed.canvas.width,
+      height: trimmed.canvas.height,
+    }
+    const mergedFrame: ImageFrame = {
+      id: newFrameId(),
+      label: 'מיזוג תמונות',
+      layerId: topmost.layerId ?? activeLayerId,
+      x: left + trimmed.left / scale,
+      y: top + trimmed.top / scale,
+      w: trimmed.canvas.width / scale,
+      h: trimmed.canvas.height / scale,
+      assetId: mergedAssetId,
+      fit: 'stretch',
+      z: topmost.z,
+      wrap: topmost.wrap,
+      wrapOffset: topmost.wrapOffset,
+    }
+    const mergedIds = new Set(ordered.map((image) => image.id))
+    const nextImages = [...images.filter((image) => !mergedIds.has(image.id)), mergedFrame]
+    const nextAssets = { ...assets, [mergedAssetId]: mergedAsset }
+    if (editingParentId) {
+      pageOps.commit({
+        assets: nextAssets,
+        parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, images: [...parent.images.filter((image) => !mergedIds.has(image.id)), mergedFrame] } : parent),
+      })
+    } else {
+      pageOps.commit({ images: nextImages, assets: nextAssets })
+    }
+    setMultiSel([])
+    setSelectedIdRaw(mergedFrame.id)
+    setSelectedPage(ownerPage(rects, mergedFrame.x + mergedFrame.w / 2, mergedFrame.y + mergedFrame.h / 2))
+  }
+
   /** delete text frames, pictures, shapes and guides in one undo step */
   const deleteSelection = (ids: string[], guideIds: string[]) => {
     const gone = new Set(ids)
@@ -1829,6 +2177,8 @@ export function Workspace({
     replaceSelectedText,
     insertPageNumberMarker,
     openSmartLayout: () => setSmartLayoutDialog(true),
+    insertFootnote,
+    openFootnoteOptions: () => setFootnoteOptionsOpen(true),
   }))
 
   // ── effects ────────────────────────────────────────────────────────────────────
@@ -1889,6 +2239,17 @@ export function Workspace({
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  useEffect(() => {
+    const onFootnoteShortcut = (event: KeyboardEvent) => {
+      const inEditor = event.target instanceof HTMLElement && !!event.target.closest('.rich-editor')
+      if (!inEditor || !textSel || !(event.ctrlKey || event.metaKey) || !event.altKey || !event.shiftKey || event.code !== 'KeyF') return
+      event.preventDefault()
+      insertFootnote()
+    }
+    window.addEventListener('keydown', onFootnoteShortcut)
+    return () => window.removeEventListener('keydown', onFootnoteShortcut)
+  }, [textSel, frames])
 
   // tool shortcuts + hold Space for a temporary Hand tool
   useEffect(() => {
@@ -2100,6 +2461,239 @@ export function Workspace({
     }
   }
 
+  /** the topmost unlocked, visible frame/picture/shape whose bounding box overlaps a world-space rectangle — resolved from
+   *  the drawn marquee at release, so the drag may start outside the target and still cut it in two. */
+  const marqueeTargetIn = (x0: number, y0: number, x1: number, y1: number): MarqueeTarget | null => {
+    const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)]
+    const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)]
+    const overlaps = (o: { x: number; y: number; w: number; h: number }) => o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay
+    const candidates = [
+      ...visibleFrames.filter((f) => !itemLocks[f.id] && overlaps(f)).map((f) => ({ id: f.id, kind: 'frame' as const, layerId: f.layerId, z: f.z ?? 1, name: 'תיבת טקסט' })),
+      ...visibleImages.filter((im) => !itemLocks[im.id] && overlaps(im)).map((im) => ({ id: im.id, kind: 'image' as const, layerId: im.layerId, z: im.z ?? 0, name: assets[im.assetId]?.name ?? 'תמונה' })),
+      ...visibleShapes.filter((sh) => !itemLocks[sh.id] && overlaps(sh)).map((sh) => ({ id: sh.id, kind: 'shape' as const, layerId: sh.layerId, z: sh.z ?? 1, name: sh.kind === 'path' ? 'נתיב' : 'צורה' })),
+    ]
+    if (candidates.length === 0) return null
+    const top = candidates.reduce((best, c) => ((rank.get(c.id) ?? 0) > (rank.get(best.id) ?? 0) ? c : best))
+    const element = vpRef.current?.querySelector<HTMLElement>(`[data-object-id="${top.id}"][data-object-kind="${top.kind}"]`)
+    if (!element || element.closest('.parent-shadow')) return null
+    const bounds = element.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return null
+    return { id: top.id, kind: top.kind, element, bounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, layerId: top.layerId, z: top.z, name: top.name }
+  }
+
+  const imagePixelAt = (image: ImageFrame, asset: Asset, point: { x: number; y: number }) => {
+    const cx = image.x + image.w / 2
+    const cy = image.y + image.h / 2
+    const angle = ((image.rotation ?? 0) * Math.PI) / 180
+    let x = (point.x - cx) * Math.cos(angle) + (point.y - cy) * Math.sin(angle)
+    let y = -(point.x - cx) * Math.sin(angle) + (point.y - cy) * Math.cos(angle)
+    if (image.flipX) x = -x
+    if (image.flipY) y = -y
+    x += image.w / 2
+    y += image.h / 2
+    const fitScale = image.fit === 'stretch' ? null : image.fit === 'fit'
+      ? Math.min(image.w / asset.width, image.h / asset.height)
+      : Math.max(image.w / asset.width, image.h / asset.height)
+    const contentWidth = fitScale === null ? image.w : asset.width * fitScale
+    const contentHeight = fitScale === null ? image.h : asset.height * fitScale
+    const offsetX = (image.w - contentWidth) / 2
+    const offsetY = (image.h - contentHeight) / 2
+    if (x < offsetX || x > offsetX + contentWidth || y < offsetY || y > offsetY + contentHeight) return null
+    return { x: ((x - offsetX) / contentWidth) * asset.width, y: ((y - offsetY) / contentHeight) * asset.height }
+  }
+
+  const beginRepairStroke = (image: ImageFrame, event: ReactPointerEvent<HTMLDivElement>) => {
+    const asset = assets[image.assetId]
+    if (!asset) return
+    const point = imagePixelAt(image, asset, toWorld(event.clientX, event.clientY))
+    if (!point) return
+    const fitScale = image.fit === 'stretch' ? null : image.fit === 'fit'
+      ? Math.min(image.w / asset.width, image.h / asset.height)
+      : Math.max(image.w / asset.width, image.h / asset.height)
+    const contentWidth = fitScale === null ? image.w : asset.width * fitScale
+    repairStroke.current = {
+      id: image.id,
+      assetId: image.assetId,
+      points: [point],
+      radius: Math.max(1, (eraserRadius * asset.width) / (contentWidth * zoom)),
+    }
+    setSelectedPage(ownerPage(rects, image.x + image.w / 2, image.y + image.h / 2))
+    setSelectedId(image.id)
+    setEditingId(null)
+    event.preventDefault()
+    event.stopPropagation()
+    vpRef.current?.setPointerCapture(event.pointerId)
+  }
+
+  const finishRepairStroke = async (stroke: NonNullable<typeof repairStroke.current>) => {
+    const image = images.find((candidate) => candidate.id === stroke.id)
+    const asset = assets[stroke.assetId]
+    if (!image || image.assetId !== stroke.assetId || !asset || stroke.points.length === 0) return
+    try {
+      const bitmap = new Image()
+      await new Promise<void>((resolve, reject) => {
+        bitmap.onload = () => resolve()
+        bitmap.onerror = () => reject(new Error('image failed to load'))
+        bitmap.src = asset.dataUrl
+      })
+      const source = document.createElement('canvas')
+      source.width = bitmap.naturalWidth || asset.width
+      source.height = bitmap.naturalHeight || asset.height
+      source.getContext('2d')?.drawImage(bitmap, 0, 0, source.width, source.height)
+      const repaired = repairImageStroke(source, stroke.points, stroke.radius)
+      const nextAssetId = newFrameId()
+      const nextAsset: Asset = {
+        ...asset,
+        name: `${asset.name.replace(/\.png$/i, '')} — תיקון.png`,
+        mime: 'image/png',
+        dataUrl: canvasDataUrl(repaired),
+        width: repaired.width,
+        height: repaired.height,
+      }
+      const nextAssets = { ...assets, [nextAssetId]: nextAsset }
+      const nextImages = images.map((candidate) => candidate.id === image.id ? { ...candidate, assetId: nextAssetId } : candidate)
+      if (editingParentId) {
+        pageOps.commit({
+          assets: nextAssets,
+          parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, images: parent.images.map((candidate) => candidate.id === image.id ? { ...candidate, assetId: nextAssetId } : candidate) } : parent),
+        })
+      } else {
+        pageOps.commit({ assets: nextAssets, images: nextImages })
+      }
+    } catch (error) {
+      console.warn('Could not repair the image seam.', error)
+    }
+  }
+
+  const finishMarqueeCut = async (gesture: MarqueeGesture, target: MarqueeTarget) => {
+    const selection: ScreenBox = {
+      left: Math.min(gesture.clientX0, gesture.clientX1),
+      top: Math.min(gesture.clientY0, gesture.clientY1),
+      width: Math.abs(gesture.clientX1 - gesture.clientX0),
+      height: Math.abs(gesture.clientY1 - gesture.clientY0),
+    }
+    const overlapsTarget = selection.left < target.bounds.left + target.bounds.width &&
+      selection.left + selection.width > target.bounds.left &&
+      selection.top < target.bounds.top + target.bounds.height &&
+      selection.top + selection.height > target.bounds.top
+    if (selection.width < 4 || selection.height < 4 || !overlapsTarget) return
+
+    try {
+      const vectorShape = target.kind === 'shape' ? shapes.find((shape) => shape.id === target.id) : undefined
+      if (vectorShape && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
+        const start = toWorld(gesture.clientX0, gesture.clientY0)
+        const end = toWorld(gesture.clientX1, gesture.clientY1)
+        const mask: ShapeFrame = {
+          id: newFrameId(),
+          kind: gesture.kind === 'ellipse' ? 'ellipse' : 'rect',
+          x: Math.min(start.x, end.x),
+          y: Math.min(start.y, end.y),
+          w: Math.abs(end.x - start.x),
+          h: Math.abs(end.y - start.y),
+          fill: '#000000',
+          stroke: null,
+          strokeWidth: 0,
+        }
+        const split = splitShapeByMask(vectorShape, mask)
+        if (!split.piece) return
+        const makePiece = (geometry: NonNullable<typeof split.piece>, z: number): ShapeFrame => ({
+          ...vectorShape,
+          id: newFrameId(),
+          kind: 'path',
+          ...geometry,
+          closed: true,
+          curveMode: undefined,
+          pathText: undefined,
+          image: undefined,
+          frame: undefined,
+          radii: undefined,
+          sides: undefined,
+          groupId: undefined,
+          rotation: undefined,
+          z,
+        })
+        const pieces = [
+          ...(split.remainder ? [makePiece(split.remainder, vectorShape.z ?? target.z)] : []),
+          makePiece(split.piece, (vectorShape.z ?? target.z) + 0.001),
+        ]
+        if (editingParentId) {
+          pageOps.commit({
+            parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, shapes: [...parent.shapes.filter((shape) => shape.id !== vectorShape.id), ...pieces] } : parent),
+          })
+        } else {
+          pageOps.commit({ shapes: [...shapes.filter((shape) => shape.id !== vectorShape.id), ...pieces] })
+        }
+        const selectedPiece = pieces[pieces.length - 1]
+        setSelectedId(selectedPiece.id)
+        setEditingId(null)
+        setTool('select')
+        setSelectedPage(ownerPage(rects, selectedPiece.x + selectedPiece.w / 2, selectedPiece.y + selectedPiece.h / 2))
+        return
+      }
+
+      const sourceCanvas = await captureObject(target.element, target.bounds, live.current.zoom)
+      const { remainder, piece } = splitObjectCanvas(sourceCanvas, target.bounds, selection, gesture.kind)
+      const trimmedPiece = trimTransparentBounds(piece)
+      if (!trimmedPiece) return
+      const trimmedRemainder = trimTransparentBounds(remainder)
+
+      const nextAssets: Assets = { ...assets }
+      const imageFor = (canvas: HTMLCanvasElement, name: string): ImageFrame => {
+        const assetId = newFrameId()
+        const asset: Asset = { name: `${name}.png`, mime: 'image/png', dataUrl: canvasDataUrl(canvas), width: canvas.width, height: canvas.height }
+        nextAssets[assetId] = asset
+        return {
+          id: newFrameId(),
+          label: name,
+          layerId: target.layerId ?? activeLayerId,
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 1,
+          assetId,
+          fit: 'stretch',
+          z: target.z,
+        }
+      }
+      const sourceWorld = toWorld(target.bounds.left, target.bounds.top)
+      const sourceBox = { x: sourceWorld.x, y: sourceWorld.y, w: target.bounds.width / live.current.zoom, h: target.bounds.height / live.current.zoom }
+      const selectionWorld = toWorld(selection.left, selection.top)
+      const pieceBox = { x: selectionWorld.x, y: selectionWorld.y, w: selection.width / live.current.zoom, h: selection.height / live.current.zoom }
+      const tightBox = (box: typeof sourceBox, original: HTMLCanvasElement, trimmed: { canvas: HTMLCanvasElement; left: number; top: number }) => ({
+        x: box.x + (trimmed.left / original.width) * box.w,
+        y: box.y + (trimmed.top / original.height) * box.h,
+        w: (trimmed.canvas.width / original.width) * box.w,
+        h: (trimmed.canvas.height / original.height) * box.h,
+      })
+      const remainderFrame = trimmedRemainder ? imageFor(trimmedRemainder.canvas, `שארית — ${target.name}`) : null
+      const pieceFrame = imageFor(trimmedPiece.canvas, `חלק חתוך — ${target.name}`)
+      const placed = (frame: ImageFrame, box: typeof sourceBox, z: number): ImageFrame => ({ ...frame, ...box, z })
+      const nextImages = images.filter((image) => image.id !== (target.kind === 'image' ? target.id : ''))
+      const nextShapes = shapes.filter((shape) => shape.id !== (target.kind === 'shape' ? target.id : ''))
+      const nextFrames = target.kind === 'frame'
+        ? frames.map((frame) => frame.id === target.id ? { ...frame, rasterized: true } : frame)
+        : frames
+      const additions = [
+        ...(remainderFrame && trimmedRemainder ? [placed(remainderFrame, tightBox(sourceBox, remainder, trimmedRemainder), target.z)] : []),
+        placed(pieceFrame, tightBox(pieceBox, piece, trimmedPiece), target.z + 0.001),
+      ]
+
+      if (editingParentId) {
+        pageOps.commit({
+          assets: nextAssets,
+          parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, frames: nextFrames, images: [...nextImages, ...additions], shapes: nextShapes } : parent),
+        })
+      } else {
+        pageOps.commit({ frames: nextFrames, images: [...nextImages, ...additions], shapes: nextShapes, assets: nextAssets })
+      }
+      setSelectedId(pieceFrame.id)
+      setEditingId(null)
+      setTool('select')
+    } catch (error) {
+      console.warn('Could not cut the selected object.', error)
+    }
+  }
+
   // ── text on the outline of a shape ────────────────────────────────────────────
   /** the outline nearest to a world point, if one is within reach (the topmost shape wins a tie) */
   const nearestOutline = (p: { x: number; y: number }) => {
@@ -2235,6 +2829,15 @@ export function Workspace({
     const sx = snapEdges([p.x], [...snapLinesRef.current.v, ...snapLinesRef.current.cv], tol)
     const sy = snapEdges([p.y], [...snapLinesRef.current.h, ...snapLinesRef.current.ch], tol)
     return { p: { x: p.x + (sx?.delta ?? 0), y: p.y + (sy?.delta ?? 0) }, lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
+  }
+
+  const snapNewTextFramePoint = (p: { x: number; y: number }, off: boolean) => {
+    if (off) return { p, lines: [] as SnapLine[] }
+    const tol = SNAP_PX / live.current.zoom
+    const edges = objectLines(frames)
+    const sx = snapEdges([p.x], [...snapLinesRef.current.v, ...snapLinesRef.current.cv, ...edges.v], tol)
+    const sy = snapEdges([p.y], [...snapLinesRef.current.h, ...snapLinesRef.current.ch, ...edges.h], tol)
+    return { p: { x: p.x + (sx?.delta ?? 0), y: p.y + (sy?.delta ?? 0) }, lines: [sx?.line, sy?.line].filter((line): line is SnapLine => !!line) }
   }
 
   /**
@@ -2683,12 +3286,12 @@ export function Workspace({
   }, [tool])
 
   useEffect(() => {
-    if (tool !== 'eraser') setEraserPoint(null)
+    if (tool !== 'eraser' && tool !== 'heal') setEraserPoint(null)
   }, [tool])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (tool !== 'eraser' || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
+      if ((tool !== 'eraser' && tool !== 'heal') || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
       if (event.key === '[' || event.key === '{' || event.key === '(' || event.code === 'BracketLeft') {
         event.preventDefault()
         setEraserRadius((value) => Math.max(1, value - 1))
@@ -3325,9 +3928,10 @@ export function Workspace({
   }
 
   const panMode = tool === 'hand' || space
+  const marqueeTool = tool === 'marqueeRect' || tool === 'marqueeEllipse'
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
-    if (clickedCanvas && tool !== 'pen' && tool !== 'pencil') {
+    if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && !marqueeTool) {
       if (isolatedGroupId) {
         setIsolatedGroupId(null)
         setSelectedIdRaw(null)
@@ -3338,6 +3942,28 @@ export function Workspace({
     if (layerLocked && !panMode && tool !== 'zoom') return
     if (linkFrom && !panMode) {
       setLinkFrom(null) // clicked away from any frame
+      return
+    }
+    if (marqueeTool && e.button === 0) {
+      // the target (whichever object the drawn rectangle ends up over) is resolved at release, not here — so the
+      // drag may start outside every shape and still cut whichever one it crosses
+      const world = toWorld(e.clientX, e.clientY)
+      const gesture: MarqueeGesture = {
+        kind: tool === 'marqueeEllipse' ? 'ellipse' : 'rect',
+        x0: world.x,
+        y0: world.y,
+        x1: world.x,
+        y1: world.y,
+        clientX0: e.clientX,
+        clientY0: e.clientY,
+        clientX1: e.clientX,
+        clientY1: e.clientY,
+      }
+      marqueeCutRef.current = gesture
+      setMarqueeCut(gesture)
+      setSelectedPage(ownerPage(rects, world.x, world.y))
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
       return
     }
     if (e.button === 0 && !panMode) {
@@ -3386,7 +4012,9 @@ export function Workspace({
     } else if ((tool === 'type' || placing || placingImages.length > 0) && e.button === 0) {
       // start dragging a new text frame (with text loaded, the frame receives it)
       placeMods.current = { shift: e.shiftKey, alt: e.altKey }
-      const p = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey).p
+      const point = toWorld(e.clientX, e.clientY)
+      const snap = tool === 'type' && !placing && placingImages.length === 0 ? snapNewTextFramePoint : snapPoint
+      const p = snap(point, e.ctrlKey || e.metaKey).p
       createStart.current = p
       setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       setSelectedId(null)
@@ -3433,6 +4061,14 @@ export function Workspace({
     }
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (marqueeCutRef.current) {
+      const previous = marqueeCutRef.current
+      const world = toWorld(e.clientX, e.clientY)
+      const next = { ...previous, x1: world.x, y1: world.y, clientX1: e.clientX, clientY1: e.clientY }
+      marqueeCutRef.current = next
+      setMarqueeCut(next)
+      return
+    }
     if (pegDrag.current) {
       movePeg(pegDrag.current, e)
       return
@@ -3444,8 +4080,17 @@ export function Workspace({
     }
     if (tool === 'scissors') setScissorHover(scissorHit(toWorld(e.clientX, e.clientY)))
     else if (scissorHover) setScissorHover(false)
-    if (tool === 'eraser') setEraserPoint(toWorld(e.clientX, e.clientY))
+    if (tool === 'eraser' || tool === 'heal') setEraserPoint(toWorld(e.clientX, e.clientY))
     else if (eraserPoint) setEraserPoint(null)
+    if (repairStroke.current && tool === 'heal' && e.buttons !== 0) {
+      const stroke = repairStroke.current
+      const image = images.find((candidate) => candidate.id === stroke.id)
+      const asset = assets[stroke.assetId]
+      const point = image && asset ? imagePixelAt(image, asset, toWorld(e.clientX, e.clientY)) : null
+      const previous = stroke.points[stroke.points.length - 1]
+      if (point && Math.hypot(point.x - previous.x, point.y - previous.y) >= 1) stroke.points.push(point)
+      return
+    }
     if (tool === 'eraser' && eraserDragging.current && e.buttons !== 0) {
       eraseAt(toWorld(e.clientX, e.clientY))
       return
@@ -3629,13 +4274,29 @@ export function Workspace({
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
         return
       }
-      const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, undefined, e.altKey)
+      // Alt on a text-frame handle keeps the resize anchored to the opposite edge;
+      // it must not use the symmetric shape/image behavior, so the thread can reflow into this frame.
+      const rawBox = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, undefined, false)
+      const verticalAlt = e.altKey && (d.mode === 'n' || d.mode === 's')
+      const box = verticalAlt ? { ...rawBox, x: d.orig.x, w: d.orig.w } : rawBox
       if (d.mode === 'move') learnRepeatOffset(d.id, box)
-      onFramesChange(frames.map((f) => (f.id === d.id ? { ...f, ...box } : f)), d.key)
+      const altScale = d.mode !== 'move' && e.altKey
+        ? {
+            x: d.mode.includes('e') || d.mode.includes('w') ? box.w / Math.max(1, d.orig.w) : 1,
+            y: d.mode.includes('n') || d.mode.includes('s') ? box.h / Math.max(1, d.orig.h) : 1,
+          }
+        : undefined
+      onFramesChange(frames.map((f) => f.id === d.id ? {
+        ...f,
+        ...box,
+        ...(altScale ? { textFlowBox: { w: d.orig.w, h: d.orig.h }, textScale: altScale } : { textFlowBox: undefined, textScale: undefined }),
+      } : f), d.key)
       return
     }
     if (createStart.current) {
-      const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
+      const point = toWorld(e.clientX, e.clientY)
+      const snap = tool === 'type' && !placing && placingImages.length === 0 ? snapNewTextFramePoint : snapPoint
+      const snapped = snap(point, e.ctrlKey || e.metaKey)
       setSnapShown(snapped.lines)
       setDraft({ x0: createStart.current.x, y0: createStart.current.y, x1: snapped.p.x, y1: snapped.p.y })
       return
@@ -3719,6 +4380,23 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = () => {
+    const healingStroke = repairStroke.current
+    if (healingStroke) {
+      repairStroke.current = null
+      setEraserPoint(null)
+      void finishRepairStroke(healingStroke)
+      return
+    }
+    const cutGesture = marqueeCutRef.current
+    if (cutGesture) {
+      marqueeCutRef.current = null
+      setMarqueeCut(null)
+      if (Math.abs(cutGesture.clientX1 - cutGesture.clientX0) >= 4 && Math.abs(cutGesture.clientY1 - cutGesture.clientY0) >= 4) {
+        const target = marqueeTargetIn(cutGesture.x0, cutGesture.y0, cutGesture.x1, cutGesture.y1)
+        if (target) void finishMarqueeCut(cutGesture, target)
+      }
+      return
+    }
     eraserDragging.current = false
     eraserTouched.current.clear()
     if (eraserPoint) setEraserPoint(null)
@@ -3765,6 +4443,9 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    repairStroke.current = null
+    marqueeCutRef.current = null
+    setMarqueeCut(null)
     eraserDragging.current = false
     eraserTouched.current.clear()
     setEraserPoint(null)
@@ -3809,6 +4490,7 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return // let the pan handler see it
+    setFootnoteSel(null)
     if (layerLocked || itemLocks[id]) return
     if (layerLocked) return
     if (placingImages.length > 0) return // the click places a picture on the page, even over a text frame
@@ -3857,6 +4539,7 @@ export function Workspace({
     } else {
       if (handleMultiPointer(id, e)) return
       e.preventDefault()
+      setTextSel(null)
       setSelectedId(id)
       setEditingId(null)
       beginFrameDrag(e, id, 'move')
@@ -3948,6 +4631,8 @@ export function Workspace({
       ? ' panning'
       : panMode
         ? ' pan'
+        : marqueeTool
+          ? ' marqueetool'
         : placing || placingImages.length > 0
           ? ' placing'
           : linkFrom
@@ -3962,6 +4647,8 @@ export function Workspace({
                   ? ' penciltool'
                 : tool === 'scissors'
                   ? ' scissorstool'
+                  : tool === 'heal'
+                    ? ' healtool'
                   : tool === 'eraser'
                     ? ' erasertool'
               : tool === 'eyedropper'
@@ -4009,11 +4696,10 @@ export function Workspace({
     panelHead && textSel && textSel.headId === panelHead.id && textSel.a !== textSel.b && textSel.b <= panelHead.text.length
       ? textSel
       : null
-  // a caret with nothing selected while editing: the panel shows the text at the caret - the character before it, as typing
-  // there would carry on that look (at the start of a paragraph, the one after it)
-  const textEditing = !!editingId && selChain.some((f) => f.id === editingId)
+  const textEditing = !!editingId && selChain.some((frame) => frame.id === editingId)
+  // a collapsed text selection remains the active paragraph scope after focus moves into a toolbar
   const panelCaret =
-    panelHead && !panelSel && textEditing && textSel && textSel.headId === panelHead.id && textSel.a === textSel.b && textSel.a <= panelHead.text.length
+    panelHead && !panelSel && textSel && textSel.headId === panelHead.id && textSel.a === textSel.b && textSel.a <= panelHead.text.length
       ? textSel
       : null
   // the Paragraph panel: indents/leading/etc. are always the whole story's own settings (never selection-scoped);
@@ -4023,9 +4709,10 @@ export function Workspace({
   // some text / a frame is selected is stored as a per-paragraph patch), so the fields show the first paragraph in
   // scope — otherwise a value just typed would snap back to the story's own the moment it was applied
   const scopeFlow = selFrame ? flow.get(selFrame.id) : undefined
+  const panelParagraphRange = panelSel ?? panelCaret
   const scopeParagraph = panelHead
-    ? panelSel
-      ? paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]
+    ? panelParagraphRange
+      ? paragraphsInRange(panelHead.text, panelParagraphRange.a, panelParagraphRange.b)[0]
       : scopeFlow
         ? paragraphsInRange(panelHead.text, scopeFlow.start, Math.max(scopeFlow.start + 1, scopeFlow.end))[0]
         : 0
@@ -4062,12 +4749,30 @@ export function Workspace({
       }
     : null
 
+    const activeFootnoteHead = footnoteSel ? frames.find((frame) => frame.id === footnoteSel.headId) : undefined
+    const activeFootnote = activeFootnoteHead?.footnotes?.find((note) => note.id === footnoteSel?.noteId)
+    const activeFootnoteStyle = activeFootnote ? activeFootnote.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, activeFootnote.paragraphStyleId) : null
+    const activeFootnoteRuns = activeFootnote && activeFootnoteStyle ? normalizeRuns(activeFootnote.content, activeFootnote.runs, activeFootnoteStyle) : []
+    const activeFootnoteSelected = !!footnoteSel && footnoteSel.a !== footnoteSel.b
+    const footnoteToolbarStyle: TextStyle | null = activeFootnote && activeFootnoteStyle
+      ? {
+          ...activeFootnoteStyle,
+          ...(activeFootnoteSelected
+            ? styleAtChar(activeFootnoteRuns, Math.min(footnoteSel!.a, footnoteSel!.b), activeFootnoteStyle)
+            : styleAtChar(activeFootnoteRuns, Math.max(0, footnoteSel!.a - 1), activeFootnoteStyle)),
+        }
+      : null
+    const toolbarTextStyle = footnoteToolbarStyle ?? panelStyle
+    const toolbarParagraphStyle = activeFootnoteStyle ?? paragraphStyle
+
   // more than one size in the text the panel speaks for: its size field must not pretend one of them is the size
-  const panelSizeMixed = panelHead && !panelCaret
-    ? new Set(
+  const panelSizeMixed = activeFootnote && activeFootnoteSelected
+    ? new Set(sliceRuns(activeFootnoteRuns, Math.min(footnoteSel!.a, footnoteSel!.b), Math.max(footnoteSel!.a, footnoteSel!.b)).map((run) => run.style.fontSize)).size > 1
+    : panelHead && !panelCaret
+      ? new Set(
         (panelSel ? sliceRuns(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel.a, panelSel.b) : normalizeRuns(panelHead.text, panelHead.runs, panelHead)).map((run) => run.style.fontSize),
       ).size > 1
-    : false
+      : false
 
   // the paragraph style the Paragraph Styles panel highlights: the one of the paragraph the selection (or the caret) is in
   // a paragraph with none of these carries the document's base style (paragraphStyles[0]), same as a frame nobody has
@@ -4089,10 +4794,15 @@ export function Workspace({
   // to read as a single style throughout, so this is also what decides which style, if any, the frame is shown under.
   const panelRange: { a: number; b: number } | null = !panelHead
     ? null
-    : textEditing && textSel && textSel.headId === panelHead.id
+    : textSel && textSel.headId === panelHead.id
       ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
       : { a: 0, b: panelHead.text.length }
   const highlightedStyleId: string | null | undefined = (() => {
+    if (footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      return note?.paragraphStyleId ?? null
+    }
     if (!panelHead || !panelRange) return undefined
     const ids = new Set(paragraphsInRange(panelHead.text, panelRange.a, panelRange.b).map((index) => paragraphStyleIdOf(panelHead, index)))
     if (ids.size > 1) return null // the range reaches across several styles: none is "the" style
@@ -4120,7 +4830,7 @@ export function Workspace({
   const [, bumpOverrideBaseline] = useState(0)
   // panelRange already falls back to the whole story for a merely-selected frame (see above), so a frame's "+" works
   // the same whether you are inside its text editing a word or just have it selected with the Selection tool
-  const overrideParagraphs = panelHead && panelRange && typeof highlightedStyleId === 'string' ? paragraphsInRange(panelHead.text, panelRange.a, panelRange.b) : null
+  const overrideParagraphs = !footnoteSel && panelHead && panelRange && typeof highlightedStyleId === 'string' ? paragraphsInRange(panelHead.text, panelRange.a, panelRange.b) : null
   // what actually diverges from the style right now (never sensitive to how much text there is - typing more of an
   // already-matching look must not look like a change): its own keys/values are the signature, not the raw text
   const overrideLook =
@@ -4154,11 +4864,24 @@ export function Workspace({
    * (restyleParagraphs itself notices when that covers the whole story and updates the frame's own top-level look too).
    */
   const applyParagraphStyleToFrame = (id: string) => {
+    if (footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      if (!head || !note) return
+      const style = footnoteTextStyle(footnoteConfig, paragraphStyles, id)
+      const runs = normalizeRuns(note.content, undefined, style)
+      updateFrame(head.id, {
+        footnotes: head.footnotes?.map((item) => item.id === note.id
+          ? { ...item, paragraphStyleId: id, style: undefined, runs }
+          : item),
+      }, `footnote-paragraph-style:${note.id}:${id}`)
+      return
+    }
     if (!selectedId) return
     const selected = frames.find((frame) => frame.id === selectedId)
     if (!selected) return
     const head = chainOf(frames, selected.id)[0]
-    const range = textEditing && textSel && textSel.headId === head.id ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) } : { a: 0, b: head.text.length }
+    const range = textSel && textSel.headId === head.id ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) } : { a: 0, b: head.text.length }
     const indexes = paragraphsInRange(head.text, range.a, range.b)
     let next: TextFrame = head
     for (const index of indexes) next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', id)
@@ -4169,6 +4892,32 @@ export function Workspace({
     onParagraphStylesChange(nextStyles)
     const resolved = resolveParagraphStyle(id, nextStyles)
     const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const oldFootnoteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, id)
+    const nextFootnoteStyle = footnoteTextStyle(footnoteConfig, nextStyles, id)
+    const footnoteCharKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+    const footnoteStyleKeys = [...footnoteCharKeys, 'align', 'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+    const updateFootnoteStyles = (frame: TextFrame) => {
+      if (!frame.footnotes?.some((note) => note.paragraphStyleId === id)) return frame
+      const footnotes = frame.footnotes.map((note) => {
+        if (note.paragraphStyleId !== id) return note
+        let style = note.style
+        if (style) {
+          const overrides = Object.fromEntries(footnoteStyleKeys
+            .filter((key) => style![key] !== undefined && style![key] !== oldFootnoteStyle[key])
+            .map((key) => [key, style![key]])) as Partial<TextStyle>
+          style = { ...nextFootnoteStyle, ...overrides }
+        }
+        const runs = note.runs?.map((run) => {
+          const runStyle = { ...run.style }
+          for (const key of footnoteCharKeys) {
+            if (runStyle[key] === oldFootnoteStyle[key]) Object.assign(runStyle, { [key]: nextFootnoteStyle[key] })
+          }
+          return { ...run, style: runStyle }
+        })
+        return { ...note, ...(style ? { style } : {}), ...(runs ? { runs } : {}) }
+      })
+      return { ...frame, footnotes }
+    }
     const updateImportedParagraphs = (frame: TextFrame) => {
       const hasFrameStyle = frame.paragraphStyleId === id
       const hasParagraphStyles = !!frame.paragraphStyleIds?.length
@@ -4184,7 +4933,7 @@ export function Workspace({
         const end = index + 1 < paragraphStyleIds.length ? (frame.text.indexOf('\n', start) + 1 || frame.text.length) : frame.text.length
         if (styleId === id) {
           runs = styleRange(runs, start, end, charPatch)
-          paragraphStylePatches[index] = Object.fromEntries(['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
+          paragraphStylePatches[index] = Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
           if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
           if (resolved.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, index, resolved.spaceAfter)
         }
@@ -4193,7 +4942,7 @@ export function Workspace({
       const sameStyle = paragraphStyleIds.length > 0 && paragraphStyleIds.every((styleId) => styleId === id)
       return { ...frame, ...(sameStyle ? resolved : {}), paragraphStylePatches, paraSpaceBefore, paraSpaceAfter, runs }
     }
-    onFramesChange(frames.map(updateImportedParagraphs), `paragraph-style-edit:${id}`)
+    onFramesChange(frames.map((frame) => updateImportedParagraphs(updateFootnoteStyles(frame))), `paragraph-style-edit:${id}`)
   }
   const createParagraphStyle = () => {
     // an id from the clock, not the list length: deleting a style and adding another must never reuse an id
@@ -4372,6 +5121,18 @@ export function Workspace({
       }),
     )
 
+  const footnoteStyleOccurrences = (styleId: string) => headFrames(frames).flatMap((head) =>
+    (head.footnotes ?? []).filter((note) => note.paragraphStyleId === styleId).map((note) => {
+      const targetId = [...flow].find(([, part]) => part.headId === head.id && part.footnotes.some((placed) => placed.id === note.id && (placed.offset ?? 0) === 0 && !placed.continued))?.[0]
+      return { frame: head, target: frames.find((frame) => frame.id === targetId) ?? head, note }
+    }),
+  )
+
+  const allStyleOccurrences = (styleId: string) => [
+    ...styleOccurrences(styleId).map((occurrence) => ({ kind: 'body' as const, ...occurrence })),
+    ...footnoteStyleOccurrences(styleId).map((occurrence) => ({ kind: 'footnote' as const, ...occurrence })),
+  ]
+
   /**
    * Gives paragraphs of a story another paragraph style: its name in the per-paragraph lists, the character look in the
    * runs, and the paragraph look (leading, spacing, indents, alignment) in the paragraph overrides. A story that has no
@@ -4390,7 +5151,7 @@ export function Workspace({
     if ((hardReset || leaving.weight !== undefined) && charPatch.weight === undefined) charPatch.weight = 400
     if ((hardReset || leaving.italic !== undefined) && charPatch.italic === undefined) charPatch.italic = false
     if ((hardReset || leaving.tracking !== undefined) && charPatch.tracking === undefined) charPatch.tracking = 0
-    const layout = pick(['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
+    const layout = pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
     const count = frame.text.split('\n').length
     const hadLists = !!frame.paragraphStyleIds?.length
     const carriesSource = hadLists ? new Set<number>() : new Set(paragraphsWithStyle(frame, sourceId))
@@ -4437,12 +5198,26 @@ export function Workspace({
   }
 
   const findParagraphStyle = (styleId: string, direction: -1 | 0 | 1 = 0) => {
-    const occurrences = styleOccurrences(styleId)
+    const occurrences = allStyleOccurrences(styleId)
     if (occurrences.length > 0) {
       const previous = styleSearchIndex.current[styleId]
       const index = direction === 0 ? 0 : previous === undefined ? (direction < 0 ? occurrences.length - 1 : 0) : (previous + direction + occurrences.length) % occurrences.length
       styleSearchIndex.current[styleId] = index
       const occurrence = occurrences[index]
+      if (occurrence.kind === 'footnote') {
+        const page = ownerPage(rects, occurrence.target.x + occurrence.target.w / 2, occurrence.target.y + occurrence.target.h / 2)
+        setSelectedPage(page)
+        setSelectedId(occurrence.target.id)
+        setEditingId(null)
+        setTextSel(null)
+        setEditingFootnoteId(null)
+        setEditingFootnoteFrameId(null)
+        setEditingFootnoteOffset(null)
+        setFootnoteRequest(null)
+        setFootnoteSel({ headId: occurrence.frame.id, noteId: occurrence.note.id, a: 0, b: occurrence.note.content.length })
+        goTo(spreadOfPage(page))
+        return occurrences.length
+      }
       const chain = chainOf(frames, occurrence.frame.id)
       const target = chain.find((frame) => {
         const flowPart = flow.get(frame.id)
@@ -4465,11 +5240,35 @@ export function Workspace({
   /** Replaces the style of the occurrence the explorer is on (the first, when it has not been used); returns how many are left. */
   const swapOneParagraphStyle = (sourceId: string, targetId: string) => {
     if (sourceId === targetId) return 0
-    const occurrences = styleOccurrences(sourceId)
+    const occurrences = allStyleOccurrences(sourceId)
     if (occurrences.length === 0) return 0
     const current = Math.min(styleSearchIndex.current[sourceId] ?? 0, occurrences.length - 1)
     const occurrence = occurrences[current]
-    onFramesChange(frames.map((frame) => (frame.id === occurrence.frame.id ? restyleParagraphs(frame, [occurrence.index], sourceId, targetId) : frame)), `style-swap-one:${sourceId}:${targetId}`)
+    if (occurrence.kind === 'footnote') {
+      const oldBase = footnoteTextStyle(footnoteConfig, paragraphStyles, occurrence.note.paragraphStyleId)
+      const nextBase = footnoteTextStyle(footnoteConfig, paragraphStyles, targetId)
+      const styleKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const styleOverrides = occurrence.note.style
+        ? Object.fromEntries(styleKeys.filter((key) => occurrence.note.style![key] !== undefined && occurrence.note.style![key] !== oldBase[key]).map((key) => [key, occurrence.note.style![key]])) as Partial<TextStyle>
+        : {}
+      const charKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+      const runs = occurrence.note.runs?.map((run) => {
+        const runStyle = { ...run.style }
+        for (const key of charKeys) if (runStyle[key] === oldBase[key]) Object.assign(runStyle, { [key]: nextBase[key] })
+        return { ...run, style: runStyle }
+      })
+      const nextNote = {
+        ...occurrence.note,
+        paragraphStyleId: targetId,
+        ...(occurrence.note.style ? { style: { ...nextBase, ...styleOverrides } } : { style: undefined }),
+        ...(runs ? { runs } : {}),
+      }
+      onFramesChange(frames.map((frame) => frame.id === occurrence.frame.id
+        ? { ...frame, footnotes: frame.footnotes?.map((note) => note.id === occurrence.note.id ? nextNote : note) }
+        : frame), `style-swap-one-footnote:${sourceId}:${targetId}`)
+    } else {
+      onFramesChange(frames.map((frame) => (frame.id === occurrence.frame.id ? restyleParagraphs(frame, [occurrence.index], sourceId, targetId) : frame)), `style-swap-one:${sourceId}:${targetId}`)
+    }
     // the list is one shorter now, and the next occurrence sits where this one was
     if (current > 0) styleSearchIndex.current[sourceId] = current - 1
     else delete styleSearchIndex.current[sourceId]
@@ -4790,8 +5589,8 @@ export function Workspace({
         shape={selShape}
         image={selImage}
         frame={selFrame}
-        textStyle={panelStyle}
-        paragraphStyle={paragraphStyle}
+        textStyle={toolbarTextStyle}
+        paragraphStyle={toolbarParagraphStyle}
         strokeWidth={drawingStrokeWidth}
         colorTarget={colorTarget}
         onColorTarget={setColorTarget}
@@ -4806,17 +5605,59 @@ export function Workspace({
         onImageWrap={(wrap) => selImage && updateImage(selImage.id, { wrap })}
         onImageMatchShape={() => { const asset = selImage && assets[selImage.assetId]; if (selImage && asset) updateImage(selImage.id, { h: selImage.w * (asset.height / asset.width) }) }}
         onImageDelete={() => { if (selImage) { onImagesChange(images.filter((image) => image.id !== selImage.id)); setSelectedId(null) } }}
-        onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
-        onAlign={(align) => selFrame && applyAlign(selFrame.id, align)}
-        onLeading={(leading) => selFrame && applyParagraphStyle(selFrame.id, { leading })}
-        onParagraphStyle={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)}
-        onParagraphSpacing={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)}
+        onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame && applyCharStyle(selFrame.id, patch)}
+        onAlign={(align) => footnoteSel ? applyFootnoteParagraphStyle({ align }) : selFrame && applyAlign(selFrame.id, align)}
+        onLeading={(leading) => footnoteSel ? applyFootnoteParagraphStyle({ leading }) : selFrame && applyParagraphStyle(selFrame.id, { leading })}
+        onParagraphStyle={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParagraphStyle(selFrame.id, patch)}
+        onParagraphSpacing={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParaSpacing(selFrame.id, patch)}
         onFill={(color) => selShape && updateShape(selShape.id, colorTarget === 'fill' ? { fill: color, fillGradient: undefined } : { stroke: color }, `context-${colorTarget}:${selShape.id}`)}
         onStrokeWidth={(value) => {
           setDrawingStrokeWidth(value)
           if (selShape) updateShape(selShape.id, { strokeWidth: value }, `context-stroke:${selShape.id}`)
         }}
-      />
+      >
+        {multiSel.length > 1 && (() => {
+          const selectedShapeCount = shapes.filter((shape) => multiSel.includes(shape.id)).length
+          const hasSelectedGroup = selectedObjectIds().some((id) => !!objectGroupId(id))
+          return (
+            <div className="context-multi-selection" role="group" aria-label="פעולות לבחירה מרובה">
+              <span className="context-divider" />
+              <span className="context-multi-count">{multiSel.length} נבחרו</span>
+              {selectedShapeCount >= 2 && (
+                <div className="context-multi-operations" role="group" aria-label="בניית צורות">
+                  {(['unite', 'subtract', 'intersect', 'exclude'] as BoolOp[]).map((op) => (
+                    <button key={op} className="context-command" title={BOOL_OP_NAMES[op]} onClick={() => combineSelectedShapes(op)}>
+                      {BOOL_OP_NAMES[op]}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedShapeCount >= 2 && <AlignButtons onAlign={alignObjects} />}
+              <button className="context-command" onClick={groupSelectedObjects}>צור גרופ</button>
+              {hasSelectedGroup && <button className="context-command" onClick={ungroupSelectedObjects}>שחרר גרופ</button>}
+              {imageShapeMerge && <button className="context-command" onClick={insertImageIntoShape}>הכנס תמונה לצורה</button>}
+              {canMergeImages && <button className="context-command" onClick={() => void mergeSelectedImages()}>מזג תמונות</button>}
+              <button className="context-command danger" onClick={() => deleteSelection(multiSel, [])}>מחק</button>
+            </div>
+          )
+        })()}
+        {selFrame && toolbarTextStyle && (
+          <div className="context-font-size-field" role="group" aria-label="גודל גופן">
+            <NumberField
+              ariaLabel="גודל גופן"
+              value={toolbarTextStyle.fontSize}
+              unit="px"
+              unitLabel="pt"
+              step={1}
+              min={1}
+              max={999}
+              mixed={panelSizeMixed}
+              onStep={(delta) => footnoteSel ? stepFootnoteFontSize(delta) : stepFontSize(selFrame.id, delta)}
+              onChange={(fontSize) => footnoteSel ? applyFootnoteCharStyle({ fontSize }) : applyCharStyle(selFrame.id, { fontSize })}
+            />
+          </div>
+        )}
+      </ContextToolbar>
 
       {editingParentId && (
         <div className="parent-edit-bar">
@@ -4871,6 +5712,16 @@ export function Workspace({
             }}
           >
             <div className="sheet" style={{ width: sheetW, height: sheetH }}>
+              {marqueeCut && <div
+                className={'marquee-selection-preview' + (marqueeCut.kind === 'ellipse' ? ' ellipse' : '')}
+                style={{
+                  left: tx + Math.min(marqueeCut.x0, marqueeCut.x1) * zoom,
+                  top: ty + Math.min(marqueeCut.y0, marqueeCut.y1) * zoom,
+                  width: Math.abs(marqueeCut.x1 - marqueeCut.x0) * zoom,
+                  height: Math.abs(marqueeCut.y1 - marqueeCut.y0) * zoom,
+                }}
+                aria-hidden="true"
+              />}
               <svg width={sheetW} height={sheetH}>
                 {visible.map((s) => (
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
@@ -4900,6 +5751,7 @@ export function Workspace({
                     floats={[]}
                     z={0}
                     overflow={false}
+                    continuesParagraphAtEnd={false}
                     hasPrev={false}
                     zoom={zoom}
                     tx={tx}
@@ -4916,6 +5768,7 @@ export function Workspace({
                     paragraphPatches={f.paragraphStylePatches}
                     spaceBeforeFirst={frameSpaceBefore(style, f)}
                     spaceAfterLast={frameSpaceAfter(style, f, f.text)}
+                    footnoteHeight={0}
                     request={null}
                     onPointerDown={noop}
                     onDoubleClick={noop}
@@ -4959,7 +5812,7 @@ export function Workspace({
                   selected={im.id === selectedId}
                   locked={layerLocked || !!itemLocks[im.id]}
                   marked={!previewMode && multiSel.includes(im.id)}
-                  showEdge={!previewMode}
+                  showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                   onPointerDown={onImagePointerDown(im.id)}
                   onDoubleClick={() => { enterGroupIsolation(im.id) }}
                   onHandleDown={onHandleDown(im.id)}
@@ -4977,7 +5830,7 @@ export function Workspace({
                   selected={sh.id === selectedId && tool !== 'pencil'}
                   locked={layerLocked || !!itemLocks[sh.id]}
                   marked={!previewMode && multiSel.includes(sh.id)}
-                  showEdge={!previewMode}
+                  showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
                   activeCorners={sh.id === selectedId ? [0, 1, 2, 3] : undefined}
                   together={roundTogether}
@@ -5079,9 +5932,9 @@ export function Workspace({
                   showEdge
                 />
               )}
-              {tool === 'eraser' && eraserPoint && (
+              {(tool === 'eraser' || tool === 'heal') && eraserPoint && (
                 <div
-                  className="eraser-brush"
+                  className={tool === 'heal' ? 'heal-brush' : 'eraser-brush'}
                   aria-hidden="true"
                   style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2 }}
                 />
@@ -5095,6 +5948,24 @@ export function Workspace({
                 const fl = flow.get(f.id)
                 if (!fl) return null
                 const storyHead = chainOf(frames, f.id)[0]
+                const selectedFootnote = footnoteSel?.headId === fl.headId
+                  ? storyHead.footnotes?.find((note) => note.id === footnoteSel.noteId)
+                  : undefined
+                const footnoteSelection = footnoteSel && selectedFootnote
+                  ? { noteId: selectedFootnote.id, all: footnoteSel.a === 0 && footnoteSel.b === selectedFootnote.content.length }
+                  : null
+                const sourceFootnotes = [...(storyHead.footnotes ?? [])].sort((a, b) => a.anchor - b.anchor)
+                const markersBeforeFrame = [...fl.story.slice(0, fl.start)].filter((char) => char === FOOTNOTE_MARKER).length
+                const markerOffsets = [...fl.slice].flatMap((char, index) => char === FOOTNOTE_MARKER ? [index] : [])
+                const footnoteMarkers = Object.fromEntries(markerOffsets.flatMap((offset, index) => {
+                  const anchor = fl.start + offset
+                  const noteIndex = sourceFootnotes.findIndex((note) => note.anchor === anchor)
+                  const note = noteIndex >= 0 ? sourceFootnotes[noteIndex] : sourceFootnotes[markersBeforeFrame + index]
+                  if (!note) return []
+                  const indexInStory = sourceFootnotes.indexOf(note)
+                  const number = footnoteNumbers.get(note.id) ?? footnoteConfig.startAt + indexInStory
+                  return [[offset, formatFootnoteNumber(number, footnoteConfig.numberStyle, 'plain')]]
+                }))
                 return (
                   <TextFrameView
                     key={f.id}
@@ -5110,8 +5981,35 @@ export function Workspace({
                     paragraphPatches={storyHead.paragraphStylePatches}
                     spaceBeforeFirst={fl.spaceBeforeFirst}
                     spaceAfterLast={fl.spaceAfterLast}
+                    footnoteMarkers={footnoteMarkers}
+                    footnoteReferenceScale={footnoteConfig.referenceScale}
+                    footnoteAlignment={footnoteConfig.alignment}
+                    footnotes={fl.footnotes}
+                    footnoteHeight={fl.footnoteHeight}
+                    footnoteDividerGap={footnoteConfig.dividerGap}
+                    footnoteNumberGap={footnoteConfig.numberTextGap}
+                    onFootnoteEdit={(noteId, localOffset, fragmentOffset) => editFootnote(fl.headId, noteId, f.id, localOffset, fragmentOffset)}
+                    editingFootnoteId={editingFootnoteId}
+                    editingFootnoteFrameId={editingFootnoteFrameId}
+                    editingFootnoteOffset={editingFootnoteOffset}
+                    footnoteRequest={footnoteRequest?.frameId === f.id ? footnoteRequest : null}
+                    footnoteSelection={footnoteSelection}
+                    onFootnoteCopyText={(noteId) => {
+                      const sourceNote = storyHead.footnotes?.find((note) => note.id === noteId)
+                      return sourceNote && footnoteSel?.headId === fl.headId && footnoteSel.noteId === noteId && footnoteSel.a === 0 && footnoteSel.b === sourceNote.content.length ? sourceNote.content : null
+                    }}
+                    onFootnoteTextEdit={(noteId, from, to, insert) => {
+                      const sourceNote = frames.find((frame) => frame.id === fl.headId)?.footnotes?.find((note) => note.id === noteId)
+                      const selectedAll = sourceNote && footnoteSel?.headId === fl.headId && footnoteSel.noteId === noteId && footnoteSel.a === 0 && footnoteSel.b === sourceNote.content.length
+                      applyFootnoteEdit(fl.headId, noteId, selectedAll ? 0 : from, selectedAll ? sourceNote.content.length : to, insert)
+                    }}
+                    onFootnoteSelect={(noteId, from, to) => setFootnoteSel({ headId: fl.headId, noteId, a: from, b: to })}
+                    onFootnoteSelectAll={selectAllFootnote}
+                    onFootnoteStop={() => { setEditingFootnoteId(null); setEditingFootnoteFrameId(null); setEditingFootnoteOffset(null); setFootnoteRequest(null) }}
+                    onSelectAllText={() => selectAllStory(f.id)}
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
+                    continuesParagraphAtEnd={fl.end < fl.story.length && fl.story[fl.end - 1] !== '\n'}
                     hasPrev={fl.prevId !== null}
                     zoom={zoom}
                     tx={tx}
@@ -5121,7 +6019,7 @@ export function Workspace({
                     marked={!previewMode && multiSel.includes(f.id)}
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
-                    showEdge={!previewMode}
+                    showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                     showHidden={showHiddenChars && !previewMode}
                     request={request && request.frameId === f.id ? request : null}
                     onPointerDown={onFramePointerDown(f.id)}
@@ -5398,6 +6296,8 @@ export function Workspace({
                       onAlign={alignObjects}
                       canInsertImage={!!imageShapeMerge}
                       onInsertImage={insertImageIntoShape}
+                      canMergeImages={canMergeImages}
+                      onMergeImages={() => void mergeSelectedImages()}
                       onDelete={() => deleteSelection(multiSel, [])}
                     />
                   )}
@@ -5574,6 +6474,20 @@ export function Workspace({
       {firstWordDialog && (
         <FirstWordStylerDialog styles={paragraphStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />
       )}
+      {footnoteDialog && (
+        <FootnoteEditorDialog
+          title={footnoteDialog.noteId ? 'עריכת הערת שוליים' : 'הוספת הערת שוליים'}
+          initial={footnoteDialog.initial}
+          initialRuns={footnoteDialog.initialRuns}
+          baseStyle={footnoteTextStyle(footnoteConfig, paragraphStyles)}
+          onSave={saveFootnote}
+          onDelete={footnoteDialog.noteId ? deleteFootnote : undefined}
+          onClose={() => setFootnoteDialog(null)}
+        />
+      )}
+      {footnoteOptionsOpen && (
+        <FootnoteOptionsDialog value={doc.footnotes} paragraphStyles={paragraphStyles} onSave={saveFootnoteOptions} onClose={() => setFootnoteOptionsOpen(false)} />
+      )}
       {rulerMenu && (
         <ContextMenu
           x={rulerMenu.x}
@@ -5594,6 +6508,9 @@ export function Workspace({
           items={[
             { label: 'צור גרופ', disabled: selectedObjectIds().length < 2, onClick: groupSelectedObjects },
             { label: 'שחרר גרופ', disabled: !selectedObjectIds().some((id) => !!objectGroupId(id)), onClick: ungroupSelectedObjects },
+            { separator: true },
+            { label: 'מזג צורות', disabled: selectedObjectIds().length < 2 || selectedObjectIds().some((id) => !shapes.some((shape) => shape.id === id)), onClick: () => combineSelectedShapes('unite') },
+            { label: 'מזג תמונות לשכבה אחת', disabled: !canMergeImages, onClick: () => void mergeSelectedImages() },
           ]}
         />
       )}

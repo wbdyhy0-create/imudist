@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { GradientFill, ShapeFrame } from '../document'
 import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab, tintHex, type ColorModel } from '../colorModels'
 import { FillPicker } from './FillPicker'
+import { ColorLibrary } from './ColorLibrary'
 import { Group } from './PropertiesPanel'
 
 interface Props {
@@ -39,6 +40,9 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
   const [opacity, setOpacity] = useState(shape?.opacity ?? 1)
   const [gradient, setGradient] = useState<GradientFill>(normalizedGradient(shape?.fillGradient ?? DEFAULT_GRADIENT))
   const [swatches, setSwatches] = useState(INITIAL_SWATCHES)
+  const activeStopDrag = useRef<{ index: number; pointerId: number; startY: number } | null>(null)
+  const deleteStopCandidate = useRef<number | null>(null)
+  const [deleteStopIndex, setDeleteStopIndex] = useState<number | null>(null)
 
   useEffect(() => {
     baseColors.current = { fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' }
@@ -77,6 +81,29 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
     const stops = (gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]).map((stop, stopIndex) => stopIndex === index ? { ...stop, ...patch } : stop)
     updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
   }
+  const moveStop = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.parentElement?.getBoundingClientRect()
+    if (!bounds || bounds.width === 0) return
+    const stops = gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]
+    const minimum = index === 0 ? 0 : stops[index - 1].offset
+    const maximum = index === stops.length - 1 ? 1 : stops[index + 1].offset
+    const offset = Math.max(minimum, Math.min(maximum, (event.clientX - bounds.left) / bounds.width))
+    updateStop(index, { offset })
+  }
+  const moveStopByKey = (index: number, event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const stops = gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]
+    const minimum = index === 0 ? 0 : stops[index - 1].offset
+    const maximum = index === stops.length - 1 ? 1 : stops[index + 1].offset
+    const step = event.shiftKey ? 0.05 : 0.01
+    const offset = event.key === 'Home'
+      ? minimum
+      : event.key === 'End'
+        ? maximum
+        : Math.max(minimum, Math.min(maximum, stops[index].offset + (event.key === 'ArrowRight' ? step : -step)))
+    updateStop(index, { offset })
+  }
   const addStop = () => {
     const stops = [...(gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }])]
     stops.splice(Math.max(1, stops.length - 1), 0, { offset: 0.5, color: '#888888' })
@@ -86,6 +113,38 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
     const stops = (gradient.stops ?? []).filter((_, stopIndex) => stopIndex !== index)
     if (stops.length < 2) return
     updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
+  }
+  const startStopDrag = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    activeStopDrag.current = { index, pointerId: event.pointerId, startY: event.clientY }
+    deleteStopCandidate.current = null
+    setDeleteStopIndex(null)
+  }
+  const dragStop = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = activeStopDrag.current
+    if (!drag || drag.index !== index || drag.pointerId !== event.pointerId || event.buttons !== 1) return
+    event.stopPropagation()
+    const canRemove = (gradient.stops?.length ?? 0) > 2
+    const deleteCandidate = canRemove && event.clientY - drag.startY >= 24
+    if (deleteCandidate) {
+      deleteStopCandidate.current = index
+      setDeleteStopIndex(index)
+      return
+    }
+    deleteStopCandidate.current = null
+    setDeleteStopIndex(null)
+    moveStop(index, event)
+  }
+  const finishStopDrag = (index: number, event: ReactPointerEvent<HTMLDivElement>, cancelled = false) => {
+    const drag = activeStopDrag.current
+    if (!drag || drag.index !== index || drag.pointerId !== event.pointerId) return
+    const deleteStop = !cancelled && deleteStopCandidate.current === index
+    activeStopDrag.current = null
+    deleteStopCandidate.current = null
+    setDeleteStopIndex(null)
+    if (deleteStop) removeStop(index)
   }
   const addSwatch = () => setSwatches((current) => [...current, { name: `צבע ${current.length + 1}`, color, kind: 'תהליך', global: false }])
   const applySwatch = (swatch: Swatch) => applyColor(swatch.color)
@@ -114,17 +173,39 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
   return (
     <aside className="props-panel color-tools-panel" aria-label={title} dir="rtl">
       <h2 className="props-title">{title}</h2>
-      {!shape ? <p className="muted">בחר צורה כדי להחיל עליה צבע.</p> : tool === 'gradient' ? (
+      {!shape && tool !== 'gradient' ? <p className="muted">בחר צורה כדי להחיל עליה צבע.</p> : tool === 'gradient' ? (
+        <>
         <Group title="מעבר צבע">
           <label className="field-label" htmlFor="gradient-type">סוג מעבר</label>
           <select id="gradient-type" className="select" value={gradient.type} onChange={(e) => updateGradient({ type: e.target.value as GradientFill['type'] })}>
             <option value="linear">קווי</option>
             <option value="radial">מעגלי</option>
           </select>
-          <div className="gradient-preview" style={{ background: `${gradient.type === 'radial' ? 'radial-gradient' : 'linear-gradient'}(${gradient.reverse ? 'to left' : 'to right'}, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} />
-          <div className="gradient-ramp" aria-label="רמפת מעבר צבע">
+          <div className="gradient-preview" style={{ background: gradient.type === 'radial'
+            ? `radial-gradient(${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})`
+            : `linear-gradient(${90 - (gradient.angle ?? 0) + (gradient.reverse ? 180 : 0)}deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} />
+          {gradient.type === 'linear' && <label className="field-label" htmlFor="gradient-angle">זווית: {gradient.angle ?? 0}°</label>}
+          {gradient.type === 'linear' && <input id="gradient-angle" type="range" min={0} max={359} value={((gradient.angle ?? 0) + 360) % 360} onChange={(e) => updateGradient({ angle: Number(e.target.value) })} aria-label="זווית מעבר הצבע" />}
+          <div className="gradient-ramp" style={{ background: `linear-gradient(90deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} aria-label="רמפת מעבר צבע">
             {(gradient.stops ?? []).map((stop, index) => (
-              <div key={`${index}-${stop.offset}`} className="gradient-stop" style={{ insetInlineStart: `${stop.offset * 100}%`, background: stop.color }} title={`עצירה ${index + 1}`} />
+              <div
+                key={index}
+                className={'gradient-stop' + (deleteStopIndex === index ? ' delete-armed' : '')}
+                style={{ left: `${stop.offset * 100}%`, background: stop.color }}
+                title={deleteStopIndex === index ? 'שחרר כדי למחוק עצירה' : `עצירה ${index + 1} · ${Math.round(stop.offset * 100)}%`}
+                role="slider"
+                tabIndex={0}
+                aria-label={`מיקום עצירה ${index + 1}`}
+                aria-valuemin={Math.round((gradient.stops?.[index - 1]?.offset ?? 0) * 100)}
+                aria-valuemax={Math.round((gradient.stops?.[index + 1]?.offset ?? 1) * 100)}
+                aria-valuenow={Math.round(stop.offset * 100)}
+                aria-orientation="horizontal"
+                onPointerDown={(event) => startStopDrag(index, event)}
+                onPointerMove={(event) => dragStop(index, event)}
+                onPointerUp={(event) => finishStopDrag(index, event)}
+                onPointerCancel={(event) => finishStopDrag(index, event, true)}
+                onKeyDown={(event) => moveStopByKey(index, event)}
+              />
             ))}
           </div>
           <div className="gradient-stop-list">
@@ -139,6 +220,10 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
           <div className="props-buttons"><button className="btn small" onClick={addStop}>הוסף עצירה</button></div>
           <label className="page-bar-check"><input type="checkbox" checked={!!gradient.reverse} onChange={(e) => updateGradient({ reverse: e.target.checked })} />הפוך מעבר</label>
         </Group>
+        <Group title="ספריית מעברים">
+          <ColorLibrary mode="gradients" onGradient={(next) => updateGradient(next)} />
+        </Group>
+        </>
       ) : (
         <>
           <Group title="מילוי וקו">
@@ -163,16 +248,21 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
             <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} />
           </Group>
           <Group title="דוגמיות צבע">
-            <FillPicker label="דוגמיות צבע" value={target === 'fill' ? shape.fill : shape.stroke} onChange={applyColor} />
+            <FillPicker label="דוגמיות צבע" value={target === 'fill' ? shape?.fill ?? null : shape?.stroke ?? null} onChange={applyColor} />
           </Group>
         </>
       )}
-      {tool === 'swatches' && shape && <Group title="ניהול דוגמיות">
-        <div className="swatches-manager">
-          {swatches.map((swatch) => <button key={swatch.name} className="managed-swatch" title={`${swatch.kind}${swatch.global ? ' · גלובלי' : ''}`} onClick={() => applySwatch(swatch)}><span style={{ background: swatch.color ?? 'transparent' }} />{swatch.name}</button>)}
-        </div>
-        <button className="btn small" onClick={addSwatch}>הוסף את הצבע הנוכחי</button>
-      </Group>}
+      {tool === 'swatches' && shape && <>
+        <Group title="ספריית צבעים">
+          <ColorLibrary onColor={(next) => applyColor(next)} onGradient={(next) => { onTarget('fill'); updateGradient(next) }} />
+        </Group>
+        <Group title="דוגמיות המסמך">
+          <div className="swatches-manager">
+            {swatches.map((swatch) => <button key={swatch.name} className="managed-swatch" title={`${swatch.kind}${swatch.global ? ' · גלובלי' : ''}`} onClick={() => applySwatch(swatch)}><span style={{ background: swatch.color ?? 'transparent' }} />{swatch.name}</button>)}
+          </div>
+          <button className="btn small" onClick={addSwatch}>הוסף את הצבע הנוכחי</button>
+        </Group>
+      </>}
     </aside>
   )
 }

@@ -1,5 +1,6 @@
 import {
   DEFAULT_PARAGRAPH_STYLES,
+  DEFAULT_FOOTNOTE_CONFIG,
   DEFAULT_TEXT_STYLE,
   DEFAULT_WRAP_OFFSET,
   DEFAULT_SHAPE_FILL,
@@ -21,6 +22,8 @@ import {
   type Assets,
   type CharStyle,
   type DocSettings,
+  type FootnoteItem,
+  type FootnoteLayoutConfig,
   type GradientFill,
   type Guide,
   type ImageFit,
@@ -46,6 +49,7 @@ import {
   type TextStyle,
   type WrapMode,
 } from './document'
+import { footnoteTextStyle } from './footnoteLayout'
 import { normalizeDeg } from './frames'
 import type { DocContent } from './pages'
 import { normalizeRuns } from './story'
@@ -156,10 +160,34 @@ function parseSettings(v: unknown, name: string): DocSettings {
     margins: sidesOf(v.margins, d.margins),
     bleed: sidesOf(v.bleed, d.bleed),
     slug: sidesOf(v.slug, d.slug),
+    footnotes: parseFootnoteConfig(v.footnotes),
   }
   const clean = normalizeSizes(settings)
   if (validateDoc(clean)) throw new FileFormatError('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).')
   return clean
+}
+
+function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
+  const raw = isObj(value) ? value : {}
+  return {
+    mode: oneOf(raw.mode, ['vertical', 'horizontal'], DEFAULT_FOOTNOTE_CONFIG.mode),
+    columns: raw.columns === 2 ? 2 : 1,
+    referenceScale: num(raw.referenceScale, DEFAULT_FOOTNOTE_CONFIG.referenceScale, 0.25, 1),
+    numberTextGap: num(raw.numberTextGap, DEFAULT_FOOTNOTE_CONFIG.numberTextGap, 0, 100),
+    minSpacingBetweenInline: num(raw.minSpacingBetweenInline, DEFAULT_FOOTNOTE_CONFIG.minSpacingBetweenInline, 0, 100),
+    maxFootnoteHeight: num(raw.maxFootnoteHeight, DEFAULT_FOOTNOTE_CONFIG.maxFootnoteHeight, 12, MAX_PAGE_PT),
+    dividerGap: num(raw.dividerGap, DEFAULT_FOOTNOTE_CONFIG.dividerGap, 0, MAX_PAGE_PT),
+    spaceBefore: num(raw.spaceBefore, DEFAULT_FOOTNOTE_CONFIG.spaceBefore, 0, MAX_PAGE_PT),
+    startAt: int(raw.startAt, DEFAULT_FOOTNOTE_CONFIG.startAt, 1, 9999),
+    restart: oneOf(raw.restart, ['continuous', 'page', 'spread'], DEFAULT_FOOTNOTE_CONFIG.restart),
+    markerPrefix: str(raw.markerPrefix, DEFAULT_FOOTNOTE_CONFIG.markerPrefix).slice(0, 12),
+    markerSuffix: str(raw.markerSuffix, DEFAULT_FOOTNOTE_CONFIG.markerSuffix).slice(0, 12),
+    numberStyle: oneOf(raw.numberStyle, ['arabic', 'hebrew', 'roman'], DEFAULT_FOOTNOTE_CONFIG.numberStyle),
+    noteFormat: oneOf(raw.noteFormat, ['plain', 'dot', 'dotBefore', 'rightParen', 'doubleRightParen', 'leftParen', 'doubleLeftParen', 'round', 'square'], DEFAULT_FOOTNOTE_CONFIG.noteFormat),
+    alignment: oneOf(raw.alignment, ['right', 'center'], DEFAULT_FOOTNOTE_CONFIG.alignment),
+    ...(typeof raw.fontFamily === 'string' && raw.fontFamily ? { fontFamily: raw.fontFamily.slice(0, 100) } : {}),
+    ...(typeof raw.paragraphStyleId === 'string' && raw.paragraphStyleId ? { paragraphStyleId: raw.paragraphStyleId.slice(0, 100) } : {}),
+  }
 }
 
 function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
@@ -183,7 +211,7 @@ const groupOf = (raw: Record<string, unknown>): { groupId?: string } => typeof r
 /** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
 type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
 const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields> => ({
-  ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 1, MAX_PAGE_PT) } : {}),
+  ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 0, MAX_PAGE_PT) } : {}),
   ...(typeof raw.wordSpacingMin === 'number' && Number.isFinite(raw.wordSpacingMin) ? { wordSpacingMin: num(raw.wordSpacingMin, 90, 10, 100) } : {}),
   ...(typeof raw.wordSpacingMax === 'number' && Number.isFinite(raw.wordSpacingMax) ? { wordSpacingMax: num(raw.wordSpacingMax, 120, 100, 500) } : {}),
   ...(typeof raw.spaceBefore === 'number' && Number.isFinite(raw.spaceBefore) ? { spaceBefore: num(raw.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
@@ -226,7 +254,7 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.weight === 'number' && Number.isFinite(s.weight) ? { weight: num(s.weight, 400, 1, 1000) } : {}),
     ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
     ...(typeof s.fontSize === 'number' && Number.isFinite(s.fontSize) ? { fontSize: num(s.fontSize, 14, 1, 999) } : {}),
-    ...(typeof s.leading === 'number' && Number.isFinite(s.leading) ? { leading: num(s.leading, 17, 1, MAX_PAGE_PT) } : {}),
+    ...(typeof s.leading === 'number' && Number.isFinite(s.leading) ? { leading: num(s.leading, 17, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.tracking === 'number' && Number.isFinite(s.tracking) ? { tracking: num(s.tracking, 0, -1000, 1000) } : {}),
     ...((['right', 'center', 'left', 'justify', 'justifyCenter'] as const).includes(s.align as TextAlign) ? { align: s.align as TextAlign } : {}),
     ...(typeof s.spaceBefore === 'number' && Number.isFinite(s.spaceBefore) ? { spaceBefore: num(s.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
@@ -269,7 +297,7 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
   }))
 }
 
-function parseFrames(v: unknown): TextFrame[] {
+function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_FOOTNOTE_CONFIG, paragraphStyles: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES): TextFrame[] {
   if (!Array.isArray(v)) return []
   const D = DEFAULT_TEXT_STYLE
   const frames: TextFrame[] = []
@@ -286,10 +314,30 @@ function parseFrames(v: unknown): TextFrame[] {
     const runs: Run[] | undefined = Array.isArray(raw.runs)
       ? raw.runs.filter(isObj).map((r) => ({ len: int(r.len, 0, 0, 1e9), style: parseCharStyle(r.style, base) }))
       : undefined
+    const footnotes: FootnoteItem[] | undefined = Array.isArray(raw.footnotes)
+      ? raw.footnotes.filter(isObj).flatMap((note) => {
+          const anchor = int(note.anchor, -1, 0, Math.max(0, text.length - 1))
+          const content = typeof note.content === 'string' ? note.content.slice(0, 1_000_000) : ''
+          if (!content || text[anchor] !== '\uE006') return []
+          const noteStyleRaw = isObj(note.style) ? note.style : null
+          const paragraphStyleId = typeof note.paragraphStyleId === 'string' ? note.paragraphStyleId : undefined
+          const fallbackNoteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, paragraphStyleId)
+          const noteBase: TextStyle = noteStyleRaw
+            ? { ...fallbackNoteStyle, ...parseCharStyle(noteStyleRaw, fallbackNoteStyle), ...paragraphStyleOf(noteStyleRaw) }
+            : fallbackNoteStyle
+          const noteRuns = Array.isArray(note.runs)
+            ? note.runs.filter(isObj).map((run) => ({ len: int(run.len, 0, 0, 1e9), style: parseCharStyle(run.style, noteBase) }))
+            : undefined
+          return [{ id: str(note.id, `footnote-${anchor}`), anchor, content, runs: normalizeRuns(content, noteRuns, noteBase), ...(noteStyleRaw ? { style: noteBase } : {}), ...(paragraphStyleId ? { paragraphStyleId } : {}) }]
+        })
+      : undefined
 
     frames.push({
       ...base,
       ...groupOf(raw),
+      ...(raw.rasterized === true ? { rasterized: true } : {}),
+      ...(isObj(raw.textFlowBox) && typeof raw.textFlowBox.w === 'number' && typeof raw.textFlowBox.h === 'number' ? { textFlowBox: { w: raw.textFlowBox.w, h: raw.textFlowBox.h } } : {}),
+      ...(isObj(raw.textScale) && typeof raw.textScale.x === 'number' && typeof raw.textScale.y === 'number' ? { textScale: { x: raw.textScale.x, y: raw.textScale.y } } : {}),
       ...(typeof raw.runningHeaderStyleId === 'string' && raw.runningHeaderStyleId ? { runningHeaderStyleId: raw.runningHeaderStyleId } : {}),
       ...(raw.runningHeaderStrategy === 'first' || raw.runningHeaderStrategy === 'last' ? { runningHeaderStrategy: raw.runningHeaderStrategy } : {}),
       align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify', 'justifyCenter'], D.align),
@@ -300,6 +348,7 @@ function parseFrames(v: unknown): TextFrame[] {
       h: num(raw.h, 50, MIN_FRAME_PT, MAX_PAGE_PT),
       text,
       runs: normalizeRuns(text, runs, base),
+      ...(footnotes?.length ? { footnotes } : {}),
       next: typeof raw.next === 'string' ? raw.next : null,
       ...zOf(raw),
       ...rotationOf(raw),
@@ -367,6 +416,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
     out.push({
       id,
       ...groupOf(raw),
+      ...(typeof raw.label === 'string' && raw.label ? { label: raw.label.slice(0, 120) } : {}),
       assetId,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -410,6 +460,7 @@ function parseGradient(v: unknown): { fillGradient?: GradientFill } {
       start,
       end,
       ...(stops.length >= 2 ? { stops } : {}),
+      ...(typeof v.angle === 'number' ? { angle: Math.max(-360, Math.min(360, v.angle)) } : {}),
       ...(v.reverse === true ? { reverse: true } : {}),
     },
   }
@@ -633,14 +684,15 @@ export function parseDocument(text: string, name: string): DocContent {
   const assets = parseAssets(data.assets)
   const doc = parseSettings(data.settings, name)
   const parents = parseParents(data.parents, assets)
+  const paragraphStyles = parseParagraphStyles(data.paragraphStyles)
   return {
     doc,
-    frames: parseFrames(data.frames),
+    frames: parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles),
     images: parseImages(data.images, assets),
     assets,
     guides: parseGuides(data.guides, doc.pages),
     shapes: parseShapes(data.shapes, assets),
-    paragraphStyles: parseParagraphStyles(data.paragraphStyles),
+    paragraphStyles,
     parents,
     pageParents: parsePageParents(data.pageParents, parents, doc.pages),
     sections: parseSections(data.sections, doc.pages),

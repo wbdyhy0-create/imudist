@@ -11,6 +11,65 @@ export interface Sides {
   right: number
 }
 
+export type FootnoteLayoutMode = 'vertical' | 'horizontal'
+export type FootnoteRestart = 'continuous' | 'page' | 'spread'
+export type FootnoteNumberStyle = 'arabic' | 'hebrew' | 'roman'
+export type FootnoteMarkerFormat = 'plain' | 'dot' | 'dotBefore' | 'rightParen' | 'doubleRightParen' | 'leftParen' | 'doubleLeftParen' | 'round' | 'square'
+export type FootnoteAlignment = 'right' | 'center'
+export const FOOTNOTE_REFERENCE_SCALE = 0.6
+
+export interface FootnoteLayoutConfig {
+  mode: FootnoteLayoutMode
+  columns: 1 | 2
+  /** main-story reference size relative to its current run font size, 0.25–1 */
+  referenceScale: number
+  /** gap between a footnote's number and its text, in points */
+  numberTextGap: number
+  minSpacingBetweenInline: number
+  maxFootnoteHeight: number
+  dividerGap: number
+  spaceBefore: number
+  startAt: number
+  restart: FootnoteRestart
+  markerPrefix: string
+  markerSuffix: string
+  numberStyle: FootnoteNumberStyle
+  noteFormat: FootnoteMarkerFormat
+  alignment: FootnoteAlignment
+  fontFamily?: string
+  paragraphStyleId?: string
+}
+
+export interface FootnoteItem {
+  id: string
+  anchor: number
+  content: string
+  runs?: Run[]
+  style?: TextStyle
+  paragraphStyleId?: string
+}
+
+export const FOOTNOTE_MARKER = '\uE006'
+
+export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
+  mode: 'vertical',
+  columns: 1,
+  referenceScale: FOOTNOTE_REFERENCE_SCALE,
+  numberTextGap: 5,
+  minSpacingBetweenInline: 8,
+  maxFootnoteHeight: 1000,
+  dividerGap: 8,
+  spaceBefore: 8,
+  startAt: 1,
+  restart: 'continuous',
+  markerPrefix: '',
+  markerSuffix: '',
+  numberStyle: 'arabic',
+  noteFormat: 'dot',
+  alignment: 'right',
+  fontFamily: '',
+}
+
 /** The size of one page, points. */
 export interface PageSize {
   w: number
@@ -46,6 +105,7 @@ export interface DocSettings {
   margins: Sides
   bleed: Sides
   slug: Sides
+  footnotes?: FootnoteLayoutConfig
 }
 
 /** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
@@ -209,8 +269,13 @@ export interface Run {
  */
 export interface TextFrame extends TextStyle {
   id: string
+  /** the text remains in its thread as an invisible flow carrier after a marquee cut is rasterized */
+  rasterized?: boolean
   /** Objects sharing this id form an editable group. */
   groupId?: string
+  /** frozen flow box and visual content scale used by Alt-resize of a text frame */
+  textFlowBox?: { w: number; h: number }
+  textScale?: { x: number; y: number }
   runningHeaderStyleId?: string
   runningHeaderStrategy?: RunningHeaderStrategy
   paragraphStyleId?: string
@@ -219,7 +284,7 @@ export interface TextFrame extends TextStyle {
   /** Imported paragraph-style names, parallel to paragraphStyleIds. */
   paragraphStyleNames?: string[]
   /** Resolved paragraph-level overrides, parallel to paragraphStyleIds. */
-  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number
@@ -228,6 +293,8 @@ export interface TextFrame extends TextStyle {
   h: number
   text: string
   runs: Run[]
+  /** footnotes belong to the head of a threaded story; each anchor is a character offset in `text` */
+  footnotes?: FootnoteItem[]
   next: string | null
   /** stacking order (higher = in front). Missing = the default layer: text frames in front of pictures */
   z?: number
@@ -259,7 +326,7 @@ export interface ParagraphStyleRecord {
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", InDesign's default */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
 }
 
 /** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */
@@ -276,6 +343,8 @@ export interface GradientFill {
   start: string
   end: string
   stops?: { offset: number; color: string }[]
+  /** direction in degrees; 0 = left to right, 90 = bottom to top */
+  angle?: number
   reverse?: boolean
 }
 
@@ -291,6 +360,8 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
+  /** optional label shown in the Layers panel */
+  label?: string
   groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string

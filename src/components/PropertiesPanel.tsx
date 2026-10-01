@@ -172,7 +172,7 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
                 value={style.leading ?? defaultLeading(style)}
                 unit="px"
                 unitLabel="pt"
-                min={1}
+                min={0}
                 max={MAX_PAGE_PT}
                 onChange={(v) => onParagraphStyle({ leading: Math.round(v) })}
               />

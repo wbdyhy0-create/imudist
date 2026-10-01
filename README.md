@@ -1,5 +1,23 @@
 # React + TypeScript + Vite
 
+## Tauri desktop app
+
+Imudist is configured for Tauri v2 on Windows. The browser build remains available with `npm run dev` and `npm run build`.
+
+Prerequisites for the desktop build:
+
+- Rust stable with Cargo installed (`rustup` is recommended).
+- Microsoft WebView2 Runtime.
+
+Commands:
+
+```powershell
+npm run tauri:dev       # development window
+npm run dist            # Windows NSIS/MSI installer in src-tauri/target/release/bundle
+```
+
+In the Tauri window, project open/save uses native Windows dialogs and the Tauri filesystem plugin. Browser mode keeps the existing browser file-picker fallback.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

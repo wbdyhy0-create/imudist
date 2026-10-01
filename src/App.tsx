@@ -140,12 +140,12 @@ export default function App() {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
-  const confirmDocxImport = async (replaceSelected: boolean) => {
+  const confirmDocxImport = async (replaceSelected: boolean, includeFootnotes: boolean) => {
     const file = importOptionsFile
     setImportOptionsFile(null)
     if (!file) return
     try {
-      const placed = await readPlacedText(file)
+      const placed = await readPlacedText(file, { includeFootnotes })
       if (replaceSelected && ws.current?.replaceSelectedText(placed)) return
       setPlacingImages([])
       setPlacing(placed)
@@ -450,12 +450,12 @@ export default function App() {
           />
         )}
         {dialog === 'export' && doc && exportContent && (
-          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} onClose={closeDialog} />
+          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} paragraphStyles={session.paragraphStyles} onClose={closeDialog} />
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
       {session.modal && <Modal spec={session.modal} />}
-      {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected) => void confirmDocxImport(replaceSelected)} onClose={() => setImportOptionsFile(null)} />}
+      {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes) => void confirmDocxImport(replaceSelected, includeFootnotes)} onClose={() => setImportOptionsFile(null)} />}
     </div>
   )
 }

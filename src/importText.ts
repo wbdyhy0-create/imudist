@@ -1,4 +1,4 @@
-import { DEFAULT_TEXT_STYLE, type CharStyle, type Run, type TextAlign, type TextStyle } from './document'
+import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharStyle, type Run, type TextAlign, type TextStyle } from './document'
 import { mergeRuns } from './story'
 import { unzipEntry } from './zip'
 
@@ -16,8 +16,18 @@ export interface PlacedText {
   paragraphStyleIds?: string[]
   /** Display names matching paragraphStyleIds, kept as a stable fallback when local ids change. */
   paragraphStyleNames?: string[]
+  /** Word footnotes, anchored to marker offsets in the imported story. */
+  footnotes?: ImportedFootnote[]
   /** semi-automatic flow: the last frame of the thread being filled; the next frame is linked after it */
   continueFrom?: string
+}
+
+export interface ImportedFootnote {
+  anchor: number
+  content: string
+  runs: Run[]
+  style: TextStyle
+  paragraphStyleId?: string
 }
 
 export interface ImportedParagraphStyle {
@@ -155,10 +165,11 @@ function parseXml(bytes: Uint8Array): Document {
 }
 
 /** Read a Word document: paragraphs, and per-run bold / italic / size / font (styles included). */
-export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise<PlacedText> {
+export async function placedFromDocx(name: string, buffer: ArrayBuffer, options: { includeFootnotes?: boolean } = {}): Promise<PlacedText> {
   let documentXml: Uint8Array | null
   let stylesXml: Uint8Array | null
   let themeXml: Uint8Array | null = null
+  let footnotesXml: Uint8Array | null = null
   try {
     documentXml = await unzipEntry(buffer, 'word/document.xml')
   } catch {
@@ -166,6 +177,9 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
   }
   try { stylesXml = await unzipEntry(buffer, 'word/styles.xml') } catch { stylesXml = null }
   try { themeXml = await unzipEntry(buffer, 'word/theme/theme1.xml') } catch { themeXml = null }
+  if (options.includeFootnotes !== false) {
+    try { footnotesXml = await unzipEntry(buffer, 'word/footnotes.xml') } catch { footnotesXml = null }
+  }
   if (!documentXml) throw new ImportError('זה לא קובץ Word תקין (חסר word/document.xml).')
 
   const themeFonts: ThemeFonts = {}
@@ -201,11 +215,74 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
     const s = id && depth < 12 ? styles.get(id) : undefined
     return s ? { ...overlay(resolve(s.basedOn, depth + 1), s.props), ...(s.align ? { align: s.align } : {}) } : {}
   }
+  const baseSize = defaults.size ?? 12
+  const baseFont = defaults.font ?? DEFAULT_TEXT_STYLE.fontFamily
+
+  const wordFootnotes = new Map<string, Omit<ImportedFootnote, 'anchor'>>()
+  if (footnotesXml) {
+    const fdoc = parseXml(footnotesXml)
+    const notes = Array.from(fdoc.getElementsByTagName('*')).filter((el) => el.localName === 'footnote' && isWordElement(el))
+    for (const note of notes) {
+      const id = attr(note, 'id')
+      if (!id || Number(id) < 1) continue
+      const noteParagraphs = Array.from(note.getElementsByTagName('*')).filter((el) => el.localName === 'p' && isWordElement(el))
+      const noteParts: { text: string; style: CharStyle }[] = []
+      let content = ''
+      let noteStyle: TextStyle | undefined
+      let noteParagraphStyleId: string | undefined
+      for (const [paragraphIndex, paragraph] of noteParagraphs.entries()) {
+        const pPr = child(paragraph, 'pPr')
+        const pStyle = attr(child(pPr, 'pStyle'), 'val') ?? defaultParagraphStyle
+        if (!noteParagraphStyleId && pStyle) noteParagraphStyleId = pStyle
+        const paragraphProps = overlay(defaults, resolve(pStyle))
+        const align = readJc(pPr) ?? resolve(pStyle).align
+        let last: CharStyle = {
+          fontFamily: paragraphProps.fontCs ?? paragraphProps.font ?? baseFont,
+          fontSize: paragraphProps.sizeCs ?? paragraphProps.size ?? baseSize,
+          weight: paragraphProps.bold ? 700 : 400,
+          italic: !!paragraphProps.italic,
+          tracking: 0,
+          ...(paragraphProps.color ? { color: paragraphProps.color } : {}),
+        }
+        for (const run of Array.from(paragraph.getElementsByTagName('*')).filter((el) => el.localName === 'r' && isWordElement(el))) {
+          let runText = ''
+          for (const node of Array.from(run.children)) {
+            if (!isWordElement(node)) continue
+            if (node.localName === 't') runText += node.textContent ?? ''
+            else if (node.localName === 'tab') runText += '\t'
+            else if (node.localName === 'br' || node.localName === 'cr') runText += '\n'
+            else if (node.localName === 'noBreakHyphen') runText += '‑'
+          }
+          if (!runText) continue
+          const rPr = child(run, 'rPr')
+          const props = overlay(overlay(paragraphProps, resolve(attr(child(rPr, 'rStyle'), 'val'))), readRPr(rPr, themeFonts))
+          if (props.hidden) continue
+          const rtl = HEBREW_OR_ARABIC.test(runText)
+          last = {
+            fontFamily: (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
+            fontSize: (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
+            ...(props.color ? { color: props.color } : {}),
+            weight: props.bold ? 700 : 400,
+            italic: !!props.italic,
+            tracking: 0,
+          }
+          if (!noteStyle) noteStyle = { ...DEFAULT_TEXT_STYLE, ...last, align: align ?? alignFor(runText), ...(align ? { align } : {}) }
+          noteParts.push({ text: runText, style: last })
+          content += runText
+        }
+        if (paragraphIndex < noteParagraphs.length - 1) {
+          noteParts.push({ text: '\n', style: last })
+          content += '\n'
+        }
+      }
+      if (content.trim()) wordFootnotes.set(id, { content, runs: mergeRuns(noteParts.map((part) => ({ len: part.text.length, style: part.style }))), style: noteStyle ?? { ...DEFAULT_TEXT_STYLE, align: alignFor(content) }, ...(noteParagraphStyleId ? { paragraphStyleId: noteParagraphStyleId } : {}) })
+    }
+  }
 
   const doc = parseXml(documentXml)
   const pieces: { text: string; style: CharStyle }[] = []
-  const baseSize = defaults.size ?? 12
-  const baseFont = defaults.font ?? DEFAULT_TEXT_STYLE.fontFamily
+  const referenceAnchors: { wordId: string; anchor: number }[] = []
+  let importedLength = 0
 
   const paragraphs = elements(doc, 'p')
   const paragraphStyles: ImportedParagraphStyle[] = Array.from(styles.entries())
@@ -241,18 +318,27 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
 
     for (const r of Array.from(p.getElementsByTagName('*')).filter((el) => el.localName === 'r' && isWordElement(el))) {
       let text = ''
+      const runReferences: { wordId: string; offset: number }[] = []
       for (const c of Array.from(r.children)) {
         if (!isWordElement(c)) continue
         if (c.localName === 't') text += c.textContent ?? ''
         else if (c.localName === 'tab') text += '\t'
         else if (c.localName === 'br' || c.localName === 'cr') text += '\n'
         else if (c.localName === 'noBreakHyphen') text += '‑'
+        else if (c.localName === 'footnoteReference') {
+          const wordId = attr(c, 'id')
+          if (wordId && wordFootnotes.has(wordId)) {
+            runReferences.push({ wordId, offset: text.length })
+            text += FOOTNOTE_MARKER
+          }
+        }
       }
       if (!text) continue
       for (const char of text) if (char === '\n') breaks++
       const rPr = child(r, 'rPr')
       const props = overlay(overlay(paragraphProps, resolve(attr(child(rPr, 'rStyle'), 'val'))), readRPr(rPr, themeFonts))
       if (props.hidden) continue
+      for (const reference of runReferences) referenceAnchors.push({ wordId: reference.wordId, anchor: importedLength + reference.offset })
       const rtl = HEBREW_OR_ARABIC.test(text)
       last = {
         fontFamily: (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
@@ -264,6 +350,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
       }
       if (!firstRun) firstRun = last
       pieces.push({ text, style: last })
+      importedLength += text.length
     }
     const directFormatting = firstRun && (firstRun.fontSize !== baseSize || firstRun.fontFamily !== baseFont || firstRun.weight >= 600 || firstRun.italic || !!firstRun.color)
     const inferredId = directFormatting && (!pStyle || pStyle === defaultParagraphStyle) ? `inferred-${firstRun!.fontFamily}-${firstRun!.fontSize}-${firstRun!.weight}-${firstRun!.italic}-${firstRun!.color ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-') : null
@@ -280,7 +367,10 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
         paragraphStyleNames.push(paragraphStyles.find((style) => style.wordId === pStyle)?.name ?? pStyle ?? '')
       }
     }
-    if (pi < paragraphs.length - 1) pieces.push({ text: '\n', style: last }) // paragraph break
+    if (pi < paragraphs.length - 1) {
+      pieces.push({ text: '\n', style: last }) // paragraph break
+      importedLength += 1
+    }
   })
 
   // Word stores many built-in styles that are not used by this document. Keep only
@@ -295,6 +385,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
     }
   }
   paragraphStyleIds.forEach(markBasedOn)
+  for (const note of wordFootnotes.values()) markBasedOn(note.paragraphStyleId ?? null)
   const activeParagraphStyles = [...paragraphStyles.filter((style) => usedParagraphStyles.has(style.wordId)), ...Array.from(inferredStyles.values()), ...Array.from(unresolvedStyles.values())]
 
   const text = pieces.map((p) => p.text).join('').replace(/\n+$/, '')
@@ -314,14 +405,18 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer): Promise
   }
 
   const first = runs[0].style
-  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames }
+  const footnotes = referenceAnchors.flatMap(({ wordId, anchor }) => {
+    const source = wordFootnotes.get(wordId)
+    return source && anchor < text.length ? [{ anchor, ...source }] : []
+  })
+  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(footnotes.length ? { footnotes } : {}) }
 }
 
 /** Read a file the user picked (or dropped): .docx or plain text. */
-export async function readPlacedText(file: File): Promise<PlacedText> {
+export async function readPlacedText(file: File, options: { includeFootnotes?: boolean } = {}): Promise<PlacedText> {
   if (file.size > MAX_FILE) throw new ImportError('הקובץ גדול מדי (מעל 40MB).')
   const lower = file.name.toLowerCase()
-  if (lower.endsWith('.docx')) return placedFromDocx(file.name, await file.arrayBuffer())
+  if (lower.endsWith('.docx')) return placedFromDocx(file.name, await file.arrayBuffer(), options)
   if (lower.endsWith('.doc')) throw new ImportError('קבצי doc ישנים לא נתמכים. פתח את הקובץ ב-Word ושמור אותו כ-docx.')
   if (/\.(txt|text|md|csv)$/.test(lower) || file.type.startsWith('text/')) return placedFromPlainText(file.name, decodeText(await file.arrayBuffer()))
   throw new ImportError('סוג הקובץ לא נתמך. אפשר לייבא קובצי docx וקובצי טקסט (txt).')

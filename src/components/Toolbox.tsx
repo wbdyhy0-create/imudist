@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 export type ToolId =
-  | 'select' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
-  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper'
+  | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
+  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper' | 'heal'
   | 'hand' | 'zoom'
 
 interface ToolDef {
@@ -23,6 +23,8 @@ interface ToolDef {
 // Groups: 1 navigate & select · 2 content · 3 shapes & lines · 4 edit & transform · 5 helpers
 export const TOOLS: ToolDef[] = [
   { id: 'select', label: 'בחירה', group: 1, key: 'V', code: 'KeyV', enabled: true, icon: <path d="M5 3v16l4.300-3.700L12 21.500l2.700-1.200-2.700-6.100 6-.2z" fill="currentColor" stroke="none" /> },
+  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <rect x="4" y="5" width="16" height="14" strokeDasharray="2 2" /> },
+  { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
   { id: 'direct', label: 'עריכת נקודות', group: 1, key: 'A', code: 'KeyA', enabled: true, icon: <><path d="M4.500 17.500C8 17.500 8 6.500 12 6.500s4 11 7.500 11" /><path d="M3 16h3v3H3zM10.500 5h3v3h-3zM18 16h3v3h-3z" fill="currentColor" stroke="none" /></> },
   { id: 'hand', label: 'יד', group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
   { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
@@ -85,6 +87,7 @@ export const TOOLS: ToolDef[] = [
 
   { id: 'scissors', label: 'מספריים', group: 4, key: 'C', code: 'KeyC', enabled: true, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
   { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
+  { id: 'heal', label: 'מברשת ריפוי', group: 4, enabled: true, icon: <><path d="m4 12 8-8 8 8-8 8z" /><path d="M12 8v8M8 12h8" /><circle cx="12" cy="12" r="2" fill="currentColor" /></> },
   { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
   { id: 'gap', label: 'רווח', group: 4, key: 'U', enabled: false, icon: <path d="M4 4v16M20 4v16M9 12h6M11 9.500 8.500 12l2.500 2.500M13 9.500l2.500 2.500-2.500 2.500" /> },
   { id: 'color', label: 'צבע', group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
@@ -108,6 +111,7 @@ export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polyg
  * one was picked last, and a small mark in its corner opens a flyout to pick a different one.
  */
 const FOLD_GROUPS: ToolId[][] = [
+  ['marqueeRect', 'marqueeEllipse', 'heal'],
   ['rect', 'ellipse', 'polygon'],
   ['type', 'pathtype'],
   ['framerect', 'frameellipse', 'framepolygon'],
@@ -117,6 +121,8 @@ const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
 const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   select: 'בחירת אובייקטים, הזזה ושינוי גודל',
+  marqueeRect: 'בחירה מלבנית וחיתוך לאובייקט חדש',
+  marqueeEllipse: 'בחירה אליפטית וחיתוך לאובייקט חדש',
   direct: 'עריכת נקודות עוגן וידיות של נתיב',
   hand: 'הזזת תצוגת הקנבס',
   zoom: 'הגדלה והקטנה של תצוגת המסמך',
@@ -134,6 +140,7 @@ const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   pencil: 'ציור קו חופשי מוחלק',
   scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
   eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
+  heal: 'גרירה על תפר בתמונה ממלאת אותו בפיקסלים מהאזור שמסביב; סוגריים מרובעים משנים את גודל המברשת',
   color: 'בחירת צבע מילוי או קו',
   gradient: 'יצירת מעבר צבע',
   swatches: 'בחירה וניהול של דוגמיות צבע',

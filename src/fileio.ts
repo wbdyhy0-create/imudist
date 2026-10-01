@@ -4,6 +4,7 @@ import { FILE_EXT } from './fileFormat'
 export interface FileRef {
   name: string
   handle: FileSystemFileHandle | null
+  path?: string
 }
 
 /** The File System Access API (Chrome, Edge): real "Save" / "Save as" dialogs and overwriting in place. */
@@ -12,8 +13,9 @@ interface PickerApi {
   showOpenFilePicker?: (options: unknown) => Promise<FileSystemFileHandle[]>
 }
 const api = window as unknown as PickerApi
+export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
-export const hasFilePicker = typeof api.showSaveFilePicker === 'function' && typeof api.showOpenFilePicker === 'function'
+export const hasFilePicker = isTauri || (typeof api.showSaveFilePicker === 'function' && typeof api.showOpenFilePicker === 'function')
 
 const TYPES = [{ description: 'מסמך Imudist', accept: { 'application/json': [FILE_EXT] } }]
 
@@ -33,6 +35,14 @@ export async function writeToHandle(handle: FileSystemFileHandle, text: string) 
 
 /** Ask where to save. Returns null when the user cancels. */
 export async function saveWithPicker(suggestedName: string, text: string): Promise<FileRef | null> {
+  if (isTauri) {
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+    const path = await save({ defaultPath: suggestedName, filters: [{ name: 'מסמך Imudist', extensions: [FILE_EXT.slice(1)] }] })
+    if (!path) return null
+    await writeTextFile(path, text)
+    return { name: path.split(/[\\/]/).pop() ?? suggestedName, handle: null, path }
+  }
   try {
     const handle = await api.showSaveFilePicker!({ suggestedName, types: TYPES })
     await writeToHandle(handle, text)
@@ -45,6 +55,13 @@ export async function saveWithPicker(suggestedName: string, text: string): Promi
 
 /** Ask which file to open. Returns null when the user cancels. */
 export async function openWithPicker(): Promise<{ ref: FileRef; text: string } | null> {
+  if (isTauri) {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    const path = await open({ multiple: false, directory: false, filters: [{ name: 'מסמך Imudist', extensions: [FILE_EXT.slice(1)] }] })
+    if (!path || Array.isArray(path)) return null
+    return { ref: { name: path.split(/[\\/]/).pop() ?? path, handle: null, path }, text: await readTextFile(path) }
+  }
   try {
     const [handle] = await api.showOpenFilePicker!({ types: TYPES, multiple: false })
     return { ref: { name: handle.name, handle }, text: await (await handle.getFile()).text() }

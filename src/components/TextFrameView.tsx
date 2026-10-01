@@ -1,11 +1,12 @@
-import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
+import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
+import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { splitMarks } from '../richtext'
+import { caretOffsetAt, splitMarks } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
+import type { FootnotePlacement } from '../footnoteLayout'
 
 /**
  * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
@@ -25,8 +26,11 @@ function withMarks(
   isLastPart: boolean,
   firstLineIndent: (paragraphIndex: number) => number,
   scale: number,
+  footnoteMarkers?: Record<number, string>,
+  referenceFontSize = 9,
+  textOffset = 0,
 ): { nodes: ReactNode[]; trailing: ReactNode[] } {
-  if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex)) return { nodes: [text], trailing: [] }
+  if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex) && !footnoteMarkers) return { nodes: [text], trailing: [] }
   let idx = startParaIndex
   const nodes: ReactNode[] = []
   // the `.para-gap` / `.para-indent` spacers that follow a paragraph's closing "\n" belong to the START of the next
@@ -36,9 +40,18 @@ function withMarks(
   const trailing: ReactNode[] = []
   if (firstLineIndent(startParaIndex) && atStart) nodes.push(<span key="i0" className="para-indent" contentEditable={false} style={{ width: firstLineIndent(startParaIndex) * scale }} />)
   const pieces = splitMarks(text)
+  let offset = 0
   for (const [i, piece] of pieces.entries()) {
     if (piece.kind === 'text') {
-      nodes.push(piece.text)
+      let plainStart = 0
+      for (let index = 0; index < piece.text.length; index++) {
+        const reference = footnoteMarkers?.[textOffset + offset + index]
+        if (piece.text[index] !== FOOTNOTE_MARKER || !reference) continue
+        if (index > plainStart) nodes.push(piece.text.slice(plainStart, index))
+        nodes.push(<span key={`footnote-${textOffset + offset + index}`} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px` } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
+        plainStart = index + 1
+      }
+      if (plainStart < piece.text.length) nodes.push(piece.text.slice(plainStart))
     } else if (piece.kind === 'space') {
       nodes.push(showMarks ? <span key={i} className="mark-space">{piece.text}</span> : piece.text)
     } else {
@@ -53,6 +66,7 @@ function withMarks(
       if (gapValue && !atEnd) spacers.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
       if (firstLineIndent(idx) && !atEnd) spacers.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent(idx) * scale }} />)
     }
+    offset += piece.text.length
   }
   return { nodes, trailing }
 }
@@ -72,6 +86,8 @@ interface Props {
   z: number
   /** the story has more text than fits in its frames (only set on the last frame of a story) */
   overflow: boolean
+  /** the last visible paragraph continues in the next frame */
+  continuesParagraphAtEnd: boolean
   hasPrev: boolean
   zoom: number
   /** screen position of world (0, 0) inside the sheet */
@@ -93,10 +109,29 @@ interface Props {
   startParaIndex: number
   /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
   atParaStart: boolean
-  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
+  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
+  footnoteMarkers?: Record<number, string>
+  footnoteReferenceScale?: number
+  footnoteAlignment?: 'right' | 'center'
+  footnotes?: FootnotePlacement[]
+  footnoteHeight: number
+  footnoteDividerGap?: number
+  footnoteNumberGap?: number
+  onFootnoteEdit?: (id: string, localOffset: number, fragmentOffset: number) => void
+  footnoteRequest?: (SelRequest & { noteId: string }) | null
+  editingFootnoteOffset?: number | null
+  footnoteSelection?: { noteId: string; all: boolean } | null
+  onFootnoteCopyText?: (id: string) => string | null
+  editingFootnoteId?: string | null
+  editingFootnoteFrameId?: string | null
+  onFootnoteTextEdit?: (id: string, from: number, to: number, insert: string) => void
+  onFootnoteSelect?: (id: string, from: number, to: number) => void
+  onFootnoteSelectAll?: (id: string) => void
+  onFootnoteStop?: () => void
+  onSelectAllText?: () => void
   request: SelRequest | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
@@ -125,7 +160,12 @@ function RichText({
   startParaIndex,
   atParaStart,
   firstLineIndent,
+  baseAlign,
+  continuesParagraphAtEnd,
   paragraphPatches,
+  baseFontSize,
+  footnoteMarkers,
+  footnoteReferenceScale,
 }: {
   text: string
   runs: Run[]
@@ -137,7 +177,12 @@ function RichText({
   startParaIndex: number
   atParaStart: boolean
   firstLineIndent: (paragraphIndex: number) => number
-  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
+  baseAlign: TextStyle['align']
+  continuesParagraphAtEnd: boolean
+  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
+  baseFontSize: number
+  footnoteMarkers?: Record<number, string>
+  footnoteReferenceScale: number
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -161,7 +206,7 @@ function RichText({
   // the spacers closing the previous paragraph, waiting to open the next one (see withMarks)
   let carry: ReactNode[] = []
   for (const [i, part] of parts.entries()) {
-    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale)
+    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, part.run.style.fontSize * scale * footnoteReferenceScale, Number(part.key))
     let group = paragraphNodes[paragraphNodes.length - 1]
     let opening: ReactNode[] = []
     if (!group || group.index !== renderParaIndex) {
@@ -200,7 +245,9 @@ function RichText({
       ))}
       {paragraphNodes.map((paragraph) => {
         const patch = paragraphPatches?.[paragraph.index]
-        return <div key={`paragraph-${paragraph.index}`} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
+        const wordSpacing = patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
+        const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
+        return <div key={`paragraph-${paragraph.index}`} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
       })}
     </>
   )
@@ -229,6 +276,8 @@ export function TextFrameView(p: Props) {
     <div
       className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
       data-frame-id={frame.id}
+      data-object-id={frame.id}
+      data-object-kind="frame"
       style={{
         zIndex: p.z,
         left: p.tx + frame.x * p.zoom,
@@ -236,6 +285,7 @@ export function TextFrameView(p: Props) {
         width: frame.w * p.zoom,
         height: frame.h * p.zoom,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
+        pointerEvents: frame.rasterized ? 'none' : undefined,
       }}
       onPointerDown={p.onPointerDown}
       onDoubleClick={p.onDoubleClick}
@@ -253,6 +303,7 @@ export function TextFrameView(p: Props) {
         style={{
           width: frame.w,
           height: frame.h,
+          visibility: frame.rasterized ? 'hidden' : undefined,
           fontSize: style.fontSize,
           fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
           lineHeight: `${style.leading ?? defaultLeading(style)}px`,
@@ -262,12 +313,14 @@ export function TextFrameView(p: Props) {
           // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
           // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
           paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst : undefined,
-          paddingBottom: !hasNext ? p.spaceAfterLast : undefined,
+          paddingBottom: (!hasNext ? p.spaceAfterLast : 0) + p.footnoteHeight || undefined,
+          '--text-body-top': `${!p.hasPrev ? p.spaceBeforeFirst : 0}px`,
+          '--text-body-height': `${Math.max(0, frame.h - (!p.hasPrev ? p.spaceBeforeFirst : 0) - p.footnoteHeight)}px`,
           paddingLeft: style.indentLeft || undefined,
           paddingRight: style.indentRight || undefined,
-          transform: `scale(${p.zoom})`,
+          transform: `scale(${p.zoom * (frame.textScale?.x ?? 1), p.zoom * (frame.textScale?.y ?? 1)})`,
           transformOrigin: '0 0',
-        }}
+        } as CSSProperties}
       >
       {editing ? (
         <RichEditor
@@ -281,6 +334,11 @@ export function TextFrameView(p: Props) {
           atParaStart={p.atParaStart}
           firstLineIndent={style.firstLineIndent ?? 0}
           paragraphPatches={paragraphPatches}
+          baseAlign={style.align}
+          continuesAtEnd={p.continuesParagraphAtEnd}
+          footnoteMarkers={p.footnoteMarkers}
+          footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
+          onSelectAll={p.onSelectAllText}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -303,12 +361,80 @@ export function TextFrameView(p: Props) {
             paraGaps={p.paraGaps}
             startParaIndex={p.startParaIndex}
             atParaStart={p.atParaStart}
+            footnoteMarkers={p.footnoteMarkers}
+            footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
+            baseFontSize={style.fontSize}
+            baseAlign={style.align}
+            continuesParagraphAtEnd={p.continuesParagraphAtEnd}
           />
         </div>
       )}
       </div>
+      {!!p.footnotes?.length && (
+        <div className="footnotes-scale" style={{ width: frame.w, height: frame.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${style.leading ?? defaultLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
+          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, height: p.footnoteHeight - (p.footnoteDividerGap ?? 0), '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+            <div className="footnote-divider" />
+            {p.footnotes.map((note) => {
+              const noteStyle = note.style ?? style
+              const fragmentOffset = note.offset ?? 0
+              const isEditingFootnote = p.editingFootnoteId === note.id && p.editingFootnoteFrameId === frame.id && p.editingFootnoteOffset === fragmentOffset
+              const referenceLabel = String(note.referenceNumber)
+              const dotAfterNumber = referenceLabel.endsWith('.')
+              const numberLabel = dotAfterNumber ? referenceLabel.slice(0, -1) : referenceLabel
+              const numberDirection = /[\u0590-\u05ff]/.test(numberLabel) ? 'rtl' : 'ltr'
+              let offset = 0
+              const content = note.runs?.length
+                ? note.runs.map((run, index) => {
+                    const text = note.content.slice(offset, offset + run.len)
+                    offset += run.len
+                    return <span key={index} style={{ fontFamily: run.style.fontFamily, fontSize: `${run.style.fontSize}px`, fontWeight: run.style.weight, fontStyle: run.style.italic ? 'italic' : 'normal', color: run.style.color ?? noteStyle.color, letterSpacing: run.style.tracking ? `${(run.style.tracking / 1000) * run.style.fontSize}px` : undefined }}>{text}</span>
+                  })
+                : note.content
+              return (
+                <div
+                  key={`${note.id}:${fragmentOffset}`}
+                  className="footnote-item"
+                  title="לחיצה לעריכת הערת השוליים"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (isEditingFootnote) return
+                    const clickedNumber = event.target instanceof Element && !!event.target.closest('.footnote-number')
+                    const contentRoot = event.currentTarget.querySelector<HTMLElement>('.footnote-content')
+                    const localOffset = clickedNumber ? 0 : caretOffsetAt(event.clientX, event.clientY, contentRoot) ?? 0
+                    p.onFootnoteEdit?.(note.id, localOffset, fragmentOffset)
+                  }}
+                  style={{ left: `${frame.w - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', ...cssTextAlign(noteStyle.align) }}
+                >
+                  {!note.continued && (
+                    <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>
+                      <span dir={numberDirection}>{numberLabel}</span>{dotAfterNumber && <span dir="rtl">.</span>}
+                    </span>
+                  )}
+                  {isEditingFootnote ? (
+                    <RichEditor
+                      text={note.content}
+                      runs={normalizeRuns(note.content, note.runs, noteStyle)}
+                      scale={1}
+                      floats={[]}
+                      hasPrev={false}
+                      request={p.footnoteRequest?.noteId === note.id ? p.footnoteRequest : null}
+                      onEdit={(from, to, insert) => p.onFootnoteTextEdit?.(note.id, (note.offset ?? 0) + from, (note.offset ?? 0) + to, insert)}
+                      onSelect={(from, to) => p.onFootnoteSelect?.(note.id, (note.offset ?? 0) + from, (note.offset ?? 0) + to)}
+                      onSelectAll={() => p.onFootnoteSelectAll?.(note.id)}
+                      onBackspaceAtStart={() => {}}
+                      onCopyText={() => p.onFootnoteCopyText?.(note.id) ?? null}
+                      onStop={() => p.onFootnoteStop?.()}
+                    />
+                  ) : <span className={'footnote-content' + (p.footnoteSelection?.noteId === note.id && p.footnoteSelection.all ? ' selected' : '')}>{content}</span>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {showIn && (
         <div

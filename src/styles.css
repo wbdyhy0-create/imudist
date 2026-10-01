@@ -204,6 +204,11 @@ svg { display: block; }
   overflow: visible; background: #302727; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
   color: var(--text-dim); direction: rtl;
 }
+.context-multi-selection { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.context-multi-count { color: #fff; white-space: nowrap; }
+.context-multi-operations { display: flex; align-items: center; gap: 3px; }
+.context-multi-selection .align-buttons { display: flex; gap: 2px; }
+.context-multi-selection .align-buttons button { width: 26px; height: 26px; }
 .context-tool-strip { display: flex; align-items: center; gap: 2px; flex: none; }
 .context-tool-button { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 3px; color: var(--text-dim); }
 .context-tool-button:hover, .context-tool-button.active { background: var(--accent); color: #fff; }
@@ -211,6 +216,8 @@ svg { display: block; }
 .context-tool-name { color: #fff; font-weight: 700; white-space: nowrap; }
 .context-divider { width: 1px; height: 22px; flex: none; background: var(--border); }
 .context-command { height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-field); color: var(--text-dim); white-space: nowrap; }
+.context-text-controls label[title="גודל גופן"] { display: none; }
+.context-font-size-field .num-field { width: 88px; }
 .context-command:hover { border-color: var(--accent-line); color: #fff; }
 .context-image-fits { display: flex; gap: 3px; }
 .context-image-fits button { height: 26px; padding: 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-field); color: var(--text-dim); font-size: 11px; }
@@ -295,7 +302,7 @@ svg { display: block; }
 .dock-drop-top.active { height: 20px; color: var(--accent-line); border-color: var(--accent-line); background: rgba(61, 139, 255, 0.12); }
 .dock-tab {
   width: max-content; min-width: 100%; min-height: 42px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px;
-  border: 1px solid transparent; border-radius: 3px; color: var(--text-dim); cursor: grab; direction: rtl; justify-content: flex-start; text-align: right;
+  border: 1px solid var(--border); border-radius: 3px; color: #fff; cursor: grab; direction: rtl; justify-content: flex-start; text-align: right;
 }
 .dock-tab span { width: max-content; white-space: nowrap; text-align: right; }
 .dock-tab:hover { color: #fff; background: var(--hover); }
@@ -427,8 +434,10 @@ svg { display: block; }
 .color-stop-row label { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-dim); }
 .color-stop-row input[type='color'] { width: 34px; height: 28px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-field); }
 .gradient-preview { height: 34px; margin-top: 12px; border: 1px solid var(--border); border-radius: 4px; }
-.gradient-ramp { position: relative; height: 18px; margin-top: 12px; border: 1px solid var(--border); background: linear-gradient(90deg, #fff, #0066ff); }
-.gradient-stop { position: absolute; bottom: -5px; width: 10px; height: 10px; transform: translateX(50%) rotate(45deg); border: 1px solid #fff; box-shadow: 0 0 0 1px #111; }
+.gradient-ramp { position: relative; direction: ltr; height: 18px; margin-top: 12px; border: 1px solid var(--border); touch-action: none; user-select: none; }
+.gradient-stop { position: absolute; z-index: 1; bottom: -5px; width: 10px; height: 10px; transform: translateX(-50%) rotate(45deg); border: 1px solid #fff; box-shadow: 0 0 0 1px #111; cursor: move; touch-action: none; }
+.gradient-stop:active { cursor: move; }
+.gradient-stop.delete-armed { border-color: #ff5c5c; box-shadow: 0 0 0 2px #ff5c5c; cursor: no-drop; }
 .gradient-stop-list { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
 .gradient-stop-editor { display: flex; align-items: center; gap: 6px; }
 .gradient-stop-editor input[type='color'] { width: 32px; height: 26px; padding: 1px; border: 1px solid var(--border); }
@@ -444,20 +453,41 @@ svg { display: block; }
 .managed-swatch { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 5px; color: var(--text-dim); text-align: start; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
 .managed-swatch:hover { color: #fff; background: var(--hover); }
 .managed-swatch span { width: 18px; height: 18px; flex: none; border: 1px solid var(--border-strong); }
+.color-library { display: grid; gap: 7px; }
+.color-library-search { width: 100%; min-width: 0; height: 30px; padding: 4px 8px; color: var(--text); background: var(--bg-field); border: 1px solid var(--border); border-radius: 3px; }
+.color-library-category { min-height: 30px; }
+.color-library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; max-height: 230px; overflow: auto; overscroll-behavior: contain; }
+.color-library-item { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 42px; padding: 5px; color: var(--text-dim); text-align: start; background: var(--bg-field); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.color-library-item:hover { color: var(--text); border-color: var(--border-strong); background: var(--hover); }
+.color-library-preview { width: 24px; height: 24px; flex: none; border: 1px solid var(--border-strong); border-radius: 2px; }
+.color-library-copy { display: grid; min-width: 0; gap: 2px; }
+.color-library-copy strong, .color-library-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.color-library-copy strong { font-size: 11px; font-weight: 500; }
+.color-library-copy small { color: var(--text-dim); font-size: 9px; }
+.color-library-gradient { display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 4px; text-align: start; }
+.color-library-gradient-preview { display: block; width: 30px; height: 30px; flex: 0 0 30px; border: 1px solid var(--border-strong); border-radius: 2px; }
+.color-library-gradient .color-library-copy { display: flex; justify-content: space-between; gap: 5px; }
+.color-library-empty { grid-column: 1 / -1; margin: 6px 0; text-align: center; }
+.color-library-credit { color: var(--text-dim); font-size: 10px; text-decoration: underline; text-underline-offset: 2px; }
 
 .ws-center { flex: 1; min-width: 0; display: grid; }
 .ruler-corner { background: var(--bg-raised); }
 .ruler { width: 100%; height: 100%; display: block; min-width: 0; min-height: 0; }
 
 .viewport { direction: rtl; position: relative; overflow: auto; background: var(--pasteboard); min-width: 0; min-height: 0; }
+.viewport.marqueetool { cursor: crosshair; }
+.marquee-selection-preview { position: absolute; z-index: 1000003; box-sizing: border-box; border: 1px dashed #fff; outline: 1px solid #111; background: rgba(61, 139, 255, 0.16); pointer-events: none; }
+.marquee-selection-preview.ellipse { border-radius: 50%; }
 .viewport.preview { background: #0d0909; }
 .viewport.texttool, .viewport.linking { cursor: crosshair; }
 .viewport.pentool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M6 22 9 14 20 3l5 5-11 11z' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cpath d='m6 22 5-2' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 5 22, crosshair; }
 .viewport.pentool.pen-dragging { cursor: grabbing; }
 .viewport.penciltool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='m5 22 3-7L20 3a2.5 2.5 0 0 1 4 4L12 19z' fill='%23f1c27d' stroke='black' stroke-width='1.5'/%3E%3Cpath d='m5 22 3-7 4 4z' fill='%23f2e8d5' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 5 22, crosshair; }
 .viewport.scissorstool { cursor: crosshair; }
+.viewport.healtool { cursor: crosshair; }
 .viewport.erasertool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m4 14 8-9a2 2 0 0 1 3 0l4 4-8 9H7z' fill='%23f1c27d' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M4 14h7M7 18h10' stroke='black' stroke-width='1.4'/%3E%3C/svg%3E") 4 20, crosshair; }
 .eraser-brush { position: absolute; z-index: 1000002; border: 1px solid #24a6ff; border-radius: 50%; background: rgba(36, 166, 255, 0.08); pointer-events: none; }
+.heal-brush { position: absolute; z-index: 1000002; border: 1px solid #e0ad47; border-radius: 50%; background: rgba(224, 173, 71, 0.12); pointer-events: none; }
 .viewport.scissorstool.scissors-target { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Cpath d='M9 2v14M2 9h14' stroke='white' stroke-width='3'/%3E%3Cpath d='M9 2v14M2 9h14' stroke='black' stroke-width='1'/%3E%3C/svg%3E") 9 9, crosshair; }
 .viewport.linetool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Cpath d='M9 2v14M2 9h14' stroke='white' stroke-width='3'/%3E%3Cpath d='M9 2v14M2 9h14' stroke='black' stroke-width='1'/%3E%3C/svg%3E") 9 9, crosshair; }
 .viewport.linetool .shape-frame.ghost { opacity: 1; pointer-events: none; }
@@ -492,17 +522,37 @@ svg { display: block; }
 /* text is laid out at a fixed 1x scale inside here (world points = css px), then the whole thing is scaled as one
    unit via `transform` (set inline, since it depends on the current zoom) — see TextFrameView.tsx's own comment.
    Positioned at the outer .text-frame's own origin, out of flow, so it never affects that box's own layout. */
-.text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; }
+.text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; overflow: hidden; }
+.footnote-reference { font-size: 0; vertical-align: super; }
+.footnote-reference::after { content: attr(data-reference); font-size: var(--footnote-marker-size, 9px); line-height: 1; direction: inherit; unicode-bidi: isolate; }
+.footnotes-scale { position: absolute; z-index: 2; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+.footnotes-area { position: absolute; left: 0; right: 0; box-sizing: border-box; direction: rtl; pointer-events: none; white-space: pre-wrap; overflow: hidden; }
+.footnote-divider { position: absolute; top: 0; right: 0; width: 35%; border-top: 1px solid currentColor; opacity: 0.7; }
+.footnote-item { position: absolute; display: flex; align-items: flex-start; gap: var(--footnote-number-gap, 5px); box-sizing: border-box; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.footnote-item { pointer-events: auto; cursor: text; }
+.footnote-number { display: inline-flex; flex: none; align-items: baseline; gap: 1px; white-space: nowrap; unicode-bidi: isolate; }
+.footnote-content { display: block; flex: 1; min-width: 0; }
+.footnote-item > .rich-editor { flex: 1; width: 0; min-width: 0; height: 100%; }
+.footnote-content.selected { background: #b3d4ff; }
+.footnote-dialog-field { display: grid; gap: 5px; margin: 8px 0; }
+.footnote-dialog textarea { min-height: 110px; resize: vertical; }
+.footnote-options-dialog { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 12px 14px; font-size: 12px; line-height: 1.2; }
+.footnote-options-dialog h2 { margin-bottom: 4px; font-size: 14px; }
+.footnote-options-dialog .footnote-dialog-field { gap: 2px; margin: 3px 0; font-size: 12px; }
+.footnote-options-dialog input, .footnote-options-dialog select { min-height: 26px; padding: 3px 6px; font-size: 12px; }
+.footnote-options-dialog .modal-buttons { gap: 6px; margin-top: 7px; }
 /* unicode-bidi stays "normal" (not "plaintext"): the frame's own base direction is always RTL, fixed by dir="rtl", never
    guessed from whichever language happens to be typed first (that guess is what "plaintext" does, and a frame that starts
    with an English word would then read as a whole LTR paragraph). Mixed text (Hebrew, English, digits, punctuation) still
    reorders correctly within that — that part is the browser's ordinary bidi algorithm, not tied to this setting. */
-.text-frame-body { width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.text-frame-scale > .text-frame-body, .text-frame-scale > .rich-editor { position: absolute; top: var(--text-body-top, 0); left: 0; }
+.text-frame-body { width: 100%; height: var(--text-body-height, 100%); overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wrap-float { pointer-events: none; user-select: none; }
 .rich-editor {
-  display: block; width: 100%; height: 100%; overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: block; width: 100%; height: var(--text-body-height, 100%); overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere;
   user-select: text; cursor: text; caret-color: #111; text-rendering: inherit;
 }
+.rich-editor::selection, .rich-editor *::selection { background: #b3d4ff; color: inherit; }
 .text-frame-body .sel { background: #b3d4ff; }
 /* View > תווים נסתרים: shows spaces and paragraph breaks. Both are pure CSS overlays (generated ::before/::after
    content) rather than real characters, so they can never affect the story's actual text, its wrapping/pagination

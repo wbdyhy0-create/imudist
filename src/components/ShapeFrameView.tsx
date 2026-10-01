@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Asset, PathVertex, ShapeFrame } from '../document'
+import { linearGradientLine } from '../colorModels'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
@@ -145,6 +146,8 @@ export function ShapeFrameView({
   return (
     <div
       className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
+      data-object-id={shape.id}
+      data-object-kind="shape"
       style={{
         left: tx + shape.x * zoom,
         top: ty + shape.y * zoom,
@@ -164,7 +167,7 @@ export function ShapeFrameView({
                 {gradientStops.map((stop, index) => <stop key={index} offset={`${stop.offset * 100}%`} stopColor={shape.fillGradient!.reverse ? gradientStops[gradientStops.length - 1 - index].color : stop.color} />)}
               </radialGradient>
             ) : (
-              <linearGradient id={gradientId} x1={shape.fillGradient.reverse ? '100%' : '0%'} x2={shape.fillGradient.reverse ? '0%' : '100%'} y1="0%" y2="0%">
+              <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" {...linearGradientLine((shape.fillGradient.angle ?? 0) + (shape.fillGradient.reverse ? 180 : 0), w, h)}>
                 {gradientStops.map((stop, index) => <stop key={index} offset={`${stop.offset * 100}%`} stopColor={stop.color} />)}
               </linearGradient>
             )}

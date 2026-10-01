@@ -167,6 +167,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
         doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
         doc('הוספת כותרת משתנה…', '', (ws) => ws.insertRunningHeader()),
+        doc('הוספת הערת שוליים', 'Ctrl+Alt+Shift+F', (ws) => ws.insertFootnote()),
+        doc('אפשרויות הערות שוליים…', '', (ws) => ws.openFootnoteOptions()),
         sep,
         {
           label: 'הוספת מספר עמוד אוטומטי',

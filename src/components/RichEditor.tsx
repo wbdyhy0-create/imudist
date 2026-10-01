@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { Run } from '../document'
+import type { Run, TextAlign } from '../document'
 import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, readSelectionIn, setSelectionIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
@@ -31,11 +31,18 @@ interface Props {
   firstLineIndent?: number
   /** leading/indents/alignment a paragraph style (or a change made to it) overrides, one entry per paragraph of the WHOLE story */
   paragraphPatches?: ParagraphPatch[]
+  footnoteMarkers?: Record<number, string>
+  footnoteReferenceScale?: number
+  /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
+   *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
+  baseAlign?: TextAlign
+  continuesAtEnd?: boolean
   hasPrev: boolean
   request: SelRequest | null
   /** replace the characters [from, to) of `text` with `insert` */
   onEdit: (from: number, to: number, insert: string) => void
   onSelect: (a: number, b: number) => void
+  onSelectAll?: () => void
   onBackspaceAtStart: () => void
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
@@ -78,7 +85,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${p.text}|${JSON.stringify(p.runs)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
@@ -94,8 +101,12 @@ export function RichEditor(p: Props) {
             startParaIndex: p.startParaIndex,
             atParaStart: p.atParaStart,
             firstLineIndent: p.firstLineIndent,
+            footnoteMarkers: p.footnoteMarkers,
+            footnoteReferenceScale: p.footnoteReferenceScale,
           },
           p.paragraphPatches,
+          p.baseAlign,
+          p.continuesAtEnd,
         ),
       )
       // keeps the empty last line reachable - inside the last paragraph's own block when there is one (a block-level
@@ -242,6 +253,17 @@ export function RichEditor(p: Props) {
         window.addEventListener('pointerup', stop)
       }}
       onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && live.current.onSelectAll) {
+          e.preventDefault()
+          e.stopPropagation()
+          const selection = document.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(e.currentTarget)
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          requestAnimationFrame(() => live.current.onSelectAll?.())
+          return
+        }
         if (e.key === 'Escape') {
           e.currentTarget.blur()
           return

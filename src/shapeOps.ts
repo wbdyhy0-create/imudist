@@ -128,4 +128,21 @@ export function combineShapes(backToFront: ShapeFrame[], op: BoolOp): ({ x: numb
   return { ...g, fill: back.fill, stroke: back.stroke, strokeWidth: back.strokeWidth }
 }
 
+export function splitShapeByMask(shape: ShapeFrame, mask: ShapeFrame): {
+  remainder: { x: number; y: number; w: number; h: number; geom: PathGeom } | null
+  piece: { x: number; y: number; w: number; h: number; geom: PathGeom } | null
+} {
+  const cx = shape.x + shape.w / 2
+  const cy = shape.y + shape.h / 2
+  const angle = ((shape.rotation ?? 0) * Math.PI) / 180
+  const source: MultiPolygon = shapeToPolygons(shape).map((poly) => poly.map((ring) => ring.map(([x, y]): Pair => [
+    cx + (x - cx) * Math.cos(angle) - (y - cy) * Math.sin(angle),
+    cy + (x - cx) * Math.sin(angle) + (y - cy) * Math.cos(angle),
+  ])))
+  const cutter = shapeToPolygons(mask)
+  const remainder = polygonClipping.difference(source, cutter) as MultiPolygon
+  const piece = polygonClipping.intersection(source, cutter) as MultiPolygon
+  return { remainder: toGeometry(remainder), piece: toGeometry(piece) }
+}
+
 export type { Polygon }

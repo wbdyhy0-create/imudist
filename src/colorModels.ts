@@ -4,6 +4,19 @@ export interface RgbColor { red: number; green: number; blue: number }
 export interface CmykColor { cyan: number; magenta: number; yellow: number; black: number }
 export interface LabColor { lightness: number; a: number; b: number }
 
+export function linearGradientLine(angle: number, width: number, height: number) {
+  const radians = (angle * Math.PI) / 180
+  const dx = Math.cos(radians)
+  const dy = -Math.sin(radians)
+  const halfLength = (Math.abs(dx) * width + Math.abs(dy) * height) / 2
+  return {
+    x1: width / 2 - dx * halfLength,
+    y1: height / 2 - dy * halfLength,
+    x2: width / 2 + dx * halfLength,
+    y2: height / 2 + dy * halfLength,
+  }
+}
+
 export const hexToRgb = (hex: string): RgbColor => {
   const clean = hex.replace('#', '')
   const value = clean.length === 3 ? clean.split('').map((part) => part + part).join('') : clean.padEnd(6, '0')

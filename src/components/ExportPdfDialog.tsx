@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import type { Assets, DocSettings, ImageFrame, ShapeFrame, TextFrame } from '../document'
+import type { Assets, DocSettings, ImageFrame, ParagraphStyleRecord, ShapeFrame, TextFrame } from '../document'
 import { exportPdf } from '../pdfExport'
+import { isTauri } from '../fileio'
 import { formatNumber, fromPt, toPt, type Unit } from '../units'
 import { NumberField } from './NumberField'
 
@@ -10,6 +11,7 @@ interface Props {
   images: ImageFrame[]
   shapes: ShapeFrame[]
   assets: Assets
+  paragraphStyles: ParagraphStyleRecord[]
   onClose: () => void
 }
 
@@ -22,7 +24,7 @@ const DEFAULT_BLEED_MM = 3
 /** File > ייצוא ל-PDF…: every page rendered as a sharp image (see pdfExport.ts for why — this is a deliberate
  *  choice, not a shortcut: it's what actually guarantees the Hebrew text can never come out scrambled), with the
  *  print-shop essentials — page range, bleed + crop marks, picture resolution — and opens the result once it's done. */
-export function ExportPdfDialog({ doc, frames, images, shapes, assets, onClose }: Props) {
+export function ExportPdfDialog({ doc, frames, images, shapes, assets, paragraphStyles, onClose }: Props) {
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(doc.pages)
@@ -41,7 +43,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, onClose }
     setError(null)
     // opened synchronously, still inside the click's own user-gesture, so navigating it to the PDF once the
     // (async, multi-page) render below finishes isn't caught by the popup blocker
-    const viewWindow = window.open('', '_blank')
+    const viewWindow = isTauri ? null : window.open('', '_blank')
     if (viewWindow) {
       viewWindow.document.title = 'מייצא PDF…'
       viewWindow.document.documentElement.dir = 'rtl'
@@ -50,8 +52,8 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, onClose }
     }
     setBusy({ done: 0, total: rangeMode === 'all' ? doc.pages : clampedTo - clampedFrom + 1 })
     try {
-      await exportPdf(
-        { doc, frames, images, shapes, assets },
+      const exported = await exportPdf(
+        { doc, frames, images, shapes, assets, paragraphStyles },
         {
           range: rangeMode === 'all' ? null : { from: clampedFrom, to: clampedTo },
           bleed: bleedOn,
@@ -63,7 +65,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, onClose }
         (done, total) => setBusy({ done, total }),
         viewWindow,
       )
-      onClose()
+      if (exported) onClose()
     } catch {
       viewWindow?.close()
       setError('הייצוא נכשל. נסה שוב.')

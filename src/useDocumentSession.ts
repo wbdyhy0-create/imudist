@@ -16,8 +16,8 @@ import {
 } from './fileio'
 import { COALESCE_MS, changeHistory, newHistory, redoHistory, replaceHistory, undoHistory, type History } from './history'
 import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
-import { emptyPrimaryFrameIds, withPrimaryFrames } from './placeText'
-import { addRecent, listRecent, removeRecent, type RecentEntry } from './recent'
+import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
+import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
 
 const NO_FRAMES: TextFrame[] = []
 const NO_IMAGES: ImageFrame[] = []
@@ -122,7 +122,18 @@ export function useDocumentSession() {
   const update = (id: number, fn: (d: OpenDoc) => OpenDoc) => setDocs((list) => list.map((d) => (d.id === id ? fn(d) : d)))
 
   useEffect(() => {
-    void listRecent().then(setRecent)
+    void listRecent().then(async (entries) => {
+      setRecent(entries)
+      const paths = entries.flatMap((entry) => entry.path ? [entry.path] : [])
+      if (paths.length === 0) return
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const results = await Promise.allSettled(paths.map((path) => invoke('remember_recent_file', { path })))
+        if (results.some((result) => result.status === 'rejected')) console.warn('Some recent document permissions could not be restored.')
+      } catch (e) {
+        console.warn('Could not restore recent document permissions.', e)
+      }
+    })
   }, [])
 
   // the browser asks before the tab is closed while there is unsaved work
@@ -201,8 +212,11 @@ export function useDocumentSession() {
         const applied = applySettings(s, next, options?.resizeTextFrames)
         const r = drop && drop.size > 0 ? { ...applied, frames: applied.frames.filter((f) => !drop.has(f.id)) } : applied
         if (!next.primaryTextFrame) return r
+        const expanded = s.doc.primaryTextFrame && next.columns > s.doc.columns
+          ? expandPrimaryFramesForColumns(r, s.doc, s.frames)
+          : r
         // turning the option on gives every page without a text frame one; otherwise only pages that were added
-        return withPrimaryFrames(r, s.doc.primaryTextFrame ? Array.from({ length: Math.max(0, next.pages - s.doc.pages) }, (_, i) => s.doc.pages + i) : 'all')
+        return withPrimaryFrames(expanded, s.doc.primaryTextFrame ? Array.from({ length: Math.max(0, next.pages - s.doc.pages) }, (_, i) => s.doc.pages + i) : 'all')
       }, key),
     commit: (patch) => change((s) => ({ ...s, ...patch })),
   }
@@ -222,8 +236,18 @@ export function useDocumentSession() {
 
   const tabs: DocTab[] = docs.map((d) => ({ id: d.id, name: d.h.present.doc.name, dirty: d.saved !== d.h.present }))
 
-  const remember = (handle: FileSystemFileHandle | null) => {
-    if (handle) void addRecent(handle).then(setRecent)
+  const remember = async (ref: FileRef) => {
+    if (ref.path) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('remember_recent_file', { path: ref.path })
+      } catch (e) {
+        console.warn('Could not persist access to the recent document.', e)
+      }
+      setRecent(await addRecentPath(ref.path, ref.name))
+    } else if (ref.handle) {
+      setRecent(await addRecent(ref.handle))
+    }
   }
 
   // ── saving ─────────────────────────────────────────────────────────────────────
@@ -257,7 +281,7 @@ export function useDocumentSession() {
         update(id, (d) => ({ ...d, h: replaceHistory(d.h, now === start ? savedContent : rename(now), rename) }))
       }
       update(id, (d) => ({ ...d, file: ref, saved: savedContent }))
-      remember(ref.handle)
+      await remember(ref)
       notify(`נשמר: ${ref.name}`)
       return true
     } catch (e) {
@@ -271,11 +295,18 @@ export function useDocumentSession() {
     if (!entry || id === null) return false
     const start = entry.h.present
     const target = entry.file
-    if (!target?.handle) return saveAs(false, id)
+    if (!target || (!target.handle && !target.path)) return saveAs(false, id)
     try {
-      await writeToHandle(target.handle, serializeDocument(start))
+      if (target.path) {
+        const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+        await writeTextFile(target.path, serializeDocument(start))
+      } else if (target.handle) {
+        await writeToHandle(target.handle, serializeDocument(start))
+      } else {
+        return saveAs(false, id)
+      }
       update(id, (d) => ({ ...d, saved: start }))
-      remember(target.handle)
+      await remember(target)
       notify(`נשמר: ${target.name}`)
       return true
     } catch (e) {
@@ -351,11 +382,11 @@ export function useDocumentSession() {
   }
 
   // ── opening files ──────────────────────────────────────────────────────────────
-  const loadText = (text: string, ref: FileRef) => {
+  const loadText = async (text: string, ref: FileRef) => {
     try {
       const parsed = parseDocument(text, baseName(ref.name))
       addDoc(parsed, ref)
-      remember(ref.handle)
+      await remember(ref)
       notify(`נפתח: ${ref.name}`)
     } catch (e) {
       fail('לא ניתן לפתוח את הקובץ', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
@@ -365,7 +396,7 @@ export function useDocumentSession() {
   const openFile = async () => {
     try {
       const res = hasFilePicker ? await openWithPicker() : await openWithInput()
-      if (res) loadText(res.text, res.ref)
+      if (res) await loadText(res.text, res.ref)
     } catch (e) {
       fail('לא ניתן לפתוח את הקובץ', e)
     }
@@ -374,7 +405,7 @@ export function useDocumentSession() {
   /** open a file the user dropped or double-clicked; with its handle the document can be saved back in place */
   const openTextFile = async (file: File, handle: FileSystemFileHandle | null = null) => {
     try {
-      loadText(await file.text(), { name: file.name, handle })
+      await loadText(await file.text(), { name: file.name, handle })
     } catch (e) {
       fail('לא ניתן לפתוח את הקובץ', e)
     }
@@ -383,12 +414,18 @@ export function useDocumentSession() {
 
   const openRecent = async (entry: RecentEntry) => {
     try {
+      if (entry.path) {
+        const { readTextFile } = await import('@tauri-apps/plugin-fs')
+        await loadText(await readTextFile(entry.path), { name: entry.name, handle: null, path: entry.path })
+        return
+      }
+      if (!entry.handle) throw new Error('הקובץ לא נמצא.')
       if (!(await ensureReadPermission(entry.handle))) return
-      loadText(await (await entry.handle.getFile()).text(), { name: entry.handle.name, handle: entry.handle })
-    } catch {
-      // the file was moved or deleted
-      setRecent(await removeRecent(entry))
-      fail('לא ניתן לפתוח את הקובץ', new Error(`הקובץ "${entry.name}" לא נמצא. ייתכן שהוא הועבר או נמחק.`))
+      await loadText(await (await entry.handle.getFile()).text(), { name: entry.handle.name, handle: entry.handle })
+    } catch (e) {
+      if (!entry.path) setRecent(await removeRecent(entry))
+      const message = entry.path ? messageOf(e) : `הקובץ "${entry.name}" לא נמצא. ייתכן שהוא הועבר או נמחק.`
+      fail('לא ניתן לפתוח את הקובץ', new Error(message))
     }
   }
 

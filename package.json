@@ -1,15 +1,22 @@
 {
   "name": "imudist",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "dist": "tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/plugin-dialog": "^2.8.0",
+    "@tauri-apps/plugin-fs": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.6.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "polygon-clipping": "^0.15.7",
@@ -17,6 +24,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",

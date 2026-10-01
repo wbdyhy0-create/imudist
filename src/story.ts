@@ -153,6 +153,22 @@ export function cleanSpacing(text: string, runs: Run[], base: CharStyle, from = 
   return out
 }
 
+/** Map a text offset through cleanSpacing's removal of repeated spaces and paragraph breaks in [from, to). */
+export function cleanSpacingOffset(text: string, offset: number, from = 0, to = text.length): number {
+  const start = Math.max(0, Math.min(from, text.length))
+  const end = Math.max(start, Math.min(to, text.length))
+  const at = Math.max(0, Math.min(offset, text.length))
+  const countRemovedBefore = (limit: number) => {
+    let removed = 0
+    for (let index = Math.max(start, 1); index < Math.min(limit, end); index++) {
+      const char = text[index]
+      if ((char === ' ' || char === '\n') && text[index - 1] === char) removed++
+    }
+    return removed
+  }
+  return at - countRemovedBefore(at)
+}
+
 /** The 0-based index of the paragraph ("\n"-separated piece of `text`) that character offset `i` belongs to. */
 export const paraIndexAt = (text: string, i: number): number => {
   let n = 0

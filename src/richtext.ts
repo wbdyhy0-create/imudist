@@ -1,4 +1,4 @@
-import { cssTextAlign, type CharStyle, type Run, type TextAlign } from './document'
+import { cssTextAlign, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, type CharStyle, type Run, type TextAlign } from './document'
 import { sliceRuns } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 
@@ -42,6 +42,8 @@ export function splitMarks(text: string): MarkPiece[] {
 }
 
 export interface RunNodeOpts {
+  footnoteMarkers?: Record<number, string>
+  footnoteReferenceScale?: number
   /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
   showMarks?: boolean
   /**
@@ -128,10 +130,31 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale)
     const runText = text.slice(pos, pos + r.len)
-    if (opts.showMarks || opts.paraLineHeight || opts.paraGaps || opts.firstLineIndent) {
+    const appendText = (parent: HTMLElement, value: string, start: number) => {
+      if (!opts.footnoteMarkers) {
+        parent.appendChild(document.createTextNode(value))
+        return
+      }
+      let plainStart = 0
+      for (let index = 0; index < value.length; index++) {
+        const reference = opts.footnoteMarkers[start + index]
+        if (value[index] !== FOOTNOTE_MARKER || !reference) continue
+        if (index > plainStart) parent.appendChild(document.createTextNode(value.slice(plainStart, index)))
+        const marker = document.createElement('span')
+        marker.className = 'footnote-reference'
+        marker.dataset.reference = reference
+        marker.dir = /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'
+        marker.style.setProperty('--footnote-marker-size', `${r.style.fontSize * scale * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)}px`)
+        marker.textContent = FOOTNOTE_MARKER
+        parent.appendChild(marker)
+        plainStart = index + 1
+      }
+      if (plainStart < value.length) parent.appendChild(document.createTextNode(value.slice(plainStart)))
+    }
+    if (opts.showMarks || opts.paraLineHeight || opts.paraGaps || opts.firstLineIndent || opts.footnoteMarkers) {
       for (const piece of splitMarks(runText)) {
         if (piece.kind === 'text') {
-          span.appendChild(document.createTextNode(piece.text))
+          appendText(span, piece.text, seen)
         } else if (piece.kind === 'para') {
           if (opts.showMarks) {
             const mark = document.createElement('span')
@@ -163,7 +186,7 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
         seen += piece.text.length
       }
     } else {
-      span.textContent = runText
+      appendText(span, runText, seen)
       seen += runText.length
     }
     frag.appendChild(span)
@@ -193,29 +216,44 @@ const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== und
  * The spacers that follow a paragraph's closing "
 " (`.para-gap`, `.para-indent`) open the NEXT paragraph's block —
  * left at the end of the previous one they'd sit alone on an extra empty line.
+ *
+ * `continuesAtEnd` (with `baseAlign`, the frame's own default alignment): `text`'s last character is NOT a real
+ * paragraph end, only where this frame's slice of a longer story happens to be cut — the read-only view (see
+ * TextFrameView.tsx's `continues`) stretches that cut line to both margins instead of leaving it ragged like a
+ * genuine paragraph end, so the live editor and the exported PDF need the exact same `text-align-last` override or
+ * their last line jumps to a different width the moment editing stops / the document is printed.
  */
-export function buildParagraphNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}, patches?: ParagraphPatch[]): DocumentFragment {
-  if (!patches || !patches.some(shapesBlock)) return buildRunNodes(text, runs, scale, opts)
-  const frag = document.createDocumentFragment()
+export function buildParagraphNodes(text: string, runs: Run[], scale: number, opts: RunNodeOpts = {}, patches?: ParagraphPatch[], baseAlign?: TextAlign, continuesAtEnd?: boolean): DocumentFragment {
   const first = opts.startParaIndex ?? 0
-  const indentOf = (paragraph: number) => patches[paragraph]?.firstLineIndent ?? opts.firstLineIndent ?? 0
+  const lastParagraphIndex = first + (text.match(/\n/g) ?? []).length
+  const needsLastLineJustify = !!continuesAtEnd && (patches?.[lastParagraphIndex]?.align ?? baseAlign) === 'justify'
+  if ((!patches || !patches.some(shapesBlock)) && !needsLastLineJustify) return buildRunNodes(text, runs, scale, opts)
+  const frag = document.createDocumentFragment()
+  const indentOf = (paragraph: number) => patches?.[paragraph]?.firstLineIndent ?? opts.firstLineIndent ?? 0
   let pos = 0
   let paragraph = first
   while (pos < text.length) {
     const nl = text.indexOf('\n', pos)
     const end = nl < 0 ? text.length : nl + 1
     const block = document.createElement('div')
-    const patch = patches[paragraph]
+    const patch = patches?.[paragraph]
     if (patch?.align) {
       const css = cssTextAlign(patch.align)
       block.style.textAlign = css.textAlign
       if (css.textAlignLast) block.style.textAlignLast = css.textAlignLast
     }
+    if (needsLastLineJustify && end === text.length) block.style.textAlignLast = 'justify'
     if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
     if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
     if (patch?.indentRight) block.style.paddingRight = `${patch.indentRight * scale}px`
     block.style.boxSizing = 'border-box'
-    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks })
+    const footnoteMarkers = opts.footnoteMarkers
+      ? Object.fromEntries(Object.entries(opts.footnoteMarkers).flatMap(([offset, label]) => {
+          const index = Number(offset)
+          return index >= pos && index < end ? [[index - pos, label]] : []
+        }))
+      : undefined
+    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale })
     const lead = nodes.firstChild as HTMLElement | null
     const isOpening = pos > 0 || !!opts.atParaStart
     // the previous paragraph's closing gap, then this paragraph's own first-line indent

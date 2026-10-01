@@ -1,12 +1,17 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, defaultLeading, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { styleOf } from './frames'
-import { pageRects, type PageRect } from './pages'
+import { ownerPage, pageRects, type PageRect } from './pages'
+import { footnoteTextStyle, numberFootnotes } from './footnoteLayout'
+import { primaryTextFrameOrder } from './placeText'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
 import { imageGeometry, shapePath } from './shapes'
-import { flowFrames, type FrameFlow } from './textLayout'
+import { flowFrames, flowFramesWithFootnoteContinuation, type FrameFlow } from './textLayout'
 import { floatsFor } from './wrap'
+import { isTauri } from './fileio'
+import { linearGradientLine } from './colorModels'
+import { normalizeRuns } from './story'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -67,11 +72,12 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
 
 async function drawTextDom(
   ctx: CanvasRenderingContext2D,
-  content: { frames: TextFrame[]; images: ImageFrame[] },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; paragraphStyles: ParagraphStyleRecord[] },
   flows: Map<string, FrameFlow>,
   page: PageRect,
   scale: number,
 ) {
+  const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
   const root = document.createElement('div')
   Object.assign(root.style, {
     position: 'fixed',
@@ -93,6 +99,7 @@ async function drawTextDom(
       const style = styleOf(frame)
       const hasPrev = flow.prevId !== null
       const hasNext = frame.next !== null
+      const continuesAtEnd = flow.end < flow.story.length && flow.story[flow.end - 1] !== '\n'
       const outer = document.createElement('div')
       Object.assign(outer.style, {
         position: 'absolute',
@@ -113,7 +120,6 @@ async function drawTextDom(
       const inner = document.createElement('div')
       Object.assign(inner.style, {
         width: `${frame.w}px`,
-        height: `${frame.h}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
@@ -124,6 +130,7 @@ async function drawTextDom(
         ...cssTextAlign(style.align),
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : '',
         paddingTop: !hasPrev && flow.spaceBeforeFirst ? `${flow.spaceBeforeFirst}px` : '',
+        height: `${frame.h - flow.footnoteHeight + (!hasNext ? flow.spaceAfterLast : 0)}px`,
         paddingBottom: !hasNext && flow.spaceAfterLast ? `${flow.spaceAfterLast}px` : '',
         paddingLeft: style.indentLeft ? `${style.indentLeft}px` : '',
         paddingRight: style.indentRight ? `${style.indentRight}px` : '',
@@ -139,11 +146,78 @@ async function drawTextDom(
             startParaIndex: flow.startParaIndex,
             firstLineIndent: style.firstLineIndent,
             atParaStart: flow.atParaStart,
+            footnoteMarkers: Object.fromEntries(flow.footnoteReferences.map((note) => [note.anchor - flow.start, String(note.referenceNumber)])),
+            footnoteReferenceScale: footnoteConfig.referenceScale,
           },
           content.frames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
+          style.align,
+          continuesAtEnd,
         ),
       )
       outer.appendChild(inner)
+      if (flow.footnotes.length) {
+        const footnotes = document.createElement('div')
+        footnotes.className = 'footnotes-area'
+        Object.assign(footnotes.style, {
+          position: 'absolute',
+          left: '0',
+          right: '0',
+          bottom: '0',
+          height: `${flow.footnoteHeight - footnoteConfig.dividerGap}px`,
+          direction: 'rtl',
+          whiteSpace: 'pre-wrap',
+          overflow: 'hidden',
+          color: '#111',
+        })
+        const divider = document.createElement('div')
+        divider.className = 'footnote-divider'
+        Object.assign(divider.style, { position: 'absolute', top: '0', right: '0', width: '35%', borderTop: '1px solid currentColor', opacity: '0.7' })
+        footnotes.appendChild(divider)
+        for (const note of flow.footnotes) {
+          const noteStyle = note.style ?? footnoteTextStyle(footnoteConfig, content.paragraphStyles)
+          const item = document.createElement('div')
+          item.className = 'footnote-item'
+          Object.assign(item.style, {
+            position: 'absolute',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: `${footnoteConfig.numberTextGap}px`,
+            left: `${frame.w - note.x - note.width}px`,
+            top: `${note.y}px`,
+            width: `${note.width}px`,
+            height: `${note.height}px`,
+            overflow: 'hidden',
+            overflowWrap: 'anywhere',
+            textAlign: footnoteConfig.alignment,
+          })
+          const number = document.createElement('span')
+          number.className = 'footnote-number'
+          number.dir = 'rtl'
+          number.style.fontSize = `${noteStyle.fontSize}px`
+          const referenceLabel = note.continued ? '' : String(note.referenceNumber)
+          const dotAfterNumber = referenceLabel.endsWith('.')
+          const numberLabel = dotAfterNumber ? referenceLabel.slice(0, -1) : referenceLabel
+          const numberText = document.createElement('span')
+          numberText.dir = /[\u0590-\u05ff]/.test(numberLabel) ? 'rtl' : 'ltr'
+          numberText.textContent = numberLabel
+          number.appendChild(numberText)
+          if (dotAfterNumber) {
+            const dot = document.createElement('span')
+            dot.dir = 'rtl'
+            dot.textContent = '.'
+            number.appendChild(dot)
+          }
+          const text = document.createElement('span')
+          text.className = 'footnote-content'
+          Object.assign(text.style, { flex: '1', minWidth: '0' })
+          Object.assign(item.style, { fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: String(noteStyle.weight), fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : '', paddingLeft: noteStyle.indentLeft ? `${noteStyle.indentLeft}px` : '', paddingRight: noteStyle.indentRight ? `${noteStyle.indentRight}px` : '', ...cssTextAlign(noteStyle.align), color: noteStyle.color ?? '#111' })
+          text.appendChild(buildParagraphNodes(note.content, normalizeRuns(note.content, note.runs ?? [], noteStyle), 1))
+          if (!note.continued) item.appendChild(number)
+          item.appendChild(text)
+          footnotes.appendChild(item)
+        }
+        outer.appendChild(footnotes)
+      }
       root.appendChild(outer)
     }
     await document.fonts?.ready
@@ -174,7 +248,10 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
   if (shape.fillGradient && !shape.frame) {
     const g = shape.fillGradient.type === 'radial'
       ? ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7)
-      : ctx.createLinearGradient(shape.fillGradient.reverse ? w : 0, 0, shape.fillGradient.reverse ? 0 : w, 0)
+      : (() => {
+        const line = linearGradientLine((shape.fillGradient!.angle ?? 0) + (shape.fillGradient!.reverse ? 180 : 0), w, h)
+        return ctx.createLinearGradient(line.x1, line.y1, line.x2, line.y2)
+      })()
     const stops = shape.fillGradient.stops?.length
       ? shape.fillGradient.stops
       : [{ offset: 0, color: shape.fillGradient.start }, { offset: 1, color: shape.fillGradient.end }]
@@ -212,7 +289,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
  *  gets drawn) beyond it on every side, so pictures/shapes that bleed off the page still print all the way to the
  *  cut line. */
 async function renderPage(
-  content: { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[] },
   flows: Map<string, FrameFlow>,
   page: PageRect,
   bleedPt: number,
@@ -242,7 +319,7 @@ async function renderPage(
     const asset = content.assets[image.assetId]
     if (asset) await drawImage(ctx, image, asset, page, scale)
   }
-  await drawTextDom(ctx, content, flows, page, scale)
+  await drawTextDom(ctx, { doc: content.doc, frames: content.frames, images: content.images, paragraphStyles: content.paragraphStyles }, flows, page, scale)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   return canvas
 }
@@ -252,7 +329,7 @@ async function renderPage(
  *  scramble RTL/BiDi the way a hand-rolled vector-text-plus-embedded-font pipeline realistically could), then
  *  downloads it and opens it in a new tab. `onProgress(done, total)` fires after each page renders. */
 export async function exportPdf(
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[] },
   options: PdfExportOptions,
   fileBaseName: string,
   onProgress?: (done: number, total: number) => void,
@@ -261,7 +338,20 @@ export async function exportPdf(
   viewWindow?: Window | null,
 ) {
   const rects = pageRects(content.doc)
-  const flows = flowFrames(content.frames, content.images)
+  const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
+  const provisionalFlows = flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
+  const frameById = new Map(content.frames.map((frame) => [frame.id, frame]))
+  const numbering = numberFootnotes([...provisionalFlows].flatMap(([frameId, flow]) => {
+    const frame = frameById.get(frameId)
+    if (!frame) return []
+    const page = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+    const pageRect = rects[page]
+    const spread = pageRect ? Math.round(pageRect.y * 1000) : page
+    return flow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
+  }), footnoteConfig, content.doc.binding)
+  const flows = numbering.size
+    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, numbering, primaryTextFrameOrder(content.doc, content.frames), content.paragraphStyles)
+    : provisionalFlows
   const from = options.range ? Math.max(1, options.range.from) : 1
   const to = options.range ? Math.min(rects.length, options.range.to) : rects.length
   const total = Math.max(0, to - from + 1)
@@ -284,7 +374,21 @@ export async function exportPdf(
   }
   if (!pdf) {
     viewWindow?.close()
-    return
+    return false
+  }
+  if (isTauri) {
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const { writeFile } = await import('@tauri-apps/plugin-fs')
+    const { openPath } = await import('@tauri-apps/plugin-opener')
+    const path = await save({ defaultPath: `${fileBaseName}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
+    if (!path) return false
+    await writeFile(path, new Uint8Array(pdf.output('arraybuffer')))
+    try {
+      await openPath(path)
+    } catch (error) {
+      console.warn('PDF was saved but could not be opened automatically.', error)
+    }
+    return true
   }
   const blob = pdf.output('blob')
   const url = URL.createObjectURL(blob)
@@ -297,6 +401,7 @@ export async function exportPdf(
   if (viewWindow && !viewWindow.closed) viewWindow.location.href = url
   else window.open(url, '_blank')
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  return true
 }
 
 /** Crop marks around a page whose trim box sits at (originX + bleedPt, originY + bleedPt) on the sheet. */

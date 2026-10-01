@@ -12,6 +12,8 @@ interface Props {
   /** exactly a picture and a shape are selected together */
   canInsertImage: boolean
   onInsertImage: () => void
+  canMergeImages: boolean
+  onMergeImages: () => void
   onDelete: () => void
 }
 
@@ -49,7 +51,7 @@ const OPS: { op: BoolOp; hint: string; icon: ReactNode }[] = [
 ]
 
 /** The properties panel while several objects are selected: combining shapes, putting a picture inside a shape, and deleting. */
-export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, onDelete }: Props) {
+export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, canMergeImages, onMergeImages, onDelete }: Props) {
   return (
     <aside className="props-panel" aria-label="בחירה מרובה">
       <h2 className="props-title">{count} אובייקטים נבחרו</h2>
@@ -61,6 +63,16 @@ export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, can
           <div className="props-buttons">
             <button className="btn small" onClick={onInsertImage}>
               הכנס את התמונה לתוך הצורה
+            </button>
+          </div>
+        </Group>
+      )}
+
+      {canMergeImages && (
+        <Group title="איחוד תמונות">
+          <div className="props-buttons">
+            <button className="btn small" onClick={onMergeImages}>
+              מזג לשכבת תמונה אחת
             </button>
           </div>
         </Group>

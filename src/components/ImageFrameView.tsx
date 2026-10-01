@@ -30,6 +30,8 @@ export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked
   return (
     <div
       className={'image-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
+      data-object-id={image.id}
+      data-object-kind="image"
       style={{
         zIndex: z,
         left: tx + image.x * zoom,

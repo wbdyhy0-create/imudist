@@ -30,8 +30,8 @@ export function LayersPanel({ frames, images, shapes, selectedId, activeLayerId,
   const [editColor, setEditColor] = useState(LAYER_COLORS[0])
   const visibleTextFrames = frames.filter((item) => item.text.trim())
   const allItems = [
-    ...visibleTextFrames.map((item) => ({ id: item.id, layerId: item.layerId, label: item.text.trim().split('\n')[0] || 'תיבת טקסט', type: 'T' })),
-    ...images.map((item) => ({ id: item.id, layerId: item.layerId, label: 'תמונה', type: 'IMG' })),
+    ...visibleTextFrames.map((item) => ({ id: item.id, layerId: item.layerId, label: item.rasterized ? 'מקור טקסט חתוך' : item.text.trim().split('\n')[0] || 'תיבת טקסט', type: 'T' })),
+    ...images.map((item) => ({ id: item.id, layerId: item.layerId, label: item.label ?? 'תמונה', type: 'IMG' })),
     ...shapes.map((item) => ({ id: item.id, layerId: item.layerId, label: item.kind === 'path' ? 'נתיב' : item.kind === 'rect' ? 'מלבן' : item.kind === 'ellipse' ? 'אליפסה' : 'צורה', type: 'PATH' })),
   ].map((item) => ({ ...item, label: itemNames[item.id] ?? item.label }))
   const itemsFor = (layerId: string) => {
