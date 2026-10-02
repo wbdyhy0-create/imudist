@@ -1,10 +1,11 @@
-import { DEFAULT_WRAP_OFFSET, MAX_PAGE_PT, type Asset, type ImageFit, type ImageFrame, type WrapMode } from '../document'
+import { DEFAULT_SHADOW_OFFSET, DEFAULT_WRAP_OFFSET, MAX_PAGE_PT, type Asset, type ImageFit, type ImageFrame, type WrapMode } from '../document'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
 import { ArrangeButtons } from './ArrangeButtons'
 import { NumberField } from './NumberField'
 import { Group, Labeled } from './PropertiesPanel'
+import { ShadowControls } from './ShadowControls'
 
 interface Props {
   image: ImageFrame
@@ -14,6 +15,7 @@ interface Props {
   onFit: (fit: ImageFit) => void
   onWrap: (wrap: WrapMode) => void
   onWrapOffset: (offset: number) => void
+  onShadowChange: (patch: Pick<ImageFrame, 'shadowOffsetX' | 'shadowOffsetY' | 'shadowColor' | 'shadowOpacity'>) => void
   onArrange: (op: ArrangeOp) => void
   /** make the frame the same shape as the picture (keeping its width) */
   onMatchShape: () => void
@@ -33,7 +35,7 @@ const FITS: { id: ImageFit; label: string; hint: string }[] = [
 ]
 
 /** The properties panel of a selected picture. */
-export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onArrange, onMatchShape, onDelete }: Props) {
+export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onShadowChange, onArrange, onMatchShape, onDelete }: Props) {
   const wrap = image.wrap ?? 'none'
   // pixels per inch at the current size: a hint for print quality (72 pt = 1 inch)
   const ppi = asset ? Math.round(asset.width / (image.w / 72)) : null
@@ -95,6 +97,19 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap,
             התאם מסגרת ליחס התמונה
           </button>
         </div>
+      </Group>
+
+      <Group title="הצללה">
+        <ShadowControls
+          offsetX={image.shadowOffsetX ?? 0}
+          offsetY={image.shadowOffsetY ?? image.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
+          opacity={image.shadowOpacity ?? 0}
+          color={image.shadowColor ?? '#000000'}
+          onOffsetXChange={(shadowOffsetX) => onShadowChange({ shadowOffsetX })}
+          onOffsetYChange={(shadowOffsetY) => onShadowChange({ shadowOffsetY })}
+          onOpacityChange={(shadowOpacity) => onShadowChange({ shadowOpacity })}
+          onColorChange={(shadowColor) => onShadowChange({ shadowColor })}
+        />
       </Group>
 
       <Group title="קובץ">

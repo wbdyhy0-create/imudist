@@ -1,6 +1,31 @@
-import { cssTextAlign, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, type CharStyle, type Run, type TextAlign } from './document'
-import { sliceRuns } from './story'
+import { cssTextAlign, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, type CharStyle, type Run, type TextAlign } from './document'
+import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
+import { hexToRgb } from './colorModels'
+
+export function textOutlineShadow(style: CharStyle, scale: number): string {
+  const radius = (style.outlineWidth ?? 0) * scale
+  if (radius <= 0) return ''
+  const color = style.outlineColor ?? '#000000'
+  return Array.from({ length: 16 }, (_, index) => {
+    const angle = (index * Math.PI * 2) / 16
+    return `${(Math.cos(angle) * radius).toFixed(2)}px ${(Math.sin(angle) * radius).toFixed(2)}px 0 ${color}`
+  }).join(', ')
+}
+
+export function textDropShadow(style: CharStyle, scale: number): string {
+  const opacity = Math.max(0, Math.min(1, style.shadowOpacity ?? 0))
+  if (opacity === 0) return ''
+  const x = (style.shadowOffsetX ?? 0) * scale
+  const y = (style.shadowOffsetY ?? style.shadowOffset ?? 6) * scale
+  const blur = Math.hypot(x, y) * 0.35 * (1 - opacity)
+  const rgb = hexToRgb(style.shadowColor ?? '#000000')
+  return `${x}px ${y}px ${blur}px rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${opacity})`
+}
+
+export function textShadow(style: CharStyle, scale: number): string {
+  return [textOutlineShadow(style, scale), textDropShadow(style, scale)].filter(Boolean).join(', ')
+}
 
 /** CSS for one run. `scale` is the zoom (1 for measuring); font sizes are stored in points. */
 export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) {
@@ -8,7 +33,9 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) 
   el.style.fontSize = `${style.fontSize * scale}px`
   el.style.fontWeight = String(style.weight)
   el.style.fontStyle = style.italic ? 'italic' : 'normal'
-  // tracking is 1/1000 em (InDesign's own unit)
+  el.style.color = style.color ?? ''
+  el.style.textShadow = textShadow(style, scale)
+  // tracking is 1/1000 em (the standard typographic unit)
   el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
 }
 
@@ -44,6 +71,8 @@ export function splitMarks(text: string): MarkPiece[] {
 export interface RunNodeOpts {
   footnoteMarkers?: Record<number, string>
   footnoteReferenceScale?: number
+  tocPageMarkers?: Record<number, string>
+  tocLeaderMarkers?: Record<number, string>
   /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
   showMarks?: boolean
   /**
@@ -131,27 +160,45 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
     applyRunStyle(span, r.style, scale)
     const runText = text.slice(pos, pos + r.len)
     const appendText = (parent: HTMLElement, value: string, start: number) => {
-      if (!opts.footnoteMarkers) {
+      if (!opts.footnoteMarkers && !opts.tocPageMarkers && !opts.tocLeaderMarkers) {
         parent.appendChild(document.createTextNode(value))
         return
       }
       let plainStart = 0
       for (let index = 0; index < value.length; index++) {
-        const reference = opts.footnoteMarkers[start + index]
-        if (value[index] !== FOOTNOTE_MARKER || !reference) continue
+        const absolute = start + index
+        const character = value[index]
+        const reference = character === FOOTNOTE_MARKER ? opts.footnoteMarkers?.[absolute] : undefined
+        const pageNumber = character === TOC_PAGE_MARKER ? opts.tocPageMarkers?.[absolute] ?? '8888' : undefined
+        const leader = character === TOC_LEADER_MARKER ? opts.tocLeaderMarkers?.[absolute] ?? '.'.repeat(128) : undefined
+        if (!(character === FOOTNOTE_MARKER && reference) && pageNumber === undefined && leader === undefined) continue
         if (index > plainStart) parent.appendChild(document.createTextNode(value.slice(plainStart, index)))
         const marker = document.createElement('span')
-        marker.className = 'footnote-reference'
-        marker.dataset.reference = reference
-        marker.dir = /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'
-        marker.style.setProperty('--footnote-marker-size', `${r.style.fontSize * scale * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)}px`)
-        marker.textContent = FOOTNOTE_MARKER
+        if (reference !== undefined) {
+          const referenceStyle = styleAtChar(runs, Math.max(0, absolute - 1), r.style)
+          marker.className = 'footnote-reference'
+          marker.dataset.reference = reference
+          marker.dir = /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'
+          marker.style.fontFamily = `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`
+          marker.style.fontWeight = String(referenceStyle.weight)
+          marker.style.fontStyle = referenceStyle.italic ? 'italic' : 'normal'
+          marker.style.setProperty('--footnote-marker-size', `${referenceStyle.fontSize * scale * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)}px`)
+        } else if (pageNumber !== undefined) {
+          marker.className = 'toc-page-reference'
+          marker.dataset.reference = pageNumber
+          marker.style.setProperty('--toc-reference-size', `${r.style.fontSize * scale}px`)
+        } else {
+          marker.className = 'toc-leader'
+          marker.dataset.leader = leader
+          marker.style.setProperty('--toc-reference-size', `${r.style.fontSize * scale}px`)
+        }
+        marker.textContent = character
         parent.appendChild(marker)
         plainStart = index + 1
       }
       if (plainStart < value.length) parent.appendChild(document.createTextNode(value.slice(plainStart)))
     }
-    if (opts.showMarks || opts.paraLineHeight || opts.paraGaps || opts.firstLineIndent || opts.footnoteMarkers) {
+    if (opts.showMarks || opts.paraLineHeight || opts.paraGaps || opts.firstLineIndent || opts.footnoteMarkers || opts.tocPageMarkers || opts.tocLeaderMarkers) {
       for (const piece of splitMarks(runText)) {
         if (piece.kind === 'text') {
           appendText(span, piece.text, seen)
@@ -227,7 +274,8 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
   const first = opts.startParaIndex ?? 0
   const lastParagraphIndex = first + (text.match(/\n/g) ?? []).length
   const needsLastLineJustify = !!continuesAtEnd && (patches?.[lastParagraphIndex]?.align ?? baseAlign) === 'justify'
-  if ((!patches || !patches.some(shapesBlock)) && !needsLastLineJustify) return buildRunNodes(text, runs, scale, opts)
+  const hasTocRows = text.includes(TOC_PAGE_MARKER)
+  if ((!patches || !patches.some(shapesBlock)) && !needsLastLineJustify && !hasTocRows) return buildRunNodes(text, runs, scale, opts)
   const frag = document.createDocumentFragment()
   const indentOf = (paragraph: number) => patches?.[paragraph]?.firstLineIndent ?? opts.firstLineIndent ?? 0
   let pos = 0
@@ -247,6 +295,33 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
     if (patch?.indentRight) block.style.paddingRight = `${patch.indentRight * scale}px`
     block.style.boxSizing = 'border-box'
+    const line = text.slice(pos, end)
+    const pageMarkerAt = line.indexOf(TOC_PAGE_MARKER)
+    const leaderMarkerAt = pageMarkerAt < 0 ? -1 : line.lastIndexOf(TOC_LEADER_MARKER, pageMarkerAt)
+    if (pageMarkerAt >= 0 && leaderMarkerAt >= 0) {
+      const row = document.createElement('div')
+      row.className = 'toc-row'
+      const title = document.createElement('span')
+      title.className = 'toc-title'
+      title.appendChild(buildRunNodes(line.slice(0, leaderMarkerAt).replace(/\t$/, ''), sliceRuns(runs, pos, pos + leaderMarkerAt - (line[leaderMarkerAt - 1] === '\t' ? 1 : 0)), scale, { showMarks: opts.showMarks }))
+      const leader = document.createElement('span')
+      leader.className = 'toc-leader'
+      leader.dataset.leader = opts.tocLeaderMarkers?.[pos + leaderMarkerAt] ?? '.'.repeat(128)
+      leader.textContent = TOC_LEADER_MARKER
+      leader.style.setProperty('--toc-reference-size', `${sliceRuns(runs, pos + leaderMarkerAt, pos + leaderMarkerAt + 1)[0]?.style.fontSize ?? 12}px`)
+      const pageNumber = document.createElement('span')
+      pageNumber.className = 'toc-page-reference'
+      pageNumber.dataset.reference = opts.tocPageMarkers?.[pos + pageMarkerAt] ?? '8888'
+      pageNumber.textContent = TOC_PAGE_MARKER
+      pageNumber.style.setProperty('--toc-reference-size', `${sliceRuns(runs, pos + pageMarkerAt, pos + pageMarkerAt + 1)[0]?.style.fontSize ?? 12}px`)
+      row.append(title, leader, pageNumber)
+      block.appendChild(row)
+      if (pageMarkerAt + 1 < line.length) block.appendChild(document.createTextNode(line.slice(pageMarkerAt + 1)))
+      frag.appendChild(block)
+      pos = end
+      paragraph++
+      continue
+    }
     const footnoteMarkers = opts.footnoteMarkers
       ? Object.fromEntries(Object.entries(opts.footnoteMarkers).flatMap(([offset, label]) => {
           const index = Number(offset)

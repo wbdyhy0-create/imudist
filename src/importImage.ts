@@ -1,4 +1,5 @@
 import { MAX_IMAGE_BYTES, type Asset } from './document'
+import { hashId } from './assetHash'
 import { ImportError } from './importText'
 
 /** A picture read from a file, waiting to be placed (the loaded image cursor). */
@@ -35,15 +36,6 @@ function toBase64(bytes: Uint8Array): string {
   const chunk = 0x8000
   for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
   return btoa(binary)
-}
-
-async function hashId(buffer: ArrayBuffer): Promise<string> {
-  try {
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))
-    return Array.from(digest.subarray(0, 12), (b) => b.toString(16).padStart(2, '0')).join('')
-  } catch {
-    return `img-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` // insecure context: no hashing
-  }
 }
 
 /** Read a picture file: keep its bytes as a data URL and find out its pixel size. */

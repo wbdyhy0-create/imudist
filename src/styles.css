@@ -216,6 +216,12 @@ svg { display: block; }
 .context-tool-name { color: #fff; font-weight: 700; white-space: nowrap; }
 .context-divider { width: 1px; height: 22px; flex: none; background: var(--border); }
 .context-command { height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-field); color: var(--text-dim); white-space: nowrap; }
+.arrange-dropdown { position: relative; flex: none; }
+.arrange-trigger { display: inline-flex; align-items: center; gap: 7px; }
+.arrange-chevron { font-size: 14px; line-height: 1; }
+.arrange-menu { position: absolute; z-index: 4000000; top: calc(100% + 5px); inset-inline-start: 0; display: flex; min-width: 112px; flex-direction: column; gap: 2px; padding: 4px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.arrange-menu button { min-height: 28px; padding: 3px 8px; color: var(--text); text-align: start; white-space: nowrap; }
+.arrange-menu button:hover, .arrange-menu button:focus-visible { background: var(--hover); color: #fff; }
 .context-text-controls label[title="גודל גופן"] { display: none; }
 .context-font-size-field .num-field { width: 88px; }
 .context-command:hover { border-color: var(--accent-line); color: #fff; }
@@ -234,11 +240,26 @@ svg { display: block; }
 .context-stroke-square { bottom: 0; inset-inline-end: 0; z-index: 1; background: transparent; border: 3px solid #fff; box-shadow: 0 0 0 1px var(--border-strong); }
 .context-fill-square.active, .context-stroke-square.active { outline: 1px solid var(--accent-line); outline-offset: 2px; }
 .context-swatch-wrap { position: relative; flex: none; }
+.context-text-color { display: inline-flex; align-items: center; gap: 5px; }
+.context-character-colors { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.context-text-color-mark { width: 15px; height: 4px; border: 1px solid var(--border-strong); }
 .context-swatch-popover { position: absolute; z-index: 4000000; top: calc(100% + 6px); left: 50%; width: 230px; padding: 10px; transform: translateX(-50%); background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: 5px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55); }
 .context-swatch-popover .swatch-row { gap: 7px; }
+.context-outline-popover { display: flex; flex-direction: column; gap: 9px; }
 .context-field { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; }
 .context-field input[type='number'] { width: 64px; height: 25px; padding: 0 5px; background: var(--bg-field); border: 1px solid var(--border); color: var(--text); }
 .context-field input[type='range'] { width: 100px; accent-color: var(--accent-line); }
+.context-feather-controls { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.context-feather-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--text); white-space: nowrap; }
+.context-feather-controls .context-field { gap: 4px; }
+.context-feather-controls .context-field input[type='range'] { width: 64px; }
+.context-tool-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.shadow-controls { display: flex; flex-direction: column; gap: 4px; }
+.shadow-controls input[type='range'] { width: 100%; accent-color: var(--accent-line); }
+.outline-controls { display: flex; flex-direction: column; gap: 8px; }
+.outline-controls .swatch-row { flex-wrap: nowrap; gap: 4px; }
+.outline-controls .swatch-chip { flex: none; }
+.feather-toolbar-ramp { width: 54px; height: 13px; flex: none; border: 1px solid var(--border-strong); border-radius: 2px; background-color: #777; background-image: linear-gradient(90deg, rgba(0,0,0,var(--feather-start-opacity,1)), rgba(0,0,0,var(--feather-end-opacity,0))), linear-gradient(45deg, #aaa 25%, transparent 25%), linear-gradient(-45deg, #aaa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #aaa 75%), linear-gradient(-45deg, transparent 75%, #aaa 75%); background-size: 100% 100%, 8px 8px, 8px 8px, 8px 8px, 8px 8px; background-position: 0 0, 0 0, 0 4px, 4px -4px, -4px 0; }
 .context-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .context-text-controls { display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .context-text-controls select, .context-text-controls input { height: 26px; padding: 0 5px; background: var(--bg-field); border: 1px solid var(--border); color: var(--text); }
@@ -253,6 +274,7 @@ svg { display: block; }
 .context-align-buttons button::after { content: attr(data-tooltip); position: absolute; z-index: 4000000; left: 50%; bottom: calc(100% + 7px); padding: 5px 8px; transform: translateX(-50%); opacity: 0; visibility: hidden; background: rgba(255, 255, 255, 0.96); border: 1px solid #fff; border-radius: 4px; box-shadow: 0 4px 12px #0008; color: #171717; font-size: 11px; font-weight: 600; white-space: nowrap; pointer-events: none; }
 .context-align-buttons button:hover::after, .context-align-buttons button:focus-visible::after { opacity: 1; visibility: visible; }
 .context-paragraph-controls { display: inline-flex; align-items: center; gap: 5px; padding-inline-start: 8px; border-inline-start: 1px solid var(--border); }
+.context-toolbar .context-paragraph-controls { display: none; }
 .context-paragraph-controls { display: inline-flex; align-items: center; gap: 5px; padding-inline-start: 8px; border-inline-start: 1px solid var(--border); }
 .context-paragraph-controls label:nth-child(-n + 2) { display: none; }
 .context-paragraph-controls label:last-child { display: none; }
@@ -267,6 +289,13 @@ svg { display: block; }
   position: relative; z-index: 1000000; width: 42px; flex: none; display: flex; flex-direction: column; align-items: center; padding: 4px 0;
   background: var(--bg-bar); border-inline-end: 1px solid var(--line); overflow: visible;
 }
+.toolbox.toolbox-floating { position: fixed; z-index: 3000000; height: min(78vh, 650px); max-height: calc(100vh - 40px); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.toolbox-grab { width: 34px; height: 18px; flex: none; display: grid; place-items: center; margin-bottom: 3px; border-radius: 3px; color: var(--text-dim); cursor: grab; touch-action: none; }
+.toolbox-grab:hover { background: var(--hover); color: #fff; }
+.toolbox-grab:active { cursor: grabbing; }
+.toolbox-grab svg { width: 24px; height: 12px; fill: currentColor; }
+.toolbox-dock-target { position: fixed; z-index: 2999999; box-sizing: border-box; border: 2px dashed var(--accent-line); border-inline-start: 4px solid var(--accent); background: rgba(0, 102, 255, 0.1); pointer-events: none; }
+.toolbox-dock-target span { position: absolute; top: 6px; left: calc(100% + 6px); padding: 4px 7px; border: 1px solid var(--accent-line); border-radius: 3px; background: var(--bg-raised); color: var(--text); font-size: 11px; font-weight: 600; white-space: nowrap; box-shadow: 0 3px 10px #0006; }
 .toolbox-scroll { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; overflow-y: auto; overflow-x: visible; scrollbar-width: none; }
 .tool { position: relative; width: 32px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 3px; color: #d0d0d0; }
 .tool svg { width: 19px; height: 19px; }
@@ -343,6 +372,9 @@ svg { display: block; }
 .layer-item-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; padding: 3px 5px; color: inherit; text-align: start; overflow: hidden; }
 .layer-item-type { min-width: 28px; color: var(--text-off); font-size: 10px; text-align: center; }
 .layers-foot { padding-top: 10px; color: var(--text-dim); font-size: 11px; }
+.layer-parent-order { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.layer-parent-order input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent-line); }
+.layer-parent-order:has(input:disabled) { opacity: 0.5; }
 .layers-actions { display: flex; justify-content: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 .layers-actions .icon-button { width: 28px; height: 26px; }
 .layers-actions .icon-button:disabled { opacity: 0.35; }
@@ -430,11 +462,38 @@ svg { display: block; }
 @media (max-width: 560px) { .color-dialog-body { grid-template-columns: 1fr; } .color-preview-large { height: 110px; } }
 .screen-modes { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 .color-tools-panel { direction: rtl; }
+.color-sample-start { width: 100%; }
+.color-samples-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.color-sample-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.color-sample-apply { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 30px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; text-align: start; }
+.color-sample-apply:hover { background: var(--hover); }
+.color-sample-apply[draggable='true'] { cursor: grab; }
+.color-sample-apply[draggable='true']:active { cursor: grabbing; }
+.color-sample-chip { width: 18px; height: 18px; flex: none; border: 1px solid rgba(255,255,255,.45); border-radius: 2px; }
+.color-sample-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.color-sample-hex { color: var(--text-dim); font: 11px/1.2 Consolas, monospace; }
+.color-sample-delete { flex: none; font-size: 16px; line-height: 1; }
+.color-samples-empty { margin-top: 7px; }
+.viewport.color-sampler-active { cursor: crosshair; }
+.viewport.feathertool { cursor: crosshair; }
+.feather-gesture-layer { position: absolute; z-index: 100000; inset: 0; overflow: visible; pointer-events: none; }
+.feather-gesture-layer line { stroke: var(--accent-line); stroke-width: 2; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+.feather-gesture-layer circle { fill: #fff; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.viewport.color-sampler-active .parent-shadow,
+.viewport.color-sampler-active .parent-shadow [data-object-id],
+.viewport.color-sampler-active [data-object-id].locked { pointer-events: auto !important; }
+.color-sampler-lens { position: fixed; z-index: 10000; width: 84px; height: 108px; pointer-events: none; }
+.color-sampler-grid { display: grid; width: 84px; height: 84px; grid-template: repeat(9, 1fr) / repeat(9, 1fr); overflow: hidden; border: 2px solid #fff; border-radius: 50%; background: #fff; box-shadow: 0 2px 10px #000a; }
+.color-sampler-grid span { min-width: 0; min-height: 0; border: 1px solid #0002; }
+.color-sampler-crosshair { position: absolute; left: calc(var(--sampler-focus-x, 42px) - 1px); top: calc(var(--sampler-focus-y, 42px) - 1px); width: 2px; height: 2px; outline: 1px solid #fff; box-shadow: 0 0 0 1px #111; }
+.color-sampler-readout { position: absolute; top: var(--sampler-readout-top, 88px); left: 0; display: flex; align-items: center; justify-content: center; gap: 4px; width: 84px; height: 18px; padding: 1px 3px; border: 1px solid #555; border-radius: 3px; background: #171717; box-shadow: 0 2px 6px #0008; color: #fff; font: 9px/1 Consolas, monospace; }
+.color-sampler-readout .color-sampler-chip { width: 12px; height: 12px; }
 .color-stop-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
 .color-stop-row label { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--text-dim); }
 .color-stop-row input[type='color'] { width: 34px; height: 28px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-field); }
 .gradient-preview { height: 34px; margin-top: 12px; border: 1px solid var(--border); border-radius: 4px; }
 .gradient-ramp { position: relative; direction: ltr; height: 18px; margin-top: 12px; border: 1px solid var(--border); touch-action: none; user-select: none; }
+.gradient-ramp.drag-over { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .gradient-stop { position: absolute; z-index: 1; bottom: -5px; width: 10px; height: 10px; transform: translateX(-50%) rotate(45deg); border: 1px solid #fff; box-shadow: 0 0 0 1px #111; cursor: move; touch-action: none; }
 .gradient-stop:active { cursor: move; }
 .gradient-stop.delete-armed { border-color: #ff5c5c; box-shadow: 0 0 0 2px #ff5c5c; cursor: no-drop; }
@@ -516,6 +575,9 @@ svg { display: block; }
    itself stays unpositioned (position: static) - its child is still absolutely positioned against the same sheet
    it always was; only the child's own box gets the outline, directly, so nothing needs to duplicate its geometry. */
 .parent-shadow > .text-frame, .parent-shadow > .image-frame, .parent-shadow > .shape-frame { outline: 1px dashed var(--accent-line); opacity: 0.88; }
+.viewport.parent-override-mode .parent-shadow > .text-frame.locked,
+.viewport.parent-override-mode .parent-shadow > .image-frame.locked,
+.viewport.parent-override-mode .parent-shadow > .shape-frame.locked { pointer-events: auto; cursor: copy; }
 .viewport.preview .parent-shadow > .text-frame, .viewport.preview .parent-shadow > .image-frame, .viewport.preview .parent-shadow > .shape-frame { outline: none; opacity: 1; }
 .text-frame.edge { outline: 1px solid #ffb02e; }
 .text-frame.selected { outline: 2px solid #ffb02e; }
@@ -525,6 +587,20 @@ svg { display: block; }
 .text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; overflow: hidden; }
 .footnote-reference { font-size: 0; vertical-align: super; }
 .footnote-reference::after { content: attr(data-reference); font-size: var(--footnote-marker-size, 9px); line-height: 1; direction: inherit; unicode-bidi: isolate; }
+.toc-row { position: relative; display: grid; grid-template-columns: minmax(0, max-content) minmax(8px, 1fr) auto; align-items: baseline; column-gap: 4px; width: 100%; min-width: 0; box-sizing: border-box; white-space: nowrap; }
+.toc-title { grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toc-tab, .toc-line-break { position: absolute; inset-inline-start: 0; width: 0; height: 0; overflow: hidden; font-size: 0; line-height: 0; }
+.toc-leader { grid-column: 2; min-width: 0; width: 100%; overflow: hidden; font-size: 0; white-space: nowrap; }
+.toc-leader::after { content: attr(data-leader); overflow: hidden; font-size: var(--toc-reference-size, 12px); line-height: inherit; white-space: nowrap; }
+.toc-page-reference { grid-column: 3; font-size: 0; white-space: nowrap; }
+.toc-page-reference::after { content: attr(data-reference); font-size: var(--toc-reference-size, 12px); line-height: inherit; white-space: nowrap; }
+.toc-dialog { width: min(620px, calc(100vw - 32px)); }
+.toc-level-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 100px 30px; align-items: end; gap: 8px; margin-top: 10px; }
+.toc-level-row select, .toc-leader-field input { width: 100%; height: 32px; padding: 0 8px; background: var(--bg-field); border: 1px solid var(--border); border-radius: 4px; }
+.toc-remove-level { width: 28px; height: 28px; }
+.toc-add-level { margin-top: 10px; }
+.toc-leader-field { margin-top: 16px; }
+.toc-error { margin: 10px 0 0; color: var(--danger); }
 .footnotes-scale { position: absolute; z-index: 2; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 .footnotes-area { position: absolute; left: 0; right: 0; box-sizing: border-box; direction: rtl; pointer-events: none; white-space: pre-wrap; overflow: hidden; }
 .footnote-divider { position: absolute; top: 0; right: 0; width: 35%; border-top: 1px solid currentColor; opacity: 0.7; }
@@ -560,7 +636,7 @@ svg { display: block; }
    (which only ever look at real text nodes — see richtext.ts's textOffsetIn/locate). .mark-space overlays a dot on
    the space's own box without adding width, so lines wrap exactly the same with marks on or off; .mark-para's ¶
    sits in normal inline flow right before the (zero-width) forced line break itself, so it lands at the end of the
-   visible line, like Word/InDesign — no RTL-aware positioning math needed since it just follows the text order. */
+   visible line, like word processors and layout tools — no RTL-aware positioning math needed since it just follows the text order. */
 .mark-space { position: relative; }
 .mark-space::after {
   content: '·'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -711,6 +787,13 @@ svg { display: block; }
 .modal { width: min(440px, calc(100vw - 32px)); padding: 22px 24px 18px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
 .import-options-dialog { width: min(500px, calc(100vw - 32px)); }
 .import-options-dialog .file-name { margin-bottom: 12px; color: var(--text); }
+.import-pdf-options-dialog { width: min(500px, calc(100vw - 32px)); }
+.import-pdf-options-dialog .file-name { margin: 0 0 16px; color: var(--text); }
+.import-pdf-range-field { margin-top: 16px; }
+.import-pdf-range { width: 100%; height: 32px; padding: 0 9px; background: var(--bg-field); border: 1px solid var(--border); border-radius: 4px; direction: ltr; text-align: left; }
+.import-pdf-range:focus { border-color: var(--accent-line); outline: 1px solid var(--accent-line); }
+.import-pdf-range:disabled { opacity: 0.5; }
+.import-pdf-range-error { margin: 6px 0 0; color: var(--danger); }
 .import-options-body { margin: 8px 0 16px; padding: 10px 12px; background: var(--bg-field); border: 1px solid var(--border); }
 .import-options-body p { margin: 0 0 10px; }
 .dlg-check.disabled { opacity: 0.5; }
@@ -739,6 +822,7 @@ svg { display: block; }
 .recent-list button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 6px; text-align: start; }
 .recent-list button:hover { background: var(--bg-raised); }
 .recent-list svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+.recent-list .recent-app-icon { width: 28px; height: 28px; flex: none; object-fit: contain; }
 .recent-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-date { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 /* ── side panels: pages + properties ─────────────────────── */

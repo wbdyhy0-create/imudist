@@ -1,6 +1,11 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
+import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
+import { applyFeatherCanvasMask } from '../feather'
+import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
+import { createPortal } from 'react-dom'
 import { footnoteTextStyle, formatFootnoteNumber, numberFootnotes } from '../footnoteLayout'
 import {
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -13,7 +18,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
-import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
 import {
   DEFAULT_GUIDE_COLOR,
   DEFAULT_FOOTNOTE_CONFIG,
@@ -36,12 +40,14 @@ import {
   withPageSize,
   type Asset,
   type Assets,
+  type ColorSample,
   type CharStyle,
   type DocSettings,
   type Guide,
   type GuideAxis,
   type FootnoteItem,
   type FootnoteLayoutConfig,
+  type GradientFeather,
   type DrawKind,
   type PathGeom,
   type PathSmoothPoint,
@@ -63,6 +69,10 @@ import {
   EXTERNAL_PAGE_NUMBER_MARKER,
   INTERNAL_LETTER_PAGE_NUMBER_MARKER,
   RUNNING_HEADER_MARKER,
+  TOC_LEADER_MARKER,
+  TOC_PAGE_MARKER,
+  type TocConfig,
+  type TocPageReference,
 } from '../document'
 import { isTyping } from '../dom'
 import { HANDLES, angleOf, chainOf, dragBox, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
@@ -70,12 +80,14 @@ import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
-import { boxAtClick, pourText, primaryTextFrameOrder, type FlowMode } from '../placeText'
-import { ownerPage, pageRects, parentShadowContent } from '../pages'
+import { boxAtClick, columnBoxes, pourText, primaryTextFrameOrder, type FlowMode } from '../placeText'
+import { ownerPage, pageRects, parentShadowContent, type ParentOverride, type ParentShadowRef } from '../pages'
+import { plainTocHeading, sliceTocDisplayMarkers, tocDisplayMarkers } from '../toc'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, type SpacingMark } from '../spacing'
+import { expandGapObject, findGaps, moveGap, type GapMember, type GapObject, type GapRegion } from '../gapTool'
 import { paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
 import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
@@ -88,6 +100,7 @@ import { floatsFor } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
 import { ColorToolsPanel } from './ColorToolsPanel'
+import { ColorSamplerLens, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
 import { ColorPickerDialog } from './ColorPickerDialog'
 import { AlignButtons, type AlignOp } from './AlignButtons'
@@ -108,6 +121,7 @@ import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { LayersPanel } from './LayersPanel'
+import { TocDialog } from './TocDialog'
 import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
@@ -158,6 +172,39 @@ interface MarqueeGesture {
   clientY1: number
 }
 
+interface FeatherTarget {
+  id: string
+  kind: 'frame' | 'image' | 'shape'
+  x: number
+  y: number
+  w: number
+  h: number
+  rotation?: number
+  flipX?: boolean
+  flipY?: boolean
+}
+
+interface FeatherDrag {
+  target: FeatherTarget
+  startClient: { x: number; y: number }
+  endClient: { x: number; y: number }
+  feather: GradientFeather
+}
+
+interface GapDrag {
+  start: { x: number; y: number }
+  gaps: GapRegion[]
+  originals: GapObject[]
+  key: string
+  nearestOnly: boolean
+  grabbedEdges: Partial<Record<'x' | 'y', 'before' | 'after'>>
+}
+
+interface GapCandidateCache {
+  signature: readonly unknown[]
+  bySpread: Map<number, GapObject[]>
+}
+
 const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 const stepZoom = (z: number, dir: 1 | -1) =>
   dir > 0
@@ -200,6 +247,7 @@ export interface WorkspaceHandle {
   /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
   cleanSpacing: () => void
   insertRunningHeader: () => void
+  insertTableOfContents: () => void
   firstWordStyler: () => void
   canReplaceSelectedText: () => boolean
   replaceSelectedText: (placed: PlacedText) => boolean
@@ -240,6 +288,7 @@ interface Props {
   onPlacingChange: (placed: PlacedText | null) => void
   images: ImageFrame[]
   assets: Assets
+  colorSamples: ColorSample[]
   onImagesChange: (images: ImageFrame[], coalesceKey?: string) => void
   /** pictures waiting to be placed (the loaded image cursor); the first is placed by the next click */
   placingImages: PlacedImage[]
@@ -259,6 +308,7 @@ interface Props {
   /** independently-numbered runs of pages (Section Options) */
   sections: PageSection[]
   onSectionsChange: (sections: PageSection[], coalesceKey?: string) => void
+  parentOverrides: ParentOverride[]
   /** the parent page open for editing instead of the document itself, or null while editing the document normally */
   editingParentId: string | null
   onEditParent: (id: string) => void
@@ -345,6 +395,7 @@ export function Workspace({
   onPlacingChange,
   images,
   assets,
+  colorSamples,
   onImagesChange,
   placingImages,
   onPlacingImagesChange,
@@ -360,6 +411,7 @@ export function Workspace({
   onPageParentsChange,
   sections,
   onSectionsChange,
+  parentOverrides,
   editingParentId,
   onEditParent,
   onExitParentEdit,
@@ -381,7 +433,12 @@ export function Workspace({
   const { spreads, bounds } = useMemo(() => computeLayout(doc), [doc])
   const rects = useMemo(() => pageRects(doc), [doc])
   const footnoteConfig = doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
-  const provisionalFlow = useMemo(() => flowFrames(frames, images, footnoteConfig, undefined, new Map(), paragraphStyles), [frames, images, footnoteConfig, paragraphStyles])
+  // the offset `commitStory` just edited at, read (not a dependency) so typing one more character still only pays for
+  // re-laying-out the frame it landed in and whatever follows - not the whole story's frames from its very start.
+  // Safe when stale (e.g. after a resize instead of a text edit): flowFrames only reuses a frame's cached range when
+  // its own full signature (size, floats, style...) still matches too, and re-verifies the reused text didn't change.
+  const dirtyOffsetRef = useRef<number | undefined>(undefined)
+  const provisionalFlow = useMemo(() => flowFrames(frames, images, footnoteConfig, undefined, new Map(), paragraphStyles, dirtyOffsetRef.current), [frames, images, footnoteConfig, paragraphStyles])
   const footnoteNumbers = useMemo(() => {
     const byId = new Map(frames.map((frame) => [frame.id, frame]))
     const entries = [...provisionalFlow].flatMap(([frameId, frameFlow]) => {
@@ -412,8 +469,11 @@ export function Workspace({
     if (nextFrames !== frames) onFramesChange(nextFrames, 'primary-thread-migration')
   }, [doc.primaryTextFrame, previewMode, editingParentId, primaryFrameIds, frames, onFramesChange])
   const flow = useMemo(() => footnoteNumbers.size
-    ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles)
+    ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, dirtyOffsetRef.current)
     : provisionalFlow, [frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, provisionalFlow])
+  const tocMarkersByHead = useMemo(() => new Map(headFrames(frames).flatMap((head) => head.tocPageReferences?.length
+    ? [[head.id, tocDisplayMarkers(head.tocPageReferences, head.text, 0, head.text.length, frames, flow, rects, sections, doc, doc.toc?.leader ?? '.', head.tocFootnoteReferences) ]]
+    : [])), [frames, flow, rects, sections, doc])
   /** stacking rank of every object (1 = the back) */
   const rank = useMemo(() => new Map(stackOrder(frames, images, shapes).map((o, i) => [o.id, i + 1])), [frames, images, shapes])
   /** the page that Insert / Delete act on (the last one clicked) */
@@ -433,10 +493,57 @@ export function Workspace({
   const [scroll, setScroll] = useState({ x: 0, y: 0 })
   const [view, setView] = useState<View>({ zoom: 1, anchor: null })
   const [tool, setTool] = useState<ToolId>('select')
+  const activateTool = useCallback((nextTool: ToolId) => setTool(nextTool), [])
   const [colorTarget, setColorTarget] = useState<'fill' | 'stroke'>('fill')
+    const [textColorTarget, setTextColorTarget] = useState<'fill' | 'outline'>('fill')
   const [colorDialogTarget, setColorDialogTarget] = useState<'fill' | 'stroke' | null>(null)
+  const [defaultShapePaint, setDefaultShapePaint] = useState<Partial<ShapeFrame>>({ fill: null, stroke: DEFAULT_SHAPE_STROKE })
+  const [sampledShapeStyle, setSampledShapeStyle] = useState<{ sourceId: string; paint: Pick<ShapeFrame, 'fill' | 'fillGradient' | 'stroke' | 'strokeWidth' | 'strokeDash' | 'strokeCap' | 'opacity'> } | null>(null)
+  useEffect(() => {
+    if (tool !== 'eyedropper') setSampledShapeStyle(null)
+  }, [tool])
+  const [colorSamplerActive, setColorSamplerActive] = useState(false)
+  const [colorSamplerPreview, setColorSamplerPreview] = useState<ColorSamplerPreview | null>(null)
+  const colorSamplerLensRef = useRef<HTMLDivElement>(null)
+  const samplerImageCache = useRef(new Map<string, Promise<HTMLCanvasElement>>())
+  const samplerMoveToken = useRef(0)
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !gapCancel.current) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      gapCancel.current()
+    }
+    window.addEventListener('keydown', onEscape, true)
+    return () => window.removeEventListener('keydown', onEscape, true)
+  }, [])
+  useEffect(() => {
+    if (!colorSamplerActive) return
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setColorSamplerActive(false)
+      setColorSamplerPreview(null)
+    }
+    window.addEventListener('keydown', cancel)
+    return () => window.removeEventListener('keydown', cancel)
+  }, [colorSamplerActive])
   const [sampledTextStyle, setSampledTextStyle] = useState<CharStyle | null>(null)
   const [space, setSpace] = useState(false)
+  const [shiftPressed, setShiftPressed] = useState(false)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Shift') setShiftPressed(true) }
+    const onKeyUp = (event: KeyboardEvent) => { if (event.key === 'Shift') setShiftPressed(false) }
+    const onBlur = () => setShiftPressed(false)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+  const parentShadowZ = doc.parentItemsAbovePageContent || shiftPressed ? rank.size + 1 : 0
   const [panning, setPanning] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
   /** the selected text frame or picture (guides have their own, multiple, selection) */
@@ -465,6 +572,8 @@ export function Workspace({
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [marqueeCut, setMarqueeCut] = useState<MarqueeGesture | null>(null)
   const marqueeCutRef = useRef<MarqueeGesture | null>(null)
+  const [featherDrag, setFeatherDrag] = useState<FeatherDrag | null>(null)
+  const featherDragRef = useRef<FeatherDrag | null>(null)
   /** the snapping lines of the document, and the ones an object is held on right now (drawn while dragging) */
   const snapLines = useMemo(() => snapLinesOf(doc, guides), [doc, guides])
   const snapLinesRef = useRef(snapLines)
@@ -472,6 +581,22 @@ export function Workspace({
   const [snapShown, setSnapShown] = useState<SnapLine[]>([])
   /** the gaps between the moved object and its neighbours (measured, and marked when equal) */
   const [spacingShown, setSpacingShown] = useState<SpacingMark[]>([])
+  const [gapPreview, setGapPreview] = useState<GapRegion[]>([])
+  const gapDrag = useRef<GapDrag | null>(null)
+  const gapCancel = useRef<(() => void) | null>(null)
+  const gapCandidatesCache = useRef<GapCandidateCache | null>(null)
+  const gapHoverFrame = useRef<number | null>(null)
+  const gapHoverPointer = useRef<{ point: { x: number; y: number }; nearestOnly: boolean } | null>(null)
+  const applyGapRectsRef = useRef<(rectangles: GapObject[], key: string) => void>(() => {})
+  const updateGapPreview = (next: GapRegion[]) => setGapPreview((current) => {
+    const same = current.length === next.length && current.every((gap, index) => {
+      const candidate = next[index]
+      return gap.axis === candidate.axis && gap.x === candidate.x && gap.y === candidate.y && gap.w === candidate.w && gap.h === candidate.h &&
+        gap.beforeIds.length === candidate.beforeIds.length && gap.beforeIds.every((id, idIndex) => id === candidate.beforeIds[idIndex]) &&
+        gap.afterIds.length === candidate.afterIds.length && gap.afterIds.every((id, idIndex) => id === candidate.afterIds[idIndex])
+    })
+    return same ? current : next
+  })
   /** text on the outline of a shape: the shape being edited, the selected range of its text, the caret request, and whether the pointer is over an outline (for the cursor) */
   const [pathEdit, setPathEdit] = useState<string | null>(null)
   const [pathSel, setPathSel] = useState<{ id: string; a: number; b: number } | null>(null)
@@ -525,7 +650,7 @@ export function Workspace({
   const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
   /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
   const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
-  /** InDesign's own "fine outline" rotation guides: a faint outline of the object's box at the angle this drag
+  /** The "fine outline" rotation guides professional layout tools show: a faint outline of the object's box at the angle this drag
    *  started from, plus a wedge showing how far it has turned since — world point of the centre, box size, the
    *  rotation it started at, and how many degrees it has swept so far */
   const [rotatePreview, setRotatePreview] = useState<{ cx: number; cy: number; w: number; h: number; startRotation: number; sweep: number } | null>(null)
@@ -552,7 +677,7 @@ export function Workspace({
   const [shapeFlip, setShapeFlip] = useState<true | undefined>(undefined)
   const shapeFlipRef = useRef<true | undefined>(undefined)
   /** the small degrees readout next to a line's moving end while drawing it or dragging one of its endpoints
-   *  (InDesign shows the same thing) — world point of the moving end, and the angle to show there */
+   *  (as professional layout tools do) — world point of the moving end, and the angle to show there */
   const [angleTip, setAngleTip] = useState<{ x: number; y: number; deg: number } | null>(null)
   /** the last pointer position while drawing, and whether Enter is held: pressing a key refreshes the preview without moving the mouse */
   const lastShapePointer = useRef<{ x: number; y: number } | null>(null)
@@ -613,6 +738,7 @@ export function Workspace({
   /** the settings window of a shape tool (double click on the tool) */
   const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
   const [runningHeaderDialog, setRunningHeaderDialog] = useState(false)
+  const [tocDialogOpen, setTocDialogOpen] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [footnoteDialog, setFootnoteDialog] = useState<{ headId: string; from: number; to: number; noteId?: string; initial: string; initialRuns?: Run[] } | null>(null)
   const [footnoteOptionsOpen, setFootnoteOptionsOpen] = useState(false)
@@ -623,7 +749,7 @@ export function Workspace({
   const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
   const marginDrag = useRef<{ edge: keyof Sides; page: number; key: string } | null>(null)
   /** a guide being dragged out of a ruler or moved (not yet stored); `remove` = it is over a ruler / panel, so letting go deletes it */
-  const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean; snap: GuideSnap | null } | null>(null)
+  const [guideDrag, setGuideDrag] = useState<{ id: string | null; axis: GuideAxis; page: number; pos: number; color: string; remove: boolean; snap: GuideSnap | null; centerSnap: boolean } | null>(null)
   /** the color new guides get: the last one the user chose */
   const [guideColor, setGuideColor] = useState(DEFAULT_GUIDE_COLOR)
   const [guidesDialog, setGuidesDialog] = useState(false)
@@ -735,13 +861,16 @@ export function Workspace({
    * master without picking it again each time. Passed explicitly (including `null` for "none"), that choice is
    * used instead.
    */
-  const insertPages = (count: number, where: InsertWhere, master?: string | null) => {
+  const insertPages = (count: number, where: InsertWhere, master?: string | null, pageIndex?: number) => {
     if (doc.pages >= 9999) return
     // "beside": the new page stands in the row of the selected page (to its left in a right-to-left document)
-    const at = where === 'end' ? doc.pages : where === 'before' ? selPage : selPage + 1
+    const anchorPage = pageIndex ?? selPage
+    const at = where === 'end' ? doc.pages : where === 'before' ? anchorPage : anchorPage + 1
+    const pageToShow = Math.min(doc.pages + count - 1, where === 'before' ? at + count : at)
     const parentId = master !== undefined ? master : effectiveActiveParent
-    pendingNav.current = at
-    setSelectedPage(at)
+    pendingNav.current = pageToShow
+    setSelectedPage(pageToShow)
+    setPageSel([pageToShow])
     pageOps.insert(at, count, where === 'beside', parentId)
   }
   const deleteSelectedPage = () => {
@@ -784,9 +913,10 @@ export function Workspace({
    * `paraOverrides`, when given, replaces the head frame's per-paragraph spaceBefore/spaceAfter overrides too (see
    * `applyEdit`, the one caller that has them — spliced to stay lined up with the story's new paragraphs).
    */
-  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches' | 'footnotes'>) => {
+  const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches' | 'footnotes'>, dirtyOffset?: number) => {
+    dirtyOffsetRef.current = dirtyOffset
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
-    const nf = flowFrames(next, images, doc.footnotes, undefined, new Map(), paragraphStyles)
+    const nf = flowFrames(next, images, doc.footnotes, undefined, new Map(), paragraphStyles, dirtyOffset)
     const chain = chainOf(next, headId)
     const target =
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
@@ -804,7 +934,7 @@ export function Workspace({
     const head = frames.find((f) => f.id === headId)
     if (!head) return
     const r = editStory(head.text, head.runs, from, to, insert, head)
-    // Enter at the end of a paragraph whose style names a different "next style" (InDesign): the new paragraph follows
+    // Enter at the end of a paragraph whose style names a different "next style" (as in professional layout tools): the new paragraph follows
     // that one instead of just repeating this one's, and the "\n" just typed is restyled to it too, so whatever gets
     // typed next already looks right (editStory picks new text's look from the character right before it - the "\n")
     let base = head
@@ -826,13 +956,15 @@ export function Workspace({
         }
         nextStyleAt = { index: sourceIndex + 1, style: next }
         const resolved = resolveParagraphStyle(next.id)
-        const charKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+        const charKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
         const charPatch = Object.fromEntries(charKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]])) as Partial<CharStyle>
         // what the style being left set and the next one leaves alone goes back to plain, same as clicking a style does
         const leaving = source ? resolveParagraphStyle(source.id) : {}
         if (leaving.weight !== undefined && charPatch.weight === undefined) charPatch.weight = 400
         if (leaving.italic !== undefined && charPatch.italic === undefined) charPatch.italic = false
         if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
+        if (leaving.outlineWidth !== undefined && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
+        if (leaving.outlineColor !== undefined && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
         runs = styleRange(runs, from, from + 1, charPatch)
       }
     }
@@ -861,7 +993,7 @@ export function Workspace({
       paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert),
       ...paragraphLists,
       footnotes: alignFootnotesToMarkers(r.text, footnotes),
-    })
+    }, from)
   }
 
   const insertFootnote = () => {
@@ -904,6 +1036,12 @@ export function Workspace({
     const caret = from + insert.length
     updateFrame(head.id, { footnotes: head.footnotes?.map((item) => item.id === noteId ? { ...item, content: result.text, runs: result.runs } : item) }, `footnote:${noteId}`)
     setFootnoteSel({ headId, noteId, a: caret, b: caret })
+    if (editingFootnoteId === noteId && editingFootnoteFrameId) {
+      requestToken.current += 1
+      const fragmentOffset = editingFootnoteOffset ?? 0
+      const localCaret = Math.max(0, Math.min(caret - fragmentOffset, result.text.length - fragmentOffset))
+      setFootnoteRequest({ noteId, frameId: editingFootnoteFrameId, a: localCaret, b: localCaret, token: requestToken.current })
+    }
   }
 
   const applyFootnoteCharStyle = (patch: Partial<CharStyle>) => {
@@ -998,6 +1136,129 @@ export function Workspace({
   }
 
   const insertRunningHeader = () => setRunningHeaderDialog(true)
+  const createTableOfContents = (config: TocConfig): boolean => {
+    if (editingParentId || previewMode || !doc) return false
+    const existingTocIds = new Set(headFrames(frames)
+      .filter((head) => head.tocPageReferences?.length)
+      .flatMap((head) => chainOf(frames, head.id).map((frame) => frame.id)))
+    const sourceFrames = frames.filter((frame) => !existingTocIds.has(frame.id))
+    const levelByStyle = new Map(config.levels.map((level, index) => [level.sourceStyleId, { ...level, index }]))
+    const entries: {
+      text: string
+      sourceText: string
+      sourceStyleId: string
+      sourceFrameId: string
+      sourceParagraphIndex: number
+      pageIndex: number
+      frameX: number
+      frameY: number
+      level: TocConfig['levels'][number]
+    }[] = []
+
+    for (const head of headFrames(sourceFrames)) {
+      if (head.tocPageReferences?.length) continue
+      const paragraphs = head.text.split('\n')
+      const chain = chainOf(sourceFrames, head.id)
+      let offset = 0
+      paragraphs.forEach((paragraph, sourceParagraphIndex) => {
+        const sourceText = paragraph.trim()
+        const text = plainTocHeading(sourceText)
+        const sourceStyleId = head.paragraphStyleIds?.[sourceParagraphIndex]
+          ?? (sourceParagraphIndex === 0 ? head.paragraphStyleId : undefined)
+          ?? paragraphStyles.find((style) => style.name === head.paragraphStyleNames?.[sourceParagraphIndex])?.id
+        const mappedLevel = sourceStyleId ? levelByStyle.get(sourceStyleId) : undefined
+        if (text && sourceStyleId && mappedLevel) {
+          const sourceFrame = chain.find((candidate) => {
+            const part = flow.get(candidate.id)
+            return part && offset >= part.start && offset < part.end
+          })
+          if (sourceFrame) {
+            const pageIndex = ownerPage(rects, sourceFrame.x + sourceFrame.w / 2, sourceFrame.y + sourceFrame.h / 2)
+            entries.push({
+              text,
+              sourceText,
+              sourceStyleId,
+              sourceFrameId: head.id,
+              sourceParagraphIndex,
+              pageIndex,
+              frameX: sourceFrame.x,
+              frameY: sourceFrame.y,
+              level: mappedLevel,
+            })
+          }
+        }
+        offset += paragraph.length + 1
+      })
+    }
+
+    entries.sort((a, b) => a.pageIndex - b.pageIndex || a.frameY - b.frameY || (doc.binding === 'rtl' ? b.frameX - a.frameX : a.frameX - b.frameX) || a.sourceParagraphIndex - b.sourceParagraphIndex)
+    if (entries.length === 0) return false
+
+    let story = ''
+    const runs: Run[] = []
+    const paragraphStyleIds: string[] = []
+    const paragraphStyleNames: string[] = []
+    const paragraphStylePatches: NonNullable<TextFrame['paragraphStylePatches']> = []
+    const tocPageReferences: TocPageReference[] = []
+    const occurrences = new Map<string, number>()
+    for (const entry of entries) {
+      const lineStart = story.length
+      const line = `${entry.text}\t${TOC_LEADER_MARKER}${TOC_PAGE_MARKER}\n`
+      const offset = lineStart + entry.text.length + 2
+      const occurrenceKey = `${entry.sourceStyleId}\u0000${entry.sourceText}`
+      const occurrence = occurrences.get(occurrenceKey) ?? 0
+      occurrences.set(occurrenceKey, occurrence + 1)
+      tocPageReferences.push({ offset, sourceFrameId: entry.sourceFrameId, sourceParagraphIndex: entry.sourceParagraphIndex, sourceStyleId: entry.sourceStyleId, sourceText: entry.sourceText, occurrence })
+
+      const outputStyleId = paragraphStyles.some((style) => style.id === entry.level.outputStyleId) ? entry.level.outputStyleId : 'body'
+      const outputStyle = resolveParagraphStyle(outputStyleId)
+      const runStyle = {
+        ...DEFAULT_TEXT_STYLE,
+        ...(outputStyle.fontFamily ? { fontFamily: outputStyle.fontFamily } : {}),
+        ...(outputStyle.color ? { color: outputStyle.color } : {}),
+        ...(outputStyle.fontSize ? { fontSize: outputStyle.fontSize } : {}),
+        ...(outputStyle.weight ? { weight: outputStyle.weight } : {}),
+        ...(outputStyle.italic !== undefined ? { italic: outputStyle.italic } : {}),
+        ...(outputStyle.tracking !== undefined ? { tracking: outputStyle.tracking } : {}),
+      }
+      runs.push({ len: line.length, style: runStyle })
+      paragraphStyleIds.push(outputStyleId)
+      paragraphStyleNames.push(paragraphStyles.find((style) => style.id === outputStyleId)?.name ?? '')
+      paragraphStylePatches.push({
+        align: outputStyle.align ?? 'right',
+        indentRight: (outputStyle.indentRight ?? 0) + entry.level.indent,
+        ...(outputStyle.indentLeft ? { indentLeft: outputStyle.indentLeft } : {}),
+        ...(outputStyle.leading ? { leading: outputStyle.leading } : {}),
+        ...(outputStyle.firstLineIndent ? { firstLineIndent: outputStyle.firstLineIndent } : {}),
+      })
+      story += line
+    }
+
+    const pageIndex = Math.min(selectedPage, doc.pages - 1)
+    const firstBox = columnBoxes(doc, rects[pageIndex], pageSidesOf(doc)[pageIndex], pageIndex)[0]
+    const placed: PlacedText = {
+      name: 'תוכן עניינים',
+      text: story,
+      runs,
+      style: DEFAULT_TEXT_STYLE,
+      paragraphStyleIds,
+      paragraphStyleNames,
+      paragraphStylePatches,
+      tocPageReferences,
+    }
+    const result = pourText(doc, sourceFrames, images, placed, { box: firstBox }, 'auto', shapes)
+    if (result.overflow || !result.headId) return false
+    const nextPageParents = [...pageParents]
+    while (nextPageParents.length < result.content.doc.pages) nextPageParents.push(effectiveActiveParent)
+    const nextDoc = { ...result.content.doc, toc: config }
+    pageOps.commit({ doc: nextDoc, frames: result.content.frames, pageParents: nextPageParents })
+    setSelectedId(result.headId)
+    setEditingId(null)
+    setPageSel([pageIndex])
+    setSelectedPage(pageIndex)
+    setTocDialogOpen(false)
+    return true
+  }
   const applyRunningHeader = (styleId: string, strategy: 'first' | 'last') => {
     if (!selectedId) return
     const frame = frames.find((candidate) => candidate.id === selectedId)
@@ -1025,7 +1286,7 @@ export function Workspace({
 
   const applyFirstWordStyle = (sourceId: string, targetId: string, scope: 'document' | 'selection') => {
     const resolved = resolveParagraphStyle(targetId)
-    const charPatch = Object.fromEntries(['fontFamily', 'color', 'fontSize', 'weight', 'italic', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const charPatch = Object.fromEntries(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'fontSize', 'weight', 'italic', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
     const selectedHead = textSel?.headId
     const nextFrames = frames.map((frame) => {
       if (!frame.text || (scope === 'selection' && frame.id !== selectedHead)) return frame
@@ -1168,6 +1429,15 @@ export function Workspace({
     askSelection(frameId, 0, fl.slice.length)
   }
 
+  const selectStoryToStart = (frameId: string, localOffset: number) => {
+    const fl = flow.get(frameId)
+    if (!fl) return
+    const offset = Math.max(0, Math.min(localOffset, fl.slice.length))
+    setFootnoteSel(null)
+    setTextSel({ headId: fl.headId, a: 0, b: fl.start + offset })
+    askSelection(frameId, 0, offset)
+  }
+
   const selectAllText = () => {
     if (editingFootnoteId && footnoteSel) {
       const head = frames.find((frame) => frame.id === footnoteSel.headId)
@@ -1199,7 +1469,7 @@ export function Workspace({
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
-    const sel = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
     const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) })
@@ -1496,6 +1766,30 @@ export function Workspace({
   const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) =>
     onShapesChange(shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh)), key)
 
+  const applyGapRects = (rectangles: GapObject[], key: string) => {
+    const byId = new Map<string, GapMember>()
+    for (const rectangle of rectangles) {
+      for (const member of expandGapObject(rectangle, MIN_FRAME_PT)) byId.set(member.id, member)
+    }
+    const update = <T extends { id: string; x: number; y: number; w: number; h: number }>(items: T[]) => {
+      let changed = false
+      const next = items.map((item) => {
+        const rectangle = byId.get(item.id)
+        if (!rectangle || (item.x === rectangle.x && item.y === rectangle.y && item.w === rectangle.w && item.h === rectangle.h)) return item
+        changed = true
+        return { ...item, x: rectangle.x, y: rectangle.y, w: rectangle.w, h: rectangle.h }
+      })
+      return changed ? next : null
+    }
+    const nextFrames = update(frames)
+    const nextImages = update(images)
+    const nextShapes = update(shapes)
+    if (nextFrames) onFramesChange(nextFrames, key)
+    if (nextImages) onImagesChange(nextImages, key)
+    if (nextShapes) onShapesChange(nextShapes, key)
+  }
+  applyGapRectsRef.current = applyGapRects
+
   const flipShape = (id: string, axis: 'x' | 'y') => {
     const shape = shapes.find((candidate) => candidate.id === id)
     if (!shape) return
@@ -1511,6 +1805,10 @@ export function Workspace({
     if (shape.kind === 'path' && shape.geom) patch.geom = shape.geom.map((poly) => poly.map((ring) => ring.map(flipVertex)))
     if (shape.kind === 'rect' && shape.radii) patch.radii = axis === 'x' ? [shape.radii[1], shape.radii[0], shape.radii[3], shape.radii[2]] : [shape.radii[3], shape.radii[2], shape.radii[1], shape.radii[0]]
     if (shape.kind === 'line') patch.flip = shape.flip ? undefined : true
+    if (shape.feather) patch.feather = {
+      ...shape.feather,
+      ...(axis === 'x' ? { x0: 1 - shape.feather.x0, x1: 1 - shape.feather.x1 } : { y0: 1 - shape.feather.y0, y1: 1 - shape.feather.y1 }),
+    }
     if (Object.keys(patch).length > 0) updateShape(id, patch, `flip:${axis}:${id}`)
   }
 
@@ -1560,7 +1858,7 @@ export function Workspace({
     const orig = id ? guides.find((g) => g.id === id) : undefined
     if (id && !orig) return
     const color = displayGuideColor(orig?.color ?? guideColor)
-    let last: { page: number; pos: number; remove: boolean; snap: GuideSnap | null } | null = orig ? { page: orig.page, pos: orig.pos, remove: false, snap: null } : null
+    let last: { page: number; pos: number; remove: boolean; snap: GuideSnap | null; centerSnap: boolean } | null = orig ? { page: orig.page, pos: orig.pos, remove: false, snap: null, centerSnap: false } : null
     if (orig) {
       selectGuides([orig.id])
       setEditingId(null)
@@ -1574,10 +1872,16 @@ export function Workspace({
       const page = ownerPage(rects, p.x, p.y)
       const r = rects[page]
       let pos = Math.round((axis === 'h' ? p.y - r.y : p.x - r.x) * 100) / 100
-      // lining up with a guide on another page: hold the exact same coordinate and show it (Alt = no snapping)
-      const snap = ev.altKey || !inside ? null : snapGuide(axis, axis === 'h' ? r.y + pos : r.x + pos, page, id, latestGuides.current, rects, SNAP_PX / live.current.zoom)
-      if (snap) pos = Math.round((snap.world - (axis === 'h' ? r.y : r.x)) * 1000) / 1000
-      last = { page, pos, remove: !inside, snap }
+      const world = axis === 'h' ? r.y + pos : r.x + pos
+      const centerWorld = axis === 'h' ? r.y + r.h / 2 : r.x + r.w / 2
+      const tolerance = SNAP_PX / live.current.zoom
+      const guideSnap = ev.altKey || !inside ? null : snapGuide(axis, world, page, id, latestGuides.current, rects, tolerance)
+      const centerDistance = Math.abs(centerWorld - world)
+      const centerSnap = !ev.altKey && inside && centerDistance <= tolerance && (!guideSnap || centerDistance <= Math.abs(guideSnap.world - world))
+      const snap = centerSnap ? null : guideSnap
+      if (centerSnap) pos = Math.round(((axis === 'h' ? r.h : r.w) / 2) * 1000) / 1000
+      else if (snap) pos = Math.round((snap.world - (axis === 'h' ? r.y : r.x)) * 1000) / 1000
+      last = { page, pos, remove: !inside, snap, centerSnap }
       setGuideDrag({ id, axis, color, ...last })
     }
     const finish = (commit: boolean) => {
@@ -2144,7 +2448,7 @@ export function Workspace({
   }
 
   useImperativeHandle(ref, () => ({
-    selectTool: (nextTool) => setTool(nextTool),
+    selectTool: activateTool,
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
     fitPage: () => fitPage(),
@@ -2172,6 +2476,7 @@ export function Workspace({
     },
     cleanSpacing: cleanSpacingCmd,
     insertRunningHeader,
+    insertTableOfContents: () => setTocDialogOpen(true),
     firstWordStyler: () => setFirstWordDialog(true),
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
@@ -2226,15 +2531,23 @@ export function Workspace({
     [],
   )
 
-  // Ctrl/Alt + wheel (also trackpad pinch) zooms towards the pointer; must be non-passive
+  // Ctrl/meta+wheel pans horizontally; Alt alone zooms towards the pointer.
   useEffect(() => {
     const el = vpRef.current!
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.altKey) return
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025))
-      zoomAtRef.current(live.current.zoom * factor, e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
+        const multiplier = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1
+        setScrollX(el, getScrollX(el) + delta * multiplier)
+        return
+      }
+      if (e.altKey) {
+        e.preventDefault()
+        const rect = el.getBoundingClientRect()
+        const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025))
+        zoomAtRef.current(live.current.zoom * factor, e.clientX - rect.left - live.current.sb, e.clientY - rect.top)
+      }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -2261,7 +2574,7 @@ export function Workspace({
         return
       }
       const t = TOOLS.find((t) => t.enabled && t.code === e.code && !!t.shift === e.shiftKey)
-      if (t) setTool(t.id)
+      if (t) activateTool(t.id)
     }
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpace(false)
@@ -2275,7 +2588,7 @@ export function Workspace({
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', reset)
     }
-  }, [])
+  }, [activateTool])
 
   // Delete removes the selected frame or guides, arrows nudge them (Shift = 10 pt), Escape deselects / cancels linking
   useEffect(() => {
@@ -2502,6 +2815,186 @@ export function Workspace({
     return { x: ((x - offsetX) / contentWidth) * asset.width, y: ((y - offsetY) / contentHeight) * asset.height }
   }
 
+  const samplerCanvas = (asset: Asset) => {
+    let cached = samplerImageCache.current.get(asset.dataUrl)
+    if (!cached) {
+      cached = new Promise<HTMLCanvasElement>((resolve, reject) => {
+        const bitmap = new Image()
+        bitmap.onload = () => {
+          const canvas = document.createElement('canvas')
+          canvas.width = bitmap.naturalWidth || asset.width
+          canvas.height = bitmap.naturalHeight || asset.height
+          const context = canvas.getContext('2d', { willReadFrequently: true })
+          if (!context) return reject(new Error('canvas context unavailable'))
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+          resolve(canvas)
+        }
+        bitmap.onerror = () => reject(new Error('image failed to load'))
+        bitmap.src = asset.dataUrl
+      })
+      samplerImageCache.current.set(asset.dataUrl, cached)
+    }
+    return cached
+  }
+
+  const cssColorHex = (value: string) => {
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('2d')
+    if (!context) return '#000000'
+    context.fillStyle = '#000000'
+    context.fillStyle = value
+    context.fillRect(0, 0, 1, 1)
+    const [red, green, blue] = context.getImageData(0, 0, 1, 1).data
+    return rgbToHex({ red, green, blue })
+  }
+
+  const shapeColorAt = (shape: ShapeFrame, point: { x: number; y: number }) => {
+    const gradient = shape.fillGradient
+    if (!gradient?.stops?.length) return shape.fill ?? shape.stroke ?? '#000000'
+    const centerX = shape.x + shape.w / 2
+    const centerY = shape.y + shape.h / 2
+    const radians = ((shape.rotation ?? 0) * Math.PI) / 180
+    const dx = point.x - centerX
+    const dy = point.y - centerY
+    const x = dx * Math.cos(radians) + dy * Math.sin(radians) + shape.w / 2
+    const y = -dx * Math.sin(radians) + dy * Math.cos(radians) + shape.h / 2
+    let position: number
+    if (gradient.type === 'radial') {
+      position = Math.min(1, Math.hypot(x - shape.w / 2, y - shape.h / 2) / (Math.max(shape.w, shape.h) * 0.7))
+    } else {
+      const line = linearGradientLine((gradient.angle ?? 0) + (gradient.reverse ? 180 : 0), shape.w, shape.h)
+      const lineX = line.x2 - line.x1
+      const lineY = line.y2 - line.y1
+      position = Math.max(0, Math.min(1, ((x - line.x1) * lineX + (y - line.y1) * lineY) / (lineX * lineX + lineY * lineY || 1)))
+    }
+    const stops = [...gradient.stops].sort((a, b) => a.offset - b.offset)
+    const upper = stops.findIndex((stop) => stop.offset >= position)
+    if (upper <= 0) return stops[upper < 0 ? stops.length - 1 : upper].color
+    const before = stops[upper - 1]
+    const after = stops[upper]
+    const amount = (position - before.offset) / Math.max(0.0001, after.offset - before.offset)
+    const start = hexToRgb(before.color)
+    const end = hexToRgb(after.color)
+    return rgbToHex({
+      red: start.red + (end.red - start.red) * amount,
+      green: start.green + (end.green - start.green) * amount,
+      blue: start.blue + (end.blue - start.blue) * amount,
+    })
+  }
+
+  const shapeImagePixelAt = (shape: ShapeFrame, asset: Asset, point: { x: number; y: number }) => {
+    const centerX = shape.x + shape.w / 2
+    const centerY = shape.y + shape.h / 2
+    const radians = ((shape.rotation ?? 0) * Math.PI) / 180
+    const dx = point.x - centerX
+    const dy = point.y - centerY
+    const x = dx * Math.cos(radians) + dy * Math.sin(radians) + shape.w / 2
+    const y = -dx * Math.sin(radians) + dy * Math.cos(radians) + shape.h / 2
+    const box = imageGeometry(shape, asset)
+    if (x < box.x || x > box.x + box.w || y < box.y || y > box.y + box.h || box.w <= 0 || box.h <= 0) return null
+    return { x: ((x - box.x) / box.w) * asset.width, y: ((y - box.y) / box.h) * asset.height }
+  }
+
+  const updateColorSampler = async (clientX: number, clientY: number): Promise<string | null> => {
+    const moveToken = ++samplerMoveToken.current
+    const target = document.elementsFromPoint(clientX, clientY).map((element) => element.closest<HTMLElement>('[data-object-id][data-object-kind]')).find((element): element is HTMLElement => !!element)
+    const kind = target?.dataset.objectKind
+    const id = target?.dataset.objectId
+    const image = kind === 'image' ? images.find((item) => item.id === id) ?? parentShadows.images.find((item) => item.id === id) : undefined
+    const shape = kind === 'shape' ? shapes.find((item) => item.id === id) ?? parentShadows.shapes.find((item) => item.id === id) : undefined
+    const asset = image ? assets[image.assetId] : shape?.image ? assets[shape.image.assetId] : undefined
+    const samplesImage = !!asset && (!!image || !!shape?.image)
+    const pixels: string[] = []
+    let centerColor = '#ffffff'
+    try {
+      const canvas = asset ? await samplerCanvas(asset) : null
+      if (moveToken !== samplerMoveToken.current) return null
+      const context = canvas?.getContext('2d', { willReadFrequently: true })
+      const imagePointAt = (point: { x: number; y: number }) => image && asset ? imagePixelAt(image, asset, point) : shape && asset && shape.image ? shapeImagePixelAt(shape, asset, point) : null
+      const imageCenter = samplesImage ? imagePointAt(toWorld(clientX, clientY)) : null
+      const imagePoints = samplesImage && asset && canvas && context
+        ? Array.from({ length: 81 }, (_, index) => {
+            const row = Math.floor(index / 9) - 4
+            const column = index % 9 - 4
+            if (!imageCenter) return null
+            const world = toWorld(clientX + column, clientY + row)
+            return image && asset ? imagePixelAt(image, asset, world) : shape && asset ? shapeImagePixelAt(shape, asset, world) : null
+          })
+        : null
+      const validImagePoints = imagePoints?.filter((point): point is { x: number; y: number } => !!point) ?? []
+      const imageRegion = validImagePoints.length && canvas && context
+        ? (() => {
+            const left = Math.min(canvas.width - 1, Math.max(0, Math.floor(Math.min(...validImagePoints.map((point) => point.x)))))
+            const top = Math.min(canvas.height - 1, Math.max(0, Math.floor(Math.min(...validImagePoints.map((point) => point.y)))))
+            const right = Math.min(canvas.width, Math.ceil(Math.max(...validImagePoints.map((point) => point.x))) + 1)
+            const bottom = Math.min(canvas.height, Math.ceil(Math.max(...validImagePoints.map((point) => point.y))) + 1)
+            const width = Math.max(1, right - left)
+            const height = Math.max(1, bottom - top)
+            return { left, top, width, data: context.getImageData(left, top, width, height).data }
+          })()
+        : null
+      let pixelIndex = 0
+      for (let row = -4; row <= 4; row++) {
+        for (let column = -4; column <= 4; column++) {
+          const world = toWorld(clientX + column, clientY + row)
+          let color = '#ffffff'
+          if (samplesImage && asset && canvas && imagePoints) {
+            const pixel = imagePoints[pixelIndex]
+            if (pixel && imageRegion) {
+              const sampleX = Math.max(0, Math.min(canvas.width - 1, Math.floor(pixel.x)))
+              const sampleY = Math.max(0, Math.min(canvas.height - 1, Math.floor(pixel.y)))
+              const offset = ((sampleY - imageRegion.top) * imageRegion.width + sampleX - imageRegion.left) * 4
+              const alpha = imageRegion.data[offset + 3] / 255
+              const backdrop = shape ? hexToRgb(shapeColorAt(shape, world)) : { red: 255, green: 255, blue: 255 }
+              color = rgbToHex({ red: imageRegion.data[offset] * alpha + backdrop.red * (1 - alpha), green: imageRegion.data[offset + 1] * alpha + backdrop.green * (1 - alpha), blue: imageRegion.data[offset + 2] * alpha + backdrop.blue * (1 - alpha) })
+            } else if (shape) color = shapeColorAt(shape, world)
+          } else if (shape) {
+            color = shapeColorAt(shape, world)
+          } else if (kind === 'frame' && target) {
+            color = cssColorHex(getComputedStyle(document.elementFromPoint(clientX + column, clientY + row) ?? target).color)
+          }
+          pixels.push(color)
+          if (row === 0 && column === 0) centerColor = color
+          pixelIndex++
+        }
+      }
+      if (moveToken === samplerMoveToken.current) setColorSamplerPreview({ ...samplerLensPosition(clientX, clientY), color: centerColor, pixels, source: kind ?? 'page' })
+      return centerColor
+    } catch {
+      if (moveToken === samplerMoveToken.current) setColorSamplerPreview({ ...samplerLensPosition(clientX, clientY), color: centerColor, pixels: Array(81).fill(centerColor), source: kind ?? 'page' })
+      return centerColor
+    }
+  }
+
+  const samplerLensPosition = (clientX: number, clientY: number) => {
+    const left = Math.max(0, Math.min(clientX - 42, window.innerWidth - 84))
+    const top = Math.max(0, Math.min(clientY - 42, window.innerHeight - 84))
+    const readoutTop = top > window.innerHeight - 112 ? -22 : 88
+    return { left, top, focusX: clientX - left, focusY: clientY - top, readoutTop }
+  }
+
+  const moveColorSamplerLens = (clientX: number, clientY: number) => {
+    const position = samplerLensPosition(clientX, clientY)
+    const lens = colorSamplerLensRef.current
+    if (lens) {
+      lens.style.left = `${position.left}px`
+      lens.style.top = `${position.top}px`
+      lens.style.setProperty('--sampler-focus-x', `${position.focusX}px`)
+      lens.style.setProperty('--sampler-focus-y', `${position.focusY}px`)
+      lens.style.setProperty('--sampler-readout-top', `${position.readoutTop}px`)
+    } else {
+      setColorSamplerPreview((current) => current ?? { ...position, color: '#ffffff', pixels: Array(81).fill('#ffffff'), source: 'page' })
+    }
+  }
+
+  const addColorSample = (color: string) => {
+    pageOps.commit({ colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: `דגימה ${colorSamples.length + 1}` }] })
+    setColorSamplerActive(false)
+    setColorSamplerPreview(null)
+  }
+
+  const deleteColorSample = (id: string) => pageOps.commit({ colorSamples: colorSamples.filter((sample) => sample.id !== id) })
+
   const beginRepairStroke = (image: ImageFrame, event: ReactPointerEvent<HTMLDivElement>) => {
     const asset = assets[image.assetId]
     if (!asset) return
@@ -2580,7 +3073,7 @@ export function Workspace({
 
     try {
       const vectorShape = target.kind === 'shape' ? shapes.find((shape) => shape.id === target.id) : undefined
-      if (vectorShape && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
+      if (vectorShape && !vectorShape.feather && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
         const start = toWorld(gesture.clientX0, gesture.clientY0)
         const end = toWorld(gesture.clientX1, gesture.clientY1)
         const mask: ShapeFrame = {
@@ -2632,6 +3125,29 @@ export function Workspace({
       }
 
       const sourceCanvas = await captureObject(target.element, target.bounds, live.current.zoom)
+      const sourceFeather = target.kind === 'frame'
+        ? frames.find((frame) => frame.id === target.id)?.feather
+        : target.kind === 'image'
+          ? images.find((image) => image.id === target.id)?.feather
+          : shapes.find((shape) => shape.id === target.id)?.feather
+      if (sourceFeather) {
+        const objectScale = sourceCanvas.width / target.bounds.width
+        const objectWidth = target.element.offsetWidth * objectScale
+        const objectHeight = target.element.offsetHeight * objectScale
+        const sourceImage = target.kind === 'image' ? images.find((image) => image.id === target.id) : undefined
+        const sourceShape = target.kind === 'shape' ? shapes.find((shape) => shape.id === target.id) : undefined
+        const sourceFrame = target.kind === 'frame' ? frames.find((frame) => frame.id === target.id) : undefined
+        const context = sourceCanvas.getContext('2d')!
+        context.save()
+        context.globalCompositeOperation = 'destination-in'
+        context.translate(sourceCanvas.width / 2, sourceCanvas.height / 2)
+        const rotation = sourceImage?.rotation ?? sourceShape?.rotation ?? sourceFrame?.rotation ?? 0
+        if (rotation) context.rotate((rotation * Math.PI) / 180)
+        if (sourceImage?.flipX || sourceImage?.flipY) context.scale(sourceImage.flipX ? -1 : 1, sourceImage.flipY ? -1 : 1)
+        context.translate(-objectWidth / 2, -objectHeight / 2)
+        applyFeatherCanvasMask(context, sourceFeather, objectWidth, objectHeight)
+        context.restore()
+      }
       const { remainder, piece } = splitObjectCanvas(sourceCanvas, target.bounds, selection, gesture.kind)
       const trimmedPiece = trimTransparentBounds(piece)
       if (!trimmedPiece) return
@@ -2877,7 +3393,7 @@ export function Workspace({
     return { dx: dx + (sx?.delta ?? 0), dy: dy + (sy?.delta ?? 0), lines: [sx?.line, sy?.line].filter((l): l is SnapLine => !!l) }
   }
 
-  /** A line's angle for the small degrees readout (InDesign shows the same thing next to its own line tool):
+  /** A line's angle for the small degrees readout (professional layout tools show the same thing next to their line tool):
    *  counter-clockwise-positive from the horizontal, the common design-tool reading — the opposite sign of
    *  `angleOf`'s own screen/clockwise convention (used for object rotation) — and folded to -180…180, not 0…360. */
   const lineAngleDeg = (from: { x: number; y: number }, to: { x: number; y: number }) => {
@@ -2945,9 +3461,13 @@ export function Workspace({
       ...(r > 0 ? { radii: [r, r, r, r] as [number, number, number, number] } : {}),
       ...(frame ? { frame: true as const } : {}),
       ...(flip ? { flip } : {}),
-      fill: null,
-      stroke: DEFAULT_SHAPE_STROKE,
-      strokeWidth: drawingStrokeWidth,
+      fill: defaultShapePaint.fill ?? null,
+      fillGradient: defaultShapePaint.fillGradient,
+      stroke: defaultShapePaint.stroke ?? DEFAULT_SHAPE_STROKE,
+      strokeWidth: defaultShapePaint.strokeWidth ?? drawingStrokeWidth,
+      strokeDash: defaultShapePaint.strokeDash,
+      strokeCap: defaultShapePaint.strokeCap,
+      opacity: defaultShapePaint.opacity,
       z: nextZ(frames, images, shapes),
     }
   }
@@ -3017,10 +3537,13 @@ export function Workspace({
       geom: [[clean.map(vertex)]],
       closed,
       curveMode: smooth ? 'quadratic' : undefined,
-      strokeCap,
-      fill: null,
-      stroke: DEFAULT_SHAPE_STROKE,
-      strokeWidth: drawingStrokeWidth,
+      strokeCap: defaultShapePaint.strokeCap ?? strokeCap,
+      fill: defaultShapePaint.fill ?? null,
+      fillGradient: defaultShapePaint.fillGradient,
+      stroke: defaultShapePaint.stroke ?? DEFAULT_SHAPE_STROKE,
+      strokeWidth: defaultShapePaint.strokeWidth ?? drawingStrokeWidth,
+      strokeDash: defaultShapePaint.strokeDash,
+      opacity: defaultShapePaint.opacity,
       z: nextZ(frames, images, shapes),
     }
   }
@@ -3311,6 +3834,40 @@ export function Workspace({
     if (layerLocked) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
+    if (tool === 'eyedropper') {
+      e.stopPropagation()
+      e.preventDefault()
+      const paint = {
+        fill: sh.fill,
+        fillGradient: sh.fillGradient,
+        stroke: sh.stroke,
+        strokeWidth: sh.strokeWidth,
+        strokeDash: sh.strokeDash,
+        strokeCap: sh.strokeCap,
+        opacity: sh.opacity ?? 1,
+      }
+      if (sampledShapeStyle && sampledShapeStyle.sourceId !== id) {
+        const selectedTargets = selectedObjectIds().filter((targetId) => targetId !== sampledShapeStyle.sourceId && shapes.some((shape) => shape.id === targetId))
+        const targets = new Set(selectedTargets.length > 0 ? selectedTargets : [id])
+        onShapesChange(shapes.map((shape) => targets.has(shape.id) ? { ...shape, ...sampledShapeStyle.paint } : shape))
+        setSampledShapeStyle(null)
+        setSelectedId(id)
+        setMultiSel([])
+        setTool('select')
+      } else {
+        setDefaultShapePaint((current) => ({ ...current, ...paint }))
+        const selectedTargets = selectedObjectIds().filter((targetId) => targetId !== id && shapes.some((shape) => shape.id === targetId))
+        if (selectedTargets.length > 0) {
+          const targets = new Set(selectedTargets)
+          onShapesChange(shapes.map((shape) => targets.has(shape.id) ? { ...shape, ...paint } : shape))
+          setSampledShapeStyle(null)
+          setTool('select')
+        } else {
+          setSampledShapeStyle({ sourceId: id, paint })
+        }
+      }
+      return
+    }
     if (tool === 'scissors' || tool === 'eraser') {
       e.stopPropagation()
       e.preventDefault()
@@ -3929,7 +4486,77 @@ export function Workspace({
 
   const panMode = tool === 'hand' || space
   const marqueeTool = tool === 'marqueeRect' || tool === 'marqueeEllipse'
+  const featherTargetForId = (id: string): FeatherTarget | null => {
+    const frame = frames.find((candidate) => candidate.id === id)
+    if (frame) return { id, kind: 'frame', x: frame.x, y: frame.y, w: frame.w, h: frame.h, rotation: frame.rotation }
+    const image = images.find((candidate) => candidate.id === id)
+    if (image) return { id, kind: 'image', x: image.x, y: image.y, w: image.w, h: image.h, rotation: image.rotation, flipX: image.flipX, flipY: image.flipY }
+    const shape = shapes.find((candidate) => candidate.id === id)
+    if (shape && shape.w > 0 && shape.h > 0) return { id, kind: 'shape', x: shape.x, y: shape.y, w: shape.w, h: shape.h, rotation: shape.rotation }
+    return null
+  }
+  const featherTargetAt = (clientX: number, clientY: number) => {
+    if (selectedId) {
+      const selected = featherTargetForId(selectedId)
+      if (selected) return selected
+    }
+    for (const element of document.elementsFromPoint(clientX, clientY)) {
+      const object = element.closest<HTMLElement>('[data-object-id][data-object-kind]')
+      if (!object || object.closest('.parent-shadow')) continue
+      const id = object.dataset.objectId
+      const target = id ? featherTargetForId(id) : null
+      if (target && !itemLocks[target.id]) return target
+    }
+    return null
+  }
+  const featherPointAt = (target: FeatherTarget, clientX: number, clientY: number) => {
+    const world = toWorld(clientX, clientY)
+    let [x, y] = rotateVec(world.x - target.x - target.w / 2, world.y - target.y - target.h / 2, -(target.rotation ?? 0))
+    if (target.flipX) x = -x
+    if (target.flipY) y = -y
+    return { x: (x + target.w / 2) / target.w, y: (y + target.h / 2) / target.h }
+  }
+  const featherWorldPoint = (target: FeatherTarget, x: number, y: number) => {
+    let localX = (x - 0.5) * target.w
+    let localY = (y - 0.5) * target.h
+    if (target.flipX) localX = -localX
+    if (target.flipY) localY = -localY
+    const [rotatedX, rotatedY] = rotateVec(localX, localY, target.rotation ?? 0)
+    return { x: target.x + target.w / 2 + rotatedX, y: target.y + target.h / 2 + rotatedY }
+  }
+  const withFeather = <T extends { id: string; feather?: GradientFeather }>(item: T, feather: GradientFeather | null): T => {
+    const { feather: _current, ...rest } = item
+    return (feather ? { ...rest, feather } : rest) as T
+  }
+  const commitFeather = (target: FeatherTarget, feather: GradientFeather | null) => {
+    const key = `feather:${target.id}`
+    if (target.kind === 'frame') onFramesChange(frames.map((frame) => frame.id === target.id ? withFeather(frame, feather) : frame), key)
+    else if (target.kind === 'image') onImagesChange(images.map((image) => image.id === target.id ? withFeather(image, feather) : image), key)
+    else onShapesChange(shapes.map((shape) => shape.id === target.id ? withFeather(shape, feather) : shape), key)
+  }
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool === 'feather' && e.button === 0) {
+      const target = featherTargetAt(e.clientX, e.clientY)
+      if (!target || layerLocked || itemLocks[target.id]) return
+      const start = featherPointAt(target, e.clientX, e.clientY)
+      const gesture: FeatherDrag = {
+        target,
+        startClient: { x: e.clientX, y: e.clientY },
+        endClient: { x: e.clientX, y: e.clientY },
+        feather: { x0: start.x, y0: start.y, x1: start.x, y1: start.y, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] },
+      }
+      featherDragRef.current = gesture
+      setFeatherDrag(gesture)
+      setSelectedId(target.id)
+      setEditingId(null)
+      setMultiSel([])
+      const world = toWorld(e.clientX, e.clientY)
+      setSelectedPage(ownerPage(rects, world.x, world.y))
+      e.preventDefault()
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      return
+    }
     const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
     if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && !marqueeTool) {
       if (isolatedGroupId) {
@@ -4060,7 +4687,82 @@ export function Workspace({
       setSelectedId(null)
     }
   }
+  const onPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool === 'gap' && !panMode && e.button === 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      const start = toWorld(e.clientX, e.clientY)
+      if (layerLocked) return
+      const originals = gapObjectsForPoint(start)
+      const nearestOnly = e.shiftKey
+      const gaps = findGaps(start, originals, nearestOnly)
+      if (gaps.length === 0) {
+        updateGapPreview([])
+        cancelGapPreviewFrame()
+        return
+      }
+      const grabbedEdges: GapDrag['grabbedEdges'] = {}
+      for (const gap of gaps) {
+        const coordinate = gap.axis === 'x' ? start.x : start.y
+        const firstEdge = gap.axis === 'x' ? gap.x : gap.y
+        const secondEdge = gap.axis === 'x' ? gap.x + gap.w : gap.y + gap.h
+        grabbedEdges[gap.axis] = Math.abs(coordinate - firstEdge) <= Math.abs(coordinate - secondEdge) ? 'before' : 'after'
+      }
+      dragSeq.current += 1
+      const key = `gap:${newFrameId()}:${dragSeq.current}`
+      gapDrag.current = { start, gaps, originals, key, nearestOnly, grabbedEdges }
+      gapCancel.current = () => {
+        applyGapRectsRef.current(originals, key)
+        gapDrag.current = null
+        gapCancel.current = null
+        cancelGapPreviewFrame()
+        updateGapPreview([])
+      }
+      cancelGapPreviewFrame()
+      updateGapPreview(gaps)
+      setSpacingShown([])
+      setSelectedPage(ownerPage(rects, start.x, start.y))
+      e.currentTarget.setPointerCapture(e.pointerId)
+      return
+    }
+    if (!colorSamplerActive || e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    moveColorSamplerLens(e.clientX, e.clientY)
+    void updateColorSampler(e.clientX, e.clientY).then((color) => { if (color) addColorSample(color) })
+  }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (colorSamplerActive) {
+      moveColorSamplerLens(e.clientX, e.clientY)
+      void updateColorSampler(e.clientX, e.clientY)
+    }
+    const featherGesture = featherDragRef.current
+    if (featherGesture) {
+      const point = featherPointAt(featherGesture.target, e.clientX, e.clientY)
+      const next = {
+        ...featherGesture,
+        endClient: { x: e.clientX, y: e.clientY },
+        feather: { ...featherGesture.feather, x1: point.x, y1: point.y },
+      }
+      featherDragRef.current = next
+      setFeatherDrag(next)
+      return
+    }
+    const activeGap = gapDrag.current
+    if (activeGap) {
+      const point = toWorld(e.clientX, e.clientY)
+      const moved = moveGap(activeGap.gaps, activeGap.originals, { x: point.x - activeGap.start.x, y: point.y - activeGap.start.y }, MIN_FRAME_PT, { ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, grabbedEdges: activeGap.grabbedEdges })
+      if (moved.delta.x !== 0 || moved.delta.y !== 0) applyGapRects(moved.objects, activeGap.key)
+      updateGapPreview(moved.gaps)
+      return
+    }
+    if (tool === 'gap' && !panMode) {
+      const point = toWorld(e.clientX, e.clientY)
+      queueGapPreview(point, e.shiftKey)
+      return
+    }
+    if (gapPreview.length) updateGapPreview([])
+    cancelGapPreviewFrame()
     if (marqueeCutRef.current) {
       const previous = marqueeCutRef.current
       const world = toWorld(e.clientX, e.clientY)
@@ -4379,7 +5081,28 @@ export function Workspace({
     createStart.current = null
     setDraft(null)
   }
-  const endDrag = () => {
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const activeGap = gapDrag.current
+    if (activeGap) {
+      const point = toWorld(event.clientX, event.clientY)
+      const moved = moveGap(activeGap.gaps, activeGap.originals, { x: point.x - activeGap.start.x, y: point.y - activeGap.start.y }, MIN_FRAME_PT, { ctrl: event.ctrlKey || event.metaKey, alt: event.altKey, grabbedEdges: activeGap.grabbedEdges })
+      if (moved.delta.x !== 0 || moved.delta.y !== 0) applyGapRects(moved.objects, activeGap.key)
+      gapDrag.current = null
+      gapCancel.current = null
+      cancelGapPreviewFrame()
+      updateGapPreview([])
+      return
+    }
+    const featherGesture = featherDragRef.current
+    if (featherGesture) {
+      const point = featherPointAt(featherGesture.target, event.clientX, event.clientY)
+      const nextFeather = { ...featherGesture.feather, x1: point.x, y1: point.y }
+      const distance = Math.hypot(event.clientX - featherGesture.startClient.x, event.clientY - featherGesture.startClient.y)
+      featherDragRef.current = null
+      setFeatherDrag(null)
+      if (distance >= 4) commitFeather(featherGesture.target, nextFeather)
+      return
+    }
     const healingStroke = repairStroke.current
     if (healingStroke) {
       repairStroke.current = null
@@ -4443,6 +5166,14 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    cancelGapPreviewFrame()
+    if (gapCancel.current) gapCancel.current()
+    else {
+      gapDrag.current = null
+      updateGapPreview([])
+    }
+    featherDragRef.current = null
+    setFeatherDrag(null)
     repairStroke.current = null
     marqueeCutRef.current = null
     setMarqueeCut(null)
@@ -4573,14 +5304,96 @@ export function Workspace({
     const y0 = ty + y * zoom
     return y0 + h * zoom >= scroll.y - 300 && y0 <= scroll.y + vp.h + 300
   }
-  const visible = spreads.filter((s) => inViewY(s.y, s.h))
+  const visible = useMemo(() => spreads.filter((spread) => {
+    const top = ty + spread.y * zoom
+    return top + spread.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300
+  }), [spreads, ty, zoom, scroll.y, vp.h])
   // text frames, pictures and shapes are virtualized the same way, EXCEPT whatever is actively selected/edited/
   // linked-from — an import of a 100-page Word file otherwise creates 100+ live components that all re-render on
   // every keystroke, even though at most a couple of pages are ever on screen at once
-  const alwaysMounted = new Set([selectedId, editingId, linkFrom, pathEdit, ...multiSel].filter((id): id is string => !!id))
-  const visibleFrames = layerVisible ? frames.filter((f) => itemVisibility[f.id] !== false && (alwaysMounted.has(f.id) || inViewY(f.y, f.h))) : []
-  const visibleImages = layerVisible ? images.filter((im) => itemVisibility[im.id] !== false && (alwaysMounted.has(im.id) || inViewY(im.y, im.h))) : []
-  const visibleShapes = layerVisible ? shapes.filter((sh) => itemVisibility[sh.id] !== false && (alwaysMounted.has(sh.id) || inViewY(sh.y, sh.h))) : []
+  const alwaysMounted = useMemo(() => new Set([selectedId, editingId, linkFrom, pathEdit, ...multiSel].filter((id): id is string => !!id)), [selectedId, editingId, linkFrom, pathEdit, multiSel])
+  const visibleFrames = useMemo(() => layerVisible ? frames.filter((frame) => {
+    const top = ty + frame.y * zoom
+    return itemVisibility[frame.id] !== false && (alwaysMounted.has(frame.id) || (top + frame.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
+  }) : [], [layerVisible, frames, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const visibleImages = useMemo(() => layerVisible ? images.filter((image) => {
+    const top = ty + image.y * zoom
+    return itemVisibility[image.id] !== false && (alwaysMounted.has(image.id) || (top + image.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
+  }) : [], [layerVisible, images, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const visibleShapes = useMemo(() => layerVisible ? shapes.filter((shape) => {
+    const top = ty + shape.y * zoom
+    return itemVisibility[shape.id] !== false && (alwaysMounted.has(shape.id) || (top + shape.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
+  }) : [], [layerVisible, shapes, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const gapCandidateSignature = [frames, images, shapes, itemLocks, itemVisibility, layerVisible, layerLocked, isolatedGroupId, spreads]
+  const buildGapCandidatesBySpread = () => {
+    const candidates = new Map<number, GapObject[]>()
+    if (!layerVisible || layerLocked) return candidates
+    type Source = GapMember & { groupId?: string; eligible: boolean }
+    const sources: Source[] = [
+      ...frames.map((frame) => ({ id: frame.id, x: frame.x, y: frame.y, w: frame.w, h: frame.h, groupId: frame.groupId, eligible: !frame.rasterized && !frame.rotation && !itemLocks[frame.id] && itemVisibility[frame.id] !== false })),
+      ...images.map((image) => ({ id: image.id, x: image.x, y: image.y, w: image.w, h: image.h, groupId: image.groupId, eligible: !image.rotation && !itemLocks[image.id] && itemVisibility[image.id] !== false })),
+      ...shapes.map((shape) => ({ id: shape.id, x: shape.x, y: shape.y, w: shape.w, h: shape.h, groupId: shape.groupId, eligible: shape.kind !== 'line' && !shape.rotation && !itemLocks[shape.id] && itemVisibility[shape.id] !== false })),
+    ]
+    const spreadAt = (x: number, y: number) => spreads.findIndex((spread) => x >= spread.contentX && x <= spread.contentX + spread.contentW && y >= spread.y && y <= spread.y + spread.h)
+    const groups = new Map<string, { id: string; members: Source[]; eligible: boolean }>()
+    for (const source of sources) {
+      if (source.groupId) {
+        if (isolatedGroupId && source.groupId !== isolatedGroupId) continue
+        let group = groups.get(source.groupId)
+        if (!group) groups.set(source.groupId, group = { id: source.groupId, members: [], eligible: true })
+        group.members.push(source)
+        group.eligible &&= source.eligible
+      } else if (!isolatedGroupId && source.eligible) {
+        const index = spreadAt(source.x + source.w / 2, source.y + source.h / 2)
+        if (index >= 0) candidates.set(index, [...(candidates.get(index) ?? []), { id: source.id, x: source.x, y: source.y, w: source.w, h: source.h }])
+      }
+    }
+    for (const group of groups.values()) {
+      if (!group.eligible || group.members.length === 0) continue
+      const x = Math.min(...group.members.map((member) => member.x))
+      const y = Math.min(...group.members.map((member) => member.y))
+      const right = Math.max(...group.members.map((member) => member.x + member.w))
+      const bottom = Math.max(...group.members.map((member) => member.y + member.h))
+      const groupObject: GapObject = {
+        id: `group:${group.id}`,
+        x,
+        y,
+        w: Math.max(MIN_FRAME_PT, right - x),
+        h: Math.max(MIN_FRAME_PT, bottom - y),
+        memberIds: group.members.map((member) => member.id),
+        members: group.members.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
+      }
+      const index = spreadAt(groupObject.x + groupObject.w / 2, groupObject.y + groupObject.h / 2)
+      if (index >= 0) candidates.set(index, [...(candidates.get(index) ?? []), groupObject])
+    }
+    return candidates
+  }
+  const gapObjectsForPoint = (point: { x: number; y: number }): GapObject[] => {
+    if (layerLocked) return []
+    const cached = gapCandidatesCache.current
+    if (!cached || cached.signature.length !== gapCandidateSignature.length || cached.signature.some((value, index) => value !== gapCandidateSignature[index])) {
+      gapCandidatesCache.current = { signature: gapCandidateSignature, bySpread: buildGapCandidatesBySpread() }
+    }
+    const spread = visible.find((candidate) => point.x >= candidate.contentX && point.x <= candidate.contentX + candidate.contentW && point.y >= candidate.y && point.y <= candidate.y + candidate.h)
+    const index = spread ? spreads.indexOf(spread) : -1
+    return index >= 0 ? gapCandidatesCache.current?.bySpread.get(index) ?? [] : []
+  }
+  const queueGapPreview = (point: { x: number; y: number }, nearestOnly: boolean) => {
+    gapHoverPointer.current = { point, nearestOnly }
+    if (gapHoverFrame.current !== null) return
+    gapHoverFrame.current = requestAnimationFrame(() => {
+      gapHoverFrame.current = null
+      const pending = gapHoverPointer.current
+      gapHoverPointer.current = null
+      if (!pending || gapDrag.current || tool !== 'gap') return
+      updateGapPreview(findGaps(pending.point, gapObjectsForPoint(pending.point), pending.nearestOnly))
+    })
+  }
+  const cancelGapPreviewFrame = () => {
+    if (gapHoverFrame.current !== null) cancelAnimationFrame(gapHoverFrame.current)
+    gapHoverFrame.current = null
+    gapHoverPointer.current = null
+  }
 
   const runningHeaderForPage = (pageIndex: number, styleId: string, strategy: 'first' | 'last') => {
     const candidates: { page: number; index: number; text: string }[] = []
@@ -4621,12 +5434,61 @@ export function Workspace({
       const rect = rects[pageIndex]
       return rect && inViewY(rect.y, rect.h) ? parentId : null
     })
-    return parentShadowContent(doc, parents, inView, sections, frames, runningHeaderForPage)
-  }, [doc, parents, pageParents, sections, frames, flow, rects, editingParentId, scroll.y, vp.h])
+    return parentShadowContent(doc, parents, inView, sections, frames, runningHeaderForPage, parentOverrides, images, shapes)
+  }, [doc, parents, pageParents, sections, frames, images, shapes, parentOverrides, flow, rects, editingParentId, scroll.y, vp.h])
 
+  const overrideParentItem = (kind: ParentOverride['kind'], source: TextFrame | ImageFrame | ShapeFrame, event: ReactPointerEvent<Element>) => {
+    const parentShadowRef = (source as typeof source & { parentShadowRef?: ParentShadowRef }).parentShadowRef
+    if (!event.shiftKey || !parentShadowRef || editingParentId || previewMode) return
+    event.preventDefault()
+    event.stopPropagation()
+    const localId = newFrameId()
+    const record: ParentOverride = { ...parentShadowRef, localId, kind }
+    const sourceWithRef = source as typeof source & { parentShadowRef?: ParentShadowRef }
+    const { parentShadowRef: _shadowRef, ...base } = sourceWithRef
+    const z = nextZ(frames, images, shapes)
+    if (kind === 'frame') {
+      const frame: TextFrame = { ...base, id: localId, next: null, layerId: activeLayerId, z } as TextFrame
+      pageOps.commit({ frames: [...frames, frame], parentOverrides: [...parentOverrides, record] })
+      if (tool === 'type') setEditingId(localId)
+    } else if (kind === 'image') {
+      const image: ImageFrame = { ...base, id: localId, layerId: activeLayerId, z } as ImageFrame
+      pageOps.commit({ images: [...images, image], parentOverrides: [...parentOverrides, record] })
+    } else {
+      const shape: ShapeFrame = { ...base, id: localId, layerId: activeLayerId, z } as ShapeFrame
+      pageOps.commit({ shapes: [...shapes, shape], parentOverrides: [...parentOverrides, record] })
+    }
+    setSelectedPage(parentShadowRef.pageIndex)
+    setSelectedId(localId)
+  }
+
+  const relockParentOverride = (localId: string) => {
+    if (!parentOverrides.some((override) => override.localId === localId)) return false
+    pageOps.commit({
+      frames: frames.filter((frame) => frame.id !== localId),
+      images: images.filter((image) => image.id !== localId),
+      shapes: shapes.filter((shape) => shape.id !== localId),
+      parentOverrides: parentOverrides.filter((override) => override.localId !== localId),
+    })
+    setEditingId((current) => current === localId ? null : current)
+    if (selectedId === localId) setSelectedId(null)
+    setMultiSel((current) => current.filter((id) => id !== localId))
+    return true
+  }
+
+  const gapCursorClass = gapPreview.some((gap) => gap.axis === 'x') && gapPreview.some((gap) => gap.axis === 'y')
+    ? ' gap-node'
+    : gapPreview.some((gap) => gap.axis === 'x')
+      ? ' gap-x'
+      : gapPreview.some((gap) => gap.axis === 'y')
+        ? ' gap-y'
+        : ''
   const viewportClass =
     'viewport' +
     (previewMode ? ' preview' : '') +
+    (colorSamplerActive ? ' color-sampler-active' : '') +
+    (tool === 'feather' ? ' feathertool' : '') +
+    (!panMode && tool === 'gap' ? ' gaptool' + gapCursorClass : '') +
     (panning
       ? ' panning'
       : panMode
@@ -4667,12 +5529,28 @@ export function Workspace({
                   ? ' transformtool'
               : tool === 'select'
                 ? ' selecttool'
-                : '') + (penDragging ? ' pen-dragging' : '') + (scissorHover ? ' scissors-target' : '')
+                : '') + (penDragging ? ' pen-dragging' : '') + (scissorHover ? ' scissors-target' : '') + (shiftPressed ? ' parent-override-mode' : '')
 
   // ── selection info for the properties panel and the thread lines ────────────────
   const selFrame = selectedId ? (frames.find((f) => f.id === selectedId) ?? null) : null
   const selImage = selectedId ? (images.find((im) => im.id === selectedId) ?? null) : null
   const selShape = selectedId ? (shapes.find((sh) => sh.id === selectedId) ?? null) : null
+  const selectedFeatherTarget = selectedId ? featherTargetForId(selectedId) : null
+  const selectedFeather = selFrame?.feather ?? selImage?.feather ?? selShape?.feather ?? null
+  const setSelectedFeatherEnabled = (enabled: boolean) => {
+    if (!selectedFeatherTarget) return
+    const next = enabled ? selectedFeather ?? { x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] } : null
+    commitFeather(selectedFeatherTarget, next)
+  }
+  const setSelectedFeatherOpacity = (index: number, opacity: number) => {
+    if (!selectedFeatherTarget || !selectedFeather) return
+    const points = selectedFeather.points.map((point, pointIndex) => pointIndex === index ? { ...point, opacity } : point)
+    commitFeather(selectedFeatherTarget, { ...selectedFeather, points })
+  }
+  const featherGuide = featherDrag ? {
+    start: featherWorldPoint(featherDrag.target, featherDrag.feather.x0, featherDrag.feather.y0),
+    end: featherWorldPoint(featherDrag.target, featherDrag.feather.x1, featherDrag.feather.y1),
+  } : null
   const colorTool = tool === 'color' || tool === 'gradient' || tool === 'swatches' ? tool : null
   /** what the text-on-outline controls show: the style of the selected text, else the text's own */
   const pathStyleShown = (sh: ShapeFrame): CharStyle => {
@@ -4790,7 +5668,7 @@ export function Workspace({
   }
   // the range a paragraph-style click acts on: the actual text selection/caret while editing, or - with a text frame
   // simply selected (Selection tool, nothing open for editing) - its whole story. Selecting a frame and clicking a
-  // paragraph style restyles the whole thing, the same as InDesign; a lone frame in this app is almost always meant
+  // paragraph style restyles the whole thing, as in professional layout tools; a lone frame in this app is almost always meant
   // to read as a single style throughout, so this is also what decides which style, if any, the frame is shown under.
   const panelRange: { a: number; b: number } | null = !panelHead
     ? null
@@ -4890,11 +5768,17 @@ export function Workspace({
   const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
     const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
     onParagraphStylesChange(nextStyles)
+    const previous = resolveParagraphStyle(id)
     const resolved = resolveParagraphStyle(id, nextStyles)
-    const charPatch = Object.fromEntries(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const charPatch = Object.fromEntries(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
+    const refreshStyleRuns = (frame: TextFrame) => restyleRange(normalizeRuns(frame.text, frame.runs, frame), 0, frame.text.length, (style) => Object.fromEntries(
+      (['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const)
+        .filter((key) => style[key] === previous[key] && resolved[key] !== undefined)
+        .map((key) => [key, resolved[key]]),
+    ) as Partial<CharStyle>)
     const oldFootnoteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, id)
     const nextFootnoteStyle = footnoteTextStyle(footnoteConfig, nextStyles, id)
-    const footnoteCharKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+    const footnoteCharKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
     const footnoteStyleKeys = [...footnoteCharKeys, 'align', 'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
     const updateFootnoteStyles = (frame: TextFrame) => {
       if (!frame.footnotes?.some((note) => note.paragraphStyleId === id)) return frame
@@ -4921,8 +5805,9 @@ export function Workspace({
     const updateImportedParagraphs = (frame: TextFrame) => {
       const hasFrameStyle = frame.paragraphStyleId === id
       const hasParagraphStyles = !!frame.paragraphStyleIds?.length
-      if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id)) return frame
-      if (hasFrameStyle && !hasParagraphStyles) return { ...frame, ...resolved }
+      const usesDefaultStyle = !frame.paragraphStyleId && !hasParagraphStyles && paragraphStyles[0]?.id === id
+      if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id) && !usesDefaultStyle) return frame
+      if ((hasFrameStyle || usesDefaultStyle) && !hasParagraphStyles) return { ...frame, ...resolved, runs: refreshStyleRuns(frame) }
       const paragraphStyleIds = frame.paragraphStyleIds ?? []
       const paragraphStylePatches = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
       let paraSpaceBefore = frame.paraSpaceBefore
@@ -4953,7 +5838,7 @@ export function Workspace({
       onParagraphStylesChange([...paragraphStyles, { id, name: `סגנון ${paragraphStyles.length + 1}`, basedOnId: 'body', patch: {} }])
       return
     }
-    // from text (as InDesign's new style does): the style takes what the paragraph carries beyond its own style, is based on
+    // from text (as a new style does in professional layout tools): the style takes what the paragraph carries beyond its own style, is based on
     // that style, and is applied to the paragraph - which is why the "+" of the old style goes away
     const indexes = paragraphsInRange(head.text, Math.min(range.a, range.b), Math.max(range.a, range.b))
     const baseId = typeof highlightedStyleId === 'string' ? highlightedStyleId : paragraphStyles[0]?.id
@@ -5059,14 +5944,17 @@ export function Workspace({
       if (!target) return f
       const style = styleOf(f)
       const width = insetBox(f, style, 0, 0).w
-      let runs = normalizeRuns(f.text, f.runs, f)
+      const sourceRuns = normalizeRuns(f.text, f.runs, f)
+      let runs = sourceRuns
       for (const index of target.indexes) {
         const [start, boundEnd] = paragraphBounds(f.text, index)
         const end = f.text[boundEnd - 1] === '\n' ? boundEnd - 1 : boundEnd
         const para = f.text.slice(start, end)
         const totalWords = para.trim().split(/\s+/).filter(Boolean).length
         if (totalWords <= 1) continue
-        const lastWords = lastLineWordCount(para, style, width)
+        const paragraphPatch = f.paragraphStylePatches?.[index]
+        const paragraphRuns = sliceRuns(sourceRuns, start, end)
+        const lastWords = lastLineWordCount(para, style, width, paragraphRuns, paragraphPatch)
         if (lastWords < totalWords && lastWords <= maxWords) runs = styleRange(runs, start, end, { tracking })
       }
       return runs === f.runs ? f : { ...f, runs }
@@ -5095,7 +5983,7 @@ export function Workspace({
     const style = resolveParagraphStyle(styleId)
     const [start] = paragraphBounds(frame.text, index)
     const run = styleAtChar(normalizeRuns(frame.text, frame.runs, frame), start, frame)
-    return Object.entries(style).filter(([key]) => ['fontFamily', 'fontSize', 'weight', 'italic', 'color'].includes(key)).every(([key, value]) => value === undefined || run[key as keyof CharStyle] === value)
+    return Object.entries(style).filter(([key]) => ['fontFamily', 'fontSize', 'weight', 'italic', 'color', 'outlineColor', 'outlineWidth'].includes(key)).every(([key, value]) => value === undefined || run[key as keyof CharStyle] === value)
   }
 
   /**
@@ -5142,7 +6030,7 @@ export function Workspace({
     if (indexes.length === 0) return frame
     const resolved = resolveParagraphStyle(targetId, styles)
     const pick = (keys: string[]) => Object.fromEntries(keys.filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]]))
-    const charPatch = pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking']) as Partial<CharStyle>
+    const charPatch = pick(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking']) as Partial<CharStyle>
     // what the old style set and the new one leaves alone goes back to plain: bold text swapped to a regular style must
     // not stay bold. hardReset (discarding a paragraph's own overrides back to its own style) has no "old style" to
     // compare against - it always fills in plain, since the point is to match the style exactly, run-level formatting
@@ -5151,6 +6039,8 @@ export function Workspace({
     if ((hardReset || leaving.weight !== undefined) && charPatch.weight === undefined) charPatch.weight = 400
     if ((hardReset || leaving.italic !== undefined) && charPatch.italic === undefined) charPatch.italic = false
     if ((hardReset || leaving.tracking !== undefined) && charPatch.tracking === undefined) charPatch.tracking = 0
+    if ((hardReset || leaving.outlineWidth !== undefined) && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
+    if ((hardReset || leaving.outlineColor !== undefined) && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
     const layout = pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
     const count = frame.text.split('\n').length
     const hadLists = !!frame.paragraphStyleIds?.length
@@ -5183,7 +6073,7 @@ export function Workspace({
     }
     // every paragraph moved: the story as a whole is now on the target style too
     const whole = new Set(indexes).size >= count
-    const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
+    const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
     const paragraphStyleId = whole ? targetId : !hadLists || frame.paragraphStyleId === sourceId ? undefined : frame.paragraphStyleId
     return { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, runs }
   }
@@ -5247,11 +6137,11 @@ export function Workspace({
     if (occurrence.kind === 'footnote') {
       const oldBase = footnoteTextStyle(footnoteConfig, paragraphStyles, occurrence.note.paragraphStyleId)
       const nextBase = footnoteTextStyle(footnoteConfig, paragraphStyles, targetId)
-      const styleKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const styleKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
       const styleOverrides = occurrence.note.style
         ? Object.fromEntries(styleKeys.filter((key) => occurrence.note.style![key] !== undefined && occurrence.note.style![key] !== oldBase[key]).map((key) => [key, occurrence.note.style![key]])) as Partial<TextStyle>
         : {}
-      const charKeys = ['fontFamily', 'color', 'weight', 'italic', 'fontSize', 'tracking'] as const
+      const charKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
       const runs = occurrence.note.runs?.map((run) => {
         const runStyle = { ...run.style }
         for (const key of charKeys) if (runStyle[key] === oldBase[key]) Object.assign(runStyle, { [key]: nextBase[key] })
@@ -5312,7 +6202,7 @@ export function Workspace({
     onSelectParent(parent.id)
     onEditParent(parent.id)
   }
-  /** Removes a parent; every page that used it reverts to none (no parent applied), same as InDesign. */
+  /** Removes a parent; every page that used it reverts to none (no parent applied), as in professional layout tools. */
   const deleteParent = (id: string) => {
     onParentsChange(parents.filter((p) => p.id !== id))
     if (pageParents.some((p) => p === id)) onPageParentsChange(pageParents.map((p) => (p === id ? null : p)))
@@ -5586,14 +6476,16 @@ export function Workspace({
 
       <ContextToolbar
         tool={space ? 'hand' : tool}
-        shape={selShape}
-        image={selImage}
-        frame={selFrame}
+        shape={tool === 'feather' ? null : selShape}
+        image={tool === 'feather' ? null : selImage}
+        frame={tool === 'feather' ? null : selFrame}
         textStyle={toolbarTextStyle}
         paragraphStyle={toolbarParagraphStyle}
         strokeWidth={drawingStrokeWidth}
         colorTarget={colorTarget}
         onColorTarget={setColorTarget}
+        textColorTarget={textColorTarget}
+        onTextColorTarget={setTextColorTarget}
         onFlip={(axis) => selShape && flipShape(selShape.id, axis)}
         onArrange={(op) => selShape ? arrangeObject(selShape.id, op) : selImage ? arrangeObject(selImage.id, op) : selFrame ? arrangeObject(selFrame.id, op) : undefined}
         onOpacity={(value) => {
@@ -5616,6 +6508,17 @@ export function Workspace({
           if (selShape) updateShape(selShape.id, { strokeWidth: value }, `context-stroke:${selShape.id}`)
         }}
       >
+        {tool === 'feather' && (
+          <div className="context-feather-controls" role="group" aria-label="החלקת מעבר צבע">
+            <label className="context-feather-toggle"><input type="checkbox" checked={!!selectedFeather} disabled={!selectedFeatherTarget} onChange={(event) => setSelectedFeatherEnabled(event.target.checked)} />החלקה</label>
+            {!selectedFeatherTarget ? <span className="context-tool-hint">בחר אובייקט</span> : <>
+              <label className="context-field"><span>התחלה {Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)}%</span><input type="range" aria-label="אטימות התחלה" min={0} max={100} value={Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity(0, Number(event.target.value) / 100)} /></label>
+              <label className="context-field"><span>סוף {Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)}%</span><input type="range" aria-label="אטימות סוף" min={0} max={100} value={Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity((selectedFeather?.points.length ?? 2) - 1, Number(event.target.value) / 100)} /></label>
+              <div className="feather-toolbar-ramp" style={{ '--feather-start-opacity': selectedFeather?.points[0]?.opacity ?? 1, '--feather-end-opacity': selectedFeather?.points.at(-1)?.opacity ?? 0 } as CSSProperties} aria-hidden="true" />
+              <button className="context-command danger" disabled={!selectedFeather} onClick={() => selectedFeatherTarget && commitFeather(selectedFeatherTarget, null)}>הסר החלקה</button>
+            </>}
+          </div>
+        )}
         {multiSel.length > 1 && (() => {
           const selectedShapeCount = shapes.filter((shape) => multiSel.includes(shape.id)).length
           const hasSelectedGroup = selectedObjectIds().some((id) => !!objectGroupId(id))
@@ -5671,7 +6574,7 @@ export function Workspace({
       <div className="ws-main">
         <Toolbox
           tool={space ? 'hand' : tool}
-          onSelect={setTool}
+          onSelect={activateTool}
           onSettings={(id) => setToolDialog(id === 'pen' || id === 'pencil' ? id : id === 'rect' || id === 'polygon' ? id : (FRAME_TOOL_KIND[id] ?? null))}
           previewMode={previewMode}
           onPreviewMode={onPreviewMode}
@@ -5700,6 +6603,7 @@ export function Workspace({
             className={viewportClass}
             onContextMenu={openObjectMenu}
             onScroll={(e) => setScroll({ x: getScrollX(e.currentTarget), y: e.currentTarget.scrollTop })}
+            onPointerDownCapture={onPointerDownCapture}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
@@ -5722,6 +6626,11 @@ export function Workspace({
                 }}
                 aria-hidden="true"
               />}
+              {featherGuide && <svg className="feather-gesture-layer" width={sheetW} height={sheetH} aria-hidden="true">
+                <line x1={tx + featherGuide.start.x * zoom} y1={ty + featherGuide.start.y * zoom} x2={tx + featherGuide.end.x * zoom} y2={ty + featherGuide.end.y * zoom} />
+                <circle cx={tx + featherGuide.start.x * zoom} cy={ty + featherGuide.start.y * zoom} r={4} />
+                <circle cx={tx + featherGuide.end.x * zoom} cy={ty + featherGuide.end.y * zoom} r={4} />
+              </svg>}
               <svg width={sheetW} height={sheetH}>
                 {visible.map((s) => (
                   <SpreadView key={s.y} doc={doc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
@@ -5729,12 +6638,12 @@ export function Workspace({
               </svg>
               {parentShadows.images.map((im) => (
                 <div className="parent-shadow" key={im.id}>
-                  <ImageFrameView image={im} asset={assets[im.assetId]} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} onPointerDown={noop} onHandleDown={noop} onRotateDown={noop} />
+                  <ImageFrameView image={im} asset={assets[im.assetId]} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('image', im, event)} onHandleDown={noop} onRotateDown={noop} />
                 </div>
               ))}
               {parentShadows.shapes.map((sh) => (
                 <div className="parent-shadow" key={sh.id}>
-                  <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={0} selected={false} locked showEdge={false} />
+                  <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('shape', sh, event)} />
                 </div>
               ))}
               {parentShadows.frames.map((f) => {
@@ -5749,7 +6658,7 @@ export function Workspace({
                     runs={runs}
                     highlight={null}
                     floats={[]}
-                    z={0}
+                    z={parentShadowZ}
                     overflow={false}
                     continuesParagraphAtEnd={false}
                     hasPrev={false}
@@ -5770,7 +6679,7 @@ export function Workspace({
                     spaceAfterLast={frameSpaceAfter(style, f, f.text)}
                     footnoteHeight={0}
                     request={null}
-                    onPointerDown={noop}
+                    onPointerDown={(event) => overrideParentItem('frame', f, event)}
                     onDoubleClick={noop}
                     onHandleDown={noop}
                     onRotateDown={noop}
@@ -5804,6 +6713,7 @@ export function Workspace({
                 <ImageFrameView
                   key={im.id}
                   image={im}
+                  featherOverride={featherDrag?.target.kind === 'image' && featherDrag.target.id === im.id ? featherDrag.feather : undefined}
                   asset={assets[im.assetId]}
                   zoom={zoom}
                   tx={tx}
@@ -5814,7 +6724,7 @@ export function Workspace({
                   marked={!previewMode && multiSel.includes(im.id)}
                   showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                   onPointerDown={onImagePointerDown(im.id)}
-                  onDoubleClick={() => { enterGroupIsolation(im.id) }}
+                  onDoubleClick={() => { if (!relockParentOverride(im.id)) enterGroupIsolation(im.id) }}
                   onHandleDown={onHandleDown(im.id)}
                   onRotateDown={onRotateDown(im.id)}
                 />
@@ -5823,6 +6733,7 @@ export function Workspace({
                 <ShapeFrameView
                   key={sh.id}
                   shape={sh}
+                  featherOverride={featherDrag?.target.kind === 'shape' && featherDrag.target.id === sh.id ? featherDrag.feather : undefined}
                   zoom={zoom}
                   tx={tx}
                   ty={ty}
@@ -5842,6 +6753,7 @@ export function Workspace({
                   onRotateDown={onRotateDown(sh.id)}
                   onCornerDown={onCornerDown(sh.id)}
                   onDoubleClick={() => {
+                    if (relockParentOverride(sh.id)) return
                     if (enterGroupIsolation(sh.id)) {
                       if (tool === 'select') setTool('direct')
                       setSelectedId(sh.id)
@@ -5873,9 +6785,13 @@ export function Workspace({
                     ...(shapeStart.current.kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
                     ...(shapeStart.current.kind === 'rect' && shapePrefs.rect.radius > 0 ? { radii: [shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius, shapePrefs.rect.radius] as [number, number, number, number] } : {}),
                     ...(shapeFlip ? { flip: shapeFlip } : {}),
-                    fill: null,
-                    stroke: DEFAULT_SHAPE_STROKE,
-                    strokeWidth: 1,
+                    fill: defaultShapePaint.fill ?? null,
+                    fillGradient: defaultShapePaint.fillGradient,
+                    stroke: defaultShapePaint.stroke ?? DEFAULT_SHAPE_STROKE,
+                    strokeWidth: defaultShapePaint.strokeWidth ?? drawingStrokeWidth,
+                    strokeDash: defaultShapePaint.strokeDash,
+                    strokeCap: defaultShapePaint.strokeCap,
+                    opacity: defaultShapePaint.opacity,
                   }}
                   zoom={zoom}
                   tx={tx}
@@ -5955,9 +6871,11 @@ export function Workspace({
                   ? { noteId: selectedFootnote.id, all: footnoteSel.a === 0 && footnoteSel.b === selectedFootnote.content.length }
                   : null
                 const sourceFootnotes = [...(storyHead.footnotes ?? [])].sort((a, b) => a.anchor - b.anchor)
+                const tocMarkers = sliceTocDisplayMarkers(tocMarkersByHead.get(fl.headId), fl.start, fl.end)
                 const markersBeforeFrame = [...fl.story.slice(0, fl.start)].filter((char) => char === FOOTNOTE_MARKER).length
                 const markerOffsets = [...fl.slice].flatMap((char, index) => char === FOOTNOTE_MARKER ? [index] : [])
-                const footnoteMarkers = Object.fromEntries(markerOffsets.flatMap((offset, index) => {
+                const footnoteMarkers = {
+                  ...Object.fromEntries(markerOffsets.flatMap((offset, index) => {
                   const anchor = fl.start + offset
                   const noteIndex = sourceFootnotes.findIndex((note) => note.anchor === anchor)
                   const note = noteIndex >= 0 ? sourceFootnotes[noteIndex] : sourceFootnotes[markersBeforeFrame + index]
@@ -5965,11 +6883,16 @@ export function Workspace({
                   const indexInStory = sourceFootnotes.indexOf(note)
                   const number = footnoteNumbers.get(note.id) ?? footnoteConfig.startAt + indexInStory
                   return [[offset, formatFootnoteNumber(number, footnoteConfig.numberStyle, 'plain')]]
-                }))
+                  })),
+                  ...tocMarkers?.footnotes,
+                }
+                const lastParagraphStart = fl.slice.lastIndexOf('\n') + 1
+                const endsWithFootnoteReference = markerOffsets.some((offset) => offset >= lastParagraphStart)
                 return (
                   <TextFrameView
                     key={f.id}
                     frame={f}
+                    featherOverride={featherDrag?.target.kind === 'frame' && featherDrag.target.id === f.id ? featherDrag.feather : undefined}
                     style={fl.style}
                     slice={fl.slice}
                     runs={fl.runs}
@@ -5982,6 +6905,8 @@ export function Workspace({
                     spaceBeforeFirst={fl.spaceBeforeFirst}
                     spaceAfterLast={fl.spaceAfterLast}
                     footnoteMarkers={footnoteMarkers}
+                    tocPageMarkers={tocMarkers?.pageNumbers}
+                    tocLeaderMarkers={tocMarkers?.leaders}
                     footnoteReferenceScale={footnoteConfig.referenceScale}
                     footnoteAlignment={footnoteConfig.alignment}
                     footnotes={fl.footnotes}
@@ -6007,9 +6932,10 @@ export function Workspace({
                     onFootnoteSelectAll={selectAllFootnote}
                     onFootnoteStop={() => { setEditingFootnoteId(null); setEditingFootnoteFrameId(null); setEditingFootnoteOffset(null); setFootnoteRequest(null) }}
                     onSelectAllText={() => selectAllStory(f.id)}
+                    onSelectToStartText={(frameId, offset) => selectStoryToStart(frameId, offset)}
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
-                    continuesParagraphAtEnd={fl.end < fl.story.length && fl.story[fl.end - 1] !== '\n'}
+                    continuesParagraphAtEnd={fl.end < fl.story.length && fl.story[fl.end - 1] !== '\n' && !endsWithFootnoteReference}
                     hasPrev={fl.prevId !== null}
                     zoom={zoom}
                     tx={tx}
@@ -6024,6 +6950,7 @@ export function Workspace({
                     request={request && request.frameId === f.id ? request : null}
                     onPointerDown={onFramePointerDown(f.id)}
                     onDoubleClick={() => {
+                      if (relockParentOverride(f.id)) return
                       if (!panMode) {
                         enterGroupIsolation(f.id)
                         setSelectedId(f.id)
@@ -6074,9 +7001,15 @@ export function Workspace({
                           ? { left: tx + snap.span[0] * zoom - 18, top: ty + snap.world * zoom - 1, width: (snap.span[1] - snap.span[0]) * zoom + 36, height: 2 }
                           : { left: tx + snap.world * zoom - 1, top: ty + snap.span[0] * zoom - 18, width: 2, height: (snap.span[1] - snap.span[0]) * zoom + 36 }
                         : null
+                      const centerAlign: CSSProperties | null = guideDrag.centerSnap
+                        ? guideDrag.axis === 'h'
+                          ? { left: tx + r.x * zoom, top: ty + (r.y + r.h / 2) * zoom - 1, width: r.w * zoom, height: 2 }
+                          : { left: tx + (r.x + r.w / 2) * zoom - 1, top: ty + r.y * zoom, width: 2, height: r.h * zoom }
+                        : null
                       return (
                         <>
                           {align && <div className={`guide-align ${guideDrag.axis}`} style={align} />}
+                          {centerAlign && <div className={`guide-align center ${guideDrag.axis}`} style={centerAlign} />}
                           <div className={`guide ${guideDrag.axis} dragging${guideDrag.remove ? ' removing' : ''}${snap ? ' aligned' : ''}`} style={st} />
                           {!guideDrag.remove && (
                             <div className={'guide-tip' + (snap ? ' aligned' : '')} style={tip}>
@@ -6096,8 +7029,23 @@ export function Workspace({
                   <div key={`snap${i}`} className={'guide-align h' + (l.kind === 'center' ? ' center' : l.kind === 'object' ? ' object' : '')} style={{ left: tx + l.from * zoom, top: ty + l.at * zoom - 1, width: (l.to - l.from) * zoom, height: 2 }} />
                 ),
               )}
-              {spacingShown.length > 0 && (
+              {(spacingShown.length > 0 || gapPreview.length > 0) && (
                 <svg className="spacing-layer" aria-hidden="true">
+                  {gapPreview.map((gap, index) => {
+                    const x = tx + gap.x * zoom
+                    const y = ty + gap.y * zoom
+                    const width = gap.w * zoom
+                    const height = gap.h * zoom
+                    const label = formatLength(gap.axis === 'x' ? gap.w : gap.h, doc.unit)
+                    const labelWidth = label.length * 6.4 + 12
+                    return (
+                      <g key={`gap-preview-${index}`} className="gap-preview-label">
+                        <rect className="gap-preview" x={x} y={y} width={Math.max(1, width)} height={Math.max(1, height)} />
+                        <rect x={x + width / 2 - labelWidth / 2} y={y + height / 2 - 9} width={labelWidth} height={18} rx={4} />
+                        <text x={x + width / 2} y={y + height / 2 + 3.5} textAnchor="middle">{label}</text>
+                      </g>
+                    )
+                  })}
                   {spacingShown.map((m, i) => {
                     const a = m.axis === 'v' ? { x: tx + m.at * zoom, y: ty + m.from * zoom } : { x: tx + m.from * zoom, y: ty + m.at * zoom }
                     const b = m.axis === 'v' ? { x: a.x, y: ty + m.to * zoom } : { x: tx + m.to * zoom, y: a.y }
@@ -6259,6 +7207,7 @@ export function Workspace({
             </div>
           </div>
         </div>
+        {colorSamplerActive && colorSamplerPreview && createPortal(<ColorSamplerLens ref={colorSamplerLensRef} preview={colorSamplerPreview} />, document.body)}
         <DockingPanels
           enabledPanelIds={enabledDockPanelIds}
           openId={dockOpenId}
@@ -6339,6 +7288,7 @@ export function Workspace({
                       onFit={(fit: ImageFit) => updateImage(selImage.id, { fit })}
                       onWrap={(wrap) => updateImage(selImage.id, { wrap })}
                       onWrapOffset={(wrapOffset) => updateImage(selImage.id, { wrapOffset }, `wrapoff:${selImage.id}`)}
+                      onShadowChange={(patch) => updateImage(selImage.id, patch, `shadow:${selImage.id}`)}
                       onArrange={(op) => arrangeObject(selImage.id, op)}
                       onMatchShape={() => {
                         const a = assets[selImage.assetId]
@@ -6396,22 +7346,22 @@ export function Workspace({
             {
               id: 'color',
               label: 'צבע',
-              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, `color-tool:${colorTool ?? 'color'}`)} />,
+              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => { if (selShape) updateShape(selShape.id, patch, `color-tool:${colorTool ?? 'color'}`); else setDefaultShapePaint((current) => ({ ...current, ...patch })) }} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'gradient',
               label: 'מעבר צבע',
-              content: <ColorToolsPanel tool="gradient" shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, 'color-tool:gradient')} />,
+              content: <ColorToolsPanel tool="gradient" shape={selShape} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => { if (selShape) updateShape(selShape.id, patch, 'color-tool:gradient'); else setDefaultShapePaint((current) => ({ ...current, ...patch })) }} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'swatches',
               label: 'דוגמיות',
-              content: <ColorToolsPanel tool="swatches" shape={selShape} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => selShape && updateShape(selShape.id, patch, 'color-tool:swatches')} />,
+              content: <ColorToolsPanel tool="swatches" shape={selShape} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => { if (selShape) updateShape(selShape.id, patch, 'color-tool:swatches'); else setDefaultShapePaint((current) => ({ ...current, ...patch })) }} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'layers',
               label: 'שכבות',
-              content: <LayersPanel frames={frames} images={images} shapes={shapes} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onVisibility={setLayerVisible} onLock={(locked) => { setLayerLocked(locked); if (locked) { setSelectedId(null); setMultiSel([]); setGuideSel([]) } }} onItemVisibility={(id, visible) => { setItemVisibility((current) => ({ ...current, [id]: visible })); if (!visible && selectedId === id) setSelectedId(null) }} onItemLock={(id, locked) => { setItemLocks((current) => ({ ...current, [id]: locked })); if (locked && selectedId === id) setSelectedId(null) }} />,
+              content: <LayersPanel frames={frames} images={images} shapes={shapes} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onVisibility={setLayerVisible} onLock={(locked) => { setLayerLocked(locked); if (locked) { setSelectedId(null); setMultiSel([]); setGuideSel([]) } }} onItemVisibility={(id, visible) => { setItemVisibility((current) => ({ ...current, [id]: visible })); if (!visible && selectedId === id) setSelectedId(null) }} onItemLock={(id, locked) => { setItemLocks((current) => ({ ...current, [id]: locked })); if (locked && selectedId === id) setSelectedId(null) }} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
             },
           ]}
         />
@@ -6470,6 +7420,9 @@ export function Workspace({
       )}
       {runningHeaderDialog && (
         <RunningHeaderDialog styles={paragraphStyles} onApply={applyRunningHeader} onClose={() => setRunningHeaderDialog(false)} />
+      )}
+      {tocDialogOpen && (
+        <TocDialog styles={paragraphStyles} initial={doc.toc} onConfirm={createTableOfContents} onClose={() => setTocDialogOpen(false)} />
       )}
       {firstWordDialog && (
         <FirstWordStylerDialog styles={paragraphStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />

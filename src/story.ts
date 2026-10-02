@@ -8,6 +8,13 @@ import type { CharStyle, Run, TextFrame } from './document'
 export const charStyleOf = (s: CharStyle): CharStyle => ({
   fontFamily: s.fontFamily,
   ...(s.color ? { color: s.color } : {}),
+  ...(s.outlineColor ? { outlineColor: s.outlineColor } : {}),
+  ...(s.outlineWidth ? { outlineWidth: s.outlineWidth } : {}),
+  ...(s.shadowOffsetX !== undefined ? { shadowOffsetX: s.shadowOffsetX } : {}),
+  ...((s.shadowOffsetY ?? s.shadowOffset) !== undefined ? { shadowOffsetY: s.shadowOffsetY ?? s.shadowOffset } : {}),
+  ...(s.shadowOffset !== undefined ? { shadowOffset: s.shadowOffset } : {}),
+  ...(s.shadowColor ? { shadowColor: s.shadowColor } : {}),
+  ...(s.shadowOpacity !== undefined ? { shadowOpacity: s.shadowOpacity } : {}),
   fontSize: s.fontSize,
   weight: s.weight,
   italic: s.italic,
@@ -15,7 +22,7 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
 })
 
 const sameStyle = (a: CharStyle, b: CharStyle) =>
-  a.fontFamily === b.fontFamily && a.color === b.color && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
+  a.fontFamily === b.fontFamily && a.color === b.color && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth && a.shadowOffsetX === b.shadowOffsetX && (a.shadowOffsetY ?? a.shadowOffset) === (b.shadowOffsetY ?? b.shadowOffset) && a.shadowColor === b.shadowColor && a.shadowOpacity === b.shadowOpacity && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
 
 /** Drop empty runs and join neighbours that have the same style. */
 export function mergeRuns(runs: Run[]): Run[] {

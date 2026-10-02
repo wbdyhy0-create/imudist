@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { DEFAULT_FOOTNOTE_CONFIG, DEFAULT_TEXT_STYLE, FONT_FAMILIES, type CharStyle, type FootnoteLayoutConfig, type ParagraphStyleRecord, type Run, type TextStyle } from '../document'
 import { diffEdit, normalizeRuns, sliceRuns, styleAtChar } from '../story'
+import { NumberField } from './NumberField'
 
 function styleRuns(text: string, source: Run[], base: CharStyle, from: number, to: number, patch: Partial<CharStyle>): Run[] {
   const runs = normalizeRuns(text, source, base)
@@ -114,7 +115,7 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onSave, onClose 
         <h2>אפשרויות הערות שוליים</h2>
         <label className="footnote-dialog-field"><span>סידור</span><select value={config.mode} onChange={(event) => set('mode', event.target.value as FootnoteLayoutConfig['mode'])}><option value="vertical">אנכי</option><option value="horizontal">אופקי רציף</option></select></label>
         <label className="footnote-dialog-field"><span>מספר עמודות בטקסט ההערות</span><select value={config.columns} onChange={(event) => set('columns', Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>עמודה אחת</option><option value={2}>שתי עמודות</option></select></label>
-        <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><input type="number" min="25" max="100" value={Math.round(config.referenceScale * 100)} onChange={(event) => set('referenceScale', Number(event.target.value) / 100)} /></label>
+        <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><NumberField ariaLabel="גודל מספרי הפניה בטקסט" value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
         <label className="footnote-dialog-field"><span>מרווח בין מספר ההערה לטקסט (pt)</span><input type="number" min="0" max="100" value={config.numberTextGap} onChange={(event) => set('numberTextGap', Number(event.target.value))} /></label>
         <label className="footnote-dialog-field"><span>מרווח בין הערות אופקיות (pt)</span><input type="number" min="0" max="100" value={config.minSpacingBetweenInline} onChange={(event) => set('minSpacingBetweenInline', Number(event.target.value))} /></label>
         <label className="footnote-dialog-field"><span>גובה מרבי (pt)</span><input type="number" min="12" max="1000" value={config.maxFootnoteHeight} onChange={(event) => set('maxFootnoteHeight', Number(event.target.value))} /></label>

@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTextEditor, isTyping } from './dom'
@@ -18,7 +18,9 @@ import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
-import { parentEditDoc, parentShadowContent } from './pages'
+import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
+import type { PdfImportSource } from './importPdf'
+import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -33,8 +35,10 @@ const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
+const newImportedImageId = () => globalThis.crypto?.randomUUID?.() ?? `pdf-image-${Date.now()}-${Math.random().toString(36).slice(2)}`
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
 const isDocumentFile = (f: File) => f.name.toLowerCase().endsWith(FILE_EXT)
+const isPdfFile = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
@@ -74,6 +78,7 @@ export default function App() {
   const [importOptionsFile, setImportOptionsFile] = useState<File | null>(null)
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
+  const [importPdfSource, setImportPdfSource] = useState<PdfImportSource | null>(null)
   const ws = useRef<WorkspaceHandle>(null)
 
   const editingParent = editingParentId ? (session.parents.find((p) => p.id === editingParentId) ?? null) : null
@@ -94,13 +99,13 @@ export default function App() {
   /** the document's content for PDF export: every page's assigned parent content mixed in, behind its own objects */
   const exportContent = useMemo(() => {
     if (!doc) return null
-    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections, session.frames)
+    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections, session.frames, undefined, session.parentOverrides, session.images, session.shapes)
     return {
       frames: [...shadow.frames, ...session.frames],
       images: [...shadow.images, ...session.images],
       shapes: [...shadow.shapes, ...session.shapes],
     }
-  }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes])
+  }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes, session.parentOverrides])
 
   /**
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
@@ -110,6 +115,20 @@ export default function App() {
     // an Imudist document is opened, not placed
     for (const f of all.filter(isDocumentFile)) await sessionRef.current.openTextFile(f)
     const files = all.filter((f) => !isDocumentFile(f))
+    const pdfs = files.filter(isPdfFile)
+    if (pdfs.length > 0) {
+      if (pdfs.length !== 1 || files.length !== 1) {
+        session.showError('ייבוא PDF', new ImportError('יש לבחור קובץ PDF אחד בכל פעם.'))
+        return
+      }
+      try {
+        const { openPdfFile } = await import('./importPdf')
+        setImportPdfSource(await openPdfFile(pdfs[0]))
+      } catch (e) {
+        session.showError('לא ניתן לייבא את קובץ ה-PDF', e instanceof ImportError ? e : new ImportError('הקובץ פגום או מוגן בסיסמה.'))
+      }
+      return
+    }
     const pictures = files.filter(isImageFile)
     try {
       if (pictures.length > 0) {
@@ -140,6 +159,69 @@ export default function App() {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
+  const cancelPdfImport = () => {
+    const source = importPdfSource
+    setImportPdfSource(null)
+    if (source) void source.destroy()
+  }
+  const confirmPdfImport = async (pageNumbers: number[]) => {
+    const source = importPdfSource
+    setImportPdfSource(null)
+    if (!source || !doc) return
+    try {
+      const { readPdfFile } = await import('./importPdf')
+      const placed = await readPdfFile(source, pageNumbers)
+      let content: DocContent = {
+        doc,
+        frames: session.frames,
+        images: session.images,
+        assets: session.assets,
+        guides: session.guides,
+        shapes: session.shapes,
+        paragraphStyles: session.paragraphStyles,
+        parents: session.parents,
+        pageParents: session.pageParents,
+        sections: session.sections,
+        parentOverrides: session.parentOverrides,
+      }
+      if (placed.length > content.doc.pages) {
+        const currentMaster = activeParentId && session.parents.some((parent) => parent.id === activeParentId)
+          ? activeParentId
+          : session.parents[0]?.id ?? null
+        const expanded = insertDocumentPages(content, content.doc.pages, placed.length - content.doc.pages, false, currentMaster)
+        if (!expanded || expanded.doc.pages < placed.length) throw new ImportError('לא ניתן להוסיף את כל עמודי ה-PDF למסמך.')
+        content = expanded
+      }
+      const rects = pageRects(content.doc)
+      const images = [...content.images]
+      const assets = { ...content.assets }
+      placed.forEach(({ assetId, asset }, pageIndex) => {
+        const page = rects[pageIndex]
+        const margins = marginsOf(content.doc, pageIndex)
+        const width = page.w - margins.left - margins.right
+        const height = page.h - margins.top - margins.bottom
+        if (width <= 0 || height <= 0) throw new ImportError(`לעמוד ${pageIndex + 1} אין שטח פנוי בין השוליים.`)
+        images.push({
+          id: newImportedImageId(),
+          label: asset.name,
+          x: page.x + margins.left,
+          y: page.y + margins.top,
+          w: width,
+          h: height,
+          assetId,
+          fit: 'fit',
+        })
+        assets[assetId] = asset
+      })
+      setPlacing(null)
+      setPlacingImages([])
+      session.pages.commit({ ...content, images, assets })
+    } catch (e) {
+      session.showError('לא ניתן לייבא את קובץ ה-PDF', e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : 'הקובץ פגום או מוגן בסיסמה.'))
+    } finally {
+      await source.destroy()
+    }
+  }
   const confirmDocxImport = async (replaceSelected: boolean, includeFootnotes: boolean) => {
     const file = importOptionsFile
     setImportOptionsFile(null)
@@ -155,7 +237,7 @@ export default function App() {
   }
   const importFiles = async () => {
     const files = await pickFiles(
-      `${FILE_EXT},.docx,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+      `${FILE_EXT},.docx,.pdf,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -367,6 +449,7 @@ export default function App() {
               onPlacingChange={preview ? noop : setPlacing}
               images={editingParent ? editingParent.images : preview ? NO_IMAGES : session.images}
               assets={session.assets}
+              colorSamples={preview ? [] : session.colorSamples}
               onImagesChange={editingParent ? (next, key) => updateParent({ images: next }, key) : preview ? noop : session.changeImages}
               placingImages={preview ? NO_PLACED : placingImages}
               onPlacingImagesChange={preview ? noop : setPlacingImages}
@@ -383,6 +466,7 @@ export default function App() {
               onPageParentsChange={preview ? noop : session.changePageParents}
               sections={preview ? NO_SECTIONS : session.sections}
               onSectionsChange={preview ? noop : session.changeSections}
+              parentOverrides={preview ? [] : session.parentOverrides}
               editingParentId={editingParentId}
               onEditParent={setEditingParentId}
               onExitParentEdit={() => setEditingParentId(null)}
@@ -450,12 +534,13 @@ export default function App() {
           />
         )}
         {dialog === 'export' && doc && exportContent && (
-          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} paragraphStyles={session.paragraphStyles} onClose={closeDialog} />
+          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} onClose={closeDialog} />
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
       {session.modal && <Modal spec={session.modal} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes) => void confirmDocxImport(replaceSelected, includeFootnotes)} onClose={() => setImportOptionsFile(null)} />}
+      {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
     </div>
   )
 }

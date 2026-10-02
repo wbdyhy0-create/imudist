@@ -20,6 +20,7 @@ export const hasFilePicker = isTauri || (typeof api.showSaveFilePicker === 'func
 const TYPES = [{ description: 'מסמך Imudist', accept: { 'application/json': [FILE_EXT] } }]
 
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError'
+export const isFileHandlePermissionError = (e: unknown) => e instanceof DOMException && (e.name === 'SecurityError' || e.name === 'NotAllowedError')
 
 /** "My file.imudist" → "My file" */
 export const baseName = (fileName: string) => fileName.replace(/\.[^./\\]*$/, '')
@@ -45,7 +46,14 @@ export async function saveWithPicker(suggestedName: string, text: string): Promi
   }
   try {
     const handle = await api.showSaveFilePicker!({ suggestedName, types: TYPES })
-    await writeToHandle(handle, text)
+    try {
+      await writeToHandle(handle, text)
+    } catch (e) {
+      if (!isFileHandlePermissionError(e)) throw e
+      const name = handle.name || suggestedName
+      downloadText(name, text)
+      return { name, handle: null }
+    }
     return { name: handle.name, handle }
   } catch (e) {
     if (isAbort(e)) return null
@@ -67,6 +75,7 @@ export async function openWithPicker(): Promise<{ ref: FileRef; text: string } |
     return { ref: { name: handle.name, handle }, text: await (await handle.getFile()).text() }
   } catch (e) {
     if (isAbort(e)) return null
+    if (isFileHandlePermissionError(e)) return openWithInput()
     throw e
   }
 }

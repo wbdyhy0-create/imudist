@@ -89,11 +89,11 @@ export const TOOLS: ToolDef[] = [
   { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
   { id: 'heal', label: 'מברשת ריפוי', group: 4, enabled: true, icon: <><path d="m4 12 8-8 8 8-8 8z" /><path d="M12 8v8M8 12h8" /><circle cx="12" cy="12" r="2" fill="currentColor" /></> },
   { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
-  { id: 'gap', label: 'רווח', group: 4, key: 'U', enabled: false, icon: <path d="M4 4v16M20 4v16M9 12h6M11 9.500 8.500 12l2.500 2.500M13 9.500l2.500 2.500-2.500 2.500" /> },
+  { id: 'gap', label: 'רווח', group: 4, key: 'U', code: 'KeyU', enabled: true, icon: <path d="M4 4v16M20 4v16M9 12h6M11 9.500 8.500 12l2.500 2.500M13 9.500l2.500 2.500-2.500 2.500" /> },
   { id: 'color', label: 'צבע', group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
   { id: 'gradient', label: 'מעבר צבע', group: 5, key: 'G', code: 'KeyG', enabled: true, icon: <path d="M4 6h16v12H4zM7 6v12M10 6v12M13 6v12M16 6v12" /> },
   { id: 'swatches', label: 'דוגמיות צבע', group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
-  { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', enabled: false, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
+  { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', code: 'KeyG', shift: true, enabled: true, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
 
   { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <path d="m15 4 5 5-2.500 2.500-5-5zM12.500 8.500 4 17v3h3l8.500-8.500" /> },
   { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
@@ -107,7 +107,7 @@ const SETTINGS_TOOLS: ToolId[] = ['rect', 'polygon', 'framerect', 'framepolygon'
 export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polygon'>> = { framerect: 'rect', frameellipse: 'ellipse', framepolygon: 'polygon' }
 
 /**
- * Tools that share one slot in the toolbox, like the shape and type tools in InDesign: the slot shows and uses whichever
+ * Tools that share one slot in the toolbox, like the shape and type tools in professional layout tools: the slot shows and uses whichever
  * one was picked last, and a small mark in its corner opens a flyout to pick a different one.
  */
 const FOLD_GROUPS: ToolId[][] = [
@@ -141,9 +141,11 @@ const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
   eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
   heal: 'גרירה על תפר בתמונה ממלאת אותו בפיקסלים מהאזור שמסביב; סוגריים מרובעים משנים את גודל המברשת',
+  gap: 'גרור בין אובייקטים מיושרים כדי להרחיב צד אחד ולכווץ את השני; Shift מגביל לזוג הקרוב בלבד',
   color: 'בחירת צבע מילוי או קו',
   gradient: 'יצירת מעבר צבע',
   swatches: 'בחירה וניהול של דוגמיות צבע',
+  feather: 'גרירת נקודת התחלה וסיום יוצרת מסכת אטימות',
   eyedropper: 'דגימת סגנון מטקסט או אובייקט',
 }
 
@@ -162,6 +164,11 @@ interface ToolboxProps {
 }
 
 export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode, colorTarget, fillColor, strokeColor, onColorTarget, onOpenColor }: ToolboxProps) {
+  const toolboxRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null)
+  const [floating, setFloating] = useState(false)
+  const [floatingPosition, setFloatingPosition] = useState({ left: 0, top: 94 })
+  const [dockTarget, setDockTarget] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   // which tool of a fold group its slot shows, keyed by the group's first id; starts at that first tool, and follows
   // `tool` whenever it becomes one of the group's own (a click on the slot, a pick from its flyout, or the tool's own
   // keyboard shortcut, which changes `tool` from outside this component). Adjusted right in render, as React's docs say
@@ -179,7 +186,63 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
   const renderedGroups = new Set<ToolId>()
 
   return (
-    <div className="toolbox" role="toolbar" aria-orientation="vertical" aria-label="כלים">
+    <div
+      ref={toolboxRef}
+      className={'toolbox' + (floating ? ' toolbox-floating' : '')}
+      style={floating ? { left: floatingPosition.left, top: floatingPosition.top } : undefined}
+      role="toolbar"
+      aria-orientation="vertical"
+      aria-label="כלים"
+    >
+      <button
+        className="toolbox-grab"
+        aria-label="גרור את סרגל הכלים"
+        title={floating ? 'גרור לסרגל השמאלי כדי להצמיד' : 'גרור כדי לנתק ולהזיז'}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          const bounds = toolboxRef.current?.getBoundingClientRect()
+          if (!bounds) return
+          dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: bounds.left, top: bounds.top, moved: floating }
+          event.preventDefault()
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId || event.buttons === 0) return
+          const dx = event.clientX - drag.startX
+          const dy = event.clientY - drag.startY
+          if (!drag.moved && Math.hypot(dx, dy) < 4) return
+          drag.moved = true
+          const height = Math.min(window.innerHeight * 0.78, 650)
+          setFloating(true)
+          setFloatingPosition({
+            left: Math.max(0, Math.min(window.innerWidth - 42, drag.left + dx)),
+            top: Math.max(32, Math.min(window.innerHeight - height - 8, drag.top + dy)),
+          })
+          const dock = toolboxRef.current?.parentElement?.getBoundingClientRect()
+          const canDock = !!dock && event.clientX <= dock.left + 66 && event.clientY >= dock.top && event.clientY <= dock.bottom
+          setDockTarget((current) => {
+            const next = canDock && dock ? { left: dock.left, top: dock.top, width: 42, height: dock.height } : null
+            return current?.left === next?.left && current?.top === next?.top && current?.height === next?.height ? current : next
+          })
+          event.preventDefault()
+        }}
+        onPointerUp={(event) => {
+          const drag = dragRef.current
+          if (!drag || drag.pointerId !== event.pointerId) return
+          const dock = toolboxRef.current?.parentElement?.getBoundingClientRect()
+          dragRef.current = null
+          setDockTarget(null)
+          if (!drag.moved) return
+          if (dock && event.clientX <= dock.left + 66 && event.clientY >= dock.top && event.clientY <= dock.bottom) {
+            setFloating(false)
+            setFloatingPosition({ left: 0, top: 94 })
+          }
+        }}
+        onPointerCancel={() => { dragRef.current = null; setDockTarget(null) }}
+      >
+        <svg viewBox="0 0 24 12" aria-hidden="true"><circle cx="6" cy="3" r="1" /><circle cx="12" cy="3" r="1" /><circle cx="18" cy="3" r="1" /><circle cx="6" cy="9" r="1" /><circle cx="12" cy="9" r="1" /><circle cx="18" cy="9" r="1" /></svg>
+      </button>
       <div className="toolbox-scroll">
       {TOOLS.map((t, i) => {
         const group = foldGroupOf.get(t.id)
@@ -283,6 +346,11 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
           }}
           onClose={() => setFlyout(null)}
         />
+      )}
+      {floating && dockTarget && (
+        <div className="toolbox-dock-target" style={{ left: dockTarget.left, top: dockTarget.top, width: dockTarget.width, height: dockTarget.height }} aria-hidden="true">
+          <span>שחרר כדי להצמיד</span>
+        </div>
       )}
     </div>
   )

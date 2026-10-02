@@ -1,10 +1,12 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import type { Asset, PathVertex, ShapeFrame } from '../document'
+import type { Asset, GradientFeather, PathVertex, ShapeFrame } from '../document'
 import { linearGradientLine } from '../colorModels'
+import { featherCss } from '../feather'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
+import { dropShadowFilter } from '../shadow'
 
 /** the picture's corner handles, while its own content (not the frame) is being resized */
 const CONTENT_CORNERS = ['nw', 'ne', 'se', 'sw'] as const
@@ -17,6 +19,7 @@ export const MIN_CORNER_HANDLES = 56
 
 interface Props {
   shape: ShapeFrame
+  featherOverride?: GradientFeather
   zoom: number
   /** screen position of world (0, 0) inside the sheet */
   tx: number
@@ -74,6 +77,7 @@ export type PathPeg = 'anchor' | 'end' | 'flip'
 /** A drawn shape: the outline is an SVG path (so only the shape itself catches the pointer), plus handles when selected. */
 export function ShapeFrameView({
   shape,
+  featherOverride,
   zoom,
   tx,
   ty,
@@ -107,6 +111,7 @@ export function ShapeFrameView({
   const isPath = shape.kind === 'path'
   const w = shape.w * zoom
   const h = shape.h * zoom
+  const maskFeather = featherOverride ?? shape.feather
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
   /** the shape's own corner points, while the point-editing tool has it selected */
   const ring = directMode ? editableRing(shape) : null
@@ -159,7 +164,17 @@ export function ShapeFrameView({
         transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
       }}
     >
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={isLine ? { overflow: 'visible' } : undefined} aria-hidden="true">
+      <svg
+        width={w}
+        height={h}
+        viewBox={`0 0 ${w} ${h}`}
+        style={{
+          overflow: 'visible',
+          filter: dropShadowFilter(shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, zoom, shape.shadowColor),
+          ...(maskFeather ? { maskImage: featherCss(maskFeather, w, h), WebkitMaskImage: featherCss(maskFeather, w, h) } : {}),
+        }}
+        aria-hidden="true"
+      >
         {shape.fillGradient && (
           <defs>
             {shape.fillGradient.type === 'radial' ? (
@@ -259,6 +274,10 @@ export function ShapeFrameView({
                         fontSize={r.style.fontSize * zoom}
                         fontWeight={r.style.weight}
                         fontStyle={r.style.italic ? 'italic' : 'normal'}
+                        stroke={r.style.outlineWidth ? r.style.outlineColor ?? '#000000' : 'none'}
+                        strokeWidth={(r.style.outlineWidth ?? 0) * zoom}
+                        paintOrder="stroke fill"
+                        filter={dropShadowFilter(r.style.shadowOffsetX, r.style.shadowOffsetY ?? r.style.shadowOffset, r.style.shadowOpacity, zoom, r.style.shadowColor)}
                         style={r.style.tracking ? { letterSpacing: (r.style.tracking / 1000) * r.style.fontSize * zoom } : undefined}
                       >
                         {piece}

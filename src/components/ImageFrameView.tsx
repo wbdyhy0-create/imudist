@@ -1,9 +1,12 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { Asset, ImageFrame } from '../document'
+import type { Asset, GradientFeather, ImageFrame } from '../document'
+import { featherCss } from '../feather'
+import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 
 interface Props {
   image: ImageFrame
+  featherOverride?: GradientFeather
   asset: Asset | undefined
   zoom: number
   /** stacking rank (higher = in front) */
@@ -26,7 +29,7 @@ interface Props {
 const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' } as const
 
 /** A picture in its frame. The picture is drawn by the browser, scaled to the frame according to `image.fit`. */
-export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onDoubleClick, onHandleDown, onRotateDown }: Props) {
+export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onDoubleClick, onHandleDown, onRotateDown }: Props) {
   return (
     <div
       className={'image-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
@@ -46,7 +49,16 @@ export function ImageFrameView({ image, asset, zoom, z, tx, ty, selected, locked
       onDoubleClick={onDoubleClick}
     >
       {asset ? (
-        <img src={asset.dataUrl} alt={asset.name} draggable={false} style={{ objectFit: OBJECT_FIT[image.fit] }} />
+        <img
+          src={asset.dataUrl}
+          alt={asset.name}
+          draggable={false}
+          style={{
+            objectFit: OBJECT_FIT[image.fit],
+            filter: dropShadowFilter(image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, zoom, image.shadowColor),
+            ...((featherOverride ?? image.feather) ? { maskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom), WebkitMaskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom) } : {}),
+          }}
+        />
       ) : (
         <div className="image-missing">התמונה חסרה</div>
       )}

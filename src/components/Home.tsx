@@ -46,9 +46,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
             {recent.map((r) => (
               <li key={r.name + r.at}>
                 <button onClick={() => onOpenRecent(r)}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M7 3h7l4 4v14H7zM14 3v4h4" />
-                  </svg>
+                  <img className="recent-app-icon" src="/icons/icon-192.png" alt="" />
                   <span className="recent-name">{r.name}</span>
                   <span className="recent-date">{formatDate(r.at)}</span>
                 </button>

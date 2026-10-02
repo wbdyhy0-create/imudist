@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "imudist"
-version = "0.0.4"
+version = "0.0.7"
 dependencies = [
  "serde",
  "serde_json",

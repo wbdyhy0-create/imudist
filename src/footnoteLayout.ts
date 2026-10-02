@@ -136,8 +136,15 @@ function fitPrefix(item: FootnoteLayoutItem, width: number, maxHeight: number, m
     if (content && measure({ ...item, content }, width).height <= maxHeight) low = mid
     else high = mid - 1
   }
+  const fitsAtLeastOneWord = low > 0
+  // a one- or two-word "rest" would open the next frame alone, looking like a stranded scrap (the same concern as
+  // textLayout.ts's `avoidLooseLastLine` for body text) - taking a few more words back from the prefix costs a
+  // little room here, in exchange for a continuation that reads as a real line instead of a stray word. A footnote
+  // too short to leave 3 words behind this way moves to the next frame whole (low drops to 0, `content` stays empty) -
+  // not into the character-level fallback below, which is only for when not even one whole word truly fits.
+  if (fitsAtLeastOneWord && words.length - low > 0 && words.length - low < 3) low = Math.max(0, words.length - 3)
   let content = words.slice(0, low).join('')
-  if (!content) {
+  if (!content && !fitsAtLeastOneWord) {
     const chars = [...item.content]
     low = 0
     high = chars.length

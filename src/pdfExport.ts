@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { styleOf } from './frames'
 import { ownerPage, pageRects, type PageRect } from './pages'
 import { footnoteTextStyle, numberFootnotes } from './footnoteLayout'
@@ -12,6 +12,8 @@ import { floatsFor } from './wrap'
 import { isTauri } from './fileio'
 import { linearGradientLine } from './colorModels'
 import { normalizeRuns } from './story'
+import { tocDisplayMarkers } from './toc'
+import { applyFeatherCanvasMask } from './feather'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -52,6 +54,28 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   const boxY = (image.y - page.y) * scale
   const boxW = image.w * scale
   const boxH = image.h * scale
+  if (image.feather) {
+    const layer = document.createElement('canvas')
+    layer.width = Math.max(1, Math.ceil(boxW))
+    layer.height = Math.max(1, Math.ceil(boxH))
+    const layerContext = layer.getContext('2d')!
+    const fit = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
+    layerContext.drawImage(img, fit.x, fit.y, fit.w, fit.h)
+    applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH)
+    ctx.save()
+    ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
+    if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
+    ctx.translate(-boxW / 2, -boxH / 2)
+    ctx.globalAlpha = image.opacity ?? 1
+    if (image.flipX || image.flipY) {
+      ctx.translate(boxW / 2, boxH / 2)
+      ctx.scale(image.flipX ? -1 : 1, image.flipY ? -1 : 1)
+      ctx.translate(-boxW / 2, -boxH / 2)
+    }
+    ctx.drawImage(layer, 0, 0, boxW, boxH)
+    ctx.restore()
+    return
+  }
   ctx.save()
   ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
   if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
@@ -72,11 +96,40 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
 
 async function drawTextDom(
   ctx: CanvasRenderingContext2D,
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; paragraphStyles: ParagraphStyleRecord[] },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[]; storyFrames?: TextFrame[] },
   flows: Map<string, FrameFlow>,
   page: PageRect,
   scale: number,
+  skipFeather = false,
 ) {
+  if (!skipFeather && content.frames.some((frame) => frame.feather)) {
+    let index = 0
+    while (index < content.frames.length) {
+      if (content.frames[index].feather) {
+        const frame = content.frames[index++]
+        const layer = document.createElement('canvas')
+        layer.width = Math.max(1, Math.ceil(page.w * scale))
+        layer.height = Math.max(1, Math.ceil(page.h * scale))
+        const layerContext = layer.getContext('2d')!
+        await drawTextDom(layerContext, { ...content, frames: [frame], storyFrames: content.storyFrames ?? content.frames }, flows, page, scale, true)
+        layerContext.save()
+        layerContext.globalCompositeOperation = 'destination-in'
+        const width = frame.w * scale
+        const height = frame.h * scale
+        layerContext.translate((frame.x - page.x + frame.w / 2) * scale, (frame.y - page.y + frame.h / 2) * scale)
+        if (frame.rotation) layerContext.rotate((frame.rotation * Math.PI) / 180)
+        layerContext.translate(-width / 2, -height / 2)
+        applyFeatherCanvasMask(layerContext, frame.feather!, width, height)
+        layerContext.restore()
+        ctx.drawImage(layer, 0, 0)
+      } else {
+        const start = index
+        while (index < content.frames.length && !content.frames[index].feather) index++
+        await drawTextDom(ctx, { ...content, frames: content.frames.slice(start, index) }, flows, page, scale, true)
+      }
+    }
+    return
+  }
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
   const root = document.createElement('div')
   Object.assign(root.style, {
@@ -100,6 +153,11 @@ async function drawTextDom(
       const hasPrev = flow.prevId !== null
       const hasNext = frame.next !== null
       const continuesAtEnd = flow.end < flow.story.length && flow.story[flow.end - 1] !== '\n'
+      const storyFrames = content.storyFrames ?? content.frames
+      const head = storyFrames.find((candidate) => candidate.id === flow.headId)
+      const tocMarkers = head?.tocPageReferences?.length
+        ? tocDisplayMarkers(head.tocPageReferences, flow.story, flow.start, flow.end, storyFrames, flows, pageRects(content.doc), content.sections, content.doc, content.doc.toc?.leader ?? '.', head.tocFootnoteReferences)
+        : null
       const outer = document.createElement('div')
       Object.assign(outer.style, {
         position: 'absolute',
@@ -146,10 +204,15 @@ async function drawTextDom(
             startParaIndex: flow.startParaIndex,
             firstLineIndent: style.firstLineIndent,
             atParaStart: flow.atParaStart,
-            footnoteMarkers: Object.fromEntries(flow.footnoteReferences.map((note) => [note.anchor - flow.start, String(note.referenceNumber)])),
+            footnoteMarkers: {
+              ...Object.fromEntries(flow.footnoteReferences.map((note) => [note.anchor - flow.start, String(note.referenceNumber)])),
+              ...tocMarkers?.footnotes,
+            },
             footnoteReferenceScale: footnoteConfig.referenceScale,
+            tocPageMarkers: tocMarkers?.pageNumbers,
+            tocLeaderMarkers: tocMarkers?.leaders,
           },
-          content.frames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
+          storyFrames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
           style.align,
           continuesAtEnd,
         ),
@@ -163,7 +226,7 @@ async function drawTextDom(
           left: '0',
           right: '0',
           bottom: '0',
-          height: `${flow.footnoteHeight - footnoteConfig.dividerGap}px`,
+          height: `${flow.footnoteHeight}px`,
           direction: 'rtl',
           whiteSpace: 'pre-wrap',
           overflow: 'hidden',
@@ -171,7 +234,7 @@ async function drawTextDom(
         })
         const divider = document.createElement('div')
         divider.className = 'footnote-divider'
-        Object.assign(divider.style, { position: 'absolute', top: '0', right: '0', width: '35%', borderTop: '1px solid currentColor', opacity: '0.7' })
+        Object.assign(divider.style, { position: 'absolute', top: `${footnoteConfig.dividerGap}px`, right: '0', width: '35%', borderTop: '1px solid currentColor', opacity: '0.7' })
         footnotes.appendChild(divider)
         for (const note of flow.footnotes) {
           const noteStyle = note.style ?? footnoteTextStyle(footnoteConfig, content.paragraphStyles)
@@ -239,6 +302,21 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
   const boxY = (shape.y - page.y) * scale
   const w = shape.w * scale
   const h = shape.h * scale
+  if (shape.feather) {
+    const layer = document.createElement('canvas')
+    layer.width = Math.max(1, Math.ceil(w))
+    layer.height = Math.max(1, Math.ceil(h))
+    const layerContext = layer.getContext('2d')!
+    await drawShape(layerContext, { ...shape, x: 0, y: 0, opacity: 1, rotation: undefined, feather: undefined }, { x: 0, y: 0, w: shape.w, h: shape.h }, scale, asset)
+    applyFeatherCanvasMask(layerContext, shape.feather, w, h)
+    ctx.save()
+    ctx.translate(boxX + w / 2, boxY + h / 2)
+    if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
+    ctx.globalAlpha = shape.opacity ?? 1
+    ctx.drawImage(layer, -w / 2, -h / 2, w, h)
+    ctx.restore()
+    return
+  }
   ctx.save()
   ctx.translate(boxX + w / 2, boxY + h / 2)
   if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
@@ -289,7 +367,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
  *  gets drawn) beyond it on every side, so pictures/shapes that bleed off the page still print all the way to the
  *  cut line. */
 async function renderPage(
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[] },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[] },
   flows: Map<string, FrameFlow>,
   page: PageRect,
   bleedPt: number,
@@ -307,6 +385,38 @@ async function renderPage(
   ctx.translate(bleedPt * scale, bleedPt * scale)
   const area = { x: page.x - bleedPt, y: page.y - bleedPt, w: page.w + 2 * bleedPt, h: page.h + 2 * bleedPt }
   const overlaps = (ox: number, oy: number, ow: number, oh: number) => ox < area.x + area.w && ox + ow > area.x && oy < area.y + area.h && oy + oh > area.y
+  const isParentShadow = (item: { id: string }) => item.id.startsWith('parent-shadow:')
+  const parentContentAbove = content.doc.parentItemsAbovePageContent ?? false
+
+  if (parentContentAbove) {
+    const pageShapes = content.shapes.filter((shape) => !isParentShadow(shape))
+    const parentShapes = content.shapes.filter(isParentShadow)
+    const pageImages = content.images.filter((image) => !isParentShadow(image))
+    const parentImages = content.images.filter(isParentShadow)
+    const pageFrames = content.frames.filter((frame) => !isParentShadow(frame))
+    const parentFrames = content.frames.filter(isParentShadow)
+
+    for (const shape of pageShapes) {
+      if (overlaps(shape.x, shape.y, shape.w, shape.h)) await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
+    }
+    for (const image of pageImages) {
+      if (!overlaps(image.x, image.y, image.w, image.h)) continue
+      const asset = content.assets[image.assetId]
+      if (asset) await drawImage(ctx, image, asset, page, scale)
+    }
+    await drawTextDom(ctx, { doc: content.doc, frames: pageFrames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections, storyFrames: content.frames }, flows, page, scale)
+    for (const shape of parentShapes) {
+      if (overlaps(shape.x, shape.y, shape.w, shape.h)) await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
+    }
+    for (const image of parentImages) {
+      if (!overlaps(image.x, image.y, image.w, image.h)) continue
+      const asset = content.assets[image.assetId]
+      if (asset) await drawImage(ctx, image, asset, page, scale)
+    }
+    await drawTextDom(ctx, { doc: content.doc, frames: parentFrames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections, storyFrames: content.frames }, flows, page, scale)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    return canvas
+  }
 
   // shapes and pictures, in document order (no explicit z is fine here — this app doesn't expose a merged
   // stacking order at this layer, and export ordering by array position matches how they were placed)
@@ -319,7 +429,7 @@ async function renderPage(
     const asset = content.assets[image.assetId]
     if (asset) await drawImage(ctx, image, asset, page, scale)
   }
-  await drawTextDom(ctx, { doc: content.doc, frames: content.frames, images: content.images, paragraphStyles: content.paragraphStyles }, flows, page, scale)
+  await drawTextDom(ctx, { doc: content.doc, frames: content.frames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections }, flows, page, scale)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   return canvas
 }
@@ -329,7 +439,7 @@ async function renderPage(
  *  scramble RTL/BiDi the way a hand-rolled vector-text-plus-embedded-font pipeline realistically could), then
  *  downloads it and opens it in a new tab. `onProgress(done, total)` fires after each page renders. */
 export async function exportPdf(
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[] },
+  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[] },
   options: PdfExportOptions,
   fileBaseName: string,
   onProgress?: (done: number, total: number) => void,

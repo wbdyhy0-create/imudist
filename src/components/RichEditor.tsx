@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run, TextAlign } from '../document'
-import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, readSelectionIn, setSelectionIn, type ParagraphPatch } from '../richtext'
+import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
@@ -32,6 +32,8 @@ interface Props {
   /** leading/indents/alignment a paragraph style (or a change made to it) overrides, one entry per paragraph of the WHOLE story */
   paragraphPatches?: ParagraphPatch[]
   footnoteMarkers?: Record<number, string>
+  tocPageMarkers?: Record<number, string>
+  tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale?: number
   /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
@@ -43,6 +45,7 @@ interface Props {
   onEdit: (from: number, to: number, insert: string) => void
   onSelect: (a: number, b: number) => void
   onSelectAll?: () => void
+  onSelectToStart?: (offset: number) => void
   onBackspaceAtStart: () => void
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
@@ -85,7 +88,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${p.text}|${JSON.stringify(p.runs)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
     if (rebuilt) {
@@ -102,6 +105,8 @@ export function RichEditor(p: Props) {
             atParaStart: p.atParaStart,
             firstLineIndent: p.firstLineIndent,
             footnoteMarkers: p.footnoteMarkers,
+            tocPageMarkers: p.tocPageMarkers,
+            tocLeaderMarkers: p.tocLeaderMarkers,
             footnoteReferenceScale: p.footnoteReferenceScale,
           },
           p.paragraphPatches,
@@ -253,6 +258,17 @@ export function RichEditor(p: Props) {
         window.addEventListener('pointerup', stop)
       }}
       onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Home' && live.current.onSelectToStart) {
+          e.preventDefault()
+          e.stopPropagation()
+          const selection = document.getSelection()
+          const focus = selection?.focusNode && e.currentTarget.contains(selection.focusNode)
+            ? textOffsetIn(e.currentTarget, selection.focusNode, selection.focusOffset)
+            : live.current.text.length
+          setSelectionIn(e.currentTarget, 0, focus)
+          live.current.onSelectToStart(focus)
+          return
+        }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && live.current.onSelectAll) {
           e.preventDefault()
           e.stopPropagation()

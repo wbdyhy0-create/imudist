@@ -1,4 +1,4 @@
-import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
 import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
@@ -11,6 +11,17 @@ export interface PageRect {
   y: number
   w: number
   h: number
+}
+
+export interface ParentShadowRef {
+  parentId: string
+  pageIndex: number
+  sourceId: string
+}
+
+export interface ParentOverride extends ParentShadowRef {
+  kind: 'frame' | 'image' | 'shape'
+  localId: string
 }
 
 /** Everything the user has made: the settings and the objects on the pages. It is what undo / save / open handle. */
@@ -32,6 +43,10 @@ export interface DocContent {
   pageParents: (string | null)[]
   /** independently-numbered runs of pages (Section Options); empty = the whole document numbers itself plainly */
   sections: PageSection[]
+  /** page-local copies of parent items that have been overridden */
+  parentOverrides?: ParentOverride[]
+  /** colors sampled into this document's color panel */
+  colorSamples?: ColorSample[]
 }
 
 /** World rectangle of every page, indexed by page index. */
@@ -98,6 +113,10 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     const n = map(s.startPage)
     return n === null || n >= newDoc.pages ? [] : [n === s.startPage ? s : { ...s, startPage: n }]
   })
+  const parentOverrides = (c.parentOverrides ?? []).flatMap((override) => {
+    const pageIndex = map(override.pageIndex)
+    return pageIndex === null || pageIndex >= newDoc.pages ? [] : [{ ...override, pageIndex }]
+  })
   return {
     doc: newDoc,
     frames,
@@ -109,6 +128,8 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     parents: c.parents,
     pageParents: remapList(c.pageParents, newDoc.pages, map),
     sections,
+    parentOverrides,
+    colorSamples: c.colorSamples,
   }
 }
 
@@ -149,10 +170,27 @@ export function parentShadowContent(
   sections: PageSection[],
   documentFrames: TextFrame[] = [],
   runningHeader?: (pageIndex: number, styleId: string, strategy: 'first' | 'last') => string,
-): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
+  parentOverrides: ParentOverride[] = [],
+  documentImages: ImageFrame[] = [],
+  documentShapes: ShapeFrame[] = [],
+): {
+  frames: (TextFrame & { parentShadowRef: ParentShadowRef })[]
+  images: (ImageFrame & { parentShadowRef: ParentShadowRef })[]
+  shapes: (ShapeFrame & { parentShadowRef: ParentShadowRef })[]
+} {
   const rects = pageRects(doc)
   const sides = pageSidesOf(doc)
-  const out: { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } = { frames: [], images: [], shapes: [] }
+  const out: {
+    frames: (TextFrame & { parentShadowRef: ParentShadowRef })[]
+    images: (ImageFrame & { parentShadowRef: ParentShadowRef })[]
+    shapes: (ShapeFrame & { parentShadowRef: ParentShadowRef })[]
+  } = { frames: [], images: [], shapes: [] }
+  const localIds = new Set([...documentFrames, ...documentImages, ...documentShapes].map((item) => item.id))
+  const activeOverrides = new Set(parentOverrides
+    .filter((override) => localIds.has(override.localId))
+    .map((override) => `${override.pageIndex}:${override.parentId}:${override.kind}:${override.sourceId}`))
+  const isOverridden = (pageIndex: number, parentId: string, kind: ParentOverride['kind'], sourceId: string) =>
+    activeOverrides.has(`${pageIndex}:${parentId}:${kind}:${sourceId}`)
   pageParents.forEach((parentId, pageIndex) => {
     const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
     const rect = rects[pageIndex]
@@ -173,7 +211,7 @@ export function parentShadowContent(
     const inHalf = (x: number, w: number) => x + w / 2 >= srcX && x + w / 2 < srcX + parent.w
     const label = pageNumberLabel(sections, pageIndex, doc.startPage)
     for (const f of parent.frames) {
-      if (!inHalf(f.x, f.w)) continue
+      if (!inHalf(f.x, f.w) || isOverridden(pageIndex, parent.id, 'frame', f.id)) continue
       const pageHeader = f.runningHeaderStyleId ? (runningHeader?.(pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last') ?? runningHeaderForPage(doc, documentFrames, pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last')) : ''
         const sourceRuns = normalizeRuns(f.text, f.runs, f)
         const numbered = substituteMarker(f.text, sourceRuns, PAGE_NUMBER_MARKER, label)
@@ -182,10 +220,10 @@ export function parentShadowContent(
       const letters = substituteMarker(externalNumber.text, externalNumber.runs, LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
       const internalLetters = substituteMarker(letters.text, letters.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
       const sub = substituteMarker(internalLetters.text, internalLetters.runs, RUNNING_HEADER_MARKER, pageHeader)
-      out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null })
+      out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: f.id } })
     }
-    for (const im of parent.images) if (inHalf(im.x, im.w)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy })
-    for (const sh of parent.shapes) if (inHalf(sh.x, sh.w)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy })
+    for (const im of parent.images) if (inHalf(im.x, im.w) && !isOverridden(pageIndex, parent.id, 'image', im.id)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: im.id } })
+    for (const sh of parent.shapes) if (inHalf(sh.x, sh.w) && !isOverridden(pageIndex, parent.id, 'shape', sh.id)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: sh.id } })
   })
   return out
 }

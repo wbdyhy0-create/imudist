@@ -2,6 +2,10 @@
 export const COALESCE_MS = 1000
 const MAX_STEPS = 200
 
+export function shouldMergeChange(last: { key: string; at: number } | null, key: string | undefined, now: number): boolean {
+  return !!key && last?.key === key && (key.startsWith('gap:') || now - last.at < COALESCE_MS)
+}
+
 /** Undo / redo lists of one immutable value. Every open document has its own. */
 export interface History<T> {
   past: T[]

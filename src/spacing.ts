@@ -36,7 +36,7 @@ const AX: Record<'v' | 'h', Ax> = {
 /** two gaps closer than this are the same */
 const EPS = 0.01
 /** objects closer than this touch: there is no gap to show */
-const MIN_GAP = 0.5
+export const MIN_GAP = 0.5
 
 interface Gap {
   a: Rect

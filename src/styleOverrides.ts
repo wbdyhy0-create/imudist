@@ -54,7 +54,7 @@ function paragraphRuns(head: TextFrame, index: number) {
 
 /**
  * How a paragraph deviates from a paragraph style (its resolved look): what the text carries that the style does not
- * say - the "+" of an InDesign style panel. Only what the style sets is compared (plus weight / italic / tracking,
+ * say - the "+" mark a style panel shows in professional layout tools. Only what the style sets is compared (plus weight / italic / tracking,
  * where "nothing" means plain), and only what the paragraph actually has. The result is a style patch of the differing
  * values, ready to become a new style based on this one.
  */

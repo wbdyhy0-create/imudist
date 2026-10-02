@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -8,14 +8,15 @@ import {
   ensureReadPermission,
   fileNameFor,
   hasFilePicker,
+  isFileHandlePermissionError,
   openWithInput,
   openWithPicker,
   saveWithPicker,
   writeToHandle,
   type FileRef,
 } from './fileio'
-import { COALESCE_MS, changeHistory, newHistory, redoHistory, replaceHistory, undoHistory, type History } from './history'
-import { applySettings, deletePages, insertPages, movePage, type DocContent } from './pages'
+import { changeHistory, newHistory, redoHistory, replaceHistory, shouldMergeChange, undoHistory, type History } from './history'
+import { applySettings, deletePages, insertPages, movePage, type DocContent, type ParentOverride } from './pages'
 import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
 import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
 
@@ -28,6 +29,8 @@ const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
+const NO_PARENT_OVERRIDES: ParentOverride[] = []
+const NO_COLOR_SAMPLES: ColorSample[] = []
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
@@ -107,6 +110,8 @@ export function useDocumentSession() {
   const parents = state?.parents ?? NO_PARENTS
   const pageParents = state?.pageParents ?? NO_PAGE_PARENTS
   const sections = state?.sections ?? NO_SECTIONS
+  const parentOverrides = state?.parentOverrides ?? NO_PARENT_OVERRIDES
+  const colorSamples = state?.colorSamples ?? NO_COLOR_SAMPLES
   const file = active?.file ?? null
   const dirty = !!active && active.saved !== active.h.present
   const anyDirty = docs.some((d) => d.saved !== d.h.present)
@@ -157,14 +162,14 @@ export function useDocumentSession() {
     setModal({ title, message: messageOf(e), buttons: [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }] })
 
   // ── the active document's history ──────────────────────────────────────────────
-  /** apply a change to the active document; changes with the same key in quick succession merge into one undo step */
+  /** apply a change to the active document; gap gesture keys merge for their whole unique gesture, other keys use the time window */
   const change = (next: (prev: DocContent) => DocContent | null, key?: string) => {
     const id = latest.current.activeId
     if (id === null) return
     const now = Date.now()
     update(id, (d) => {
       // decided from the state (not from a ref) so React may safely run the updater more than once
-      const merge = !!key && d.last?.key === key && now - d.last.at < COALESCE_MS
+      const merge = shouldMergeChange(d.last, key, now)
       const h = changeHistory(d.h, (prev) => next(prev) ?? prev, merge)
       return { ...d, h, last: key ? { key, at: now } : null }
     })
@@ -282,7 +287,7 @@ export function useDocumentSession() {
       }
       update(id, (d) => ({ ...d, file: ref, saved: savedContent }))
       await remember(ref)
-      notify(`נשמר: ${ref.name}`)
+      notify(!ref.handle && !ref.path ? `הקובץ ${ref.name} הורד לתיקיית ההורדות` : `נשמר: ${ref.name}`)
       return true
     } catch (e) {
       fail('השמירה נכשלה', e)
@@ -301,7 +306,15 @@ export function useDocumentSession() {
         const { writeTextFile } = await import('@tauri-apps/plugin-fs')
         await writeTextFile(target.path, serializeDocument(start))
       } else if (target.handle) {
-        await writeToHandle(target.handle, serializeDocument(start))
+        try {
+          await writeToHandle(target.handle, serializeDocument(start))
+        } catch (error) {
+          if (!isFileHandlePermissionError(error)) throw error
+          downloadText(target.name, serializeDocument(start))
+          update(id, (d) => ({ ...d, file: { ...target, handle: null }, saved: start }))
+          notify(`הקובץ ${target.name} הורד לתיקיית ההורדות כי אין הרשאת כתיבה למיקום המקורי`)
+          return true
+        }
       } else {
         return saveAs(false, id)
       }
@@ -356,8 +369,8 @@ export function useDocumentSession() {
 
   /** New documents open in a new tab; the ones already open stay as they are. */
   const createDocument = (d: DocSettings, onDone?: () => void) => {
-    // every new document starts with one parent ("אב A") already applied to all of its pages, the same way InDesign
-    // always has an "A-Master" - so pages already look uniform from the start, instead of needing it set by hand
+    // every new document starts with one parent ("אב A") already applied to all of its pages, the same way
+    // professional layout tools start with a default master - so pages already look uniform from the start, instead of needing it set by hand
     const parentA: ParentPage = { id: globalThis.crypto?.randomUUID?.() ?? `parent-${Date.now()}`, prefix: 'A', name: 'אב A', w: d.width, h: d.height, frames: [], images: [], shapes: [] }
     const blank: DocContent = {
       doc: d,
@@ -393,6 +406,11 @@ export function useDocumentSession() {
     }
   }
 
+  const openWithInputFallback = async () => {
+    const result = await openWithInput()
+    if (result) await loadText(result.text, result.ref)
+  }
+
   const openFile = async () => {
     try {
       const res = hasFilePicker ? await openWithPicker() : await openWithInput()
@@ -402,7 +420,6 @@ export function useDocumentSession() {
     }
   }
 
-  /** open a file the user dropped or double-clicked; with its handle the document can be saved back in place */
   const openTextFile = async (file: File, handle: FileSystemFileHandle | null = null) => {
     try {
       await loadText(await file.text(), { name: file.name, handle })
@@ -410,7 +427,14 @@ export function useDocumentSession() {
       fail('לא ניתן לפתוח את הקובץ', e)
     }
   }
-  const openHandle = async (handle: FileSystemFileHandle) => openTextFile(await handle.getFile(), handle)
+  const openHandle = async (handle: FileSystemFileHandle) => {
+    try {
+      await openTextFile(await handle.getFile(), handle)
+    } catch (error) {
+      if (!isFileHandlePermissionError(error)) throw error
+      await openWithInputFallback()
+    }
+  }
 
   const openRecent = async (entry: RecentEntry) => {
     try {
@@ -420,8 +444,16 @@ export function useDocumentSession() {
         return
       }
       if (!entry.handle) throw new Error('הקובץ לא נמצא.')
-      if (!(await ensureReadPermission(entry.handle))) return
-      await loadText(await (await entry.handle.getFile()).text(), { name: entry.handle.name, handle: entry.handle })
+      try {
+        if (!(await ensureReadPermission(entry.handle))) {
+          await openWithInputFallback()
+          return
+        }
+        await loadText(await (await entry.handle.getFile()).text(), { name: entry.handle.name, handle: entry.handle })
+      } catch (error) {
+        if (!isFileHandlePermissionError(error)) throw error
+        await openWithInputFallback()
+      }
     } catch (e) {
       if (!entry.path) setRecent(await removeRecent(entry))
       const message = entry.path ? messageOf(e) : `הקובץ "${entry.name}" לא נמצא. ייתכן שהוא הועבר או נמחק.`
@@ -471,6 +503,8 @@ export function useDocumentSession() {
     parents,
     pageParents,
     sections,
+    parentOverrides,
+    colorSamples,
     history,
     changeFrames,
     changeImages,

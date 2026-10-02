@@ -1,12 +1,13 @@
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
-import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, wordSpacingPt, type Run, type TextFrame, type TextStyle } from '../document'
+import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { caretOffsetAt, splitMarks } from '../richtext'
+import { caretOffsetAt, splitMarks, textShadow } from '../richtext'
 import { substituteMarker } from '../numbering'
-import { normalizeRuns } from '../story'
+import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 import type { FootnotePlacement } from '../footnoteLayout'
+import { featherCss } from '../feather'
 
 /**
  * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
@@ -27,10 +28,13 @@ function withMarks(
   firstLineIndent: (paragraphIndex: number) => number,
   scale: number,
   footnoteMarkers?: Record<number, string>,
+  tocPageMarkers?: Record<number, string>,
+  tocLeaderMarkers?: Record<number, string>,
   referenceFontSize = 9,
   textOffset = 0,
+  referenceStyle?: CharStyle,
 ): { nodes: ReactNode[]; trailing: ReactNode[] } {
-  if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex) && !footnoteMarkers) return { nodes: [text], trailing: [] }
+  if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex) && !footnoteMarkers && !tocPageMarkers && !tocLeaderMarkers) return { nodes: [text], trailing: [] }
   let idx = startParaIndex
   const nodes: ReactNode[] = []
   // the `.para-gap` / `.para-indent` spacers that follow a paragraph's closing "\n" belong to the START of the next
@@ -45,10 +49,22 @@ function withMarks(
     if (piece.kind === 'text') {
       let plainStart = 0
       for (let index = 0; index < piece.text.length; index++) {
-        const reference = footnoteMarkers?.[textOffset + offset + index]
-        if (piece.text[index] !== FOOTNOTE_MARKER || !reference) continue
+        const absolute = textOffset + offset + index
+        const character = piece.text[index]
+        if (character === '\t' && piece.text[index + 1] === TOC_LEADER_MARKER) {
+          if (index > plainStart) nodes.push(piece.text.slice(plainStart, index))
+          plainStart = index + 1
+          continue
+        }
+        const reference = character === FOOTNOTE_MARKER ? footnoteMarkers?.[absolute] : undefined
+        const tocPage = character === TOC_PAGE_MARKER ? tocPageMarkers?.[absolute] ?? '8888' : undefined
+        const tocLeader = character === TOC_LEADER_MARKER ? tocLeaderMarkers?.[absolute] ?? '.'.repeat(128) : undefined
+        if (!(character === FOOTNOTE_MARKER && reference !== undefined) && tocPage === undefined && tocLeader === undefined) continue
         if (index > plainStart) nodes.push(piece.text.slice(plainStart, index))
-        nodes.push(<span key={`footnote-${textOffset + offset + index}`} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px` } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
+        const key = `marker-${absolute}`
+        if (reference !== undefined) nodes.push(<span key={key} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px`, ...(referenceStyle ? { fontFamily: `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`, fontWeight: referenceStyle.weight, fontStyle: referenceStyle.italic ? 'italic' : 'normal' } : {}) } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
+        else if (tocPage !== undefined) nodes.push(<span key={key} className="toc-page-reference" data-reference={tocPage} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_PAGE_MARKER}</span>)
+        else nodes.push(<span key={key} className="toc-leader" data-leader={tocLeader} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_LEADER_MARKER}</span>)
         plainStart = index + 1
       }
       if (plainStart < piece.text.length) nodes.push(piece.text.slice(plainStart))
@@ -73,6 +89,7 @@ function withMarks(
 
 interface Props {
   frame: TextFrame
+  featherOverride?: GradientFeather
   /** default style + alignment of the whole story (the first frame's) */
   style: TextStyle
   /** the part of the story shown in this frame, with its style runs */
@@ -114,6 +131,8 @@ interface Props {
   spaceBeforeFirst: number
   spaceAfterLast: number
   footnoteMarkers?: Record<number, string>
+  tocPageMarkers?: Record<number, string>
+  tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale?: number
   footnoteAlignment?: 'right' | 'center'
   footnotes?: FootnotePlacement[]
@@ -132,6 +151,7 @@ interface Props {
   onFootnoteSelectAll?: (id: string) => void
   onFootnoteStop?: () => void
   onSelectAllText?: () => void
+  onSelectToStartText?: (frameId: string, localOffset: number) => void
   request: SelRequest | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
@@ -165,6 +185,8 @@ function RichText({
   paragraphPatches,
   baseFontSize,
   footnoteMarkers,
+  tocPageMarkers,
+  tocLeaderMarkers,
   footnoteReferenceScale,
 }: {
   text: string
@@ -182,6 +204,8 @@ function RichText({
   paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
   baseFontSize: number
   footnoteMarkers?: Record<number, string>
+  tocPageMarkers?: Record<number, string>
+  tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale: number
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
@@ -199,14 +223,67 @@ function RichText({
     }
     pos = end
   }
+  if (text.includes(TOC_PAGE_MARKER)) {
+    const renderRange = (from: number, to: number, paraIndex: number): ReactNode[] => parts.flatMap((part) => {
+      const partStart = Number(part.key)
+      const segmentStart = Math.max(from, partStart)
+      const segmentEnd = Math.min(to, partStart + part.text.length)
+      if (segmentStart >= segmentEnd) return []
+      const segment = part.text.slice(segmentStart - partStart, segmentEnd - partStart)
+      const referenceStyle = styleAtChar(runs, Math.max(0, segmentStart - 1), part.run.style)
+      const { nodes } = withMarks(segment, showMarks, paraGaps, paraIndex, true, true, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, segmentStart, referenceStyle)
+      return [<span key={`toc-title-run-${segmentStart}`} className={part.hl ? 'sel' : 'toc-title-run'} style={{ fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`, color: part.run.style.color ?? '#111', fontSize: part.run.style.fontSize * scale, fontWeight: part.run.style.weight, fontStyle: part.run.style.italic ? 'italic' : 'normal', letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined, textShadow: textShadow(part.run.style, scale) || undefined }}>{nodes}</span>]
+    })
+    const rows: ReactNode[] = []
+    let lineStart = 0
+    let rowIndex = 0
+    while (lineStart < text.length) {
+      const newlineAt = text.indexOf('\n', lineStart)
+      const lineEnd = newlineAt < 0 ? text.length : newlineAt
+      const pageAt = text.indexOf(TOC_PAGE_MARKER, lineStart)
+      const pageOffset = pageAt >= 0 && pageAt < lineEnd ? pageAt : -1
+      const leaderAt = pageOffset >= 0 ? text.lastIndexOf(TOC_LEADER_MARKER, pageOffset) : -1
+      const tabAt = leaderAt >= lineStart ? text.lastIndexOf('\t', leaderAt) : -1
+      const titleEnd = tabAt >= lineStart ? tabAt : lineEnd
+      const paragraph = startParaIndex + rowIndex
+      const patch = paragraphPatches?.[paragraph]
+      const indent = patch?.firstLineIndent ?? firstLineIndent(paragraph)
+      const gapsBefore = paraGaps[paragraph - 1] ?? 0
+      const rowStyle: CSSProperties = {
+        ...(patch?.align ? cssTextAlign(patch.align) : {}),
+        lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined,
+        paddingTop: gapsBefore ? `${gapsBefore * scale}px` : undefined,
+        paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined,
+        paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined,
+        boxSizing: 'border-box',
+      }
+      if (pageOffset >= 0 && leaderAt >= lineStart) {
+        rows.push(
+          <div key={`toc-row-${rowIndex}`} className="toc-row" dir="rtl" style={rowStyle}>
+            {indent > 0 && <span className="para-indent" aria-hidden="true" style={{ width: indent * scale }} />}
+            <span className="toc-title">{renderRange(lineStart, titleEnd, paragraph)}</span>
+            <span className="toc-tab" aria-hidden="true">{'\t'}</span>
+            <span className="toc-leader" data-leader={tocLeaderMarkers?.[leaderAt] ?? '.'.repeat(128)} style={{ '--toc-reference-size': `${baseFontSize * scale}px` } as CSSProperties}>{TOC_LEADER_MARKER}</span>
+            <span className="toc-page-reference" data-reference={tocPageMarkers?.[pageOffset] ?? '8888'} style={{ '--toc-reference-size': `${baseFontSize * scale}px` } as CSSProperties}>{TOC_PAGE_MARKER}</span>
+            {newlineAt >= 0 && <span className="toc-line-break" aria-hidden="true">{'\n'}</span>}
+          </div>,
+        )
+      } else rows.push(<div key={`toc-row-${rowIndex}`} style={rowStyle}>{renderRange(lineStart, lineEnd, paragraph)}{newlineAt >= 0 ? '\n' : ''}</div>)
+      lineStart = newlineAt < 0 ? text.length : newlineAt + 1
+      rowIndex++
+    }
+    return <>{floats.map((float, index) => <div key={`float${index}`} className="wrap-float" style={{ float: float.side, width: float.width * scale, height: float.height * scale, shapeOutside: shapeOf(float, scale) }} />)}{rows}</>
+  }
   // a running paragraph counter across every part, in order, so a "\n" right at a run/highlight boundary is still
   // only counted once and still gets the right entry of `paraGaps`
   const paragraphNodes: { index: number; nodes: ReactNode[] }[] = []
+  const tocParagraphs = new Set(text.split('\n').flatMap((line, index) => line.includes(TOC_PAGE_MARKER) ? [startParaIndex + index] : []))
   let renderParaIndex = startParaIndex
   // the spacers closing the previous paragraph, waiting to open the next one (see withMarks)
   let carry: ReactNode[] = []
   for (const [i, part] of parts.entries()) {
-    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, part.run.style.fontSize * scale * footnoteReferenceScale, Number(part.key))
+    const referenceStyle = styleAtChar(runs, Math.max(0, Number(part.key) - 1), part.run.style)
+    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, Number(part.key), referenceStyle)
     let group = paragraphNodes[paragraphNodes.length - 1]
     let opening: ReactNode[] = []
     if (!group || group.index !== renderParaIndex) {
@@ -215,23 +292,39 @@ function RichText({
       opening = carry
     }
     carry = trailing
-    group.nodes.push(
-      <span
-        key={part.key}
-        className={part.hl ? 'sel' : undefined}
-        style={{
-          fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-          color: part.run.style.color ?? '#111',
-          fontSize: part.run.style.fontSize * scale,
-          fontWeight: part.run.style.weight,
-          fontStyle: part.run.style.italic ? 'italic' : 'normal',
-          letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
-        }}
-      >
-        {opening}
-        {rendered}
-      </span>,
-    )
+    const partStyle: CSSProperties = {
+      fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+      color: part.run.style.color ?? '#111',
+      fontSize: part.run.style.fontSize * scale,
+      fontWeight: part.run.style.weight,
+      fontStyle: part.run.style.italic ? 'italic' : 'normal',
+      letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
+      textShadow: textShadow(part.run.style, scale) || undefined,
+    }
+    const pageMarkerAt = part.text.indexOf(TOC_PAGE_MARKER)
+    const leaderMarkerAt = pageMarkerAt < 0 ? -1 : part.text.lastIndexOf(TOC_LEADER_MARKER, pageMarkerAt)
+    const tabAt = leaderMarkerAt < 0 ? -1 : part.text.lastIndexOf('\t', leaderMarkerAt)
+    if (pageMarkerAt >= 0 && leaderMarkerAt >= 0 && tabAt >= 0) {
+      const title = part.text.slice(0, tabAt)
+      const titleNodes = withMarks(title, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale).nodes
+      const pageOffset = Number(part.key) + pageMarkerAt
+      const leaderOffset = Number(part.key) + leaderMarkerAt
+      group.nodes.push(
+        ...opening,
+        <span key={`${part.key}-toc-title`} className="toc-title" style={partStyle}>{titleNodes}</span>,
+        <span key={`${part.key}-toc-tab`} className="toc-tab" aria-hidden="true">{'\t'}</span>,
+        <span key={`${part.key}-toc-leader`} className="toc-leader" data-leader={tocLeaderMarkers?.[leaderOffset] ?? '.'.repeat(128)} style={{ '--toc-reference-size': `${part.run.style.fontSize * scale}px` } as CSSProperties}>{TOC_LEADER_MARKER}</span>,
+        <span key={`${part.key}-toc-page`} className="toc-page-reference" data-reference={tocPageMarkers?.[pageOffset] ?? '8888'} style={{ '--toc-reference-size': `${part.run.style.fontSize * scale}px` } as CSSProperties}>{TOC_PAGE_MARKER}</span>,
+        ...(part.text.endsWith('\n') ? [<span key={`${part.key}-toc-newline`} className="toc-line-break" aria-hidden="true">{'\n'}</span>] : []),
+      )
+    } else {
+      group.nodes.push(
+        <span key={part.key} className={part.hl ? 'sel' : undefined} style={partStyle}>
+          {opening}
+          {rendered}
+        </span>,
+      )
+    }
     renderParaIndex += (part.text.match(/\n/g) ?? []).length
   }
   return (
@@ -247,7 +340,7 @@ function RichText({
         const patch = paragraphPatches?.[paragraph.index]
         const wordSpacing = patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
         const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
-        return <div key={`paragraph-${paragraph.index}`} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
       })}
     </>
   )
@@ -256,6 +349,7 @@ function RichText({
 /** A right-to-left text frame with its handles and thread ports. */
 export function TextFrameView(p: Props) {
   const { frame, style, slice, selected, editing, showEdge, marked, locked } = p
+  const maskFeather = p.featherOverride ?? frame.feather
   const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
   const masterPreview = !editing && (slice.includes(PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_PAGE_NUMBER_MARKER) || slice.includes(EXTERNAL_PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_LETTER_PAGE_NUMBER_MARKER) || slice.includes(LETTER_PAGE_NUMBER_MARKER) || slice.includes(RUNNING_HEADER_MARKER))
   let masterDisplay = { text: slice, runs: p.runs }
@@ -295,7 +389,7 @@ export function TextFrameView(p: Props) {
        *  scale-invariant (font hinting/kerning shift subtly at different pixel sizes), so re-laying-out text at
        *  each zoom level let a paragraph wrap differently than it does at 100%, drifting from what `textLayout.ts`'s
        *  own fixed-scale measurer (used for pagination/overflow) assumed. A pure visual transform can't do that:
-       *  it's computed once and never re-triggers line-breaking. Matches how real DTP tools (InDesign) handle zoom.
+       *  it's computed once and never re-triggers line-breaking. Matches how professional DTP tools handle zoom.
        *  Handles/ports stay OUTSIDE this wrapper, on the outer (still zoom-multiplied) box, so their own fixed
        *  on-screen size is untouched by this transform. */}
       <div
@@ -303,6 +397,7 @@ export function TextFrameView(p: Props) {
         style={{
           width: frame.w,
           height: frame.h,
+          ...(maskFeather ? { maskImage: featherCss(maskFeather, frame.w, frame.h), WebkitMaskImage: featherCss(maskFeather, frame.w, frame.h) } : {}),
           visibility: frame.rasterized ? 'hidden' : undefined,
           fontSize: style.fontSize,
           fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
@@ -337,8 +432,11 @@ export function TextFrameView(p: Props) {
           baseAlign={style.align}
           continuesAtEnd={p.continuesParagraphAtEnd}
           footnoteMarkers={p.footnoteMarkers}
+          tocPageMarkers={p.tocPageMarkers}
+          tocLeaderMarkers={p.tocLeaderMarkers}
           footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
           onSelectAll={p.onSelectAllText}
+          onSelectToStart={(offset) => p.onSelectToStartText?.(frame.id, offset)}
           hasPrev={p.hasPrev}
           request={p.request}
           onEdit={p.onEdit}
@@ -362,6 +460,8 @@ export function TextFrameView(p: Props) {
             startParaIndex={p.startParaIndex}
             atParaStart={p.atParaStart}
             footnoteMarkers={p.footnoteMarkers}
+            tocPageMarkers={p.tocPageMarkers}
+            tocLeaderMarkers={p.tocLeaderMarkers}
             footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
@@ -374,8 +474,8 @@ export function TextFrameView(p: Props) {
       </div>
       {!!p.footnotes?.length && (
         <div className="footnotes-scale" style={{ width: frame.w, height: frame.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${style.leading ?? defaultLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
-          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, height: p.footnoteHeight - (p.footnoteDividerGap ?? 0), '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
-            <div className="footnote-divider" />
+          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+            <div className="footnote-divider" style={{ top: p.footnoteDividerGap ?? 0 }} />
             {p.footnotes.map((note) => {
               const noteStyle = note.style ?? style
               const fragmentOffset = note.offset ?? 0
@@ -389,7 +489,7 @@ export function TextFrameView(p: Props) {
                 ? note.runs.map((run, index) => {
                     const text = note.content.slice(offset, offset + run.len)
                     offset += run.len
-                    return <span key={index} style={{ fontFamily: run.style.fontFamily, fontSize: `${run.style.fontSize}px`, fontWeight: run.style.weight, fontStyle: run.style.italic ? 'italic' : 'normal', color: run.style.color ?? noteStyle.color, letterSpacing: run.style.tracking ? `${(run.style.tracking / 1000) * run.style.fontSize}px` : undefined }}>{text}</span>
+                    return <span key={index} style={{ fontFamily: run.style.fontFamily, fontSize: `${run.style.fontSize}px`, fontWeight: run.style.weight, fontStyle: run.style.italic ? 'italic' : 'normal', color: run.style.color ?? noteStyle.color, letterSpacing: run.style.tracking ? `${(run.style.tracking / 1000) * run.style.fontSize}px` : undefined, textShadow: textShadow(run.style, 1) || undefined }}>{text}</span>
                   })
                 : note.content
               return (
@@ -406,7 +506,7 @@ export function TextFrameView(p: Props) {
                     const localOffset = clickedNumber ? 0 : caretOffsetAt(event.clientX, event.clientY, contentRoot) ?? 0
                     p.onFootnoteEdit?.(note.id, localOffset, fragmentOffset)
                   }}
-                  style={{ left: `${frame.w - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', ...cssTextAlign(noteStyle.align) }}
+                  style={{ left: `${frame.w - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
                 >
                   {!note.continued && (
                     <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>

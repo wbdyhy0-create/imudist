@@ -154,8 +154,53 @@ export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocCo
   const rects = pageRects(c.doc)
   const occupied = new Set(c.frames.map((f) => ownerPage(rects, f.x + f.w / 2, f.y + f.h / 2)))
   const targets = (pages === 'all' ? rects.map((_, i) => i) : pages).filter((i) => !occupied.has(i))
-  const frames = [...c.frames, ...primaryFrames(c.doc, targets)]
+  let frames = [...c.frames, ...primaryFrames(c.doc, targets)]
   const order = primaryTextFrameOrder(c.doc, frames)
+  const oldIds = new Set(c.frames.map((frame) => frame.id))
+  const sourceIndex = order.findIndex((id) => {
+    const frame = frames.find((candidate) => candidate.id === id)
+    return oldIds.has(id) && !!frame?.text
+  })
+  const newHeadId = sourceIndex > 0 ? order.slice(0, sourceIndex).find((id) => !oldIds.has(id)) : undefined
+  const sourceHead = sourceIndex >= 0 ? frames.find((frame) => frame.id === order[sourceIndex]) : undefined
+  if (newHeadId && sourceHead) {
+    const storyFields: Partial<TextFrame> = {
+      ...styleOf(sourceHead),
+      text: sourceHead.text,
+      runs: sourceHead.runs,
+      ...(sourceHead.footnotes ? { footnotes: sourceHead.footnotes } : {}),
+      ...(sourceHead.paragraphStyleId ? { paragraphStyleId: sourceHead.paragraphStyleId } : {}),
+      ...(sourceHead.paragraphStyleIds ? { paragraphStyleIds: sourceHead.paragraphStyleIds } : {}),
+      ...(sourceHead.paragraphStyleNames ? { paragraphStyleNames: sourceHead.paragraphStyleNames } : {}),
+      ...(sourceHead.paragraphStylePatches ? { paragraphStylePatches: sourceHead.paragraphStylePatches } : {}),
+      ...(sourceHead.paraSpaceBefore ? { paraSpaceBefore: sourceHead.paraSpaceBefore } : {}),
+      ...(sourceHead.paraSpaceAfter ? { paraSpaceAfter: sourceHead.paraSpaceAfter } : {}),
+      ...(sourceHead.paraKeepFirstLines ? { paraKeepFirstLines: sourceHead.paraKeepFirstLines } : {}),
+      ...(sourceHead.paraKeepLastLines ? { paraKeepLastLines: sourceHead.paraKeepLastLines } : {}),
+      ...(sourceHead.tocPageReferences ? { tocPageReferences: sourceHead.tocPageReferences } : {}),
+      ...(sourceHead.tocFootnoteReferences ? { tocFootnoteReferences: sourceHead.tocFootnoteReferences } : {}),
+    }
+    frames = frames.map((frame) => {
+      if (frame.id === newHeadId) return { ...frame, ...storyFields }
+      if (frame.id === sourceHead.id) return {
+        ...frame,
+        text: '',
+        runs: [],
+        footnotes: undefined,
+        paragraphStyleId: undefined,
+        paragraphStyleIds: undefined,
+        paragraphStyleNames: undefined,
+        paragraphStylePatches: undefined,
+        paraSpaceBefore: undefined,
+        paraSpaceAfter: undefined,
+        paraKeepFirstLines: undefined,
+        paraKeepLastLines: undefined,
+        tocPageReferences: undefined,
+        tocFootnoteReferences: undefined,
+      }
+      return frame
+    })
+  }
   const nextById = new Map(order.map((id, index) => [id, order[index + 1] ?? null]))
   let changed = frames.length !== c.frames.length
   const threaded = frames.map((frame) => {
@@ -310,6 +355,9 @@ export function pourText(
     ...(i === 0 && placed.footnotes?.length ? { footnotes: placed.footnotes.map((note) => ({ ...note, id: newId() })) } : {}),
     paragraphStyleIds: i === 0 ? placed.paragraphStyleIds : undefined,
     paragraphStyleNames: i === 0 ? placed.paragraphStyleNames : undefined,
+    paragraphStylePatches: i === 0 ? placed.paragraphStylePatches : undefined,
+    tocPageReferences: i === 0 ? placed.tocPageReferences : undefined,
+    tocFootnoteReferences: i === 0 ? placed.tocFootnoteReferences : undefined,
     next: i < boxes.length - 1 ? ids[i + 1] : null,
     // an existing frame keeps its place in the stack
     z: i === 0 && existing ? existing.z : z,

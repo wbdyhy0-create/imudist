@@ -7,7 +7,7 @@ type LibraryTab = 'solids' | 'gradients'
 interface Props {
   onColor?: (color: string) => void
   onGradient: (gradient: GradientFill) => void
-  mode?: 'all' | 'gradients'
+  mode?: 'all' | 'gradients' | 'solids'
 }
 
 const SOLID_CATEGORIES = ['הכול', 'יסוד', 'פסטל', 'ניאון', 'טבע']
@@ -15,7 +15,7 @@ const GRADIENT_CATEGORIES = ['הכול', 'מתכתי', 'חמים', 'קרים', '
 
 export function ColorLibrary({ onColor, onGradient, mode = 'all' }: Props) {
   const [tab, setTab] = useState<LibraryTab>(mode === 'gradients' ? 'gradients' : 'solids')
-  const activeTab = mode === 'gradients' ? 'gradients' : tab
+  const activeTab = mode === 'gradients' ? 'gradients' : mode === 'solids' ? 'solids' : tab
   const [category, setCategory] = useState('הכול')
   const [query, setQuery] = useState('')
   const categories = activeTab === 'solids' ? SOLID_CATEGORIES : GRADIENT_CATEGORIES
@@ -47,7 +47,7 @@ export function ColorLibrary({ onColor, onGradient, mode = 'all' }: Props) {
       {activeTab === 'solids' ? (
         <div className="color-library-grid">
           {colors.map((color) => (
-            <button key={color.name} className="color-library-item" onClick={() => onColor?.(color.hex)} title={`${color.name} · ${color.hex}`} aria-label={`החל ${color.name}, ${color.hex}`}>
+            <button key={color.name} className="color-library-item" onMouseDown={(event) => event.preventDefault()} onClick={() => onColor?.(color.hex)} title={`${color.name} · ${color.hex}`} aria-label={`החל ${color.name}, ${color.hex}`}>
               <span className="color-library-preview" style={{ background: color.hex }} />
               <span className="color-library-copy"><strong>{color.name}</strong><small dir="ltr">{color.hex}</small></span>
             </button>

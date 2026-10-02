@@ -49,7 +49,34 @@ export interface FootnoteItem {
   paragraphStyleId?: string
 }
 
+export interface TocLevelConfig {
+  sourceStyleId: string
+  outputStyleId: string
+  indent: number
+}
+
+export interface TocConfig {
+  levels: TocLevelConfig[]
+  leader: string
+}
+
+export interface TocPageReference {
+  offset: number
+  sourceFrameId: string
+  sourceParagraphIndex: number
+  sourceStyleId: string
+  sourceText: string
+  occurrence: number
+}
+
+export interface TocFootnoteReference {
+  offset: number
+  sourceNoteId: string
+}
+
 export const FOOTNOTE_MARKER = '\uE006'
+export const TOC_PAGE_MARKER = '\uE010'
+export const TOC_LEADER_MARKER = '\uE011'
 
 export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
   mode: 'vertical',
@@ -106,6 +133,9 @@ export interface DocSettings {
   bleed: Sides
   slug: Sides
   footnotes?: FootnoteLayoutConfig
+  toc?: TocConfig
+  /** show parent-page objects above document-page objects, matching a higher shared layer, as in professional layout tools */
+  parentItemsAbovePageContent?: boolean
 }
 
 /** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
@@ -120,6 +150,19 @@ export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' 
 export interface CharStyle {
   fontFamily: string
   color?: string
+  outlineColor?: string
+  /** points; 0 or missing means no outline */
+  outlineWidth?: number
+  /** points; horizontal offset, negative is left */
+  shadowOffsetX?: number
+  /** points; vertical offset, negative is up */
+  shadowOffsetY?: number
+  /** legacy vertical offset, read only for older documents */
+  /** points; vertical drop distance for the text shadow */
+  shadowOffset?: number
+  /** 0…1 */
+  shadowColor?: string
+  shadowOpacity?: number
   /** points */
   fontSize: number
   /** CSS weight, 100 (thin) … 900 (black) */
@@ -154,7 +197,7 @@ export interface TextStyle extends CharStyle {
   indentRight?: number
   /** indents only the story's first line; missing/0 = none */
   firstLineIndent?: number
-  /** InDesign has no equivalent: indents ONLY the story's second line (from the right, its normal reading-start
+  /** Not a standard feature of professional layout tools: indents ONLY the story's second line (from the right, its normal reading-start
    * side); the first line and every line from the third on stay at indentLeft/indentRight. Missing/0 = off. */
   secondLineIndent?: number
 }
@@ -178,6 +221,7 @@ export const FONT_FAMILIES = [
 ]
 
 export const LINE_HEIGHT = 1.25
+export const DEFAULT_SHADOW_OFFSET = 6
 
 /** The automatic leading when none is set on the story: a whole point value, ~125% of the font size. */
 export const defaultLeading = (style: { fontSize: number }): number => Math.round(style.fontSize * LINE_HEIGHT)
@@ -221,7 +265,7 @@ export function wordSpacingPt(style: TextStyle): number {
  * paragraph's spaceAfter pushes the paragraph after it away, and setting a paragraph's spaceBefore pushes it away
  * from the one before it, the two independent controls asked for. When BOTH sides ask for space (e.g. a paragraph
  * style bakes a spaceAfter into every paragraph it's applied to, and the next paragraph's own style also has a
- * spaceBefore), the two demands collapse into one gap the way InDesign and CSS margins both do: the LARGER of the
+ * spaceBefore), the two demands collapse into one gap the way professional layout tools and CSS margins both do: the LARGER of the
  * two, not whichever happens to come first - otherwise a paragraph's own spaceAfter (however it got set) would
  * permanently drown out any spaceBefore the paragraph after it is ever given. Else the story's own `spaceAfter`.
  * (Paragraph 0's own spaceBefore, if set, has nowhere "before" it to attach to within this per-"\n" mechanism —
@@ -269,6 +313,7 @@ export interface Run {
  */
 export interface TextFrame extends TextStyle {
   id: string
+  feather?: GradientFeather
   /** the text remains in its thread as an invisible flow carrier after a marquee cut is rasterized */
   rasterized?: boolean
   /** Objects sharing this id form an editable group. */
@@ -295,6 +340,10 @@ export interface TextFrame extends TextStyle {
   runs: Run[]
   /** footnotes belong to the head of a threaded story; each anchor is a character offset in `text` */
   footnotes?: FootnoteItem[]
+  /** dynamic page references for a generated table-of-contents story */
+  tocPageReferences?: TocPageReference[]
+  /** copied footnote markers in a TOC story, linked to their original footnotes */
+  tocFootnoteReferences?: TocFootnoteReference[]
   next: string | null
   /** stacking order (higher = in front). Missing = the default layer: text frames in front of pictures */
   z?: number
@@ -324,9 +373,9 @@ export interface ParagraphStyleRecord {
   id: string
   name: string
   basedOnId?: string
-  /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", InDesign's default */
+  /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
 }
 
 /** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */
@@ -348,6 +397,15 @@ export interface GradientFill {
   reverse?: boolean
 }
 
+export interface GradientFeather {
+  /** Endpoints are fractions of the object's unrotated, unflipped box. */
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  points: { offset: number; opacity: number }[]
+}
+
 /**
  * How text flows around a picture. none: text ignores it (they may overlap). around: text runs beside it, on the
  * wider side, and above and below. jump: text stops above it and continues below (nothing beside it).
@@ -360,6 +418,7 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
+  feather?: GradientFeather
   /** optional label shown in the Layers panel */
   label?: string
   groupId?: string
@@ -372,6 +431,11 @@ export interface ImageFrame {
   assetId: string
   fit: ImageFit
   opacity?: number
+  shadowOffsetX?: number
+  shadowOffsetY?: number
+  shadowOffset?: number
+  shadowColor?: string
+  shadowOpacity?: number
   flipX?: boolean
   flipY?: boolean
   /** stacking order (higher = in front). Missing = the default layer: pictures behind text frames */
@@ -469,6 +533,7 @@ export interface ShapeImage {
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
+  feather?: GradientFeather
   groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
@@ -505,6 +570,11 @@ export interface ShapeFrame {
   fill: string | null
   /** object opacity, 0…1; missing = fully opaque */
   opacity?: number
+  shadowOffsetX?: number
+  shadowOffsetY?: number
+  shadowOffset?: number
+  shadowColor?: string
+  shadowOpacity?: number
   /** optional two-color fill used by the gradient tool */
   fillGradient?: GradientFill
   /** #rrggbb, or null for no line */
@@ -539,7 +609,7 @@ export interface ParentPage {
 
 /**
  * A private-use character standing in, inside a text frame's `text`, for "whatever page this ends up on" - typed
- * (via טיפוגרפיה > הוספת מספר עמוד אוטומטי) into a parent page's own text, same as InDesign's own auto-page-number
+ * (via טיפוגרפיה > הוספת מספר עמוד אוטומטי) into a parent page's own text, same as the auto-page-number
  * special character. It flows through editing, selection and wrapping exactly like any other character (it *is*
  * one); only rendering treats it specially, replacing it with the real page's number where the parent is actually
  * applied (see numbering.ts's substituteMarker, called from pages.ts's parentShadowContent).
@@ -597,6 +667,12 @@ export interface Asset {
 
 export type Assets = Record<string, Asset>
 
+export interface ColorSample {
+  id: string
+  color: string
+  label: string
+}
+
 /** Largest picture file we import. */
 export const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 /** Smallest text frame (points): a smaller drag creates nothing, and frames can't be resized below it. */
@@ -632,6 +708,7 @@ export function defaultDocSettings(name: string): DocSettings {
     margins: sides(toPt(15, 'mm')),
     bleed: sides(0),
     slug: sides(0),
+    parentItemsAbovePageContent: false,
   }
 }
 

@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
-import { defaultLeading, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SHADOW_OFFSET, defaultLeading, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
 import { ArrangeButtons } from './ArrangeButtons'
+import { FillPicker } from './FillPicker'
 import { FontPicker } from './FontPicker'
 import { NumberField } from './NumberField'
+import { ShadowControls } from './ShadowControls'
 
 interface Props {
   frame: TextFrame | null
@@ -107,6 +109,24 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { st
               <NumberField value={style.tracking} step={5} min={-500} max={500} onChange={(v) => onCharStyle({ tracking: v })} />
             </Labeled>
             <p className="muted">0 לטקסט רגיל; ערך שלילי (בערך 5- עד 15-) מקרב את האותיות ונותן מראה צפוף לכותרות.</p>
+            <Labeled label="קו מתאר לאותיות">
+              <div className="outline-controls">
+                <FillPicker label="צבע קו מתאר" value={style.outlineColor ?? '#000000'} onChange={(color) => onCharStyle({ outlineColor: color ?? '#000000' })} />
+                <NumberField ariaLabel="עובי קו מתאר" value={style.outlineWidth ?? 0} unit="px" unitLabel="pt" step={0.25} min={0} max={100} onChange={(outlineWidth) => onCharStyle({ outlineWidth })} />
+              </div>
+            </Labeled>
+            <Group title="הצללה">
+              <ShadowControls
+                offsetX={style.shadowOffsetX ?? 0}
+                offsetY={style.shadowOffsetY ?? style.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
+                opacity={style.shadowOpacity ?? 0}
+                color={style.shadowColor ?? '#000000'}
+                onOffsetXChange={(shadowOffsetX) => onCharStyle({ shadowOffsetX })}
+                onOffsetYChange={(shadowOffsetY) => onCharStyle({ shadowOffsetY })}
+                onOpacityChange={(shadowOpacity) => onCharStyle({ shadowOpacity })}
+                onColorChange={(shadowColor) => onCharStyle({ shadowColor })}
+              />
+            </Group>
     </>
   )
 }

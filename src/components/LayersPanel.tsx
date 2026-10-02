@@ -13,11 +13,14 @@ interface Props {
   onLock: (locked: boolean) => void
   onItemVisibility: (id: string, visible: boolean) => void
   onItemLock: (id: string, locked: boolean) => void
+  parentItemsAbovePageContent: boolean
+  canChangeParentOrder: boolean
+  onParentItemsAbovePageContentChange: (above: boolean) => void
 }
 
 const LAYER_COLORS = ['#3d8bff', '#ff5c5c', '#00d1b2', '#f5b800', '#a78bfa']
 
-export function LayersPanel({ frames, images, shapes, selectedId, activeLayerId, onActiveLayer, onSelect, onVisibility, onLock, onItemVisibility, onItemLock }: Props) {
+export function LayersPanel({ frames, images, shapes, selectedId, activeLayerId, onActiveLayer, onSelect, onVisibility, onLock, onItemVisibility, onItemLock, parentItemsAbovePageContent, canChangeParentOrder, onParentItemsAbovePageContentChange }: Props) {
   const [layers, setLayers] = useState([{ id: 'layer-1', name: 'שכבה 1', color: LAYER_COLORS[0], visible: true, locked: false, open: true }])
   const [activeId, setActiveId] = useState(activeLayerId)
   const [itemState, setItemState] = useState<Record<string, { visible: boolean; locked: boolean }>>({})
@@ -78,6 +81,15 @@ export function LayersPanel({ frames, images, shapes, selectedId, activeLayerId,
       </div>)}
       <div className="layers-foot">
         {itemsFor(active.id).length} אובייקטים · {active.name}
+        <label className="layer-parent-order">
+          <input
+            type="checkbox"
+            checked={parentItemsAbovePageContent}
+            disabled={!canChangeParentOrder}
+            onChange={(event) => onParentItemsAbovePageContentChange(event.target.checked)}
+          />
+          <span>אובייקטי אב מעל תוכן העמוד</span>
+        </label>
         <div className="layers-actions">
           <button className="icon-button" aria-label="הוסף שכבה" title="הוסף שכבה" onClick={() => { const n = Math.max(0, ...layers.map((item) => Number(item.id.replace('layer-', '')) || 0)) + 1; const layer = { id: `layer-${n}`, name: `שכבה ${n}`, color: LAYER_COLORS[layers.length % LAYER_COLORS.length], visible: true, locked: false, open: true }; setLayers([...layers, layer]); setActiveId(layer.id); onActiveLayer(layer.id) }}>+</button>
           <button className="icon-button" aria-label="מחק שכבה" title="מחק שכבה" disabled={layers.length <= 1 || active.id === 'layer-1'} onClick={() => { setLayers((current) => current.filter((layer) => layer.id !== active.id)); setActiveId('layer-1'); onActiveLayer('layer-1') }}>⌫</button>

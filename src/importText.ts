@@ -1,4 +1,4 @@
-import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharStyle, type Run, type TextAlign, type TextStyle } from './document'
+import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharStyle, type Run, type TextAlign, type TextStyle, type TocFootnoteReference, type TocPageReference } from './document'
 import { mergeRuns } from './story'
 import { unzipEntry } from './zip'
 
@@ -16,6 +16,9 @@ export interface PlacedText {
   paragraphStyleIds?: string[]
   /** Display names matching paragraphStyleIds, kept as a stable fallback when local ids change. */
   paragraphStyleNames?: string[]
+  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  tocPageReferences?: TocPageReference[]
+  tocFootnoteReferences?: TocFootnoteReference[]
   /** Word footnotes, anchored to marker offsets in the imported story. */
   footnotes?: ImportedFootnote[]
   /** semi-automatic flow: the last frame of the thread being filled; the next frame is linked after it */

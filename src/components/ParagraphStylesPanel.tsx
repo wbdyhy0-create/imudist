@@ -18,7 +18,7 @@ interface Props {
   onDelete: (styleId: string) => void
   /** the style of the paragraph the text selection (or caret) is in: shown highlighted. null = the selection spans several styles; missing = nothing selected */
   highlightId?: string | null
-  /** the text in the highlighted style carries changes of its own: a small "+" after the style's name (InDesign's style override mark) */
+  /** the text in the highlighted style carries changes of its own: a small "+" after the style's name (the usual style-override mark) */
   modified?: boolean
   /** accept the pending changes as they are (stop flagging them), without making a new style */
   onConfirmOverrides?: () => void

@@ -59,7 +59,7 @@
 .guide-align.v { background: repeating-linear-gradient(180deg, #ffb02e 0 9px, transparent 9px 14px); }
 .guide-tip.aligned { background: #b87400; }
 
-/* rotating an object (its own rotate handles, or a line's endpoint): InDesign's own "fine outline" guides — a faint
+/* rotating an object (its own rotate handles, or a line's endpoint): the "fine outline" guides professional layout tools show — a faint
    outline of the shape at the angle it started this drag from, and a small wedge showing how far it has turned since */
 .rotate-ghost { fill: none; stroke: #66aaff; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.8; }
 .rotate-wedge { fill: none; stroke: #ffb02e; stroke-width: 1; }
@@ -156,6 +156,13 @@
 
 /* ── gaps between objects while one is moved ───────────────── */
 .spacing-layer { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; z-index: 800003; }
+.viewport.gaptool { cursor: crosshair; }
+.viewport.gaptool.gap-x { cursor: col-resize; }
+.viewport.gaptool.gap-y { cursor: row-resize; }
+.viewport.gaptool.gap-node { cursor: move; }
+.gap-preview { fill: rgba(61, 139, 255, 0.2); stroke: #3d8bff; stroke-width: 1; }
+.gap-preview-label rect:not(.gap-preview) { fill: #17131f; stroke: #3d8bff; stroke-width: 1; }
+.gap-preview-label text { fill: #cfe1ff; font: 600 11px 'Segoe UI', Arial, sans-serif; direction: rtl; pointer-events: none; }
 .gap-mark line { stroke: #7fb2ff; stroke-width: 1; }
 .gap-mark polygon { fill: #7fb2ff; }
 .gap-mark rect { fill: #17131f; stroke: #7fb2ff; stroke-width: 1; }

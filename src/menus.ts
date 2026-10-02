@@ -226,7 +226,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('בטל קיבוץ', 'Ctrl+Shift+G', (ws) => ws.ungroup()),
       ],
     },
-    { label: 'טבלה', items: [off('הוספת טבלה…', 'Ctrl+Alt+Shift+T')] },
+    { label: 'טבלה', items: [doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()), off('הוספת טבלה…', 'Ctrl+Alt+Shift+T')] },
     {
       label: 'תצוגה',
       items: [
@@ -244,7 +244,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           label: 'מצב מסך',
           submenu: [
             { label: 'רגיל', checked: !c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(false) },
-            // W flips between the two modes, like in InDesign
+            // W flips between the two modes, like in professional layout tools
             { label: 'תצוגה מקדימה', shortcut: 'W', checked: c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(!c.previewMode) },
           ],
         },
@@ -260,6 +260,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             tool('זום', 'zoom', 'Z'),
             tool('מעבר צבע', 'gradient', 'G'),
             tool('דוגמיות צבע', 'swatches'),
+            { label: 'סרגלים', checked: c.showRulers, onClick: c.toggleRulers },
           ],
         },
         dock('pages', 'לוח עמודים', 'F12'),

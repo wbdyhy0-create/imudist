@@ -187,10 +187,10 @@ function fitEnd(
  * spanning everything rendered reports one client rect per line it covers), the same way this file already trusts
  * the browser for height in `fitEnd`, instead of a hand-rolled line-breaker.
  */
-function countWrappedLines(m: HTMLDivElement, text: string, runs: Run[], paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale'>, patches?: ParagraphPatch[]): number {
+function countWrappedLines(m: HTMLDivElement, text: string, runs: Run[], paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale'>, patches?: ParagraphPatch[], floats: WrapFloat[] = []): number {
   if (!text) return 0
   const inner = m.firstElementChild as HTMLElement
-  inner.replaceChildren(buildParagraphNodes(text, runs, 1, paraOpts, patches))
+  inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(text, runs, 1, paraOpts, patches))
   const range = document.createRange()
   range.selectNodeContents(inner)
   const tops = [...range.getClientRects()].map((rect) => rect.top).sort((a, b) => a - b)
@@ -258,6 +258,7 @@ function adjustForKeepLines(
   start: number,
   end: number,
   box: { w: number; h: number },
+  floats: WrapFloat[],
   paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale'>,
   patches: ParagraphPatch[] | undefined,
   paraKeepFirstLines: (number | null)[] | undefined,
@@ -273,16 +274,11 @@ function adjustForKeepLines(
   const keepLast = paraKeepLastLines?.[paraIndex] ?? 0
   if (keepFirst <= 0 && keepLast <= 0) return end
   m.style.width = `${box.w}px`
-  const paragraphOffset = paraStart - start
-  const footnoteMarkers = paraOpts.footnoteMarkers
-    ? Object.fromEntries(Object.entries(paraOpts.footnoteMarkers)
-      .filter(([offset]) => Number(offset) >= paragraphOffset)
-      .map(([offset, marker]) => [Number(offset) - paragraphOffset, marker]))
-    : undefined
-  const paraOptsAtStart = { ...paraOpts, footnoteMarkers, startParaIndex: paraIndex, atParaStart: true }
-  const totalLines = countWrappedLines(m, story.slice(paraStart, paraEnd), sliceRuns(runs, paraStart, paraEnd), paraOptsAtStart, patches)
+  const linesThrough = (stop: number) => countWrappedLines(m, story.slice(start, stop), sliceRuns(runs, start, stop), paraOpts, patches, floats)
+  const linesBeforeParagraph = paraStart > start ? linesThrough(paraStart) : 0
+  const totalLines = linesThrough(paraEnd) - linesBeforeParagraph
   if (totalLines <= 1) return end
-  const linesBefore = countWrappedLines(m, story.slice(paraStart, end), sliceRuns(runs, paraStart, end), paraOptsAtStart, patches)
+  const linesBefore = linesThrough(end) - linesBeforeParagraph
   const linesAfter = totalLines - linesBefore
   const violatesFirst = keepFirst > 0 && linesBefore < Math.min(keepFirst, totalLines)
   const violatesLast = keepLast > 0 && linesAfter > 0 && linesAfter < keepLast
@@ -291,23 +287,64 @@ function adjustForKeepLines(
 }
 
 /**
+ * Avoids ending a (non-last) frame on a loose last line: when a paragraph continues past `end` (not a real paragraph
+ * break), TextFrameView's `continues` / richtext.ts's `continuesAtEnd` stretch that line edge-to-edge with
+ * `text-align-last: justify` instead of leaving it ragged (see those). A line of only one or two words has at most
+ * one gap to carry that whole stretch, which widens into one glaring gap instead of an evenly-justified line - and
+ * the word(s) that didn't fit on it then open the next frame alone, looking like a stranded scrap. Pushing the whole
+ * short line into the next frame instead costs a little room here, but the next frame now opens with that line AND
+ * its own first line together, reading like any ordinary pair of justified lines - no stretch, no stray word.
+ */
+function avoidLooseLastLine(
+  m: HTMLDivElement,
+  story: string,
+  runs: Run[],
+  start: number,
+  end: number,
+  baseAlign: TextStyle['align'],
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale'>,
+  patches?: ParagraphPatch[],
+): number {
+  if (end <= start || end >= story.length || story[end - 1] === '\n') return end
+  const paraStart = story.lastIndexOf('\n', end - 1) + 1
+  const resolvedAlign = patches?.[paraIndexAt(story, paraStart)]?.align ?? baseAlign
+  if (resolvedAlign !== 'justify') return end
+  const lineStart = lineStartAtOffset(m, story, runs, start, end, end - 1, paraOpts, patches)
+  if (lineStart <= start) return end
+  // a footnote anchor on this line moves right along with it - assignFootnotes (called fresh on whatever range this
+  // returns) places every footnote by its anchor's actual frame, so there is nothing stale left behind to reconcile.
+  const words = story.slice(lineStart, end).trim().split(/\s+/).filter(Boolean).length
+  return words < 3 ? lineStart : end
+}
+
+/**
  * How many words sit on the last wrapped line of `paragraph`, at the given box width - used by the "smart tracking"
  * tool (טיפוגרפיה) to decide whether a paragraph's last line is short enough to be worth tightening. Finds the line
  * by growing the suffix word by word from the end until it no longer fits on one line (a paragraph is rarely more
  * than a few dozen words, and this only ever runs once per paragraph, on demand - not during ordinary layout).
- * Ignores any run styling within `paragraph` (uses `style` uniformly) - a reasonable approximation for a check
- * about its last couple of words, which are rarely styled differently from the rest.
+ * Uses the paragraph's actual character runs and paragraph-level layout patch, with the story style as fallback.
  */
-export function lastLineWordCount(paragraph: string, style: TextStyle, width: number): number {
-  const words = paragraph.trim().split(/\s+/).filter(Boolean)
+export function lastLineWordCount(paragraph: string, style: TextStyle, width: number, runsIn?: Run[], patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax'>): number {
+  const words = [...paragraph.matchAll(/\S+/g)]
   if (words.length <= 1) return words.length
   const m = getMeasurer()
-  configure(m, style)
-  m.style.width = `${width}px`
-  const paraOpts = { paraLineHeight: paraLineHeightOf(style), firstLineIndent: style.firstLineIndent, startParaIndex: 0, atParaStart: true }
-  for (let k = 1; k <= words.length; k++) {
-    const suffix = words.slice(words.length - k).join(' ')
-    if (countWrappedLines(m, suffix, [{ len: suffix.length, style }], paraOpts) > 1) return Math.max(1, k - 1)
+  const measureStyle = {
+    ...style,
+    ...(patch?.align ? { align: patch.align } : {}),
+    ...(patch?.leading !== undefined ? { leading: patch.leading } : {}),
+    ...(patch?.wordSpacingMin !== undefined ? { wordSpacingMin: patch.wordSpacingMin } : {}),
+    ...(patch?.wordSpacingMax !== undefined ? { wordSpacingMax: patch.wordSpacingMax } : {}),
+  }
+  configure(m, measureStyle)
+  m.style.width = `${Math.max(1, width - (patch?.indentLeft ?? 0) - (patch?.indentRight ?? 0))}px`
+  const sourceRuns = normalizeRuns(paragraph, runsIn, style)
+  const paraOpts = { firstLineIndent: patch?.firstLineIndent ?? style.firstLineIndent, startParaIndex: 0, atParaStart: false }
+  const patches = patch ? [patch] : undefined
+  for (let count = 1; count <= words.length; count++) {
+    const start = words[words.length - count].index ?? 0
+    const suffix = paragraph.slice(start)
+    const runs = sliceRuns(sourceRuns, start, paragraph.length)
+    if (countWrappedLines(m, suffix, runs, { ...paraOpts, firstLineIndent: start === 0 ? paraOpts.firstLineIndent : 0, atParaStart: start === 0 }, patches) > 1) return Math.max(1, count - 1)
   }
   return words.length
 }
@@ -349,6 +386,7 @@ export function flowFrames(
   footnoteNumbers?: ReadonlyMap<string, number>,
   footnoteContinuations: ReadonlyMap<string, FootnoteLayoutItem[]> = new Map(),
   paragraphStyles: ParagraphStyleRecord[] = [],
+  dirtyOffset?: number,
 ): Map<string, FrameFlow> {
   const result = new Map<string, FrameFlow>()
   const seen = new Set<string>()
@@ -356,7 +394,12 @@ export function flowFrames(
 
   for (const head of frames) {
     if (hasPrev.has(head.id)) continue
-    seen.add(head.id)
+    // `provisionalFlow` (no footnote numbers yet - it exists only to find out which page each anchor lands on) and
+    // the real, numbered `flow` computed from it run back-to-back on every edit, for the same head.id, with a
+    // different sig each time (footnoteNumbers is part of it) - sharing one cache slot, they'd only ever evict each
+    // other, so dirtyOffset below would never find a same-sig entry to reuse a prefix from. Separate slots fix that.
+    const cacheKey = `${head.id}:${footnoteNumbers ? 'numbered' : 'provisional'}`
+    seen.add(cacheKey)
     const chain = chainOf(frames, head.id)
     const style = styleOf(head)
     const noteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles)
@@ -373,12 +416,33 @@ export function flowFrames(
       `${JSON.stringify(head.paragraphStylePatches)}|${JSON.stringify(head.footnotes)}|${JSON.stringify(paragraphStyles)}|${JSON.stringify(footnoteConfig)}|${JSON.stringify(footnoteNumbers ? [...footnoteNumbers] : [])}|${JSON.stringify(chain.map((frame) => [frame.id, footnoteContinuations.get(frame.id)]))}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${JSON.stringify(f.textFlowBox)}:${JSON.stringify(f.textScale)}:${floatsKey(floats[i])}`).join(',')
 
-    const hit = cache.get(head.id)
+    const hit = cache.get(cacheKey)
     let flows: FrameFlow[]
     if (hit && hit.text === story && hit.runs === head.runs && hit.sig === sig) {
       flows = hit.flows
     } else {
       const runs = normalizeRuns(story, head.runs, style)
+      const reusablePrefix: FrameFlow[] = []
+      if (hit && hit.sig === sig && dirtyOffset !== undefined) {
+        for (const previous of hit.flows) {
+          if (previous.end >= dirtyOffset) break
+          const currentRuns = sliceRuns(runs, previous.start, previous.end)
+          if (hit.text.slice(previous.start, previous.end) !== story.slice(previous.start, previous.end) || JSON.stringify(previous.runs) !== JSON.stringify(currentRuns)) break
+          reusablePrefix.push(previous)
+        }
+      }
+      // a reusable frame's footnotes were already laid out exactly this way last time (same sig: same config, same
+      // continuations carried into it, same text) - assignFootnotes below skips it too, instead of re-measuring
+      // every footnote in it (a DOM reflow each) on every one of the stabilization loop's attempts, for a frame the
+      // edit never touched. `footnoteHeight` is `reserveFor`'s own `layout.height + spaceBefore + dividerGap + 1`
+      // (or 0 for none) - undone here to recover the plain layoutFootnotes result reserveFor was built from.
+      const reusableLayouts = new Map<string, ReturnType<typeof layoutFootnotes>>(
+        reusablePrefix.flatMap((previous, i): [string, ReturnType<typeof layoutFootnotes>][] => {
+          if (!previous.footnotes.length && !previous.footnoteOverflowItems.length) return []
+          const height = previous.footnoteHeight > 0 ? previous.footnoteHeight - footnoteConfig.spaceBefore - footnoteConfig.dividerGap - 1 : 0
+          return [[chain[i].id, { placements: previous.footnotes, overflowItems: previous.footnoteOverflowItems, height, overflow: previous.footnoteOverflowItems.length > 0 }]]
+        }),
+      )
       const m = getMeasurer()
       configure(m, style)
       const gaps = paraGapsOf(style, head, story)
@@ -444,10 +508,12 @@ export function flowFrames(
         inner.style.gap = ''
         return { width: Number.isFinite(width) ? width : rect.width, height: rect.height }
       }
+      const fittedEnds = new Map<string, number>()
       const calculateRanges = (reserved: Map<string, number>, forcedEnds: Map<string, number> = new Map()) => {
-        const ranges: { start: number; end: number }[] = []
-        let start = 0
+        const ranges: { start: number; end: number }[] = reusablePrefix.map(({ start, end }) => ({ start, end }))
+        let start = ranges.length ? ranges[ranges.length - 1].end : 0
         chain.forEach((f, i) => {
+        if (i < reusablePrefix.length) return
         const isFirst = i === 0
         const isLast = i === chain.length - 1
         const flowFrame = f.textFlowBox ? { ...f, w: f.textFlowBox.w, h: f.textFlowBox.h } : f
@@ -464,8 +530,14 @@ export function flowFrames(
           footnoteMarkers: footnoteMarkersFrom(start),
           footnoteReferenceScale: footnoteConfig.referenceScale,
         }
-        const fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches)
-        const normalEnd = isLast ? fitted : adjustForKeepLines(m, story, runs, start, fitted, box, paraOpts, head.paragraphStylePatches, head.paraKeepFirstLines, head.paraKeepLastLines)
+        const fitKey = JSON.stringify([f.id, start, box.w, box.h, floatsKey(floats[i]), paraOpts.startParaIndex, paraOpts.atParaStart, paraOpts.firstLineIndent, paraOpts.footnoteMarkers, paraOpts.footnoteReferenceScale])
+        let fitted = fittedEnds.get(fitKey)
+        if (fitted === undefined) {
+          fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches)
+          fittedEnds.set(fitKey, fitted)
+        }
+        const deWidowed = isLast ? fitted : avoidLooseLastLine(m, story, runs, start, fitted, style.align, paraOpts, head.paragraphStylePatches)
+        const normalEnd = isLast ? fitted : adjustForKeepLines(m, story, runs, start, deWidowed, box, floats[i], paraOpts, head.paragraphStylePatches, head.paraKeepFirstLines, head.paraKeepLastLines)
         const end = Math.max(start, Math.min(normalEnd, forcedEnds.get(f.id) ?? normalEnd))
           ranges.push({ start, end })
           start = end
@@ -473,13 +545,11 @@ export function flowFrames(
         return ranges
       }
       const assignFootnotes = (ranges: { start: number; end: number }[]) => {
-        const layouts = new Map<string, ReturnType<typeof layoutFootnotes>>()
+        const layouts = new Map<string, ReturnType<typeof layoutFootnotes>>(reusableLayouts)
         chain.forEach((frame, index) => {
+          if (index < reusablePrefix.length) return
           const { start, end } = ranges[index]
-          const localItems = footnoteItems.filter((item) => {
-            const note = head.footnotes?.find((candidate) => candidate.id === item.id)
-            return note && note.anchor >= start && note.anchor < end
-          })
+          const localItems = footnoteItems.filter((item) => item.anchor >= start && item.anchor < end)
           const inFrame = [...(footnoteContinuations.get(frame.id) ?? []), ...localItems]
           if (inFrame.length) {
             const layout = layoutFootnotes(inFrame, {
@@ -495,7 +565,7 @@ export function flowFrames(
               placements: layout.placements.map((placement) => ({
                 ...placement,
                 referenceNumber: formatFootnoteNumber(Number(placement.referenceNumber), footnoteConfig.numberStyle, footnoteConfig.noteFormat, footnoteConfig.markerPrefix, footnoteConfig.markerSuffix),
-                y: placement.y + footnoteConfig.spaceBefore + 1,
+                y: placement.y + footnoteConfig.dividerGap + footnoteConfig.spaceBefore + 1,
               })),
             })
           }
@@ -515,7 +585,7 @@ export function flowFrames(
         const nextReserved = reserveFor(nextLayouts)
         let anchorMoved = false
         chain.forEach((frame, index) => {
-          if (index === chain.length - 1) return
+          if (index === chain.length - 1 || index < reusablePrefix.length) return
           const anchorRange = ranges[index]
           const range = nextRanges[index]
           const layout = nextLayouts.get(frame.id)
@@ -539,7 +609,7 @@ export function flowFrames(
             const cut = lineStartAtOffset(m, story, runs, start, anchorRange.end, note.anchor, paraOpts, head.paragraphStylePatches)
             const nextEnd = Math.max(start, cut)
             const previousEnd = forcedEnds.get(frame.id)
-            if (nextEnd < anchorRange.end && (previousEnd === undefined || nextEnd < previousEnd)) {
+            if (cut > start && nextEnd < anchorRange.end && (previousEnd === undefined || nextEnd < previousEnd)) {
               forcedEnds.set(frame.id, nextEnd)
               anchorMoved = true
             }
@@ -580,7 +650,7 @@ export function flowFrames(
           footnoteOverflowItems: noteLayouts.get(f.id)?.overflowItems ?? [],
         })
       })
-      cache.set(head.id, { text: story, runs: head.runs, sig, flows })
+      cache.set(cacheKey, { text: story, runs: head.runs, sig, flows })
     }
     chain.forEach((f, i) => result.set(f.id, flows[i]))
   }
@@ -596,10 +666,11 @@ export function flowFramesWithFootnoteContinuation(
   numbers: ReadonlyMap<string, number>,
   primaryFrameOrder: string[],
   paragraphStyles: ParagraphStyleRecord[] = [],
+  dirtyOffset?: number,
 ): Map<string, FrameFlow> {
   const order = new Map(primaryFrameOrder.map((id, index) => [id, index]))
   let continuations = new Map<string, FootnoteLayoutItem[]>()
-  let result = flowFrames(frames, images, config, numbers, new Map(), paragraphStyles)
+  let result = flowFrames(frames, images, config, numbers, new Map(), paragraphStyles, dirtyOffset)
   for (let attempt = 0; attempt < frames.length + primaryFrameOrder.length; attempt++) {
     const next = new Map<string, FootnoteLayoutItem[]>()
     const anchorIndex = new Map<string, number>()
@@ -613,17 +684,15 @@ export function flowFramesWithFootnoteContinuation(
       const sourceFrame = frames.find((frame) => frame.id === frameId)
       const target = sourceFrame?.next ?? (index === undefined ? undefined : primaryFrameOrder[index + 1])
       if (!target || frameFlow.footnoteOverflowItems.length === 0) continue
-      const placedNoteIds = new Set(frameFlow.footnotes.map((note) => note.id))
       const spills = frameFlow.footnoteOverflowItems.filter((item) => {
         const referencePage = anchorIndex.get(item.id)
-        if ((item.offset ?? 0) === 0 && !placedNoteIds.has(item.id)) return false
         return referencePage === undefined || index === undefined || referencePage <= index
       })
-      if (spills.length) next.set(target, [...(next.get(target) ?? []), ...spills])
+      if (spills.length) next.set(target, [...(next.get(target) ?? []), ...spills.map((item) => (item.offset ?? 0) === 0 ? { ...item, continued: false } : item)])
     }
     if (next.size === 0) break
     continuations = next
-    result = flowFrames(frames, images, config, numbers, continuations, paragraphStyles)
+    result = flowFrames(frames, images, config, numbers, continuations, paragraphStyles, dirtyOffset)
   }
   return result
 }

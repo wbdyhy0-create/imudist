@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { GradientFill, ShapeFrame } from '../document'
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import type { CharStyle, ColorSample, GradientFill, ShapeFrame } from '../document'
 import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab, tintHex, type ColorModel } from '../colorModels'
 import { FillPicker } from './FillPicker'
 import { ColorLibrary } from './ColorLibrary'
@@ -8,9 +8,18 @@ import { Group } from './PropertiesPanel'
 interface Props {
   tool: 'color' | 'gradient' | 'swatches'
   shape: ShapeFrame | null
+  textStyle?: CharStyle | null
+  textId?: string | null
   onShape: (patch: Partial<ShapeFrame>) => void
+  onTextColor?: (color: string) => void
+  onTextOutlineColor?: (color: string) => void
+  textColorTarget?: 'fill' | 'outline'
+  onTextColorTarget?: (target: 'fill' | 'outline') => void
   target: 'fill' | 'stroke'
   onTarget: (target: 'fill' | 'stroke') => void
+  samples: ColorSample[]
+  onStartSampler: () => void
+  onDeleteSample: (id: string) => void
 }
 
 interface Swatch { name: string; color: string | null; kind: 'תהליך' | 'ספוט'; global: boolean }
@@ -31,10 +40,13 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Props) {
+export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample }: Props) {
   const [model, setModel] = useState<ColorModel>('CMYK')
-  const [color, setColor] = useState(shape?.fill ?? '#0066ff')
-  const [baseColor, setBaseColor] = useState<string | null>(shape?.fill ?? '#0066ff')
+  const isTextTarget = !!textId && !!onTextColor
+  const textTargetColor = textColorTarget === 'outline' ? textStyle?.outlineColor ?? '#000000' : textStyle?.color ?? '#111111'
+  const initialColor = isTextTarget ? textTargetColor : shape?.fill ?? '#0066ff'
+  const [color, setColor] = useState(initialColor)
+  const [baseColor, setBaseColor] = useState<string | null>(initialColor)
   const baseColors = useRef({ fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' })
   const [tint, setTint] = useState(100)
   const [opacity, setOpacity] = useState(shape?.opacity ?? 1)
@@ -43,34 +55,45 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
   const activeStopDrag = useRef<{ index: number; pointerId: number; startY: number } | null>(null)
   const deleteStopCandidate = useRef<number | null>(null)
   const [deleteStopIndex, setDeleteStopIndex] = useState<number | null>(null)
+  const [dragOverRamp, setDragOverRamp] = useState(false)
 
   useEffect(() => {
     baseColors.current = { fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' }
     // the panel stays open while the selection moves to another shape: show that shape's colours, not the last one's
-    setBaseColor(baseColors.current[target])
-    setColor(baseColors.current[target])
+    const selectedColor = isTextTarget ? textTargetColor : baseColors.current[target]
+    setBaseColor(selectedColor)
+    setColor(selectedColor)
     setOpacity(shape?.opacity ?? 1)
+    setTint(100)
     if (shape?.fillGradient) setGradient(normalizedGradient(shape.fillGradient))
-  }, [shape?.id])
+  }, [shape?.id, textId, textTargetColor, textColorTarget])
 
   useEffect(() => {
-    const targetColor = baseColors.current[target]
+    const targetColor = isTextTarget ? textTargetColor : baseColors.current[target]
     setBaseColor(targetColor)
     setColor(targetColor)
-  }, [target])
+  }, [target, textTargetColor, textColorTarget])
 
   const title = tool === 'color' ? 'צבע' : tool === 'gradient' ? 'מעבר צבע' : 'דוגמיות צבע'
-  const applyColor = (next: string | null) => {
-    if (!shape) return
+  const applyColor = (next: string | null, tintValue = tint) => {
     setBaseColor(next)
     setColor(next ?? '#000000')
     baseColors.current[target] = next ?? '#000000'
-    onShape(target === 'fill' ? { fill: next ? tintHex(next, tint) : null, fillGradient: undefined } : { stroke: next ? tintHex(next, tint) : null })
+    if (isTextTarget) {
+      const applied = next ? tintHex(next, tintValue) : '#000000'
+      if (textColorTarget === 'outline') onTextOutlineColor?.(applied)
+      else onTextColor?.(applied)
+      return
+    }
+    onShape(target === 'fill' ? { fill: next ? tintHex(next, tintValue) : null, fillGradient: undefined } : { stroke: next ? tintHex(next, tintValue) : null })
   }
   const applyTint = (value: number) => {
     setTint(value)
-    if (!shape || !baseColor) return
-    onShape(target === 'fill' ? { fill: tintHex(baseColor, value) } : { stroke: tintHex(baseColor, value) })
+    if (!baseColor) return
+    const tinted = tintHex(baseColor, value)
+    if (isTextTarget && textColorTarget === 'outline') onTextOutlineColor?.(tinted)
+    else if (isTextTarget) onTextColor?.(tinted)
+    else if (shape) onShape(target === 'fill' ? { fill: tinted } : { stroke: tinted })
   }
   const updateGradient = (patch: Partial<GradientFill>) => {
     const next = { ...gradient, ...patch }
@@ -112,6 +135,15 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
   const removeStop = (index: number) => {
     const stops = (gradient.stops ?? []).filter((_, stopIndex) => stopIndex !== index)
     if (stops.length < 2) return
+    updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
+  }
+  const colorFromDrop = (event: ReactDragEvent<HTMLElement>) => {
+    const color = event.dataTransfer.getData('application/x-imudist-color') || event.dataTransfer.getData('text/plain')
+    return /^#[\dA-F]{6}$/i.test(color) ? color : null
+  }
+  const addSampleStop = (color: string, offset: number) => {
+    const stops = [...(gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]), { offset, color }]
+      .sort((a, b) => a.offset - b.offset)
     updateGradient({ stops, start: stops[0].color, end: stops[stops.length - 1].color })
   }
   const startStopDrag = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
@@ -173,7 +205,26 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
   return (
     <aside className="props-panel color-tools-panel" aria-label={title} dir="rtl">
       <h2 className="props-title">{title}</h2>
-      {!shape && tool !== 'gradient' ? <p className="muted">בחר צורה כדי להחיל עליה צבע.</p> : tool === 'gradient' ? (
+      <Group title="דגימות שנדגמו">
+        <button className="btn small color-sample-start" onClick={onStartSampler}>דגום צבע</button>
+        {samples.length === 0 ? <p className="muted color-samples-empty">אין דגימות במסמך.</p> : (
+          <div className="color-samples-list">
+            {samples.map((sample) => (
+              <div className="color-sample-row" key={sample.id}>
+                <button className="color-sample-apply" draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-imudist-color', sample.color); event.dataTransfer.setData('text/plain', sample.color); event.dataTransfer.effectAllowed = 'copy' }} onClick={() => { setTint(100); applyColor(sample.color, 100) }} title={`החל ${sample.color}`}>
+                  <span className="color-sample-chip" style={{ background: sample.color }} />
+                  <span className="color-sample-label">{sample.label}</span>
+                  <bdi className="color-sample-hex" dir="ltr">{sample.color}</bdi>
+                </button>
+                <button className="icon-button color-sample-delete" aria-label={`מחק דגימה ${sample.label}`} title="מחק דגימה" onClick={() => onDeleteSample(sample.id)}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Group>
+      {!shape && !isTextTarget && tool !== 'gradient' ? <p className="muted">צבע שנבחר יחול על הצורה הבאה שתיצור.</p> : tool === 'gradient' && isTextTarget ? (
+        <Group title="מעבר צבע"><p className="muted">מעבר צבע זמין לצורות; צבע הטקסט הנבחר הוא אחיד.</p></Group>
+      ) : tool === 'gradient' ? (
         <>
         <Group title="מעבר צבע">
           <label className="field-label" htmlFor="gradient-type">סוג מעבר</label>
@@ -186,7 +237,27 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
             : `linear-gradient(${90 - (gradient.angle ?? 0) + (gradient.reverse ? 180 : 0)}deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} />
           {gradient.type === 'linear' && <label className="field-label" htmlFor="gradient-angle">זווית: {gradient.angle ?? 0}°</label>}
           {gradient.type === 'linear' && <input id="gradient-angle" type="range" min={0} max={359} value={((gradient.angle ?? 0) + 360) % 360} onChange={(e) => updateGradient({ angle: Number(e.target.value) })} aria-label="זווית מעבר הצבע" />}
-          <div className="gradient-ramp" style={{ background: `linear-gradient(90deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} aria-label="רמפת מעבר צבע">
+          <div
+            className={'gradient-ramp' + (dragOverRamp ? ' drag-over' : '')}
+            style={{ background: `linear-gradient(90deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }}
+            aria-label="רמפת מעבר צבע"
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes('application/x-imudist-color') && !event.dataTransfer.types.includes('text/plain')) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'copy'
+              setDragOverRamp(true)
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOverRamp(false)
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              setDragOverRamp(false)
+              const droppedColor = colorFromDrop(event)
+              const bounds = event.currentTarget.getBoundingClientRect()
+              if (droppedColor && bounds.width > 0) addSampleStop(droppedColor, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)))
+            }}
+          >
             {(gradient.stops ?? []).map((stop, index) => (
               <div
                 key={index}
@@ -205,6 +276,19 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
                 onPointerUp={(event) => finishStopDrag(index, event)}
                 onPointerCancel={(event) => finishStopDrag(index, event, true)}
                 onKeyDown={(event) => moveStopByKey(index, event)}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes('application/x-imudist-color') && !event.dataTransfer.types.includes('text/plain')) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.dataTransfer.dropEffect = 'copy'
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setDragOverRamp(false)
+                  const droppedColor = colorFromDrop(event)
+                  if (droppedColor) updateStop(index, { color: droppedColor })
+                }}
               />
             ))}
           </div>
@@ -226,11 +310,14 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
         </>
       ) : (
         <>
-          <Group title="מילוי וקו">
-            <div className="seg small" role="radiogroup" aria-label="החל צבע על">
+          <Group title={isTextTarget ? 'יעד צבע' : 'מילוי וקו'}>
+            {isTextTarget ? <div className="seg small" role="radiogroup" aria-label="החל צבע על טקסט">
+              <button role="radio" aria-checked={textColorTarget === 'fill'} className={textColorTarget === 'fill' ? 'on' : ''} onClick={() => onTextColorTarget?.('fill')}>מילוי</button>
+              <button role="radio" aria-checked={textColorTarget === 'outline'} className={textColorTarget === 'outline' ? 'on' : ''} onClick={() => onTextColorTarget?.('outline')}>קו מתאר</button>
+            </div> : <div className="seg small" role="radiogroup" aria-label="החל צבע על">
                 <button role="radio" aria-checked={target === 'fill'} className={target === 'fill' ? 'on' : ''} onClick={() => onTarget('fill')}>מילוי</button>
               <button role="radio" aria-checked={target === 'stroke'} className={target === 'stroke' ? 'on' : ''} onClick={() => onTarget('stroke')}>קו</button>
-            </div>
+            </div>}
           </Group>
           <Group title="מודל צבע">
             <select className="select" value={model} onChange={(e) => setModel(e.target.value as ColorModel)}>
@@ -244,17 +331,17 @@ export function ColorToolsPanel({ tool, shape, onShape, target, onTarget }: Prop
             <label className="color-hex">ערך מסך <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} /></label>
             <label className="field-label" htmlFor="color-tint">גוון: {tint}%</label>
             <input id="color-tint" type="range" min={0} max={100} value={tint} onChange={(e) => applyTint(Number(e.target.value))} />
-            <label className="field-label" htmlFor="color-opacity">שקיפות: {Math.round(opacity * 100)}%</label>
-            <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} />
+            {!isTextTarget && <><label className="field-label" htmlFor="color-opacity">שקיפות: {Math.round(opacity * 100)}%</label>
+            <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} /></>}
           </Group>
           <Group title="דוגמיות צבע">
-            <FillPicker label="דוגמיות צבע" value={target === 'fill' ? shape?.fill ?? null : shape?.stroke ?? null} onChange={applyColor} />
+            <FillPicker label="דוגמיות צבע" value={isTextTarget ? textTargetColor : target === 'fill' ? shape?.fill ?? null : shape?.stroke ?? null} onChange={applyColor} />
           </Group>
         </>
       )}
-      {tool === 'swatches' && shape && <>
+      {tool === 'swatches' && (shape || isTextTarget) && <>
         <Group title="ספריית צבעים">
-          <ColorLibrary onColor={(next) => applyColor(next)} onGradient={(next) => { onTarget('fill'); updateGradient(next) }} />
+          <ColorLibrary mode={isTextTarget ? 'solids' : 'all'} onColor={(next) => applyColor(next)} onGradient={(next) => { onTarget('fill'); updateGradient(next) }} />
         </Group>
         <Group title="דוגמיות המסמך">
           <div className="swatches-manager">

@@ -1,6 +1,6 @@
 export type Unit = 'px' | 'cm' | 'mm' | 'in'
 
-/** Internally every length is stored in points. As in InDesign, 1 px = 1 pt. */
+/** Internally every length is stored in points. As in professional layout tools, 1 px = 1 pt. */
 export const PT_PER_UNIT: Record<Unit, number> = {
   px: 1,
   mm: 72 / 25.4,

@@ -5,6 +5,7 @@ import {
   DEFAULT_WRAP_OFFSET,
   DEFAULT_SHAPE_FILL,
   DEFAULT_SHAPE_STROKE,
+  FOOTNOTE_MARKER,
   MAX_GUIDES,
   MAX_SIDES,
   MIN_SIDES,
@@ -15,16 +16,19 @@ import {
   MAX_SIDE_PT,
   MIN_FRAME_PT,
   MIN_PAGE_PT,
+  TOC_PAGE_MARKER,
   defaultDocSettings,
   normalizeSizes,
   validateDoc,
   type Asset,
   type Assets,
+  type ColorSample,
   type CharStyle,
   type DocSettings,
   type FootnoteItem,
   type FootnoteLayoutConfig,
   type GradientFill,
+  type GradientFeather,
   type Guide,
   type ImageFit,
   type ImageFrame,
@@ -47,11 +51,14 @@ import {
   type TextAlign,
   type TextFrame,
   type TextStyle,
+  type TocFootnoteReference,
+  type TocConfig,
+  type TocPageReference,
   type WrapMode,
 } from './document'
 import { footnoteTextStyle } from './footnoteLayout'
 import { normalizeDeg } from './frames'
-import type { DocContent } from './pages'
+import type { DocContent, ParentOverride } from './pages'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
 
@@ -80,6 +87,8 @@ export interface DocumentFile {
   pageParents: (string | null)[]
   /** version 2+ (this field only from a later Imudist build): independently-numbered runs of pages */
   sections: PageSection[]
+  parentOverrides?: ParentOverride[]
+  colorSamples?: ColorSample[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
@@ -102,6 +111,8 @@ export function serializeDocument(c: DocContent): string {
     parents: c.parents,
     pageParents: c.pageParents,
     sections: c.sections,
+    parentOverrides: c.parentOverrides ?? [],
+    colorSamples: c.colorSamples ?? [],
   }
   return JSON.stringify(file)
 }
@@ -136,6 +147,38 @@ function parsePageSizes(v: unknown): (PageSize | null)[] {
   ).map((z) => (z && z.w > 0 && z.h > 0 ? z : null))
 }
 
+function parseTocConfig(value: unknown): TocConfig | undefined {
+  if (!isObj(value) || !Array.isArray(value.levels)) return undefined
+  const levels = value.levels.flatMap((raw) => isObj(raw) && typeof raw.sourceStyleId === 'string' && raw.sourceStyleId
+    ? [{ sourceStyleId: raw.sourceStyleId, outputStyleId: str(raw.outputStyleId, 'body'), indent: num(raw.indent, 0, 0, MAX_SIDE_PT) }]
+    : [])
+  return levels.length > 0 ? { levels, leader: typeof value.leader === 'string' ? value.leader.slice(0, 4) : '.' } : undefined
+}
+
+function parseTocPageReferences(value: unknown, text: string): TocPageReference[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const refs = value.flatMap((raw) => {
+    if (!isObj(raw) || typeof raw.sourceFrameId !== 'string' || typeof raw.sourceStyleId !== 'string' || typeof raw.sourceText !== 'string') return []
+    if (typeof raw.offset !== 'number' || !Number.isInteger(raw.offset) || typeof raw.sourceParagraphIndex !== 'number' || !Number.isInteger(raw.sourceParagraphIndex)) return []
+    const offset = raw.offset
+    const sourceParagraphIndex = raw.sourceParagraphIndex
+    if (offset < 0 || offset >= text.length || text[offset] !== TOC_PAGE_MARKER || sourceParagraphIndex < 0) return []
+    return [{ offset, sourceFrameId: raw.sourceFrameId, sourceParagraphIndex, sourceStyleId: raw.sourceStyleId, sourceText: raw.sourceText, occurrence: int(raw.occurrence, 0, 0, MAX_PAGES * 100) }]
+  })
+  return refs.length > 0 ? refs : undefined
+}
+
+function parseTocFootnoteReferences(value: unknown, text: string): TocFootnoteReference[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const refs = value.flatMap((raw) => {
+    if (!isObj(raw) || typeof raw.offset !== 'number' || !Number.isInteger(raw.offset) || typeof raw.sourceNoteId !== 'string' || !raw.sourceNoteId) return []
+    return raw.offset >= 0 && raw.offset < text.length && text[raw.offset] === FOOTNOTE_MARKER
+      ? [{ offset: raw.offset, sourceNoteId: raw.sourceNoteId }]
+      : []
+  })
+  return refs.length > 0 ? refs : undefined
+}
+
 function parseSettings(v: unknown, name: string): DocSettings {
   const d = defaultDocSettings(name)
   if (!isObj(v)) return d
@@ -161,6 +204,8 @@ function parseSettings(v: unknown, name: string): DocSettings {
     bleed: sidesOf(v.bleed, d.bleed),
     slug: sidesOf(v.slug, d.slug),
     footnotes: parseFootnoteConfig(v.footnotes),
+    toc: parseTocConfig(v.toc),
+    parentItemsAbovePageContent: bool(v.parentItemsAbovePageContent, d.parentItemsAbovePageContent ?? false),
   }
   const clean = normalizeSizes(settings)
   if (validateDoc(clean)) throw new FileFormatError('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).')
@@ -193,6 +238,7 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
 function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
   const s = isObj(v) ? v : {}
   const color = typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? s.color : fallback.color
+  const outlineColor = typeof s.outlineColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.outlineColor) ? s.outlineColor : fallback.outlineColor
   return {
     fontFamily: str(s.fontFamily, fallback.fontFamily),
     fontSize: num(s.fontSize, fallback.fontSize, 1, 999),
@@ -200,6 +246,13 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
     italic: bool(s.italic, fallback.italic),
     tracking: num(s.tracking, fallback.tracking, -1000, 1000),
     ...(color ? { color } : {}),
+    ...(outlineColor ? { outlineColor } : {}),
+    ...(typeof s.outlineWidth === 'number' && Number.isFinite(s.outlineWidth) ? { outlineWidth: num(s.outlineWidth, 0, 0, 100) } : fallback.outlineWidth !== undefined ? { outlineWidth: fallback.outlineWidth } : {}),
+    ...(typeof s.shadowOffsetX === 'number' && Number.isFinite(s.shadowOffsetX) ? { shadowOffsetX: num(s.shadowOffsetX, 0, -100, 100) } : fallback.shadowOffsetX !== undefined ? { shadowOffsetX: fallback.shadowOffsetX } : {}),
+    ...(typeof s.shadowOffsetY === 'number' && Number.isFinite(s.shadowOffsetY) ? { shadowOffsetY: num(s.shadowOffsetY, 6, -100, 100) } : typeof s.shadowOffset === 'number' && Number.isFinite(s.shadowOffset) ? { shadowOffsetY: num(s.shadowOffset, 6, -100, 100) } : fallback.shadowOffsetY !== undefined ? { shadowOffsetY: fallback.shadowOffsetY } : fallback.shadowOffset !== undefined ? { shadowOffsetY: fallback.shadowOffset } : {}),
+    ...(typeof s.shadowColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.shadowColor) ? { shadowColor: s.shadowColor } : fallback.shadowColor ? { shadowColor: fallback.shadowColor } : {}),
+    ...(typeof s.shadowOffset === 'number' && Number.isFinite(s.shadowOffset) ? { shadowOffset: num(s.shadowOffset, 6, 0, 100) } : fallback.shadowOffset !== undefined ? { shadowOffset: fallback.shadowOffset } : {}),
+    ...(typeof s.shadowOpacity === 'number' && Number.isFinite(s.shadowOpacity) ? { shadowOpacity: num(s.shadowOpacity, 0, 0, 1) } : fallback.shadowOpacity !== undefined ? { shadowOpacity: fallback.shadowOpacity } : {}),
   }
 }
 
@@ -251,6 +304,8 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
   return {
     ...(typeof s.fontFamily === 'string' && s.fontFamily ? { fontFamily: s.fontFamily } : {}),
     ...(typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? { color: s.color } : {}),
+    ...(typeof s.outlineColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.outlineColor) ? { outlineColor: s.outlineColor } : {}),
+    ...(typeof s.outlineWidth === 'number' && Number.isFinite(s.outlineWidth) ? { outlineWidth: num(s.outlineWidth, 0, 0, 100) } : {}),
     ...(typeof s.weight === 'number' && Number.isFinite(s.weight) ? { weight: num(s.weight, 400, 1, 1000) } : {}),
     ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
     ...(typeof s.fontSize === 'number' && Number.isFinite(s.fontSize) ? { fontSize: num(s.fontSize, 14, 1, 999) } : {}),
@@ -318,7 +373,7 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       ? raw.footnotes.filter(isObj).flatMap((note) => {
           const anchor = int(note.anchor, -1, 0, Math.max(0, text.length - 1))
           const content = typeof note.content === 'string' ? note.content.slice(0, 1_000_000) : ''
-          if (!content || text[anchor] !== '\uE006') return []
+          if (!content || text[anchor] !== FOOTNOTE_MARKER) return []
           const noteStyleRaw = isObj(note.style) ? note.style : null
           const paragraphStyleId = typeof note.paragraphStyleId === 'string' ? note.paragraphStyleId : undefined
           const fallbackNoteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, paragraphStyleId)
@@ -349,9 +404,12 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       text,
       runs: normalizeRuns(text, runs, base),
       ...(footnotes?.length ? { footnotes } : {}),
+      ...(parseTocPageReferences(raw.tocPageReferences, text) ? { tocPageReferences: parseTocPageReferences(raw.tocPageReferences, text) } : {}),
+      ...(parseTocFootnoteReferences(raw.tocFootnoteReferences, text) ? { tocFootnoteReferences: parseTocFootnoteReferences(raw.tocFootnoteReferences, text) } : {}),
       next: typeof raw.next === 'string' ? raw.next : null,
       ...zOf(raw),
       ...rotationOf(raw),
+      ...parseFeather(raw.feather),
       ...paragraphStyleOf(raw),
       ...paragraphStyleIdsOf(raw),
       ...paragraphStyleNamesOf(raw),
@@ -426,6 +484,8 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       ...zOf(raw),
       ...rotationOf(raw),
       ...opacityOf(raw),
+      ...shadowOf(raw),
+      ...parseFeather(raw.feather),
       ...(raw.flipX === true ? { flipX: true as const } : {}),
       ...(raw.flipY === true ? { flipY: true as const } : {}),
       ...(raw.wrap === 'around' || raw.wrap === 'jump' ? { wrap: raw.wrap as WrapMode } : {}),
@@ -437,9 +497,42 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 const colorOrNull = (v: unknown, fallback: string | null) => (v === null ? null : typeof v === 'string' && HEX.test(v) ? v : fallback)
+function parseColorSamples(value: unknown): ColorSample[] {
+  if (!Array.isArray(value)) return []
+  const ids = new Set<string>()
+  return value.flatMap((raw) => {
+    if (!isObj(raw) || typeof raw.id !== 'string' || !raw.id || typeof raw.color !== 'string' || !HEX.test(raw.color)) return []
+    const id = raw.id.slice(0, 120)
+    if (ids.has(id)) return []
+    ids.add(id)
+    return [{ id, color: raw.color.toUpperCase(), label: typeof raw.label === 'string' ? raw.label.slice(0, 120) : raw.color.toUpperCase() }]
+  })
+}
 /** object opacity, 0…1: only written when the object is not fully opaque */
 const opacityOf = (raw: Record<string, unknown>): { opacity?: number } =>
   typeof raw.opacity === 'number' && Number.isFinite(raw.opacity) && raw.opacity < 1 ? { opacity: num(raw.opacity, 1, 0, 1) } : {}
+const shadowOf = (raw: Record<string, unknown>): Pick<ImageFrame, 'shadowOffsetX' | 'shadowOffsetY' | 'shadowColor' | 'shadowOpacity'> => ({
+  ...(typeof raw.shadowOffsetX === 'number' && Number.isFinite(raw.shadowOffsetX) ? { shadowOffsetX: num(raw.shadowOffsetX, 0, -100, 100) } : {}),
+  ...(typeof raw.shadowOffsetY === 'number' && Number.isFinite(raw.shadowOffsetY) ? { shadowOffsetY: num(raw.shadowOffsetY, 6, -100, 100) } : typeof raw.shadowOffset === 'number' && Number.isFinite(raw.shadowOffset) ? { shadowOffsetY: num(raw.shadowOffset, 6, -100, 100) } : {}),
+  ...(typeof raw.shadowColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.shadowColor) ? { shadowColor: raw.shadowColor } : {}),
+  ...(typeof raw.shadowOpacity === 'number' && Number.isFinite(raw.shadowOpacity) ? { shadowOpacity: num(raw.shadowOpacity, 0, 0, 1) } : {}),
+})
+
+function parseFeather(raw: unknown): { feather?: GradientFeather } {
+  if (!isObj(raw)) return {}
+  const { x0, y0, x1, y1 } = raw
+  const coordinates = [x0, y0, x1, y1]
+  if (!coordinates.every((value) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e4)) return {}
+  if (Math.hypot((x1 as number) - (x0 as number), (y1 as number) - (y0 as number)) < 1e-6 || !Array.isArray(raw.points)) return {}
+  const points = raw.points
+    .filter(isObj)
+    .filter((point) => typeof point.offset === 'number' && Number.isFinite(point.offset) && point.offset >= 0 && point.offset <= 1 && typeof point.opacity === 'number' && Number.isFinite(point.opacity) && point.opacity >= 0 && point.opacity <= 1)
+    .map((point) => ({ offset: point.offset as number, opacity: point.opacity as number }))
+    .sort((a, b) => a.offset - b.offset)
+    .slice(0, 8)
+  if (points.length < 2) return {}
+  return { feather: { x0: x0 as number, y0: y0 as number, x1: x1 as number, y1: y1 as number, points } }
+}
 
 /** the optional two-colour (or multi-stop) fill of a shape */
 function parseGradient(v: unknown): { fillGradient?: GradientFill } {
@@ -586,6 +679,8 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...zOf(raw),
       ...rotationOf(raw),
       ...opacityOf(raw),
+      ...shadowOf(raw),
+      ...parseFeather(raw.feather),
     })
   }
   return out
@@ -666,6 +761,43 @@ function parseSections(v: unknown, pages: number): PageSection[] {
   return sections
 }
 
+function parseParentOverrides(
+  value: unknown,
+  doc: DocSettings,
+  parents: ParentPage[],
+  frames: TextFrame[],
+  images: ImageFrame[],
+  shapes: ShapeFrame[],
+): ParentOverride[] {
+  if (!Array.isArray(value)) return []
+  const localIds = {
+    frame: new Set(frames.map((frame) => frame.id)),
+    image: new Set(images.map((image) => image.id)),
+    shape: new Set(shapes.map((shape) => shape.id)),
+  }
+  const seen = new Set<string>()
+  return value.flatMap((raw) => {
+    if (!isObj(raw)) return []
+    if (raw.kind !== 'frame' && raw.kind !== 'image' && raw.kind !== 'shape') return []
+    if (typeof raw.pageIndex !== 'number' || !Number.isInteger(raw.pageIndex)) return []
+    const parentId = str(raw.parentId, '')
+    const sourceId = str(raw.sourceId, '')
+    const localId = str(raw.localId, '')
+    const kind = raw.kind
+    const pageIndex = Math.min(MAX_PAGES, Math.max(0, raw.pageIndex))
+    const parent = parents.find((candidate) => candidate.id === parentId)
+    const sourceExists = kind === 'frame'
+      ? parent?.frames.some((item) => item.id === sourceId)
+      : kind === 'image'
+        ? parent?.images.some((item) => item.id === sourceId)
+        : parent?.shapes.some((item) => item.id === sourceId)
+    const key = `${pageIndex}:${parentId}:${kind}:${sourceId}`
+    if (!parent || pageIndex >= doc.pages || !sourceExists || !localIds[kind].has(localId) || seen.has(key)) return []
+    seen.add(key)
+    return [{ parentId, pageIndex, sourceId, localId, kind }]
+  })
+}
+
 /**
  * Read the text of a file. The document takes its name from the file (like other desktop programs),
  * so `name` is the file's name without the extension.
@@ -685,17 +817,22 @@ export function parseDocument(text: string, name: string): DocContent {
   const doc = parseSettings(data.settings, name)
   const parents = parseParents(data.parents, assets)
   const paragraphStyles = parseParagraphStyles(data.paragraphStyles)
+  const frames = parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles)
+  const images = parseImages(data.images, assets)
+  const shapes = parseShapes(data.shapes, assets)
   return {
     doc,
-    frames: parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles),
-    images: parseImages(data.images, assets),
+    frames,
+    images,
     assets,
     guides: parseGuides(data.guides, doc.pages),
-    shapes: parseShapes(data.shapes, assets),
+    shapes,
     paragraphStyles,
     parents,
     pageParents: parsePageParents(data.pageParents, parents, doc.pages),
     sections: parseSections(data.sections, doc.pages),
+    parentOverrides: parseParentOverrides(data.parentOverrides, doc, parents, frames, images, shapes),
+    colorSamples: parseColorSamples(data.colorSamples),
   }
 }
 

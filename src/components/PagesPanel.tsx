@@ -23,7 +23,7 @@ interface Props {
   onSelect: (pageIndex: number, mods?: { shift: boolean; ctrl: boolean }) => void
   onInsert: (count: number, where: InsertWhere) => void
   /** same as onInsert, but with an explicit master (or none) for the new pages, instead of inheriting one */
-  onInsertWithMaster: (count: number, where: InsertWhere, master: string | null) => void
+  onInsertWithMaster: (count: number, where: InsertWhere, master: string | null, pageIndex?: number) => void
   onDelete: () => void
   onMove: (from: number, to: number) => void
   /** show the pages one to a row, or in pairs (1-2, 3-4 …) */
@@ -397,7 +397,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
               <button
                 className="btn primary"
                 onClick={() => {
-                  onInsertWithMaster(insertDialog.count, insertDialog.where, insertDialog.master || null)
+                  onInsertWithMaster(insertDialog.count, insertDialog.where, insertDialog.master || null, insertDialog.pageIndex)
                   setInsertDialog(null)
                 }}
               >

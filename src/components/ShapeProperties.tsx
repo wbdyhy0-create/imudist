@@ -1,4 +1,4 @@
-import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
+import { DEFAULT_SHADOW_OFFSET, MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
 import type { ArrangeOp } from '../stacking'
@@ -7,6 +7,7 @@ import { ArrangeButtons } from './ArrangeButtons'
 import { FillPicker } from './FillPicker'
 import { NumberField } from './NumberField'
 import { CharControls, Group, Labeled } from './PropertiesPanel'
+import { ShadowControls } from './ShadowControls'
 
 interface Props {
   shape: ShapeFrame
@@ -237,6 +238,19 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
 
       <Group title="סדר שכבות">
         <ArrangeButtons onArrange={onArrange} />
+      </Group>
+
+      <Group title="הצללה">
+        <ShadowControls
+          offsetX={shape.shadowOffsetX ?? 0}
+          offsetY={shape.shadowOffsetY ?? shape.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
+          opacity={shape.shadowOpacity ?? 0}
+          color={shape.shadowColor ?? '#000000'}
+          onOffsetXChange={(shadowOffsetX) => onChange({ shadowOffsetX })}
+          onOffsetYChange={(shadowOffsetY) => onChange({ shadowOffsetY })}
+          onOpacityChange={(shadowOpacity) => onChange({ shadowOpacity })}
+          onColorChange={(shadowColor) => onChange({ shadowColor })}
+        />
       </Group>
 
       <div className="props-buttons" style={{ marginTop: 10 }}>
