@@ -10,7 +10,7 @@ import { imageGeometry, shapePath } from './shapes'
 import { flowFrames, flowFramesWithFootnoteContinuation, type FrameFlow } from './textLayout'
 import { floatsFor } from './wrap'
 import { isTauri } from './fileio'
-import { linearGradientLine } from './colorModels'
+import { hexToRgb, linearGradientLine } from './colorModels'
 import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
@@ -47,6 +47,23 @@ const OBJECT_FIT_RECT = (fit: 'fill' | 'fit' | 'stretch', boxW: number, boxH: nu
   const h = natH * scale
   return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h }
 }
+import { canvasShadowBlur } from './shadow'
+
+function applyCanvasShadow(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 6, opacity = 0, color = '#000000', scale = 1) {
+  const alpha = Math.max(0, Math.min(1, opacity))
+  const rgb = hexToRgb(color)
+  ctx.shadowColor = `rgba(${rgb.red}, ${rgb.green}, ${rgb.blue}, ${alpha})`
+  ctx.shadowOffsetX = offsetX * scale
+  ctx.shadowOffsetY = offsetY * scale
+  ctx.shadowBlur = canvasShadowBlur(offsetX, offsetY, alpha, scale)
+}
+
+function clearCanvasShadow(ctx: CanvasRenderingContext2D) {
+  ctx.shadowColor = 'rgba(0, 0, 0, 0)'
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = 0
+  ctx.shadowBlur = 0
+}
 
 async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset: Asset, page: PageRect, scale: number) {
   const img = await loadImage(asset.dataUrl)
@@ -54,28 +71,13 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   const boxY = (image.y - page.y) * scale
   const boxW = image.w * scale
   const boxH = image.h * scale
-  if (image.feather) {
-    const layer = document.createElement('canvas')
-    layer.width = Math.max(1, Math.ceil(boxW))
-    layer.height = Math.max(1, Math.ceil(boxH))
-    const layerContext = layer.getContext('2d')!
-    const fit = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
-    layerContext.drawImage(img, fit.x, fit.y, fit.w, fit.h)
-    applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH)
-    ctx.save()
-    ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
-    if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
-    ctx.translate(-boxW / 2, -boxH / 2)
-    ctx.globalAlpha = image.opacity ?? 1
-    if (image.flipX || image.flipY) {
-      ctx.translate(boxW / 2, boxH / 2)
-      ctx.scale(image.flipX ? -1 : 1, image.flipY ? -1 : 1)
-      ctx.translate(-boxW / 2, -boxH / 2)
-    }
-    ctx.drawImage(layer, 0, 0, boxW, boxH)
-    ctx.restore()
-    return
-  }
+  const layer = document.createElement('canvas')
+  layer.width = Math.max(1, Math.ceil(boxW))
+  layer.height = Math.max(1, Math.ceil(boxH))
+  const layerContext = layer.getContext('2d')!
+  const fit = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
+  layerContext.drawImage(img, fit.x, fit.y, fit.w, fit.h)
+  if (image.feather) applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH)
   ctx.save()
   ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
   if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
@@ -86,11 +88,8 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
     ctx.scale(image.flipX ? -1 : 1, image.flipY ? -1 : 1)
     ctx.translate(-boxW / 2, -boxH / 2)
   }
-  ctx.beginPath()
-  ctx.rect(0, 0, boxW, boxH)
-  ctx.clip()
-  const r = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
-  ctx.drawImage(img, r.x, r.y, r.w, r.h)
+  applyCanvasShadow(ctx, image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, image.shadowColor, scale)
+  ctx.drawImage(layer, 0, 0, boxW, boxH)
   ctx.restore()
 }
 
@@ -307,12 +306,13 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     layer.width = Math.max(1, Math.ceil(w))
     layer.height = Math.max(1, Math.ceil(h))
     const layerContext = layer.getContext('2d')!
-    await drawShape(layerContext, { ...shape, x: 0, y: 0, opacity: 1, rotation: undefined, feather: undefined }, { x: 0, y: 0, w: shape.w, h: shape.h }, scale, asset)
+    await drawShape(layerContext, { ...shape, x: 0, y: 0, opacity: 1, rotation: undefined, feather: undefined, shadowOpacity: 0 }, { x: 0, y: 0, w: shape.w, h: shape.h }, scale, asset)
     applyFeatherCanvasMask(layerContext, shape.feather, w, h)
     ctx.save()
     ctx.translate(boxX + w / 2, boxY + h / 2)
     if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
     ctx.globalAlpha = shape.opacity ?? 1
+    applyCanvasShadow(ctx, shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, shape.shadowColor, scale)
     ctx.drawImage(layer, -w / 2, -h / 2, w, h)
     ctx.restore()
     return
@@ -323,6 +323,8 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
   ctx.translate(-w / 2, -h / 2)
   ctx.globalAlpha = shape.opacity ?? 1
   const path = new Path2D(shapePath(shape, scale))
+  const hasFill = !shape.frame && (!!shape.fillGradient || !!shape.fill)
+  if (hasFill) applyCanvasShadow(ctx, shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, shape.shadowColor, scale)
   if (shape.fillGradient && !shape.frame) {
     const g = shape.fillGradient.type === 'radial'
       ? ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7)
@@ -342,6 +344,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     ctx.fillStyle = shape.fill
     ctx.fill(path, 'evenodd')
   }
+  clearCanvasShadow(ctx)
   if (shape.image && asset) {
     const img = await loadImage(asset.dataUrl)
     const box = imageGeometry(shape, asset)
@@ -351,6 +354,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     ctx.restore()
   }
   if (shape.stroke && shape.strokeWidth > 0) {
+    if (!hasFill) applyCanvasShadow(ctx, shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, shape.shadowColor, scale)
     ctx.strokeStyle = shape.stroke
     ctx.lineWidth = shape.strokeWidth * scale
     ctx.lineJoin = 'round'
@@ -359,6 +363,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
       if (shape.strokeDash === 'dashed') ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2])
     }
     ctx.stroke(path)
+    clearCanvasShadow(ctx)
   }
   ctx.restore()
 }

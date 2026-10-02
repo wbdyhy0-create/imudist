@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseDocument } from './fileFormat'
 import { textDropShadow } from './richtext'
-import { dropShadowFilter } from './shadow'
+import { canvasShadowBlur, dropShadowFilter, shadowBlurRadius } from './shadow'
 
 describe('drop shadow filter', () => {
   it('is disabled at zero strength', () => {
@@ -44,5 +44,10 @@ describe('drop shadow filter', () => {
   it('maps legacy vertical offsets to the Y axis', () => {
     const restored = parseDocument(JSON.stringify({ format: 'imudist', version: 2, settings: {}, frames: [{ id: 'frame', text: '', shadowOffset: 12 }], images: [], shapes: [] }), 'Legacy shadow')
     expect(restored.frames[0].shadowOffsetY).toBe(12)
+  })
+
+  it('compensates for Canvas producing a tighter blur than CSS', () => {
+    const cssBlur = shadowBlurRadius(8, 16, 0.5)
+    expect(canvasShadowBlur(8, 16, 0.5)).toBe(cssBlur * 2)
   })
 })
