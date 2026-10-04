@@ -156,20 +156,13 @@ function fitEnd(
 
   let end = lo
   if (end > start) {
-    if (story[end] === '\n') {
-      // the line break stays at the end of this frame instead of becoming a blank opening line of the next one; a
-      // "\n" right at this boundary never carries its own .para-gap height here — buildRunNodes (richtext.ts) only
-      // ever renders that gap when another paragraph actually follows within the SAME call, which a trailing "\n"
-      // by definition never has - so, unlike an ordinary space (below), including it never makes the content taller
-      // than what `fits()` already approved; it is safe to include even though `fits(end+1)` tested false, since
-      // that failure was about the NEXT frame's content starting at end+1, not about this "\n" itself adding height.
-      end += 1
-    } else if (isSpace(story[end])) {
-      // an ordinary space right past the fitting boundary: leave it for the next frame rather than absorbing it
-      // here. `fits(end+1)` already tested false for this exact boundary (that's how the search above ended) - a
-      // single space is rarely enough to overflow on its own, but when it is (the fitting line ends exactly at the
-      // box edge), forcing it in anyway pushed real content past the frame's own height, with the rest of that same
-      // line only showing up by spilling onto the next frame.
+    if (isSpace(story[end])) {
+      // a space or paragraph break right past the fitting boundary: leave it for the next frame rather than absorbing
+      // it here. `fits(end+1)` already tested false for this exact boundary (that's how the search above ended), so
+      // adding it WOULD make the content taller: a space when the fitting line ends exactly at the box edge, and a
+      // "\n" when it is an empty paragraph (a line of its own) - forcing either in pushed content past the frame's own
+      // height, where the PDF export (which clips at the frame's edge) cut it off. (A "\n" that ends a paragraph of
+      // text adds no height, so it never ends the search here: it simply fits.)
     } else if (!isSpace(story[end - 1])) {
       // avoid splitting a word: go back to the last space, unless the word is longer than the whole part
       for (let k = end - 1; k > start; k--) {
