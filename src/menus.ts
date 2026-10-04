@@ -38,6 +38,9 @@ export interface MenuContext {
   save: () => void
   saveAs: () => void
   saveCopy: () => void
+  /** autosave is on: documents with a file are written by themselves after a pause */
+  autosave: boolean
+  toggleAutosave: () => void
   revert: () => void
   newDocument: () => void
   closeDocument: () => void
@@ -100,6 +103,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'שמור בשם…', shortcut: 'Ctrl+Shift+S', disabled: !c.hasDoc, onClick: c.saveAs },
         { label: 'שמור עותק…', shortcut: 'Ctrl+Alt+S', disabled: !c.hasDoc, onClick: c.saveCopy },
         { label: 'חזור לגרסה שנשמרה', disabled: !c.canRevert, onClick: c.revert },
+        { label: 'שמירה אוטומטית', checked: c.autosave, onClick: c.toggleAutosave },
         sep,
         { label: 'הוספת קובץ…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
         off('ייבוא XML…'),
@@ -132,6 +136,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'שכפל וגרור', shownShortcut: 'Alt + גרירה', disabled: true },
         sep,
         { label: 'בחר הכול', shortcut: 'Ctrl+A', disabled: !c.hasDoc, onClick: () => c.ws.current?.selectAllText() },
+        sep,
+        doc('חיפוש והחלפה…', 'Ctrl+H', (ws) => ws.findReplace()),
         off('בטל בחירה', 'Ctrl+Shift+A'),
       ],
     },
@@ -166,6 +172,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
         doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
+        doc('יצירת חלון בטקסט…', '', (ws) => ws.windowText()),
         doc('הוספת כותרת משתנה…', '', (ws) => ws.insertRunningHeader()),
         doc('הוספת הערת שוליים', 'Ctrl+Alt+Shift+F', (ws) => ws.insertFootnote()),
         doc('אפשרויות הערות שוליים…', '', (ws) => ws.openFootnoteOptions()),

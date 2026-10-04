@@ -178,3 +178,9 @@
 /* the pen tool: the line that follows the pointer from the last point, and the ring that says the next click closes the path */
 .pen-rubber { fill: none; stroke: #3d8bff; stroke-width: 1; stroke-dasharray: 4 3; }
 .pen-close-ring { fill: none; stroke: #3d8bff; stroke-width: 1.5; }
+
+/* the autosave line at the end of the tab bar */
+.autosave-status { margin-inline-start: auto; align-self: center; padding: 0 10px; color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.autosave-status.waiting, .autosave-status.saving { color: #d8b45a; }
+.autosave-status.error { color: #e57373; }
+.autosave-status.needsFile { opacity: 0.8; }

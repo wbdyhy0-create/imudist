@@ -16,6 +16,7 @@ import {
   type FileRef,
 } from './fileio'
 import { changeHistory, newHistory, redoHistory, replaceHistory, shouldMergeChange, undoHistory, type History } from './history'
+import { assetsWeight } from './assetWeight'
 import { applySettings, deletePages, insertPages, movePage, type DocContent, type ParentOverride } from './pages'
 import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
 import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
@@ -162,16 +163,22 @@ export function useDocumentSession() {
     setModal({ title, message: messageOf(e), buttons: [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }] })
 
   // ── the active document's history ──────────────────────────────────────────────
-  /** apply a change to the active document; gap gesture keys merge for their whole unique gesture, other keys use the time window */
-  const change = (next: (prev: DocContent) => DocContent | null, key?: string) => {
+  /**
+   * apply a change to the active document; gap gesture keys merge for their whole unique gesture, other keys use the time window.
+   * `silent`: a follow-up the program makes by itself (a measurement kept up to date) - it joins the undo step it follows
+   * instead of being one of its own, and leaves the running gesture alone
+   */
+  const change = (next: (prev: DocContent) => DocContent | null, key?: string, silent = false) => {
     const id = latest.current.activeId
     if (id === null) return
     const now = Date.now()
     update(id, (d) => {
       // decided from the state (not from a ref) so React may safely run the updater more than once
-      const merge = shouldMergeChange(d.last, key, now)
-      const h = changeHistory(d.h, (prev) => next(prev) ?? prev, merge)
-      return { ...d, h, last: key ? { key, at: now } : null }
+      const merge = silent || shouldMergeChange(d.last, key, now)
+      const changed = changeHistory(d.h, (prev) => next(prev) ?? prev, merge)
+      // a silent follow-up must not cost the user their redo list
+      const h = silent && changed !== d.h ? { ...changed, future: d.h.future } : changed
+      return { ...d, h, last: silent ? d.last : key ? { key, at: now } : null }
     })
   }
   const undo = () => {
@@ -193,7 +200,7 @@ export function useDocumentSession() {
   // ── editing ────────────────────────────────────────────────────────────────────
   // Every change is a function of the newest content, so two changes in the same moment can't overwrite each other.
   /** the text frames changed (typing, dragging …); changes with the same key merge into one undo step */
-  const changeFrames = (next: TextFrame[], key?: string) => change((s) => (next !== s.frames ? { ...s, frames: next } : s), key)
+  const changeFrames = (next: TextFrame[], key?: string, silent?: boolean) => change((s) => (next !== s.frames ? { ...s, frames: next } : s), key, silent)
   const changeImages = (next: ImageFrame[], key?: string) => change((s) => (next !== s.images ? { ...s, images: next } : s), key)
   const changeShapes = (next: ShapeFrame[], key?: string) => change((s) => (next !== s.shapes ? { ...s, shapes: next } : s), key)
   const changeGuides = (next: Guide[], key?: string) => change((s) => (next !== s.guides ? { ...s, guides: next } : s), key)
@@ -328,9 +335,32 @@ export function useDocumentSession() {
     }
   }
 
+  /**
+   * The quiet twin of `save`, for autosave: writes the document in place and does nothing else - never a file dialog, a
+   * download or a message (a document that was never saved has nowhere to be written: `skipped`; a write the system
+   * refuses, such as a folder that went read-only, is `failed` and is reported by the indicator, not by a dialog).
+   */
+  const autosave = async (id: number): Promise<'saved' | 'skipped' | 'failed'> => {
+    const entry = entryOf(id)
+    const target = entry?.file
+    if (!entry || !isDirty(entry) || !target || (!target.path && !target.handle)) return 'skipped'
+    const start = entry.h.present
+    try {
+      if (target.path) {
+        const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+        await writeTextFile(target.path, serializeDocument(start))
+      } else await writeToHandle(target.handle!, serializeDocument(start))
+    } catch (e) {
+      console.warn('Autosave failed.', e)
+      return 'failed'
+    }
+    update(id, (d) => ({ ...d, saved: start }))
+    return 'saved'
+  }
+
   // ── closing ────────────────────────────────────────────────────────────────────
-  /** Run `next` now, or after asking what to do with the unsaved changes of document `id`. */
-  const guard = (id: number, next: () => void) => {
+  /** Run `next` now, or after asking what to do with the unsaved changes of document `id` (`onCancel`: the user chose to stay). */
+  const guard = (id: number, next: () => void, onCancel?: () => void) => {
     const entry = entryOf(id)
     if (!entry || !isDirty(entry)) return next()
     setModal({
@@ -343,6 +373,7 @@ export function useDocumentSession() {
           run: async () => {
             setModal(null)
             if (await save(id)) next()
+            else onCancel?.()
           },
         },
         {
@@ -352,10 +383,31 @@ export function useDocumentSession() {
             next()
           },
         },
-        { label: 'ביטול', cancel: true, run: () => setModal(null) },
+        {
+          label: 'ביטול',
+          cancel: true,
+          run: () => {
+            setModal(null)
+            onCancel?.()
+          },
+        },
       ],
     })
   }
+
+  /**
+   * The program is about to close: ask about every document that still has unsaved changes, one after the other (with
+   * autosave on, that is the ones that were never saved to a file, or whose write failed). Resolves to whether to close.
+   */
+  const confirmExit = () =>
+    new Promise<boolean>((resolve) => {
+      const ids = latest.current.docs.filter(isDirty).map((d) => d.id)
+      const step = (index: number) => {
+        if (index >= ids.length) resolve(true)
+        else guard(ids[index], () => step(index + 1), () => resolve(false))
+      }
+      step(0)
+    })
 
   /** remove a document from the open ones; the tab next to it (or none) becomes active */
   const removeDoc = (id: number) => {
@@ -533,6 +585,10 @@ export function useDocumentSession() {
     openRecent,
     save,
     saveAs,
+    autosave,
+    /** every open document as autosave sees it (see useAutosave.ts) */
+    autosaveDocs: docs.map((d) => ({ id: d.id, content: d.h.present, saved: d.saved, writable: !!(d.file?.path || d.file?.handle), weight: assetsWeight(d.h.present.assets) })),
+    confirmExit,
     revert,
     showError: fail,
     notify,

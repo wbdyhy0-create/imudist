@@ -102,19 +102,37 @@ export function FootnoteEditorDialog({ title, initial, initialRuns = [], baseSty
 interface OptionsProps {
   value?: FootnoteLayoutConfig
   paragraphStyles: ParagraphStyleRecord[]
+  onPreview: (value: FootnoteLayoutConfig) => void
   onSave: (value: FootnoteLayoutConfig) => void
   onClose: () => void
 }
 
-export function FootnoteOptionsDialog({ value, paragraphStyles, onSave, onClose }: OptionsProps) {
+export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSave, onClose }: OptionsProps) {
   const [config, setConfig] = useState<FootnoteLayoutConfig>({ ...DEFAULT_FOOTNOTE_CONFIG, ...value })
-  const set = <K extends keyof FootnoteLayoutConfig>(key: K, next: FootnoteLayoutConfig[K]) => setConfig((current) => ({ ...current, [key]: next }))
+  const set = <K extends keyof FootnoteLayoutConfig>(key: K, next: FootnoteLayoutConfig[K]) => {
+    const updated = { ...config, [key]: next }
+    setConfig(updated)
+    onPreview(updated)
+  }
   return (
     <div className="modal-backdrop">
-      <form className="modal footnote-dialog footnote-options-dialog" role="dialog" aria-modal="true" onSubmit={(event) => { event.preventDefault(); onSave(config) }}>
+      <form
+        className="modal footnote-dialog footnote-options-dialog"
+        role="dialog"
+        aria-modal="true"
+        onSubmit={(event) => { event.preventDefault(); onSave(config) }}
+        // a NumberField takes Enter for itself (commit and leave the field) instead of submitting like a plain input
+        // does: submit once its value has landed in `config`, so typing a size and pressing Enter confirms the dialog
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' || !(event.target instanceof HTMLElement) || !event.target.closest('.num-field')) return
+          const form = event.currentTarget
+          window.setTimeout(() => form.requestSubmit(), 0)
+        }}
+      >
         <h2>אפשרויות הערות שוליים</h2>
         <label className="footnote-dialog-field"><span>סידור</span><select value={config.mode} onChange={(event) => set('mode', event.target.value as FootnoteLayoutConfig['mode'])}><option value="vertical">אנכי</option><option value="horizontal">אופקי רציף</option></select></label>
         <label className="footnote-dialog-field"><span>מספר עמודות בטקסט ההערות</span><select value={config.columns} onChange={(event) => set('columns', Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>עמודה אחת</option><option value={2}>שתי עמודות</option></select></label>
+        <label className="footnote-dialog-field"><span>מרווח בין עמודות אנכיות (ס״מ)</span><NumberField ariaLabel="מרווח בין עמודות אנכיות" value={config.columnGap} unit="cm" unitLabel="ס״מ" min={0} max={100} onChange={(gap) => set('columnGap', gap)} /></label>
         <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><NumberField ariaLabel="גודל מספרי הפניה בטקסט" value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
         <label className="footnote-dialog-field"><span>מרווח בין מספר ההערה לטקסט (pt)</span><input type="number" min="0" max="100" value={config.numberTextGap} onChange={(event) => set('numberTextGap', Number(event.target.value))} /></label>
         <label className="footnote-dialog-field"><span>מרווח בין הערות אופקיות (pt)</span><input type="number" min="0" max="100" value={config.minSpacingBetweenInline} onChange={(event) => set('minSpacingBetweenInline', Number(event.target.value))} /></label>

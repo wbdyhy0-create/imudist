@@ -18,6 +18,7 @@ import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
+import { useAutosave } from './useAutosave'
 import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
@@ -47,6 +48,31 @@ export default function App() {
   const sessionRef = useRef(session)
   sessionRef.current = session
   const { doc, history } = session
+  /** autosave on or off (the "שמירה אוטומטית" item of the file menu): on unless the user turned it off, and remembered */
+  const [autosaveOn, setAutosaveOn] = useState(() => {
+    try {
+      return localStorage.getItem('imudist.autosave') !== 'off'
+    } catch {
+      return true
+    }
+  })
+  const toggleAutosave = () =>
+    setAutosaveOn((on) => {
+      try {
+        localStorage.setItem('imudist.autosave', on ? 'off' : 'on')
+      } catch {
+        // not remembered: it is back on at the next start
+      }
+      return !on
+    })
+  const autosave = useAutosave({
+    docs: session.autosaveDocs,
+    activeId: session.activeId,
+    write: (id) => sessionRef.current.autosave(id),
+    enabled: autosaveOn,
+    // the desktop window closing: whatever could not be written by itself (a document never saved) is asked about
+    confirmClose: () => sessionRef.current.confirmExit(),
+  })
   const [nextName, setNextName] = useState(1)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
@@ -170,7 +196,9 @@ export default function App() {
     if (!source || !doc) return
     try {
       const { readPdfFile } = await import('./importPdf')
-      const placed = await readPdfFile(source, pageNumbers)
+      // the import takes a while for a long file, and the window shows nothing meanwhile: say how far it is
+      session.notify(`מייבא PDF: ${pageNumbers.length} עמודים…`)
+      const placed = await readPdfFile(source, pageNumbers, (done, total) => session.notify(`מייבא PDF: ${done} מתוך ${total} עמודים…`))
       let content: DocContent = {
         doc,
         frames: session.frames,
@@ -216,6 +244,7 @@ export default function App() {
       setPlacing(null)
       setPlacingImages([])
       session.pages.commit({ ...content, images, assets })
+      session.notify(placed.length === 1 ? 'יובא עמוד אחד מה-PDF' : `יובאו ${placed.length} עמודים מה-PDF`)
     } catch (e) {
       session.showError('לא ניתן לייבא את קובץ ה-PDF', e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : 'הקובץ פגום או מוגן בסיסמה.'))
     } finally {
@@ -288,6 +317,8 @@ export default function App() {
         save: () => void sessionRef.current.save(),
         saveAs: () => void sessionRef.current.saveAs(),
         saveCopy: () => void sessionRef.current.saveAs(true),
+        autosave: autosaveOn,
+        toggleAutosave,
         revert: () => sessionRef.current.revert(),
 
         newDocument: () => setDialog('new'),
@@ -300,7 +331,7 @@ export default function App() {
         exportPdf: () => setDialog('export'),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId],
+    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn],
   )
 
   useEffect(() => {
@@ -487,6 +518,7 @@ export default function App() {
                         tabs={session.tabs}
                         activeId={session.activeId}
                         zoomText={zoomText}
+                        autosave={autosave.state}
                         onSelect={session.switchTo}
                         onClose={(id) => session.closeDocument(id)}
                         onNew={() => setDialog('new')}

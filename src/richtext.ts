@@ -249,10 +249,56 @@ export interface ParagraphPatch {
   indentRight?: number
   firstLineIndent?: number
   align?: TextAlign
+  /**
+   * points, unscaled: "a window in the text" (טיפוגרפיה > יצירת חלון בטקסט) - the paragraph's SECOND line starts this far
+   * in from the side the text starts on, leaving room under the (larger) opening word(s) of the first line.
+   */
+  windowIndent?: number
+  /** how many opening words that window was made as wide as - what lets it be measured again when the lines change */
+  windowWords?: number
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || !!p.indentLeft || !!p.indentRight || p.align !== undefined)
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || !!p.indentLeft || !!p.indentRight || p.align !== undefined || !!p.windowIndent)
+
+/**
+ * The empty float that makes a paragraph's second line shorter on the right (the reading start side) by `width`:
+ * its shape is blocked only in a band that lies inside the second line, so the first line and every line after the
+ * second keep the full width. Heights are in `lh` (the paragraph's own line height, so a leading change needs no
+ * update here).
+ *
+ * What the first line's real height depends on, and so where the second line starts, is not known up front:
+ * - `gap` is the spacer that can sit on the first line of a paragraph that follows another (see `paraGap`): it sits on
+ *   the baseline and reaches `gap` above it, so the line is `max(1lh, gap + below)` tall, where `below` - the part of
+ *   the line under the baseline, a font-metrics matter - is somewhere around 0.15-0.35lh;
+ * - an opening word set larger than the rest of the line (the point of a window) makes the line taller by about 0.3 of
+ *   the size difference, up to the 0.65lh allowed for here.
+ * The band therefore starts below the tallest the first line can be, and ends above the lowest the second one can
+ * end - so it is always wholly inside the second line, whatever the font, and never touches the first or the third.
+ */
+export function windowFloatStyle(width: number, gap: number) {
+  const first = `calc(max(1lh, ${gap}px + 0.35lh) + 0.65lh)`
+  const both = windowBlockMinHeight(gap)
+  return {
+    float: 'right' as const,
+    width: `${width}px`,
+    height: both,
+    shapeOutside: `polygon(${width}px 0, ${width}px ${first}, 0 ${first}, 0 ${both}, ${width}px ${both})`,
+    pointerEvents: 'none' as const,
+    userSelect: 'none' as const,
+  }
+}
+
+/** a paragraph block that holds a window is at least as tall as the float, so the float never spills onto the next paragraph */
+export const windowBlockMinHeight = (gap: number) => `calc(max(1lh, ${gap}px + 0.15lh) + 1lh)`
+
+function windowFloat(width: number, gap: number): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'wrap-float'
+  el.contentEditable = 'false'
+  Object.assign(el.style, windowFloatStyle(width, gap))
+  return el
+}
 
 /**
  * `buildRunNodes`, for a story some of whose paragraphs carry their own layout (`ParagraphPatch`): every paragraph
@@ -333,13 +379,16 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     const isOpening = pos > 0 || !!opts.atParaStart
     // the previous paragraph's closing gap, then this paragraph's own first-line indent
     const spacers: HTMLElement[] = []
-    if (pos > 0) {
-      const gap = opts.paraGaps ? opts.paraGaps[paragraph - 1] : opts.paraLineHeight
-      if (gap) spacers.push(paraGap(gap * scale))
-    }
+    const gapBefore = pos > 0 ? (opts.paraGaps ? opts.paraGaps[paragraph - 1] : opts.paraLineHeight) ?? 0 : 0
+    if (gapBefore) spacers.push(paraGap(gapBefore * scale))
     const indent = indentOf(paragraph)
     if (indent && isOpening) spacers.push(paraIndent(indent * scale))
     if (lead) for (const spacer of spacers.reverse()) lead.insertBefore(spacer, lead.firstChild)
+    // a window only belongs to a paragraph's own start, not to the tail of one that began in the previous frame
+    if (patch?.windowIndent && isOpening) {
+      block.style.minHeight = windowBlockMinHeight(gapBefore * scale)
+      block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale))
+    }
     block.appendChild(nodes)
     frag.appendChild(block)
     pos = end

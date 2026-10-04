@@ -25,6 +25,10 @@ export interface FootnoteLayoutConfig {
   referenceScale: number
   /** gap between a footnote's number and its text, in points */
   numberTextGap: number
+  /** gap between columns in vertical footnote mode, points */
+  columnGap: number
+  /** available width of the footnote block relative to its text frame, 0.2–1 */
+  widthScale: number
   minSpacingBetweenInline: number
   maxFootnoteHeight: number
   dividerGap: number
@@ -83,6 +87,8 @@ export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
   columns: 1,
   referenceScale: FOOTNOTE_REFERENCE_SCALE,
   numberTextGap: 5,
+  columnGap: 10,
+  widthScale: 1,
   minSpacingBetweenInline: 8,
   maxFootnoteHeight: 1000,
   dividerGap: 8,
@@ -328,8 +334,11 @@ export interface TextFrame extends TextStyle {
   paragraphStyleIds?: string[]
   /** Imported paragraph-style names, parallel to paragraphStyleIds. */
   paragraphStyleNames?: string[]
-  /** Resolved paragraph-level overrides, parallel to paragraphStyleIds. */
-  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  /**
+   * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
+   * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
+   */
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number })[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number

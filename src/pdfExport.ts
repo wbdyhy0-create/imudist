@@ -1,7 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
-import { styleOf } from './frames'
 import { ownerPage, pageRects, type PageRect } from './pages'
 import { footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder } from './placeText'
@@ -148,7 +147,9 @@ async function drawTextDom(
       if (frame.x >= page.x + page.w || frame.x + frame.w <= page.x || frame.y >= page.y + page.h || frame.y + frame.h <= page.y) continue
       const flow = flows.get(frame.id)
       if (!flow || !flow.slice) continue
-      const style = styleOf(frame)
+      // the look of the whole story is the first frame's (as on screen and in the layout that decided what fits here):
+      // a later frame's own style fields can differ (another alignment, size, leading) and would break the lines differently
+      const style = flow.style
       const hasPrev = flow.prevId !== null
       const hasNext = frame.next !== null
       const continuesAtEnd = flow.end < flow.story.length && flow.story[flow.end - 1] !== '\n'

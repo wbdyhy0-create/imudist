@@ -236,14 +236,21 @@ export function spliceParaOverrides(
  * editor does, instead of starting unstyled. Without this an Enter above a styled paragraph left every style below
  * it one paragraph out of place.
  */
-function spliceParaList<T>(list: T[] | undefined, oldText: string, from: number, to: number, insert: string, fallback: T): T[] | undefined {
+function spliceParaList<T>(list: T[] | undefined, oldText: string, from: number, to: number, insert: string, fallback: T, inherit: (entry: T) => T = (entry) => entry): T[] | undefined {
   if (!list || list.length === 0) return list
   const startPara = paraIndexAt(oldText, from)
   const removedParas = paraIndexAt(oldText, to) - startPara
   const addedParas = (insert.match(/\n/g) ?? []).length
   const out = list.slice()
-  out.splice(startPara + 1, removedParas, ...Array<T>(addedParas).fill(out[startPara] ?? fallback))
+  out.splice(startPara + 1, removedParas, ...Array<T>(addedParas).fill(inherit(out[startPara] ?? fallback)))
   return out
+}
+
+/** a paragraph split off by Enter keeps what its parent has - except a window, which belongs to the parent's own opening word(s) */
+const withoutWindow = <P extends { windowIndent?: number; windowWords?: number }>(patch: P): P => {
+  if (patch.windowIndent === undefined && patch.windowWords === undefined) return patch
+  const { windowIndent: _window, windowWords: _words, ...rest } = patch
+  return rest as P
 }
 
 type ParagraphLists = Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches'>
@@ -253,7 +260,7 @@ export function spliceParagraphStyles(f: ParagraphLists, oldText: string, from: 
   const out: ParagraphLists = {}
   const ids = spliceParaList(f.paragraphStyleIds, oldText, from, to, insert, '')
   const names = spliceParaList(f.paragraphStyleNames, oldText, from, to, insert, '')
-  const patches = spliceParaList(f.paragraphStylePatches, oldText, from, to, insert, {})
+  const patches = spliceParaList(f.paragraphStylePatches, oldText, from, to, insert, {}, withoutWindow)
   if (ids) out.paragraphStyleIds = ids
   if (names) out.paragraphStyleNames = names
   if (patches) out.paragraphStylePatches = patches

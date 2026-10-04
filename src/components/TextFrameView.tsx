@@ -1,12 +1,13 @@
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
+import { useRef } from 'react'
 import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { caretOffsetAt, splitMarks, textShadow } from '../richtext'
+import { caretOffsetAt, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
-import type { FootnotePlacement } from '../footnoteLayout'
+import { footnoteBlockWidth, type FootnotePlacement } from '../footnoteLayout'
 import { featherCss } from '../feather'
 
 /**
@@ -126,7 +127,7 @@ interface Props {
   startParaIndex: number
   /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
   atParaStart: boolean
-  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
+  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
@@ -139,10 +140,15 @@ interface Props {
   footnoteHeight: number
   footnoteDividerGap?: number
   footnoteNumberGap?: number
+  footnoteWidthScale?: number
+  footnoteMode?: 'vertical' | 'horizontal'
+  footnoteColumns?: 1 | 2
+  onFootnoteWidthPreview?: (scale: number | null) => void
+  onFootnoteWidthCommit?: (scale: number) => void
   onFootnoteEdit?: (id: string, localOffset: number, fragmentOffset: number) => void
   footnoteRequest?: (SelRequest & { noteId: string }) | null
   editingFootnoteOffset?: number | null
-  footnoteSelection?: { noteId: string; all: boolean } | null
+  footnoteSelection?: { noteId: string; all: boolean; allNotes?: boolean } | null
   onFootnoteCopyText?: (id: string) => string | null
   editingFootnoteId?: string | null
   editingFootnoteFrameId?: string | null
@@ -153,6 +159,8 @@ interface Props {
   onSelectAllText?: () => void
   onSelectToStartText?: (frameId: string, localOffset: number) => void
   request: SelRequest | null
+  /** the workspace's selection in this frame's text, kept when the editor is rebuilt (see RichEditor's `selectionHint`) */
+  selectionHint?: [number, number] | null
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
   onDoubleClick: () => void
   onHandleDown: (handle: HandleId, e: ReactPointerEvent<HTMLDivElement>) => void
@@ -201,7 +209,7 @@ function RichText({
   firstLineIndent: (paragraphIndex: number) => number
   baseAlign: TextStyle['align']
   continuesParagraphAtEnd: boolean
-  paragraphPatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>>[]
+  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
   baseFontSize: number
   footnoteMarkers?: Record<number, string>
   tocPageMarkers?: Record<number, string>
@@ -340,7 +348,11 @@ function RichText({
         const patch = paragraphPatches?.[paragraph.index]
         const wordSpacing = patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
         const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
-        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, boxSizing: 'border-box' }}>{paragraph.nodes}</div>
+        // the same rule as richtext.ts's buildParagraphNodes: a window only opens a paragraph that starts here, and the
+        // spacer closing the previous paragraph sits on its first line (so the floated band starts that much lower)
+        const windowWidth = patch?.windowIndent && (paragraph.index > startParaIndex || atParaStart) ? patch.windowIndent * scale : 0
+        const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
+        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{paragraph.nodes}</div>
       })}
     </>
   )
@@ -349,6 +361,9 @@ function RichText({
 /** A right-to-left text frame with its handles and thread ports. */
 export function TextFrameView(p: Props) {
   const { frame, style, slice, selected, editing, showEdge, marked, locked } = p
+  const footnoteWidthDrag = useRef<{ pointerId: number; startX: number; startY: number; startScale: number; screenScale: number; cos: number; sin: number } | null>(null)
+  const resizeWidthBasis = p.footnoteMode === 'vertical' && p.footnoteColumns === 2 ? frame.w / 2 : frame.w
+  const footnoteWidthScale = p.footnoteWidthScale ?? 1
   const maskFeather = p.featherOverride ?? frame.feather
   const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
   const masterPreview = !editing && (slice.includes(PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_PAGE_NUMBER_MARKER) || slice.includes(EXTERNAL_PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_LETTER_PAGE_NUMBER_MARKER) || slice.includes(LETTER_PAGE_NUMBER_MARKER) || slice.includes(RUNNING_HEADER_MARKER))
@@ -365,6 +380,46 @@ export function TextFrameView(p: Props) {
   const hasNext = frame.next !== null
   const showOut = showEdge && (selected || hasNext || p.overflow || p.armed)
   const showIn = showEdge && (selected || p.hasPrev)
+  const footnoteWidthAtPointer = (event: ReactPointerEvent<HTMLButtonElement>, drag: NonNullable<typeof footnoteWidthDrag.current>) => {
+    const deltaX = event.clientX - drag.startX
+    const deltaY = event.clientY - drag.startY
+    const localDeltaX = deltaX * drag.cos + deltaY * drag.sin
+    return Math.round(Math.max(0.2, Math.min(1, drag.startScale - localDeltaX / (resizeWidthBasis * drag.screenScale))) * 1000) / 1000
+  }
+  const beginFootnoteWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const radians = (frame.rotation ?? 0) * Math.PI / 180
+    const screenScale = p.zoom * (frame.textScale?.x ?? 1)
+    if (frame.w <= 0 || screenScale <= 0) return
+    footnoteWidthDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScale: p.footnoteWidthScale ?? 1,
+      screenScale,
+      cos: Math.cos(radians),
+      sin: Math.sin(radians),
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+  const moveFootnoteWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = footnoteWidthDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    p.onFootnoteWidthPreview?.(footnoteWidthAtPointer(event, drag))
+  }
+  const finishFootnoteWidthDrag = (event: ReactPointerEvent<HTMLButtonElement>, cancel = false) => {
+    const drag = footnoteWidthDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    footnoteWidthDrag.current = null
+    if (cancel) {
+      p.onFootnoteWidthPreview?.(null)
+      return
+    }
+    const scale = footnoteWidthAtPointer(event, drag)
+    p.onFootnoteWidthPreview?.(scale)
+    p.onFootnoteWidthCommit?.(scale)
+  }
 
   return (
     <div
@@ -439,6 +494,7 @@ export function TextFrameView(p: Props) {
           onSelectToStart={(offset) => p.onSelectToStartText?.(frame.id, offset)}
           hasPrev={p.hasPrev}
           request={p.request}
+          selectionHint={p.selectionHint}
           onEdit={p.onEdit}
           onSelect={p.onSelect}
           onBackspaceAtStart={p.onBackspaceAtStart}
@@ -474,12 +530,27 @@ export function TextFrameView(p: Props) {
       </div>
       {!!p.footnotes?.length && (
         <div className="footnotes-scale" style={{ width: frame.w, height: frame.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${style.leading ?? defaultLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
-          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: 0, left: 'auto', width: frame.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
             <div className="footnote-divider" style={{ top: p.footnoteDividerGap ?? 0 }} />
+            {!!p.editingFootnoteId && p.editingFootnoteFrameId === frame.id && showEdge && (
+              <button
+                type="button"
+                className="footnote-width-handle"
+                title="גרירה לצמצום או להרחבת כל מסגרות הערות השוליים"
+                aria-label="רוחב כל מסגרות הערות השוליים"
+                style={{ left: `${frame.w - footnoteBlockWidth(resizeWidthBasis, footnoteWidthScale)}px` }}
+                onPointerDown={beginFootnoteWidthDrag}
+                onPointerMove={moveFootnoteWidthDrag}
+                onPointerUp={finishFootnoteWidthDrag}
+                onPointerCancel={(event) => finishFootnoteWidthDrag(event, true)}
+              />
+            )}
             {p.footnotes.map((note) => {
               const noteStyle = note.style ?? style
               const fragmentOffset = note.offset ?? 0
               const isEditingFootnote = p.editingFootnoteId === note.id && p.editingFootnoteFrameId === frame.id && p.editingFootnoteOffset === fragmentOffset
+              const showFootnoteFrame = !!p.editingFootnoteId && p.editingFootnoteFrameId === frame.id && showEdge
+              const selectedFootnoteText = !!p.footnoteSelection?.allNotes || (p.footnoteSelection?.noteId === note.id && p.footnoteSelection.all)
               const referenceLabel = String(note.referenceNumber)
               const dotAfterNumber = referenceLabel.endsWith('.')
               const numberLabel = dotAfterNumber ? referenceLabel.slice(0, -1) : referenceLabel
@@ -495,17 +566,53 @@ export function TextFrameView(p: Props) {
               return (
                 <div
                   key={`${note.id}:${fragmentOffset}`}
-                  className="footnote-item"
+                  className={'footnote-item' + (showFootnoteFrame ? ' footnote-frame-visible' : '') + (p.footnoteSelection?.allNotes ? ' footnote-all-selected' : '')}
+                  data-footnote-frame-id={note.id}
                   title="לחיצה לעריכת הערת השוליים"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
+                  onPointerDown={(event) => {
                     event.stopPropagation()
-                    if (isEditingFootnote) return
-                    const clickedNumber = event.target instanceof Element && !!event.target.closest('.footnote-number')
-                    const contentRoot = event.currentTarget.querySelector<HTMLElement>('.footnote-content')
-                    const localOffset = clickedNumber ? 0 : caretOffsetAt(event.clientX, event.clientY, contentRoot) ?? 0
-                    p.onFootnoteEdit?.(note.id, localOffset, fragmentOffset)
+                    if (isEditingFootnote || event.button !== 0) return
+                    // the editor only exists once edit mode is entered, so a drag that starts on the still-static text
+                    // would show no selection until release: enter edit mode on the press itself (caret at the press
+                    // point), then drive the selection by hand for as long as the button stays down - the preventDefault
+                    // keeps the browser from starting its own selection on the static text meanwhile
+                    event.preventDefault()
+                    const item = event.currentTarget
+                    const contentRoot = item.querySelector<HTMLElement>('.footnote-content')
+                    const onNumber = event.target instanceof Element && !!event.target.closest('.footnote-number')
+                    const anchor = onNumber ? 0 : caretOffsetAt(event.clientX, event.clientY, contentRoot) ?? 0
+                    p.onFootnoteEdit?.(note.id, anchor, fragmentOffset)
+                    if (onNumber) return
+                    // false while the editor has not mounted yet (it appears after the render the press just caused)
+                    const extend = (clientX: number, clientY: number) => {
+                      const editor = item.querySelector<HTMLElement>('.rich-editor')
+                      if (!editor) return false
+                      const box = editor.getBoundingClientRect()
+                      const inside = caretOffsetAt(clientX, clientY, editor)
+                      const head = inside ?? (clientY > box.bottom ? note.content.length : clientY < box.top ? 0 : anchor)
+                      setSelectionIn(editor, Math.min(anchor, head), Math.max(anchor, head))
+                      return true
+                    }
+                    const stop = () => {
+                      window.removeEventListener('pointermove', move)
+                      window.removeEventListener('pointerup', up)
+                      window.removeEventListener('pointercancel', stop)
+                    }
+                    const move = (e: PointerEvent) => {
+                      if (!(e.buttons & 1)) return stop()
+                      extend(e.clientX, e.clientY)
+                    }
+                    const up = (e: PointerEvent) => {
+                      stop()
+                      let tries = 0
+                      const settle = () => { if (!extend(e.clientX, e.clientY) && tries++ < 10) requestAnimationFrame(settle) }
+                      settle()
+                    }
+                    window.addEventListener('pointermove', move)
+                    window.addEventListener('pointerup', up)
+                    window.addEventListener('pointercancel', stop)
                   }}
+                  onClick={(event) => event.stopPropagation()}
                   style={{ left: `${frame.w - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
                 >
                   {!note.continued && (
@@ -528,7 +635,7 @@ export function TextFrameView(p: Props) {
                       onCopyText={() => p.onFootnoteCopyText?.(note.id) ?? null}
                       onStop={() => p.onFootnoteStop?.()}
                     />
-                  ) : <span className={'footnote-content' + (p.footnoteSelection?.noteId === note.id && p.footnoteSelection.all ? ' selected' : '')}>{content}</span>}
+                  ) : <span className={'footnote-content' + (selectedFootnoteText ? ' selected' : '')}>{content}</span>}
                 </div>
               )
             })}

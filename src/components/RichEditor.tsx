@@ -39,6 +39,13 @@ interface Props {
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
   baseAlign?: TextAlign
   continuesAtEnd?: boolean
+  /**
+   * Where the workspace's own selection lies in this frame's text ([a, b), a === b for a caret). When the DOM is
+   * rebuilt (a size change, say) the selection goes back there rather than to the DOM's old offsets: those count from
+   * where this frame's slice of the story began, and text reflowing above it moves that start - the selection would
+   * slide onto other text with every change.
+   */
+  selectionHint?: [number, number] | null
   hasPrev: boolean
   request: SelRequest | null
   /** replace the characters [from, to) of `text` with `insert` */
@@ -73,6 +80,20 @@ function caretRect(range: Range): DOMRect {
 }
 
 /**
+ * Footnote numbers, TOC page numbers and leaders are CSS generated content (the character they stand for is
+ * zero-size), which a native selection never paints. Flag the ones inside the current selection so the stylesheet can
+ * give them the selection colour itself.
+ */
+function markSelectedMarkers(el: HTMLElement) {
+  const sel = window.getSelection()
+  const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null
+  const active = !!range && !range.collapsed && el.contains(range.commonAncestorContainer)
+  for (const marker of el.querySelectorAll('.footnote-reference, .toc-page-reference, .toc-leader')) {
+    marker.classList.toggle('in-selection', active && range.intersectsNode(marker))
+  }
+}
+
+/**
  * A contenteditable text box whose content is fully driven by the model: every edit is intercepted in
  * `beforeinput`, sent to `onEdit`, and the DOM is rebuilt from the new model. This keeps the per-character
  * formatting (one <span> per run) and lets the story flow between frames.
@@ -90,7 +111,7 @@ export function RichEditor(p: Props) {
     const el = ref.current!
     const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
-    const keep = rebuilt && shown.current !== null ? readSelectionIn(el) : null
+    const keep = rebuilt && shown.current !== null ? p.selectionHint ?? readSelectionIn(el) : null
     if (rebuilt) {
       el.replaceChildren(
         ...buildWrapFloats(p.floats, p.scale),
@@ -131,6 +152,7 @@ export function RichEditor(p: Props) {
       const [a, b] = keep ?? [n, n]
       setSelectionIn(el, Math.min(a, n), Math.min(b, n))
     }
+    if (rebuilt) markSelectedMarkers(el)
   })
 
   useEffect(() => {
@@ -140,6 +162,7 @@ export function RichEditor(p: Props) {
     const onSelectionChange = () => {
       const s = readSelectionIn(el)
       if (s) live.current.onSelect(s[0], s[1])
+      markSelectedMarkers(el)
     }
 
     const onBeforeInput = (e: InputEvent) => {
@@ -241,6 +264,13 @@ export function RichEditor(p: Props) {
       aria-multiline="true"
       aria-label="תיבת טקסט"
       onBlur={p.onStop}
+      onPointerUp={(event) => {
+        const editor = event.currentTarget
+        requestAnimationFrame(() => {
+          const selection = readSelectionIn(editor)
+          if (selection) live.current.onSelect(selection[0], selection[1])
+        })
+      }}
       onPointerDown={(e) => {
         if (e.button !== 0 || !live.current.onDragOutside) return
         const el = e.currentTarget
@@ -269,7 +299,7 @@ export function RichEditor(p: Props) {
           live.current.onSelectToStart(focus)
           return
         }
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && live.current.onSelectAll) {
+        if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key.toLowerCase() === 'a') && live.current.onSelectAll) {
           e.preventDefault()
           e.stopPropagation()
           const selection = document.getSelection()

@@ -1,5 +1,9 @@
 import { DEFAULT_TEXT_STYLE, type Binding, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
 
+export function footnoteBlockWidth(frameWidth: number, widthScale = 1): number {
+  return frameWidth * Math.max(0.2, Math.min(1, widthScale))
+}
+
 export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[], paragraphStyleId?: string): TextStyle {
   const resolve = (id: string, seen = new Set<string>()): Partial<TextStyle> => {
     if (seen.has(id)) return {}
@@ -105,6 +109,7 @@ export interface FootnoteLayoutResult {
 export interface FootnoteLayoutOptions {
   mode: FootnoteLayoutMode
   columns?: 1 | 2
+  columnGap?: number
   alignment?: 'right' | 'center'
   columnWidth: number
   maxFootnoteHeight: number
@@ -169,8 +174,12 @@ function fitPrefix(item: FootnoteLayoutItem, width: number, maxHeight: number, m
 }
 
 function layoutVerticalColumns(items: FootnoteLayoutItem[], options: FootnoteLayoutOptions, measure: MeasureFootnote): FootnoteLayoutResult {
-  const gap = 16
-  const columnWidth = (options.columnWidth - gap) / 2
+  const rightColumnWidth = options.columnWidth / 2
+  const gap = Math.min(Math.max(0, options.columnGap ?? 10), Math.max(0, rightColumnWidth - 16))
+  const leftColumnWidth = rightColumnWidth - gap
+  const columnWidths = [rightColumnWidth, leftColumnWidth]
+  const columnX = [0, rightColumnWidth + gap]
+  const rightColumnItemCount = Math.max(1, Math.min(items.length - 1, Math.ceil(items.length * 2 / 3)))
   const placements: FootnotePlacement[] = []
   const overflowItems: FootnoteLayoutItem[] = []
   let column = 0
@@ -181,17 +190,24 @@ function layoutVerticalColumns(items: FootnoteLayoutItem[], options: FootnoteLay
   let overflow = false
 
   while (current || itemIndex < items.length) {
-    current ??= items[itemIndex++]
+    if (!current) {
+      if (column === 0 && itemIndex >= rightColumnItemCount) {
+        column = 1
+        y = 0
+      }
+      current = items[itemIndex++]
+    }
     if (column >= 2) {
       overflow = true
       overflowItems.push({ ...current, continued: true }, ...items.slice(itemIndex).map((item) => ({ ...item, continued: true })))
       break
     }
 
+    const columnWidth = columnWidths[column]
     const measured = measure(current, columnWidth)
     const available = Math.max(0, options.maxFootnoteHeight - y)
     if (measured.height <= available) {
-      placements.push({ ...current, x: column * (columnWidth + gap), y, width: columnWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
+      placements.push({ ...current, x: columnX[column], y, width: columnWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
       y += measured.height
       height = Math.max(height, y)
       current = null
@@ -200,7 +216,7 @@ function layoutVerticalColumns(items: FootnoteLayoutItem[], options: FootnoteLay
 
     const prefix: ReturnType<typeof fitPrefix> = available > 0 ? fitPrefix(current, columnWidth, available, measure) : null
     if (prefix) {
-      placements.push({ ...current, content: prefix.content, runs: prefix.runs, x: column * (columnWidth + gap), y, width: columnWidth, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
+      placements.push({ ...current, content: prefix.content, runs: prefix.runs, x: columnX[column], y, width: columnWidth, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
       y += prefix.height
       height = Math.max(height, y)
       current = prefix.rest ? { ...current, content: prefix.rest, offset: prefix.restOffset, runs: prefix.restRuns, continued: true } : null

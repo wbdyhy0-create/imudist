@@ -6,6 +6,7 @@ import type { Unit } from '../units'
 import { FontPicker } from './FontPicker'
 import { useFontCatalog } from '../fonts'
 import { FillPicker } from './FillPicker'
+import { ContextMenu } from './ContextMenu'
 
 export type { ParagraphStyleRecord } from '../document'
 
@@ -16,6 +17,7 @@ interface Props {
   onChange: (styleId: string, patch: Partial<ParagraphStyleRecord>) => void
   onCreate: () => void
   onDelete: (styleId: string) => void
+  onDeleteMany: (styleIds: string[]) => void
   /** the style of the paragraph the text selection (or caret) is in: shown highlighted. null = the selection spans several styles; missing = nothing selected */
   highlightId?: string | null
   /** the text in the highlighted style carries changes of its own: a small "+" after the style's name (the usual style-override mark) */
@@ -26,17 +28,24 @@ interface Props {
   onDiscardOverrides?: () => void
 }
 
-export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete, highlightId, modified, onConfirmOverrides, onDiscardOverrides }: Props) {
+export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate, onDelete, onDeleteMany, highlightId, modified, onConfirmOverrides, onDiscardOverrides }: Props) {
   const [activeId, setActiveId] = useState(styles[0]?.id ?? '')
   // the style being edited or deleted follows the text: moving the selection into another paragraph moves it too
   const [followed, setFollowed] = useState(highlightId)
+  const [rangeIds, setRangeIds] = useState<string[]>([])
+  const [rangeAnchorId, setRangeAnchorId] = useState<string | null>(null)
   if (highlightId !== followed) {
     setFollowed(highlightId)
-    if (highlightId) setActiveId(highlightId)
+    if (highlightId) {
+      setActiveId(highlightId)
+      setRangeIds([highlightId])
+      setRangeAnchorId(highlightId)
+    }
   }
   const [editing, setEditing] = useState(false)
   const [category, setCategory] = useState('general')
   const [modalPosition, setModalPosition] = useState<{ x: number; y: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ styleId: string; x: number; y: number } | null>(null)
   const modalDrag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const fontCatalog = useFontCatalog()
   const active = styles.find((style) => style.id === activeId) ?? styles[0]
@@ -46,6 +55,30 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
   const selectedFamily = fontCatalog.families.find((family) => family.family === value('fontFamily', 'Segoe UI'))
   const selectedFace = `${value('weight', 400)}|${value('italic', false) ? 1 : 0}`
   const edit = (patch: ParagraphStyleRecord['patch']) => onChange(active.id, { patch })
+    const chooseStyle = (styleId: string, extend: boolean) => {
+      setActiveId(styleId)
+      if (extend) {
+        const anchorId = rangeAnchorId && styles.some((style) => style.id === rangeAnchorId) ? rangeAnchorId : activeId
+        const anchorIndex = styles.findIndex((style) => style.id === anchorId)
+        const targetIndex = styles.findIndex((style) => style.id === styleId)
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const start = Math.min(anchorIndex, targetIndex)
+          const end = Math.max(anchorIndex, targetIndex)
+          setRangeIds(styles.slice(start, end + 1).map((style) => style.id))
+          setRangeAnchorId(anchorId)
+          return
+        }
+      }
+      setRangeIds([styleId])
+      setRangeAnchorId(styleId)
+      if (styleId !== shownId) onApply(styleId)
+    }
+    const openStyleMenu = (styleId: string, x: number, y: number) => {
+      const selectedIds = rangeIds.includes(styleId) ? rangeIds : [styleId]
+      setRangeIds(selectedIds)
+      setRangeAnchorId(styleId)
+      setContextMenu({ styleId, x, y })
+    }
   const startModalDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     const rect = event.currentTarget.parentElement?.getBoundingClientRect()
@@ -62,8 +95,9 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
     <section className="paragraph-styles-panel props-panel" aria-label="סגנונות פסקה">
       <div className="styles-panel-head"><h2 className="props-title">סגנונות פסקה</h2><button className="icon-button" aria-label="סגנון חדש" onMouseDown={(event) => event.preventDefault()} onClick={onCreate}>+</button></div>
       <div className="paragraph-style-list">
-        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '')} onMouseDown={(event) => event.preventDefault()} onClick={() => { setActiveId(style.id); if (style.id !== shownId) onApply(style.id) }} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}{modified && style.id === shownId && <span className="style-plus" title="בטקסט יש שינויים שאינם חלק מהסגנון — סגנון חדש (+) ייצור מהם סגנון">+</span>}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
+        {styles.map((style) => <button key={style.id} className={'paragraph-style-row' + (style.id === shownId ? ' active' : '') + (rangeIds.includes(style.id) ? ' range-selected' : '')} onMouseDown={(event) => { if (event.button === 0) event.preventDefault() }} onContextMenu={(event) => { event.preventDefault(); if (styles.length > 1) { setActiveId(style.id); openStyleMenu(style.id, event.clientX, event.clientY) } }} onClick={(event) => chooseStyle(style.id, event.shiftKey)} onDoubleClick={() => { setActiveId(style.id); setEditing(true) }}><span className="style-sample" style={{ fontWeight: style.patch.weight ?? 400 }}>{style.name}{modified && style.id === shownId && <span className="style-plus" title="בטקסט יש שינויים שאינם חלק מהסגנון — סגנון חדש (+) ייצור מהם סגנון">+</span>}</span><span className="style-meta">{style.basedOnId ? 'מבוסס' : 'בסיס'}</span></button>)}
       </div>
+      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} items={[{ label: rangeIds.length > 1 ? `מחק ${rangeIds.length} סגנונות` : 'מחק סגנון', disabled: rangeIds.length >= styles.length, onClick: () => rangeIds.length > 1 ? onDeleteMany(rangeIds) : onDelete(contextMenu.styleId) }]} />}
       {editing && <div className="paragraph-style-modal" role="dialog" aria-label="אפשרויות סגנון פסקה" style={modalPosition ? { left: modalPosition.x, top: modalPosition.y, transform: 'none' } : undefined}><div className="paragraph-style-modal-head" onPointerDown={startModalDrag}><strong>⠿ אפשרויות סגנון פסקה</strong><button className="icon-button" onPointerDown={(event) => event.stopPropagation()} onClick={() => setEditing(false)} aria-label="סגור">×</button></div>
         {modified && active.id === shownId && <div className="paragraph-style-pending"><span>לטקסט שבפסקה יש שינויים שאינם חלק מהסגנון.</span><div className="paragraph-style-pending-actions"><button className="btn small" onMouseDown={(event) => event.preventDefault()} onClick={onDiscardOverrides}>ביטול</button><button className="btn small primary" onMouseDown={(event) => event.preventDefault()} onClick={onConfirmOverrides}>אישור</button></div></div>}
         <div className="paragraph-style-modal-layout"><nav className="paragraph-style-categories" aria-label="קטגוריות סגנון">

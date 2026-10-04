@@ -3,6 +3,7 @@ import type { Asset, GradientFeather, ImageFrame } from '../document'
 import { featherCss } from '../feather'
 import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
+import { useDisplaySrc } from '../imageProxy'
 
 interface Props {
   image: ImageFrame
@@ -30,6 +31,10 @@ const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' } as const
 
 /** A picture in its frame. The picture is drawn by the browser, scaled to the frame according to `image.fit`. */
 export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onDoubleClick, onHandleDown, onRotateDown }: Props) {
+  // a big picture (a 300-DPI page from a PDF) is drawn from a smaller copy while it is shown small - see imageProxy.ts
+  const aspect = asset && asset.height > 0 ? asset.width / asset.height : 1
+  const neededPx = Math.ceil(Math.max(image.w, image.h * aspect) * zoom * (window.devicePixelRatio || 1))
+  const src = useDisplaySrc(image.assetId, asset, neededPx)
   return (
     <div
       className={'image-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
@@ -50,10 +55,12 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
     >
       {asset ? (
         <img
-          src={asset.dataUrl}
+          src={src}
           alt={asset.name}
           draggable={false}
           style={{
+            // the copy of a big picture is a moment away the first time: nothing (not the alt text) shows until then
+            visibility: src ? undefined : 'hidden',
             objectFit: OBJECT_FIT[image.fit],
             filter: dropShadowFilter(image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, zoom, image.shadowColor),
             ...((featherOverride ?? image.feather) ? { maskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom), WebkitMaskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom) } : {}),

@@ -343,9 +343,14 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
       if (props.hidden) continue
       for (const reference of runReferences) referenceAnchors.push({ wordId: reference.wordId, anchor: importedLength + reference.offset })
       const rtl = HEBREW_OR_ARABIC.test(text)
+      // a run that holds nothing but footnote reference marks has no Hebrew letters to pick the complex-script font by,
+      // so it fell back to the document's Latin font (Arial) while the text it hangs on uses the Hebrew one: the
+      // superscript numbers looked like another typeface. It takes the font and size of the text right before it instead.
+      const referenceOnly = runReferences.length > 0 && !text.split(FOOTNOTE_MARKER).join('').trim()
+      const inherit = referenceOnly && firstRun ? last : null
       last = {
-        fontFamily: (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
-        fontSize: (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
+        fontFamily: inherit?.fontFamily ?? (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
+        fontSize: inherit?.fontSize ?? (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
         ...(props.color ? { color: props.color } : {}),
         weight: props.bold ? 700 : 400,
         italic: !!props.italic,

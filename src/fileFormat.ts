@@ -219,6 +219,8 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
     columns: raw.columns === 2 ? 2 : 1,
     referenceScale: num(raw.referenceScale, DEFAULT_FOOTNOTE_CONFIG.referenceScale, 0.25, 1),
     numberTextGap: num(raw.numberTextGap, DEFAULT_FOOTNOTE_CONFIG.numberTextGap, 0, 100),
+    columnGap: num(raw.columnGap, DEFAULT_FOOTNOTE_CONFIG.columnGap, 0, 100),
+    widthScale: num(raw.widthScale, DEFAULT_FOOTNOTE_CONFIG.widthScale, 0.2, 1),
     minSpacingBetweenInline: num(raw.minSpacingBetweenInline, DEFAULT_FOOTNOTE_CONFIG.minSpacingBetweenInline, 0, 100),
     maxFootnoteHeight: num(raw.maxFootnoteHeight, DEFAULT_FOOTNOTE_CONFIG.maxFootnoteHeight, 12, MAX_PAGE_PT),
     dividerGap: num(raw.dividerGap, DEFAULT_FOOTNOTE_CONFIG.dividerGap, 0, MAX_PAGE_PT),
@@ -292,7 +294,15 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
   ...(Array.isArray(raw.paragraphStylePatches)
     ? {
         paragraphStylePatches: raw.paragraphStylePatches.map((value) =>
-          isObj(value) ? { ...paragraphStyleOf(value), ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}) } : {},
+          isObj(value)
+            ? {
+                ...paragraphStyleOf(value),
+                ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}),
+                ...(typeof value.windowIndent === 'number' && Number.isFinite(value.windowIndent) && value.windowIndent > 0
+                  ? { windowIndent: num(value.windowIndent, 0, 0, MAX_PAGE_PT), ...(typeof value.windowWords === 'number' && Number.isFinite(value.windowWords) ? { windowWords: int(value.windowWords, 1, 1, 4) } : {}) }
+                  : {}),
+              }
+            : {},
         ),
       }
     : {}),
