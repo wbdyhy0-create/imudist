@@ -10,7 +10,7 @@ import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
-import { isTextEditor, isTyping } from './dom'
+import { isTableCellEditor, isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { baseName, pickFiles } from './fileio'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
@@ -30,7 +30,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'footnote-style', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
@@ -361,7 +361,7 @@ export default function App() {
       // single-key shortcuts (like W) must not fire while typing in a field
       if (typing && !e.ctrlKey && !e.metaKey && !e.altKey) return
       // in ordinary fields Ctrl+Z / Ctrl+Y / Ctrl+A keep their native meaning; only the text editor uses ours
-      if (typing && !isTextEditor(e.target) && (isKey(e, 'z') || isKey(e, 'y') || isKey(e, 'a'))) return
+      if (typing && !isTextEditor(e.target) && !(isTableCellEditor(e.target) && (isKey(e, 'z') || isKey(e, 'y'))) && (isKey(e, 'z') || isKey(e, 'y') || isKey(e, 'a'))) return
       if ((e.ctrlKey || e.metaKey) && isKey(e, 'y') && !e.shiftKey && !e.altKey) {
         e.preventDefault()
         if (!preview) history.redo()

@@ -203,7 +203,7 @@ export function useDocumentSession() {
   /** the text frames changed (typing, dragging …); changes with the same key merge into one undo step */
   const changeFrames = (next: TextFrame[], key?: string, silent?: boolean) => change((s) => (next !== s.frames ? { ...s, frames: next } : s), key, silent)
   const changeImages = (next: ImageFrame[], key?: string) => change((s) => (next !== s.images ? { ...s, images: next } : s), key)
-  const changeShapes = (next: ShapeFrame[], key?: string) => change((s) => (next !== s.shapes ? { ...s, shapes: next } : s), key)
+  const changeShapes = (next: ShapeFrame[], key?: string, silent?: boolean) => change((s) => (next !== s.shapes ? { ...s, shapes: next } : s), key, silent)
   const changeGuides = (next: Guide[], key?: string) => change((s) => (next !== s.guides ? { ...s, guides: next } : s), key)
   const changeParagraphStyles = (next: ParagraphStyleRecord[], key?: string) => change((s) => (next !== s.paragraphStyles ? { ...s, paragraphStyles: next } : s), key)
   const changeParents = (next: ParentPage[], key?: string) => change((s) => (next !== s.parents ? { ...s, parents: next } : s), key)

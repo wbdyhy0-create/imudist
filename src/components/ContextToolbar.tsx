@@ -13,6 +13,7 @@ interface Props {
   frame: TextFrame | null
   /** the look of the text the caret / selection is in (font, size, weight, italic, tracking); the frame's own when missing */
   textStyle?: CharStyle | null
+  tableText?: TextStyle | null
   /** the paragraph layout (leading, indents, align, spacing) of the caret / selection's own paragraph - a paragraph
    * style, or a change made while some text was selected, can give one paragraph its own; the frame's own when missing */
   paragraphStyle?: TextStyle | null
@@ -57,12 +58,12 @@ const LABELS: Partial<Record<ToolId, string>> = {
   eraser: 'מחק',
 }
 
-export function ContextToolbar({ tool, shape, image, frame, textStyle, paragraphStyle, strokeWidth, onStrokeWidth, onFill, colorTarget, onColorTarget, textColorTarget, onTextColorTarget, onFlip, onArrange, onOpacity, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageDelete, onCharStyle, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, paragraphStyle, strokeWidth, onStrokeWidth, onFill, colorTarget, onColorTarget, textColorTarget, onTextColorTarget, onFlip, onArrange, onOpacity, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageDelete, onCharStyle, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? 'כלי'
-  const char = (textStyle ?? frame) as CharStyle
+  const char = (textStyle ?? tableText ?? frame) as CharStyle
   // leading / indents / align / spacing: the caret's own paragraph may carry a style (or an override) the frame
   // itself doesn't - same reasoning as `char` above, just for paragraph-level layout instead of character look
-  const para = (paragraphStyle ?? frame) as TextStyle
+  const para = (paragraphStyle ?? tableText ?? frame) as TextStyle
   const [showSwatches, setShowSwatches] = useState(false)
   const [showTextColors, setShowTextColors] = useState(false)
   const [showTextOutline, setShowTextOutline] = useState(false)
@@ -87,7 +88,7 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, paragraph
     }
   }, [showTextColors, showTextOutline])
   return (
-    <div className="context-toolbar" role="toolbar" aria-label={`אפשרויות ${label}`}>
+    <div className={'context-toolbar' + (tableText ? ' table-format-toolbar' : '')} role="toolbar" aria-label={tableText ? 'עיצוב טבלה' : `אפשרויות ${label}`}>
       <span className="context-tool-name">{label}</span>
       <span className="context-divider" />
       {shape && <div className="context-swatch-wrap"><button className="context-command" title="פתיחת פלטת מילוי וסטרוק" onClick={() => setShowSwatches((value) => !value)}>דוגמיות</button>{showSwatches && <div className="context-swatch-popover"><div className="context-swatch-row"><FillPicker label="דוגמיות צבע" value={colorTarget === 'fill' ? shape.fill : shape.stroke} onChange={onFill} /><div className="context-swatch-pair"><button className={'context-fill-square' + (colorTarget === 'fill' ? ' active' : '')} style={shape.fill ? { background: shape.fill } : undefined} aria-label="בחר מילוי" title="החל על מילוי" onClick={() => onColorTarget('fill')} /><button className={'context-stroke-square' + (colorTarget === 'stroke' ? ' active' : '')} style={shape.stroke ? { borderColor: shape.stroke } : undefined} aria-label="בחר סטרוק" title="החל על סטרוק" onClick={() => onColorTarget('stroke')} /></div></div></div>}</div>}

@@ -265,6 +265,11 @@ svg { display: block; }
 .context-text-controls select, .context-text-controls input { height: 26px; padding: 0 5px; background: var(--bg-field); border: 1px solid var(--border); color: var(--text); }
 .context-text-controls select { width: 120px; }
 .context-text-controls input[type='number'] { width: 58px; }
+.table-text-format-controls input[type='color'] { width: 32px; padding: 2px; }
+.table-text-format-controls select:last-child { width: 78px; }
+.table-text-format-controls .table-font-picker { width: 154px; flex: none; }
+.table-text-format-controls .table-font-picker .font-picker-pop { width: min(280px, calc(100vw - 16px)); inset-inline: 0 auto; box-sizing: border-box; }
+.table-text-format-controls .table-font-picker .font-picker-list button { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .context-text-controls .context-command.active { border-color: var(--accent-line); background: var(--accent); color: #fff; }
 .context-align-buttons { display: inline-flex; gap: 2px; }
 .context-align-buttons button { height: 26px; padding: 0 5px; border: 1px solid var(--border); background: var(--bg-field); color: var(--text-dim); font-size: 11px; }

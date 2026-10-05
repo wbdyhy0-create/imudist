@@ -7,6 +7,8 @@ import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '.
 import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
 import { dropShadowFilter } from '../shadow'
+import type { CellRange, TableData, TableLayout } from '../table'
+import { TableView, type TableSelection } from './TableView'
 
 /** the picture's corner handles, while its own content (not the frame) is being resized */
 const CONTENT_CORNERS = ['nw', 'ne', 'se', 'sw'] as const
@@ -70,6 +72,16 @@ interface Props {
   onContentResize?: (corner: ContentCorner, e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of a line's two endpoint handles (0 = its first point, 1 = its second): it moves on its own, the other end staying put */
   onLineEndDown?: (which: 0 | 1, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** a table shape: how its cells are laid out, which are picked, and how they are changed */
+  tableUi?: {
+    layout: TableLayout
+    /** cells can be picked and typed into (the select tool is on) */
+    active: boolean
+    selection: TableSelection | null
+    onSelection: (selection: TableSelection | null) => void
+    onContextMenu: (selection: CellRange, x: number, y: number) => void
+    onTable: (table: TableData, key?: string) => void
+  }
 }
 
 export type PathPeg = 'anchor' | 'end' | 'flip'
@@ -106,9 +118,11 @@ export function ShapeFrameView({
   onContentGrab,
   onContentResize,
   onLineEndDown,
+  tableUi,
 }: Props) {
   const isLine = shape.kind === 'line'
   const isPath = shape.kind === 'path'
+  const tableShape = shape.kind === 'table' && shape.table && tableUi ? (shape as typeof shape & { table: TableData }) : null
   const w = shape.w * zoom
   const h = shape.h * zoom
   const maskFeather = featherOverride ?? shape.feather
@@ -151,7 +165,7 @@ export function ShapeFrameView({
 
   return (
     <div
-      className={'shape-frame' + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
+      className={'shape-frame' + (tableShape ? ' table-frame' : '') + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
       data-object-id={shape.id}
       data-object-kind="shape"
       style={{
@@ -161,11 +175,26 @@ export function ShapeFrameView({
         height: h,
         zIndex: z,
         opacity: shape.opacity ?? 1,
-        overflow: isLine ? 'visible' : undefined,
+        overflow: isLine || tableShape ? 'visible' : undefined,
         transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
       }}
     >
-      <svg
+      {tableShape && tableUi && (
+        <TableView
+          shape={tableShape}
+          layout={tableUi.layout}
+          zoom={zoom}
+          selected={selected && tableUi.active}
+          showEdge={showEdge}
+          locked={locked}
+          selection={tableUi.selection}
+          onSelection={tableUi.onSelection}
+          onContextMenu={tableUi.onContextMenu}
+          onTable={tableUi.onTable}
+          onBodyPointerDown={(event) => onPointerDown?.(event as unknown as ReactPointerEvent<SVGPathElement>)}
+        />
+      )}
+      {!tableShape && <svg
         width={w}
         height={h}
         viewBox={`0 0 ${w} ${h}`}
@@ -300,9 +329,9 @@ export function ShapeFrameView({
             </text>
           </>
         )}
-      </svg>
+      </svg>}
 
-      {showHandles && !isLine && HANDLES.map((handle) => <div key={handle} className={'handle ' + handle} onPointerDown={(e) => onHandleDown?.(handle, e)} />)}
+      {showHandles && !isLine && (tableShape ? HANDLES.filter((handle) => ['nw', 'ne', 'se', 'sw', 'e', 'w'].includes(handle)) : HANDLES).map((handle) => <div key={handle} className={'handle ' + handle} onPointerDown={(e) => onHandleDown?.(handle, e)} />)}
       {showHandles &&
         isLine &&
         (shape.flip ? [[0, h], [w, 0]] : [[0, 0], [w, h]]).map(([left, top], i) => (
@@ -314,7 +343,7 @@ export function ShapeFrameView({
             onPointerDown={(e) => onLineEndDown?.(i as 0 | 1, e)}
           />
         ))}
-      {showHandles &&
+      {showHandles && !tableShape &&
         ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown?.(c, e)} />)}
 
       {showHandles && pt && info && place && (

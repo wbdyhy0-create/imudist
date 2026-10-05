@@ -74,14 +74,18 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
           <Labeled label="רוחב">
             <NumberField value={shape.w} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
           </Labeled>
-          <Labeled label="גובה">
-            <NumberField value={shape.h} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
-          </Labeled>
+          {shape.kind !== 'table' && (
+            <Labeled label="גובה">
+              <NumberField value={shape.h} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
+            </Labeled>
+          )}
         </div>
         <p className="muted">
           {shape.kind === 'line'
             ? 'גרור את אחת מנקודות הקצה של הקו כדי להאריך, לקצר או לשנות את זוויתו. Shift שומר על זווית ישרה (קפיצות של 45°).'
-            : 'Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.'}
+            : shape.kind === 'table'
+              ? 'גובה הטבלה נקבע לפי הטקסט שבתאים. את רוחב העמודות וגובה השורות משנים בגרירת הקווים שביניהן, והגדרות הקווים והצבעים נמצאות בתפריט טבלה.'
+              : 'Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.'}
         </p>
         {shape.kind === 'path' && (
           <p className="muted">
@@ -183,12 +187,12 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
       )}
 
       {shape.kind !== 'line' && (
-        <Group title="מילוי">
-          <FillPicker label="צבע מילוי" value={shape.fill} onChange={(fill) => onChange({ fill, fillGradient: undefined })} />
+        <Group title={shape.kind === 'table' ? 'רקע הטבלה' : 'מילוי'}>
+          <FillPicker label={shape.kind === 'table' ? 'צבע הרקע' : 'צבע מילוי'} value={shape.fill} onChange={(fill) => onChange({ fill, fillGradient: undefined })} />
         </Group>
       )}
 
-      <Group title="קו">
+      {shape.kind !== 'table' && <Group title="קו">
         <FillPicker
           label="צבע הקו"
           value={shape.stroke}
@@ -201,7 +205,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
             <NumberField value={shape.strokeWidth} unit="px" unitLabel="pt" step={0.25} min={0} max={200} onChange={(v) => onChange({ strokeWidth: v })} />
           </Labeled>
         </div>
-      </Group>
+      </Group>}
 
       {shape.kind === 'line' && (
         <Group title="סגנון קו">

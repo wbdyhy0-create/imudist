@@ -7,6 +7,7 @@ import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
 import { layoutEndnotes } from './endnotes'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
 import { imageGeometry, shapePath } from './shapes'
+import { buildTableDom, layoutOfShape } from './tableLayout'
 import { flowFrames, flowFramesWithFootnoteContinuation, type FrameFlow } from './textLayout'
 import { floatsFor } from './wrap'
 import { isTauri } from './fileio'
@@ -359,7 +360,30 @@ async function drawTextDom(
   }
 }
 
+/** a table is drawn from the same layout the screen uses, rasterized from a DOM copy of it (its text is set by the browser, like a frame's) */
+async function drawTable(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number) {
+  const layout = layoutOfShape(shape)
+  if (!layout || !shape.table) return
+  const { outer, rowStroke, colStroke } = shape.table.style
+  const widest = Math.max(1, outer?.width ?? 0, rowStroke?.width ?? 0, colStroke?.width ?? 0)
+  const pad = Math.ceil(widest / 2) + 1
+  const root = buildTableDom({ table: shape.table, fill: shape.fill }, layout, pad)
+  Object.assign(root.style, { position: 'fixed', left: '-100000px', top: '0' })
+  document.body.appendChild(root)
+  try {
+    await document.fonts?.ready
+    const raster = await html2canvas(root, { backgroundColor: null, scale, width: layout.width + 2 * pad, height: layout.height + 2 * pad, logging: false })
+    ctx.save()
+    ctx.globalAlpha = shape.opacity ?? 1
+    ctx.drawImage(raster, (shape.x - page.x - pad) * scale, (shape.y - page.y - pad) * scale, (layout.width + 2 * pad) * scale, (layout.height + 2 * pad) * scale)
+    ctx.restore()
+  } finally {
+    root.remove()
+  }
+}
+
 async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number, asset?: Asset) {
+  if (shape.kind === 'table') return drawTable(ctx, shape, page, scale)
   const boxX = (shape.x - page.x) * scale
   const boxY = (shape.y - page.y) * scale
   const w = shape.w * scale
@@ -434,7 +458,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
 /** One page, rendered to a canvas at the chosen DPI. `page` is the TRIM box; `bleedPt` extends the canvas (and what
  *  gets drawn) beyond it on every side, so pictures/shapes that bleed off the page still print all the way to the
  *  cut line. */
-async function renderPage(
+export async function renderPage(
   content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[] },
   flows: Map<string, FrameFlow>,
   page: PageRect,

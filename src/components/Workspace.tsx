@@ -1,4 +1,5 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
+import { useFontCatalog, weightName } from '../fonts'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
@@ -96,7 +97,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacingPlan, diffEdit, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { charStyleOf, cleanSpacingPlan, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
@@ -107,6 +108,7 @@ import { DockingPanels } from './DockingPanels'
 import { ColorToolsPanel } from './ColorToolsPanel'
 import { ColorSamplerLens, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
+import { FontPicker } from './FontPicker'
 import { ColorPickerDialog } from './ColorPickerDialog'
 import { AlignButtons, type AlignOp } from './AlignButtons'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
@@ -116,7 +118,7 @@ import { ImageFrameView } from './ImageFrameView'
 import { ImageProperties } from './ImageProperties'
 import { MultiSelectionPanel } from './MultiSelectionPanel'
 import { NumberField } from './NumberField'
-import { FootnoteEditorDialog, FootnoteOptionsDialog, FootnoteStyleFields } from './FootnoteDialogs'
+import { FootnoteEditorDialog, FootnoteOptionsDialog } from './FootnoteDialogs'
 import { ParagraphPanel } from './ParagraphPanel'
 import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStylesPanel'
 import { StyleManagerPanel } from './StyleManagerPanel'
@@ -127,6 +129,12 @@ import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { LayersPanel } from './LayersPanel'
 import { TocDialog } from './TocDialog'
+import { InsertTableDialog, type InsertTableOptions } from './InsertTableDialog'
+import { TableOptionsDialog } from './TableOptionsDialog'
+import { CellOptionsDialog, type CellPatch } from './CellOptionsDialog'
+import type { TableSelection } from './TableView'
+import { createTable, deleteCols, deleteRows, expandRange, insertCols, insertRows, mergeRange, originsOf, patchCells, resolveCell, scaleTable, tableCols, tableRows, unmergeAt, type TableCell, type TableData } from '../table'
+import { layoutOfShape } from '../tableLayout'
 import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
@@ -219,6 +227,9 @@ const stepZoom = (z: number, dir: 1 | -1) =>
     ? (ZOOM_STEPS.find((s) => s > z * 1.001) ?? ZOOM_MAX)
     : ([...ZOOM_STEPS].reverse().find((s) => s < z / 1.001) ?? ZOOM_MIN)
 
+/** what the Table menu can do to the selected table */
+export type TableOp = 'select-row' | 'select-column' | 'select-table' | 'row-above' | 'row-below' | 'col-start' | 'col-end' | 'delete-row' | 'delete-col' | 'merge' | 'unmerge' | 'options' | 'cell-options'
+
 export interface WorkspaceHandle {
   selectTool: (tool: ToolId) => void
   zoomIn: () => void
@@ -258,6 +269,10 @@ export interface WorkspaceHandle {
   insertTableOfContents: () => void
   firstWordStyler: () => void
   windowText: () => void
+  /** table: open the dialog that adds one */
+  insertTable: () => void
+  /** table: a command on the selected table (and the cells picked in it) */
+  tableCommand: (op: TableOp) => void
   findReplace: () => void
   canReplaceSelectedText: () => boolean
   replaceSelectedText: (placed: PlacedText) => boolean
@@ -308,7 +323,8 @@ interface Props {
   guides: Guide[]
   onGuidesChange: (guides: Guide[], coalesceKey?: string) => void
   shapes: ShapeFrame[]
-  onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string) => void
+  /** `silent`: a follow-up the program makes by itself (a measurement kept up to date): it joins the undo step it follows */
+  onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string, silent?: boolean) => void
   layerOrder: string[]
   onLayerStackChange: (layerOrder: string[]) => void
   paragraphStyles: ParagraphStyleRecord[]
@@ -447,6 +463,7 @@ export function Workspace({
   onLeaveView,
   ref,
 }: Props) {
+  const fontCatalog = useFontCatalog()
   const documentRects = useMemo(() => pageRects(doc), [doc])
   const [footnotePreviewConfig, setFootnotePreviewConfig] = useState<FootnoteLayoutConfig | null>(null)
   const footnoteConfig = footnotePreviewConfig ?? doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
@@ -684,7 +701,7 @@ export function Workspace({
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape' } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape'; table?: TableData } | null>(null)
   /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
   const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
   /** The "fine outline" rotation guides professional layout tools show: a faint outline of the object's box at the angle this drag
@@ -778,6 +795,12 @@ export function Workspace({
   const [tocDialogOpen, setTocDialogOpen] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [windowTextDialog, setWindowTextDialog] = useState(false)
+  const [insertTableOpen, setInsertTableOpen] = useState(false)
+  const [tableOptionsOpen, setTableOptionsOpen] = useState(false)
+  const [cellOptionsOpen, setCellOptionsOpen] = useState(false)
+  /** the cells picked in the selected table */
+  const [tableSel, setTableSel] = useState<(TableSelection & { id: string }) | null>(null)
+  const [tableMenu, setTableMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   /** bumped on every open, so the panel starts afresh (and takes the focus) even when it was already there */
   const [findKey, setFindKey] = useState(0)
@@ -1172,11 +1195,6 @@ export function Workspace({
     setFootnoteOptionsOpen(false)
   }
 
-  const updateFootnoteStyle = (patch: Pick<FootnoteLayoutConfig, 'fontFamily' | 'paragraphStyleId'>) => {
-    pageOps.setup({ ...doc, footnotes: { ...(doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG), ...patch } }, 'footnotes:style')
-    setFootnotePreviewConfig(null)
-  }
-
   const commitFootnoteWidth = (widthScale: number) => {
     pageOps.setup({ ...doc, footnotes: { ...(doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG), widthScale } }, 'footnotes:width')
     setFootnotePreviewConfig(null)
@@ -1411,7 +1429,7 @@ export function Workspace({
       const flows = chain.map((frame) => flow.get(frame.id))
       const storyStyle = flows[0]?.style ?? styleOf(head)
       let runs = normalizeRuns(head.text, head.runs, head)
-      const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
+      const patches: NonNullable<TextFrame['paragraphStylePatches']> = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
       let touched = false
       let offset = 0
       head.text.split('\n').forEach((paragraph, index) => {
@@ -1910,7 +1928,7 @@ export function Workspace({
       ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
       : { a: frameFlow.start, b: Math.max(frameFlow.start + 1, frameFlow.end) }
     const indexes = paragraphsInRange(head.text, range.a, range.b)
-    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
+    const patches: NonNullable<TextFrame['paragraphStylePatches']> = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
     for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), align }
     onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `align:${head.id}:${indexes.join(',')}`)
   }
@@ -1927,7 +1945,7 @@ export function Workspace({
       ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
       : { a: flowPart.start, b: Math.max(flowPart.start + 1, flowPart.end) }
     const indexes = paragraphsInRange(head.text, range.a, range.b)
-    const patches = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
+    const patches: NonNullable<TextFrame['paragraphStylePatches']> = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
     for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...patch }
     onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
   }
@@ -2124,6 +2142,126 @@ export function Workspace({
     setEditingId(null)
     beginFrameDrag(e, id, 'move')
   }
+
+  // ── tables ──────────────────────────────────────────────────────────────────
+  const selectedTable = (): (ShapeFrame & { table: TableData }) | null => {
+    const shape = shapes.find((sh) => sh.id === selectedId)
+    return shape && shape.kind === 'table' && shape.table ? (shape as ShapeFrame & { table: TableData }) : null
+  }
+
+  /** a new version of a table: its height follows from the text, so it is set together with it */
+  const commitTable = (id: string, table: TableData, key?: string) =>
+    onShapesChange(shapes.map((sh) => (sh.id === id && sh.kind === 'table' ? { ...sh, table, h: layoutOfShape({ table, w: sh.w })?.height ?? sh.h } : sh)), key)
+
+  const tableUiFor = (sh: ShapeFrame, active: boolean) => {
+    const layout = layoutOfShape(sh)
+    if (!layout) return undefined
+    return {
+      layout,
+      active,
+      selection: tableSel && tableSel.id === sh.id ? tableSel : null,
+      onSelection: (next: TableSelection | null) => setTableSel(next ? { ...next, id: sh.id } : null),
+      onContextMenu: (selection: Pick<TableSelection, 'r0' | 'c0' | 'r1' | 'c1'>, x: number, y: number) => {
+        setSelectedId(sh.id)
+        setTableSel({ ...selection, editing: false, id: sh.id })
+        setTableMenu({ id: sh.id, x, y })
+      },
+      onTable: (table: TableData, key?: string) => commitTable(sh.id, table, key),
+    }
+  }
+
+  const insertTableShape = (options: InsertTableOptions) => {
+    const page = pageSize(doc, selectedPage)
+    const width = Math.round(page.w * 0.7)
+    const table = createTable({ rows: options.rows, cols: options.cols, headerRows: options.headerRows, footerRows: options.footerRows, width, cellGapX: options.cellGapX, cellGapY: options.cellGapY, cellRadius: options.cellRadius, headerContinuous: options.headerContinuous })
+    const height = layoutOfShape({ table, w: width })?.height ?? 100
+    const viewport = vpRef.current
+    const box = viewport?.getBoundingClientRect()
+    const center = viewport && box ? toWorld(box.left + viewport.clientWidth / 2, box.top + viewport.clientHeight / 2) : null
+    const pageIndex = center ? ownerPage(rects, center.x, center.y) : selectedPage
+    const area = rects[pageIndex] ?? rects[selectedPage]
+    const x = area ? area.x + (area.w - width) / 2 : 0
+    const y = area ? Math.max(area.y + 20, Math.min(center ? center.y - height / 2 : area.y + 60, area.y + area.h - height - 20)) : 0
+    const shape: ShapeFrame = { id: newFrameId(), kind: 'table', x, y, w: width, h: height, table, fill: null, stroke: null, strokeWidth: 0, layerId: activeLayerId, z: nextZ(frames, images, shapes) }
+    onShapesChange([...shapes, shape], 'table:insert')
+    setTool('select')
+    setSelectedId(shape.id)
+    if (area) setSelectedPage(pageIndex)
+    setTableSel({ id: shape.id, r0: 0, c0: 0, r1: 0, c1: 0, editing: true })
+    setInsertTableOpen(false)
+  }
+
+  const runTableOp = (op: TableOp) => {
+    const sh = selectedTable()
+    if (!sh) return
+    const t = sh.table
+    const current = tableSel?.id === sh.id ? expandRange(t, tableSel) : null
+    if (op === 'select-table') {
+      setTableSel({ id: sh.id, r0: 0, c0: 0, r1: tableRows(t) - 1, c1: tableCols(t) - 1, editing: false })
+      return
+    }
+    if (op === 'select-row') {
+      const row = current?.r0 ?? 0
+      const range = expandRange(t, { r0: row, c0: 0, r1: row, c1: tableCols(t) - 1 })
+      setTableSel({ id: sh.id, ...range, editing: false })
+      return
+    }
+    if (op === 'select-column') {
+      const col = current?.c0 ?? 0
+      const range = expandRange(t, { r0: 0, c0: col, r1: tableRows(t) - 1, c1: col })
+      setTableSel({ id: sh.id, ...range, editing: false })
+      return
+    }
+    if (op === 'options') return setTableOptionsOpen(true)
+    if (op === 'cell-options') return tableSel && tableSel.id === sh.id ? setCellOptionsOpen(true) : undefined
+    const area = tableSel && tableSel.id === sh.id ? expandRange(t, tableSel) : null
+    let next: TableData | null = null
+    let pick: { r: number; c: number } | null = null
+    if (op === 'row-above') { const at = area ? area.r0 : 0; next = insertRows(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
+    else if (op === 'row-below') { const at = area ? area.r1 + 1 : tableRows(t); next = insertRows(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
+    else if (op === 'col-start') { const at = area ? area.c0 : 0; next = insertCols(t, at); pick = { r: area?.r0 ?? 0, c: at } }
+    else if (op === 'col-end') { const at = area ? area.c1 + 1 : tableCols(t); next = insertCols(t, at); pick = { r: area?.r0 ?? 0, c: at } }
+    else if (!area) return
+    else if (op === 'delete-row') { next = deleteRows(t, area.r0, area.r1); pick = { r: Math.min(area.r0, tableRows(t) - (area.r1 - area.r0 + 1) - 1), c: area.c0 } }
+    else if (op === 'delete-col') { next = deleteCols(t, area.c0, area.c1); pick = { r: area.r0, c: Math.min(area.c0, tableCols(t) - (area.c1 - area.c0 + 1) - 1) } }
+    else if (op === 'merge') { next = mergeRange(t, area); pick = { r: area.r0, c: area.c0 } }
+    else if (op === 'unmerge') { next = unmergeAt(t, area.r0, area.c0); pick = { r: area.r0, c: area.c0 } }
+    if (!next || next === t) return
+    commitTable(sh.id, next, `table-op:${op}`)
+    if (pick) {
+      const origin = originsOf(next).find((o) => o.r0 <= pick.r && o.r1 >= pick.r && o.c0 <= pick.c && o.c1 >= pick.c)
+      if (origin) setTableSel({ id: sh.id, r0: origin.r0, c0: origin.c0, r1: origin.r1, c1: origin.c1, editing: false })
+    }
+  }
+
+  const applyCellPatch = (patch: CellPatch) => {
+    const sh = selectedTable()
+    if (sh && tableSel && tableSel.id === sh.id) commitTable(sh.id, patchCells(sh.table, tableSel, patch), 'table-cells')
+    setCellOptionsOpen(false)
+  }
+
+    const applyTableFormatting = (patch: Partial<Pick<TableCell, 'fontFamily' | 'fontSize' | 'leading' | 'tracking' | 'spaceBefore' | 'spaceAfter' | 'weight' | 'italic' | 'color' | 'align'>>) => {
+      const sh = selectedTable()
+      if (!sh) return
+      if (tableSel?.id === sh.id) commitTable(sh.id, patchCells(sh.table, tableSel, patch), 'table-text-style')
+      else commitTable(sh.id, { ...sh.table, style: { ...sh.table.style, ...patch } }, 'table-default-text-style')
+    }
+
+  // a table is as tall as its text makes it: after a change of its width (or a file written with other fonts) the height is caught up
+  useEffect(() => {
+    const stale = shapes.flatMap((sh) => {
+      const layout = sh.kind === 'table' ? layoutOfShape(sh) : null
+      return layout && Math.abs(layout.height - sh.h) > 0.25 ? [[sh.id, layout.height] as const] : []
+    })
+    if (stale.length === 0) return
+    const fixed = new Map(stale)
+    onShapesChange(shapes.map((sh) => (fixed.has(sh.id) ? { ...sh, h: fixed.get(sh.id)! } : sh)), 'table:sync', true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapes])
+
+  useEffect(() => {
+    if (tableSel && tableSel.id !== selectedId) setTableSel(null)
+  }, [selectedId, tableSel])
 
   const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) =>
     onShapesChange(shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh)), key)
@@ -2573,7 +2711,7 @@ export function Workspace({
    */
   const combineSelectedShapes = (op: BoolOp) => {
     const chosen = new Set(selectedId ? [selectedId] : multiSel)
-    const picked = shapes.filter((sh) => chosen.has(sh.id))
+    const picked = shapes.filter((sh) => chosen.has(sh.id) && sh.kind !== 'table')
     if (picked.length < 2) return
     const rankOf = new Map(stackOrder(frames, images, shapes, layerOrder).map((o, i) => [o.id, i]))
     const ordered = [...picked].sort((a, b) => (rankOf.get(a.id) ?? 0) - (rankOf.get(b.id) ?? 0))
@@ -2880,6 +3018,8 @@ export function Workspace({
     insertTableOfContents: () => setTocDialogOpen(true),
     firstWordStyler: () => setFirstWordDialog(true),
     windowText: () => setWindowTextDialog(true),
+    insertTable: () => setInsertTableOpen(true),
+    tableCommand: runTableOp,
     findReplace: () => openFind(),
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
@@ -3476,7 +3616,7 @@ export function Workspace({
 
     try {
       const vectorShape = target.kind === 'shape' ? shapes.find((shape) => shape.id === target.id) : undefined
-      if (vectorShape && !vectorShape.feather && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
+      if (vectorShape && !vectorShape.feather && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && vectorShape.kind !== 'table' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
         const start = toWorld(gesture.clientX0, gesture.clientY0)
         const end = toWorld(gesture.clientX1, gesture.clientY1)
         const mask: ShapeFrame = {
@@ -4301,7 +4441,7 @@ export function Workspace({
       }
       return
     }
-    if (tool === 'scissors' || tool === 'eraser') {
+    if ((tool === 'scissors' || tool === 'eraser') && sh.kind !== 'table') {
       e.stopPropagation()
       e.preventDefault()
       const point = toWorld(e.clientX, e.clientY)
@@ -4712,6 +4852,7 @@ export function Workspace({
   const beginFrameDrag = (e: ReactPointerEvent<HTMLElement>, id: string, mode: 'move' | HandleId) => {
     const isImage = images.some((x) => x.id === id)
     const isShape = shapes.some((x) => x.id === id)
+    const table = isShape ? shapes.find((shape) => shape.id === id)?.table : undefined
     const f = isImage ? images.find((x) => x.id === id) : isShape ? shapes.find((x) => x.id === id) : frames.find((x) => x.id === id)
     if (!f) return
     dragSeq.current += 1
@@ -4722,6 +4863,7 @@ export function Workspace({
       orig: { x: f.x, y: f.y, w: f.w, h: f.h },
       key: `drag:${dragSeq.current}`,
       kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
+      ...(table ? { table } : {}),
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -5387,7 +5529,7 @@ export function Workspace({
         setSpacingShown(sp.marks)
       } else setSpacingShown((cur) => (cur.length ? [] : cur))
       // the lines that hold the object; one along other objects runs across them and the dragged object, to show they are in line
-      const now = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
+      const now = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, d.table && e.shiftKey ? d.orig.w / d.orig.h : undefined)
       const equalLines: SnapLine[] = []
       const tol = SNAP_PX / live.current.zoom
       const same = (a: number, b: number) => Math.abs(a - b) <= tol
@@ -5403,6 +5545,20 @@ export function Workspace({
         // Shift keeps the shape's proportions
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? d.orig.w / d.orig.h : undefined, e.altKey)
         if (d.mode === 'move') learnRepeatOffset(d.id, box)
+        if (d.table && d.mode !== 'move') {
+          let table = d.table
+          if (d.mode.length === 2) {
+            if (e.shiftKey) table = scaleTable(d.table, box.w / Math.max(1, d.orig.w))
+            else {
+              const scaleY = box.h / Math.max(1, d.orig.h)
+              table = { ...d.table, rowHeights: d.table.rowHeights.map((height) => Math.max(1, height * scaleY)) }
+            }
+          }
+          const height = layoutOfShape({ table, w: box.w })?.height ?? box.h
+          const resized = { ...box, h: height }
+          onShapesChange(shapes.map((shape) => shape.id === d.id ? { ...shape, ...resized, table } : shape), d.key)
+          return
+        }
         onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
         return
       }
@@ -6132,6 +6288,22 @@ export function Workspace({
       : null
     const toolbarTextStyle = footnoteToolbarStyle ?? panelStyle
     const toolbarParagraphStyle = activeFootnoteStyle ?? paragraphStyle
+    const toolbarTable = selectedTable()
+    const toolbarTableResolved = toolbarTable
+      ? resolveCell(toolbarTable.table, tableSel?.id === toolbarTable.id ? tableSel.r0 : 0, tableSel?.id === toolbarTable.id ? tableSel.c0 : 0)
+      : null
+    const toolbarTableText: TextStyle | null = toolbarTableResolved ? {
+      fontFamily: toolbarTableResolved.fontFamily,
+      fontSize: toolbarTableResolved.fontSize,
+      color: toolbarTableResolved.color,
+      weight: toolbarTableResolved.weight,
+      italic: toolbarTableResolved.italic,
+      tracking: toolbarTableResolved.tracking,
+      align: toolbarTableResolved.align,
+      leading: toolbarTableResolved.leading,
+      spaceBefore: toolbarTableResolved.spaceBefore,
+      spaceAfter: toolbarTableResolved.spaceAfter,
+    } : null
 
   // more than one size in the text the panel speaks for: its size field must not pretend one of them is the size
   const allFootnoteSizes = footnoteSel?.allNotes && activeFootnoteHead
@@ -6296,7 +6468,7 @@ export function Workspace({
         return { ...frame, ...frameLook, paraKeepFirstLines: keepLinesTogether ? keep : undefined, paraKeepLastLines: keepLinesTogether ? keep : undefined, paraKeepWithNext: keepWithNext ? Array.from({ length: count }, () => 1) : undefined, runs: refreshStyleRuns(frame) }
       }
       const paragraphStyleIds = frame.paragraphStyleIds ?? []
-      const paragraphStylePatches = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
+      const paragraphStylePatches: NonNullable<TextFrame['paragraphStylePatches']> = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
       let paraSpaceBefore = frame.paraSpaceBefore
       let paraSpaceAfter = frame.paraSpaceAfter
       let paraKeepFirstLines = frame.paraKeepFirstLines
@@ -7023,10 +7195,11 @@ export function Workspace({
 
       <ContextToolbar
         tool={space ? 'hand' : tool}
-        shape={tool === 'feather' ? null : selShape}
+        shape={tool === 'feather' || toolbarTable ? null : selShape}
         image={tool === 'feather' ? null : selImage}
         frame={tool === 'feather' ? null : selFrame}
         textStyle={toolbarTextStyle}
+        tableText={toolbarTableText}
         paragraphStyle={toolbarParagraphStyle}
         strokeWidth={drawingStrokeWidth}
         colorTarget={colorTarget}
@@ -7044,17 +7217,43 @@ export function Workspace({
         onImageWrap={(wrap) => selImage && updateImage(selImage.id, { wrap })}
         onImageMatchShape={() => { const asset = selImage && assets[selImage.assetId]; if (selImage && asset) updateImage(selImage.id, { h: selImage.w * (asset.height / asset.width) }) }}
         onImageDelete={() => { if (selImage) { onImagesChange(images.filter((image) => image.id !== selImage.id)); setSelectedId(null) } }}
-        onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame && applyCharStyle(selFrame.id, patch)}
-        onAlign={(align) => footnoteSel ? applyFootnoteParagraphStyle({ align }) : selFrame && applyAlign(selFrame.id, align)}
-        onLeading={(leading) => footnoteSel ? applyFootnoteParagraphStyle({ leading }) : selFrame && applyParagraphStyle(selFrame.id, { leading })}
+        onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame ? applyCharStyle(selFrame.id, patch) : applyTableFormatting(patch)}
+        onAlign={(align) => footnoteSel ? applyFootnoteParagraphStyle({ align }) : selFrame ? applyAlign(selFrame.id, align) : applyTableFormatting({ align })}
+        onLeading={(leading) => footnoteSel ? applyFootnoteParagraphStyle({ leading }) : selFrame ? applyParagraphStyle(selFrame.id, { leading }) : applyTableFormatting({ leading })}
         onParagraphStyle={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParagraphStyle(selFrame.id, patch)}
-        onParagraphSpacing={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParaSpacing(selFrame.id, patch)}
+        onParagraphSpacing={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame ? applyParaSpacing(selFrame.id, patch) : applyTableFormatting(patch)}
         onFill={(color) => selShape && updateShape(selShape.id, colorTarget === 'fill' ? { fill: color, fillGradient: undefined } : { stroke: color }, `context-${colorTarget}:${selShape.id}`)}
         onStrokeWidth={(value) => {
           setDrawingStrokeWidth(value)
           if (selShape) updateShape(selShape.id, { strokeWidth: value }, `context-stroke:${selShape.id}`)
         }}
       >
+        {toolbarTable && toolbarTableText && <div className="context-text-controls table-text-format-controls" role="group" aria-label="עיצוב טקסט בתאים">
+          <div aria-label="גופן הטבלה" title="גופן"><FontPicker className="table-font-picker" value={toolbarTableText.fontFamily} families={fontCatalog.families} onChange={(fontFamily) => applyTableFormatting({ fontFamily })} /></div>
+          <select aria-label="משקל וסגנון הגופן בטבלה" title="משקל וסגנון" value={`${toolbarTableText.weight}|${toolbarTableText.italic ? 1 : 0}`} onChange={(event) => {
+            const [weight, italic] = event.target.value.split('|')
+            applyTableFormatting({ weight: Number(weight), italic: italic === '1' })
+          }}>
+            {(() => {
+              const faces = fontCatalog.families.find((font) => font.family === toolbarTableText.fontFamily)?.faces ?? []
+              const current = `${toolbarTableText.weight}|${toolbarTableText.italic ? 1 : 0}`
+              return <>
+                {!faces.some((face) => `${face.weight}|${face.italic ? 1 : 0}` === current) && <option value={current}>{weightName(toolbarTableText.weight)}{toolbarTableText.italic ? ' · נטוי' : ''}</option>}
+                {faces.map((face) => <option key={`${face.weight}|${face.italic}`} value={`${face.weight}|${face.italic ? 1 : 0}`}>{weightName(face.weight)}{face.italic ? ' · נטוי' : ''} ({face.style})</option>)}
+              </>
+            })()}
+          </select>
+          <input aria-label="צבע גופן בטבלה" title="צבע גופן" type="color" value={toolbarTableText.color ?? '#000000'} onChange={(event) => applyTableFormatting({ color: event.target.value })} />
+          <button className={'context-command' + (toolbarTableText.weight >= 600 ? ' active' : '')} title="מודגש" onClick={() => applyTableFormatting({ weight: toolbarTableText.weight >= 600 ? 400 : 700 })}>B</button>
+          <button className={'context-command' + (toolbarTableText.italic ? ' active' : '')} title="נטוי" onClick={() => applyTableFormatting({ italic: !toolbarTableText.italic })}>I</button>
+          <label className="context-field" title="ריווח בין אותיות"><span>Tracking</span><input type="number" step="1" value={toolbarTableText.tracking ?? 0} onChange={(event) => applyTableFormatting({ tracking: Number(event.target.value) })} /></label>
+          <label className="context-field" title="מרווח בין שורות"><span>שורה</span><input type="number" min="0" value={toolbarTableText.leading ?? Math.round(toolbarTableText.fontSize * 1.25)} onChange={(event) => applyTableFormatting({ leading: Number(event.target.value) })} />pt</label>
+          <label className="context-field" title="רווח לפני"><span>לפני</span><input type="number" min="0" value={toolbarTableText.spaceBefore ?? 0} onChange={(event) => applyTableFormatting({ spaceBefore: Number(event.target.value) })} /></label>
+          <label className="context-field" title="רווח אחרי"><span>אחרי</span><input type="number" min="0" value={toolbarTableText.spaceAfter ?? 0} onChange={(event) => applyTableFormatting({ spaceAfter: Number(event.target.value) })} /></label>
+          <select aria-label="יישור טקסט בטבלה" title="יישור" value={toolbarTableText.align} onChange={(event) => applyTableFormatting({ align: event.target.value as TextAlign })}>
+            <option value="right">ימין</option><option value="center">מרכז</option><option value="left">שמאל</option><option value="justify">מיושר</option>
+          </select>
+        </div>}
         {tool === 'feather' && (
           <div className="context-feather-controls" role="group" aria-label="החלקת מעבר צבע">
             <label className="context-feather-toggle"><input type="checkbox" checked={!!selectedFeather} disabled={!selectedFeatherTarget} onChange={(event) => setSelectedFeatherEnabled(event.target.checked)} />החלקה</label>
@@ -7091,19 +7290,19 @@ export function Workspace({
             </div>
           )
         })()}
-        {selFrame && toolbarTextStyle && (
+        {((selFrame && toolbarTextStyle) || (toolbarTable && toolbarTableText)) && (
           <div className="context-font-size-field" role="group" aria-label="גודל גופן">
             <NumberField
               ariaLabel="גודל גופן"
-              value={toolbarTextStyle.fontSize}
+              value={toolbarTableText?.fontSize ?? toolbarTextStyle?.fontSize ?? DEFAULT_TEXT_STYLE.fontSize}
               unit="px"
               unitLabel="pt"
               step={1}
               min={1}
               max={999}
-              mixed={panelSizeMixed}
-              onStep={(delta) => footnoteSel ? stepFootnoteFontSize(delta) : stepFontSize(selFrame.id, delta)}
-              onChange={(fontSize) => footnoteSel ? applyFootnoteCharStyle({ fontSize }) : applyCharStyle(selFrame.id, { fontSize })}
+              mixed={selFrame ? panelSizeMixed : false}
+              onStep={(delta) => footnoteSel ? stepFootnoteFontSize(delta) : selFrame ? stepFontSize(selFrame.id, delta) : applyTableFormatting({ fontSize: Math.min(999, Math.max(1, toolbarTableText!.fontSize + delta)) })}
+              onChange={(fontSize) => footnoteSel ? applyFootnoteCharStyle({ fontSize }) : selFrame ? applyCharStyle(selFrame.id, { fontSize }) : applyTableFormatting({ fontSize })}
             />
           </div>
         )}
@@ -7190,7 +7389,7 @@ export function Workspace({
               ))}
               {parentShadows.shapes.map((sh) => (
                 <div className="parent-shadow" key={sh.id}>
-                  <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('shape', sh, event)} />
+                  <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('shape', sh, event)} tableUi={sh.kind === 'table' ? tableUiFor(sh, false) : undefined} />
                 </div>
               ))}
               {parentShadows.frames.map((f) => {
@@ -7320,6 +7519,7 @@ export function Workspace({
                   onContentGrab={onContentGrab(sh.id)}
                   onContentResize={onContentResize(sh.id)}
                   onLineEndDown={onLineEndDown(sh.id)}
+                  tableUi={sh.kind === 'table' ? tableUiFor(sh, tool === 'select') : undefined}
                 />
               ))}
               {shapeStart.current && shapeBox && (shapeBox.w > 0 || shapeBox.h > 0) && (
@@ -7901,12 +8101,6 @@ export function Workspace({
               content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} />,
             },
             {
-              id: 'footnote-style',
-              label: 'סגנון הערות',
-              floating: true,
-              content: <div className="footnote-style-panel"><FootnoteStyleFields fontFamily={footnoteConfig.fontFamily} paragraphStyleId={footnoteConfig.paragraphStyleId} paragraphStyles={paragraphStyles} onChange={updateFootnoteStyle} /></div>,
-            },
-            {
               id: 'style-manager',
               label: 'ניהול סגנונות',
               content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onFindTag={findTagOccurrence} onSwapOneTag={swapOneTagOccurrence} onClean={() => cleanSpacingCmd()} />,
@@ -8001,6 +8195,17 @@ export function Workspace({
       {firstWordDialog && (
         <FirstWordStylerDialog styles={paragraphStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />
       )}
+      {insertTableOpen && <InsertTableDialog onConfirm={insertTableShape} onClose={() => setInsertTableOpen(false)} />}
+      {tableOptionsOpen && (() => {
+        const sh = selectedTable()
+        return sh ? <TableOptionsDialog table={sh.table} onApply={(table) => { commitTable(sh.id, table, 'table-options'); setTableOptionsOpen(false) }} onClose={() => setTableOptionsOpen(false)} /> : null
+      })()}
+      {cellOptionsOpen && (() => {
+        const sh = selectedTable()
+        const area = sh && tableSel && tableSel.id === sh.id ? expandRange(sh.table, tableSel) : null
+        const first = sh && area ? sh.table.cells[area.r0][area.c0] : null
+        return sh && area && first ? <CellOptionsDialog cell={first} count={originsOf(sh.table).filter((o) => o.r0 >= area.r0 && o.r1 <= area.r1 && o.c0 >= area.c0 && o.c1 <= area.c1).length} onApply={applyCellPatch} onClose={() => setCellOptionsOpen(false)} /> : null
+      })()}
       {windowTextDialog && (
         <WindowTextDialog
           styles={paragraphStyles}
@@ -8066,6 +8271,38 @@ export function Workspace({
           ]}
         />
       )}
+      {tableMenu && (() => {
+        const sh = shapes.find((shape) => shape.id === tableMenu.id && shape.kind === 'table' && shape.table) as (ShapeFrame & { table: TableData }) | undefined
+        if (!sh) return null
+        const area = tableSel?.id === sh.id ? expandRange(sh.table, tableSel) : null
+        const mergedOrigin = area && originsOf(sh.table).find((origin) => origin.r0 === area.r0 && origin.c0 === area.c0 && origin.r1 === area.r1 && origin.c1 === area.c1)
+        const canUnmerge = !!mergedOrigin && (mergedOrigin.r0 !== mergedOrigin.r1 || mergedOrigin.c0 !== mergedOrigin.c1)
+        const close = () => setTableMenu(null)
+        return <ContextMenu
+          x={tableMenu.x}
+          y={tableMenu.y}
+          onClose={close}
+          items={[
+            { label: 'בחר שורה', onClick: () => { close(); runTableOp('select-row') } },
+            { label: 'בחר עמודה', onClick: () => { close(); runTableOp('select-column') } },
+            { label: 'בחר טבלה', onClick: () => { close(); runTableOp('select-table') } },
+            { separator: true },
+            { label: 'אפשרויות טבלה…', onClick: () => { close(); setTableOptionsOpen(true) } },
+            { label: 'אפשרויות תא…', disabled: !area, onClick: () => { close(); setCellOptionsOpen(true) } },
+            { separator: true },
+            { label: 'הוספת שורה מעל', onClick: () => { close(); runTableOp('row-above') } },
+            { label: 'הוספת שורה מתחת', onClick: () => { close(); runTableOp('row-below') } },
+            { label: 'הוספת עמודה בתחילת הבחירה', onClick: () => { close(); runTableOp('col-start') } },
+            { label: 'הוספת עמודה בסוף הבחירה', onClick: () => { close(); runTableOp('col-end') } },
+            { separator: true },
+            { label: 'מחיקת שורה', disabled: !area || tableRows(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-row') } },
+            { label: 'מחיקת עמודה', disabled: !area || tableCols(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-col') } },
+            { separator: true },
+            { label: 'מיזוג תאים', disabled: !area || (area.r0 === area.r1 && area.c0 === area.c1), onClick: () => { close(); runTableOp('merge') } },
+            { label: 'ביטול מיזוג תאים', disabled: !canUnmerge, onClick: () => { close(); runTableOp('unmerge') } },
+          ]}
+        />
+      })()}
       {guidesDialog && (
         <CreateGuidesDialog
           doc={doc}

@@ -1,4 +1,5 @@
 import { PAGE_PRESETS, toPt, type Unit } from './units'
+import type { TableData } from './table'
 
 export type Binding = 'ltr' | 'rtl'
 
@@ -516,7 +517,7 @@ export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[1].value
 export const MAX_GUIDES = 5000
 
 /** The drawn shapes: a rectangle (with optionally rounded corners), an ellipse, a regular polygon of 3 to 6 corners, or a line. */
-export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path' | 'line'
+export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path' | 'line' | 'table'
 /** The kinds a shape tool draws (a 'path' only comes out of combining shapes). */
 export type DrawKind = 'rect' | 'ellipse' | 'polygon' | 'line'
 /** A line's end cap. */
@@ -593,6 +594,8 @@ export interface ShapeFrame {
   pathText?: PathText
   /** a picture placed inside the shape, clipped to its outline */
   image?: ShapeImage
+  /** kind 'table': the grid; the shape's `w` is the table's width and its `h` follows from the text (see tableLayout.ts) */
+  table?: TableData
   /** made with a graphic-frame tool: an empty one shows a placeholder icon, and only this kind of shape takes a placed
    * picture into itself — an ordinary shape stays a plain shape even when a picture is placed on top of it */
   frame?: true

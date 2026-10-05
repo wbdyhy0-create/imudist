@@ -184,3 +184,24 @@
 .autosave-status.waiting, .autosave-status.saving { color: #d8b45a; }
 .autosave-status.error { color: #e57373; }
 .autosave-status.needsFile { opacity: 0.8; }
+
+/* tables (a shape of kind 'table'): every cell is placed by the layout, so the only CSS needed is how a cell looks and what takes the pointer */
+.table-body { position: relative; pointer-events: none; }
+.table-cell { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; cursor: default; }
+.table-cell-text, .table-cell-editor { width: 100%; box-sizing: border-box; margin: 0; }
+.table-cell-editor { outline: none; min-height: 1em; cursor: text; user-select: text; }
+.table-line { position: absolute; pointer-events: none; }
+.table-row-height-guide { position: absolute; z-index: 3; height: 0; border-top: 1px dashed var(--accent-line); pointer-events: none; }
+.table-cell-mark { position: absolute; box-sizing: border-box; background: rgba(75, 140, 255, 0.2); outline: 1px solid var(--accent-line); outline-offset: -1px; pointer-events: none; }
+.table-cell-mark.editing { background: transparent; outline-width: 2px; }
+.table-grip { position: absolute; z-index: 2; pointer-events: auto; }
+.table-grip.col { cursor: col-resize; }
+.table-grip.row { cursor: row-resize; }
+.table-move-grip { position: absolute; left: -20px; top: -20px; width: 14px; height: 14px; box-sizing: border-box; border: 1px solid var(--accent-line); border-radius: 3px; background: #fff; box-shadow: 0 1px 3px #0006; cursor: move; pointer-events: auto; z-index: 3; }
+.table-dialog.wide { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+.table-dialog:not(.wide) { max-height: calc(100vh - 48px); overflow-y: auto; }
+.table-dialog-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 6px 0 12px; }
+.table-dialog-field { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.table-dialog-row { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+.table-dialog-row .dlg-check { flex: 1; }
+.table-dialog-number { width: 72px; }

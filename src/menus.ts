@@ -233,7 +233,37 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('בטל קיבוץ', 'Ctrl+Shift+G', (ws) => ws.ungroup()),
       ],
     },
-    { label: 'טבלה', items: [doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()), off('הוספת טבלה…', 'Ctrl+Alt+Shift+T')] },
+    {
+      label: 'טבלה',
+      items: [
+        doc('הוספת טבלה…', 'Ctrl+Alt+Shift+T', (ws) => ws.insertTable()),
+        sep,
+        {
+          label: 'בחירה',
+          submenu: [
+            doc('בחר שורה', '', (ws) => ws.tableCommand('select-row')),
+            doc('בחר עמודה', '', (ws) => ws.tableCommand('select-column')),
+            doc('בחר טבלה', '', (ws) => ws.tableCommand('select-table')),
+          ],
+        },
+        sep,
+        doc('אפשרויות טבלה…', '', (ws) => ws.tableCommand('options')),
+        doc('אפשרויות תא…', '', (ws) => ws.tableCommand('cell-options')),
+        sep,
+        doc('הוספת שורה מעל', '', (ws) => ws.tableCommand('row-above')),
+        doc('הוספת שורה מתחת', '', (ws) => ws.tableCommand('row-below')),
+        doc('הוספת עמודה מימין', '', (ws) => ws.tableCommand('col-start')),
+        doc('הוספת עמודה משמאל', '', (ws) => ws.tableCommand('col-end')),
+        sep,
+        doc('מחיקת שורה', '', (ws) => ws.tableCommand('delete-row')),
+        doc('מחיקת עמודה', '', (ws) => ws.tableCommand('delete-col')),
+        sep,
+        doc('מיזוג תאים', '', (ws) => ws.tableCommand('merge')),
+        doc('ביטול מיזוג תאים', '', (ws) => ws.tableCommand('unmerge')),
+        sep,
+        doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()),
+      ],
+    },
     {
       label: 'תצוגה',
       items: [

@@ -5,6 +5,7 @@ interface Props {
   value: string
   families: FontFamily[]
   onChange: (family: string) => void
+  className?: string
 }
 
 /** Show at most this many rows; the search box narrows the list down. */
@@ -13,7 +14,7 @@ const MAX_ROWS = 250
 const stack = (family: string) => `"${family}", "Segoe UI", Arial, sans-serif`
 
 /** A searchable font list where every name is drawn in its own font. */
-export function FontPicker({ value, families, onChange }: Props) {
+export function FontPicker({ value, families, onChange, className }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const root = useRef<HTMLDivElement>(null)
@@ -31,7 +32,7 @@ export function FontPicker({ value, families, onChange }: Props) {
   const matches = q ? families.filter((f) => f.family.toLowerCase().includes(q)) : families
 
   return (
-    <div className="font-picker" ref={root}>
+    <div className={'font-picker' + (className ? ` ${className}` : '')} ref={root}>
       <button className="font-picker-btn" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span style={{ fontFamily: stack(value) }}>{value}</span>
         <svg viewBox="0 0 10 6" aria-hidden="true">

@@ -59,6 +59,7 @@ import {
 import { footnoteTextStyle } from './footnoteLayout'
 import { normalizeDeg } from './frames'
 import type { DocContent, ParentOverride } from './pages'
+import { sanitizeTable } from './table'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
 
@@ -670,10 +671,9 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
   for (const raw of v) {
     if (!isObj(raw)) continue
     const geom = raw.kind === 'path' ? parseGeom(raw.geom, raw.closed === false) : undefined
-    const kind =
-      oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line'], 'rect') === 'path' && !geom
-        ? 'rect'
-        : oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line'], 'rect')
+    const table = raw.kind === 'table' ? sanitizeTable(raw.table) : null
+    const wanted = oneOf<ShapeKind>(raw.kind, ['rect', 'ellipse', 'polygon', 'path', 'line', 'table'], 'rect')
+    const kind: ShapeKind = (wanted === 'path' && !geom) || (wanted === 'table' && !table) ? 'rect' : wanted
     let id = str(raw.id, '')
     if (!id || used.has(id)) id = `s${out.length}-${Math.random().toString(36).slice(2, 8)}`
     used.add(id)
@@ -694,6 +694,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       h: num(raw.h, 100, minWH, MAX_PAGE_PT),
       ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
       ...(kind === 'path' && geom ? { geom } : {}),
+      ...(kind === 'table' && table ? { table } : {}),
       ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
       ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
       ...(kind === 'line' && (raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
@@ -704,12 +705,12 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...(kind === 'rect' && r.length === 4 ? { radii: [0, 1, 2, 3].map((i) => num(r[i], 0, 0, MAX_PAGE_PT)) as [number, number, number, number] } : {}),
       ...(image ? { image } : {}),
       ...(raw.frame === true ? { frame: true as const } : {}),
-      fill: kind === 'line' ? null : colorOrNull(raw.fill, DEFAULT_SHAPE_FILL),
+      fill: kind === 'line' ? null : colorOrNull(raw.fill, kind === 'table' ? null : DEFAULT_SHAPE_FILL),
       ...(kind === 'line' ? {} : parseGradient(raw.fillGradient)),
-      stroke: colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
-      strokeWidth: num(raw.strokeWidth, 1, 0, 200),
+      stroke: kind === 'table' ? null : colorOrNull(raw.stroke, DEFAULT_SHAPE_STROKE),
+      strokeWidth: kind === 'table' ? 0 : num(raw.strokeWidth, 1, 0, 200),
       ...zOf(raw),
-      ...rotationOf(raw),
+      ...(kind === 'table' ? {} : rotationOf(raw)),
       ...opacityOf(raw),
       ...shadowOf(raw),
       ...parseFeather(raw.feather),
