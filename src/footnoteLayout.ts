@@ -1,7 +1,17 @@
-import { DEFAULT_TEXT_STYLE, type Binding, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
+import { defaultLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
 
 export function footnoteBlockWidth(frameWidth: number, widthScale = 1): number {
   return frameWidth * Math.max(0.2, Math.min(1, widthScale))
+}
+
+export function changedFootnoteOffset(previous: FootnoteItem[], next: FootnoteItem[]): number | undefined {
+  const previousById = new Map(previous.map((note) => [note.id, note]))
+  const nextById = new Map(next.map((note) => [note.id, note]))
+  const changed = [
+    ...previous.filter((note) => nextById.get(note.id) !== note),
+    ...next.filter((note) => previousById.get(note.id) !== note),
+  ]
+  return changed.length ? Math.min(...changed.map((note) => note.anchor)) : undefined
 }
 
 export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[], paragraphStyleId?: string): TextStyle {
@@ -14,6 +24,35 @@ export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: Paragrap
   }
   const patch = paragraphStyleId || config.paragraphStyleId ? resolve(paragraphStyleId || config.paragraphStyleId!) : {}
   return { ...DEFAULT_TEXT_STYLE, ...patch, ...(config.fontFamily ? { fontFamily: config.fontFamily } : {}) }
+}
+
+export function footnoteDividerTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[]): TextStyle {
+  return footnoteTextStyle({ ...config, fontFamily: '', paragraphStyleId: config.dividerHeadingStyleId }, styles)
+}
+
+export function footnoteDividerHeight(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[]): number {
+  if (config.dividerMode === 'line') return Math.max(1, config.dividerThickness)
+  const style = footnoteDividerTextStyle(config, styles)
+  return Math.max(1, style.leading ?? defaultLeading(style))
+}
+
+export function updateFootnoteParagraphStyle(note: FootnoteItem, previous: TextStyle, next: TextStyle): FootnoteItem {
+  const charKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
+  const styleKeys = [...charKeys, 'align', 'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'secondLineIndent'] as const
+  const changedKeys = styleKeys.filter((key) => previous[key] !== next[key])
+  const changedCharKeys = charKeys.filter((key) => previous[key] !== next[key])
+  const style = note.style ? { ...note.style } : undefined
+  if (style) {
+    for (const key of changedKeys) Object.assign(style, { [key]: next[key] })
+  }
+  const runs = note.runs?.map((run) => {
+    const runStyle = { ...run.style }
+    for (const key of changedCharKeys) {
+      if (runStyle[key] === previous[key] || runStyle[key] === note.style?.[key]) Object.assign(runStyle, { [key]: next[key] })
+    }
+    return { ...run, style: runStyle }
+  })
+  return { ...note, ...(style ? { style } : {}), ...(runs ? { runs } : {}) }
 }
 
 function hebrewNumeral(value: number): string {
@@ -94,6 +133,7 @@ export interface FootnotePlacement extends FootnoteLayoutItem {
   x: number
   y: number
   width: number
+  naturalWidth?: number
   height: number
   computedWidth: number
   computedHeight: number
@@ -204,10 +244,11 @@ function layoutVerticalColumns(items: FootnoteLayoutItem[], options: FootnoteLay
     }
 
     const columnWidth = columnWidths[column]
+    const naturalWidth = measure(current, Number.POSITIVE_INFINITY).width
     const measured = measure(current, columnWidth)
     const available = Math.max(0, options.maxFootnoteHeight - y)
     if (measured.height <= available) {
-      placements.push({ ...current, x: columnX[column], y, width: columnWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
+      placements.push({ ...current, x: columnX[column], y, width: columnWidth, naturalWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
       y += measured.height
       height = Math.max(height, y)
       current = null
@@ -216,7 +257,7 @@ function layoutVerticalColumns(items: FootnoteLayoutItem[], options: FootnoteLay
 
     const prefix: ReturnType<typeof fitPrefix> = available > 0 ? fitPrefix(current, columnWidth, available, measure) : null
     if (prefix) {
-      placements.push({ ...current, content: prefix.content, runs: prefix.runs, x: columnX[column], y, width: columnWidth, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
+      placements.push({ ...current, content: prefix.content, runs: prefix.runs, x: columnX[column], y, width: columnWidth, naturalWidth: measure({ ...current, content: prefix.content }, Number.POSITIVE_INFINITY).width, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
       y += prefix.height
       height = Math.max(height, y)
       current = prefix.rest ? { ...current, content: prefix.rest, offset: prefix.restOffset, runs: prefix.restRuns, continued: true } : null
@@ -245,20 +286,21 @@ export function layoutFootnotes(
   if (options.mode === 'vertical') {
     if (options.columns === 2 && columnWidth > 16) return layoutVerticalColumns(items, options, measure)
     for (const [index, item] of items.entries()) {
+      const naturalWidth = measure(item, Number.POSITIVE_INFINITY).width
       const measured = measure(item, columnWidth)
       if (height + measured.height > maxFootnoteHeight) {
         overflow = true
         const available = maxFootnoteHeight - height
         const prefix = available > 0 ? fitPrefix(item, columnWidth, available, measure) : null
         if (prefix) {
-          placements.push({ ...item, content: prefix.content, runs: prefix.runs, x: 0, y: height, width: columnWidth, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
+          placements.push({ ...item, content: prefix.content, runs: prefix.runs, x: 0, y: height, width: columnWidth, naturalWidth: measure({ ...item, content: prefix.content }, Number.POSITIVE_INFINITY).width, height: prefix.height, computedWidth: columnWidth, computedHeight: prefix.height })
           height += prefix.height
           if (prefix.rest) overflowItems.push({ ...item, content: prefix.rest, offset: prefix.restOffset, runs: prefix.restRuns, continued: true })
         } else overflowItems.push({ ...item, continued: true })
         overflowItems.push(...items.slice(index + 1).map((remaining) => ({ ...remaining, continued: true })))
         break
       }
-      placements.push({ ...item, x: 0, y: height, width: columnWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
+      placements.push({ ...item, x: 0, y: height, width: columnWidth, naturalWidth, height: measured.height, computedWidth: columnWidth, computedHeight: measured.height })
       height += measured.height
     }
     return { placements, overflowItems, height, overflow }
@@ -288,14 +330,14 @@ export function layoutFootnotes(
       const available = maxFootnoteHeight - currentRowY
       const prefix = available > 0 ? fitPrefix(item, columnWidth, available, measure) : null
       if (prefix) {
-        placements.push({ ...item, content: prefix.content, runs: prefix.runs, x, y: currentRowY, width, height: prefix.height, computedWidth: width, computedHeight: prefix.height })
+        placements.push({ ...item, content: prefix.content, runs: prefix.runs, x, y: currentRowY, width, naturalWidth: measure({ ...item, content: prefix.content }, Number.POSITIVE_INFINITY).width, height: prefix.height, computedWidth: width, computedHeight: prefix.height })
         currentRowHeight = Math.max(currentRowHeight, prefix.height)
         if (prefix.rest) overflowItems.push({ ...item, content: prefix.rest, offset: prefix.restOffset, runs: prefix.restRuns, continued: true })
       } else overflowItems.push({ ...item, continued: true })
       overflowItems.push(...items.slice(index + 1).map((remaining) => ({ ...remaining, continued: true })))
       break
     }
-    placements.push({ ...item, x, y: currentRowY, width, height: itemHeight, computedWidth: width, computedHeight: itemHeight })
+    placements.push({ ...item, x, y: currentRowY, width, naturalWidth: natural.width, height: itemHeight, computedWidth: width, computedHeight: itemHeight })
     currentX = x + width
     currentRowHeight = Math.max(currentRowHeight, itemHeight)
     rowHasItems = true

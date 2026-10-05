@@ -161,8 +161,12 @@ export function alignFootnotesToMarkers(text: string, notes: FootnoteItem[]): Fo
  * come stay valid; each one is a real edit of the story - the runs, the per-paragraph lists (styles, overrides) and
  * the footnote anchors follow it exactly as they do when the same text is typed over by hand.
  */
-export function replaceInStory(frame: TextFrame, matches: TextMatch[]): TextFrame {
+export function replaceInStory(frame: TextFrame, matches: TextMatch[], options: { dropParagraphs?: number[] } = {}): TextFrame {
   if (matches.length === 0) return frame
+  // paragraphs removed as a whole (the caller knows which: indexes in the text as it is now): their entries leave the
+  // per-paragraph lists. An edit that removes a paragraph's break cannot say which of the two paragraphs it joins is
+  // the one that goes - it keeps the first one's entry - so the lists are not left to follow the edits then.
+  const drop = options.dropParagraphs ? new Set(options.dropParagraphs) : null
   let text = frame.text
   let runs = normalizeRuns(text, frame.runs, frame)
   let footnotes = frame.footnotes
@@ -175,18 +179,35 @@ export function replaceInStory(frame: TextFrame, matches: TextMatch[]): TextFram
   let paraSpaceAfter = frame.paraSpaceAfter
   let paraKeepFirstLines = frame.paraKeepFirstLines
   let paraKeepLastLines = frame.paraKeepLastLines
+  let paraKeepWithNext = frame.paraKeepWithNext
   for (let k = matches.length - 1; k >= 0; k--) {
     const { start, end, replacement } = matches[k]
     const edited = editStory(text, runs, start, end, replacement, frame)
     const delta = replacement.length - (end - start)
     footnotes = footnotes?.flatMap((note) => (note.anchor >= start && note.anchor < end ? [] : [{ ...note, anchor: note.anchor >= end ? note.anchor + delta : note.anchor }]))
-    lists = { ...lists, ...spliceParagraphStyles(lists, text, start, end, replacement) }
-    paraSpaceBefore = spliceParaOverrides(paraSpaceBefore, text, start, end, replacement)
-    paraSpaceAfter = spliceParaOverrides(paraSpaceAfter, text, start, end, replacement)
-    paraKeepFirstLines = spliceParaOverrides(paraKeepFirstLines, text, start, end, replacement)
-    paraKeepLastLines = spliceParaOverrides(paraKeepLastLines, text, start, end, replacement)
+    if (!drop) {
+      lists = { ...lists, ...spliceParagraphStyles(lists, text, start, end, replacement) }
+      paraSpaceBefore = spliceParaOverrides(paraSpaceBefore, text, start, end, replacement)
+      paraSpaceAfter = spliceParaOverrides(paraSpaceAfter, text, start, end, replacement)
+      paraKeepFirstLines = spliceParaOverrides(paraKeepFirstLines, text, start, end, replacement)
+      paraKeepLastLines = spliceParaOverrides(paraKeepLastLines, text, start, end, replacement)
+      paraKeepWithNext = spliceParaOverrides(paraKeepWithNext, text, start, end, replacement)
+    }
     text = edited.text
     runs = edited.runs
+  }
+  if (drop) {
+    const without = <T,>(list: T[] | undefined) => list?.filter((_, i) => !drop.has(i))
+    const overrides = (list: (number | null)[] | undefined) => {
+      const kept = without(list)
+      return kept?.some((value) => value !== null) ? kept : undefined
+    }
+    lists = { paragraphStyleIds: without(lists.paragraphStyleIds), paragraphStyleNames: without(lists.paragraphStyleNames), paragraphStylePatches: without(lists.paragraphStylePatches) }
+    paraSpaceBefore = overrides(paraSpaceBefore)
+    paraSpaceAfter = overrides(paraSpaceAfter)
+    paraKeepFirstLines = overrides(paraKeepFirstLines)
+    paraKeepLastLines = overrides(paraKeepLastLines)
+    paraKeepWithNext = overrides(paraKeepWithNext)
   }
   return {
     ...frame,
@@ -197,6 +218,7 @@ export function replaceInStory(frame: TextFrame, matches: TextMatch[]): TextFram
     paraSpaceAfter,
     paraKeepFirstLines,
     paraKeepLastLines,
+    paraKeepWithNext,
     ...(footnotes ? { footnotes: alignFootnotesToMarkers(text, footnotes) } : {}),
   }
 }

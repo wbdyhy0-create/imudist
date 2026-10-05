@@ -357,7 +357,7 @@ svg { display: block; }
 .layer-row { min-height: 32px; display: flex; align-items: center; gap: 6px; padding: 4px 5px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); }
 .layer-row-wrap { position: relative; }
 .layer-drop-indicator { height: 3px; margin: -1px 5px; background: var(--accent-line); border-radius: 2px; box-shadow: 0 0 5px var(--accent-line); }
-.layer-row.active { border-inline-start: 3px solid var(--accent-line); }
+.layer-row.active { border-inline-start: 3px solid var(--accent-line); outline: 1px solid var(--accent-line); outline-offset: -1px; }
 .layer-toggle, .layer-eye, .layer-lock { width: 20px; height: 22px; color: var(--text-dim); }
 .layer-toggle:hover, .layer-eye:hover, .layer-lock:hover { color: #fff; background: var(--hover); }
 .layer-color { width: 10px; height: 10px; flex: none; border-radius: 2px; }
@@ -376,8 +376,9 @@ svg { display: block; }
 .layer-parent-order input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent-line); }
 .layer-parent-order:has(input:disabled) { opacity: 0.5; }
 .layers-actions { display: flex; justify-content: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
-.layers-actions .icon-button { width: 28px; height: 26px; }
-.layers-actions .icon-button:disabled { opacity: 0.35; }
+.layers-actions .icon-button { width: 28px; height: 26px; color: #f4f0f0; border-color: var(--border-strong); }
+.layers-actions .icon-button:hover:not(:disabled) { color: #fff; background: var(--hover); }
+.layers-actions .icon-button:disabled { color: #c8c0c0; border-color: var(--border); opacity: 0.8; }
 .paragraph-styles-panel { direction: rtl; }
 .styles-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .styles-panel-head .props-title { margin: 0; }
@@ -605,12 +606,27 @@ svg { display: block; }
 .footnotes-scale { position: absolute; z-index: 2; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
 .footnotes-area { position: absolute; left: 0; right: 0; box-sizing: border-box; direction: rtl; pointer-events: none; white-space: pre-wrap; overflow: hidden; }
 .footnote-divider { position: absolute; top: 0; right: 0; width: 35%; border-top: 1px solid currentColor; opacity: 0.7; }
+.footnote-divider-heading { position: absolute; display: flex; align-items: center; box-sizing: border-box; overflow: hidden; white-space: nowrap; pointer-events: none; }
+.footnote-divider-heading-line { position: relative; flex: 1 1 0; min-width: 0; border-top-style: solid; border-top-color: currentColor; opacity: 0.7; }
+.footnote-divider-heading-line.decor-outer.side-right::after, .footnote-divider-heading-line.decor-outer.side-left::before, .footnote-divider-heading-line.decor-both::before, .footnote-divider-heading-line.decor-both::after { position: absolute; top: 50%; width: 4px; height: 4px; background: currentColor; content: ''; transform: translateY(-50%) rotate(45deg); }
+.footnote-divider-heading-line.decor-outer.side-right::after, .footnote-divider-heading-line.decor-both::after { right: 0; }
+.footnote-divider-heading-line.decor-outer.side-left::before, .footnote-divider-heading-line.decor-both::before { left: 0; }
+.footnote-divider-heading-line.decor-curl.side-right::after, .footnote-divider-heading-line.decor-curl.side-left::before { position: absolute; top: 50%; background: #fff; color: currentColor; content: '❧'; font-family: Georgia, 'Times New Roman', serif; font-size: 12px; line-height: 1; }
+.footnote-divider-heading-line.decor-curl.side-right::after { right: -1px; transform: translateY(-50%); }
+.footnote-divider-heading-line.decor-curl.side-left::before { left: -1px; transform: translateY(-50%) scaleX(-1); }
+.footnote-divider-heading-line.decor-needle { border: 0; background: currentColor; }
+.footnote-divider-heading-line.decor-needle.side-right { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%); }
+.footnote-divider-heading-line.decor-needle.side-left { clip-path: polygon(100% 0, 8px 0, 0 50%, 8px 100%, 100% 100%); }
+.footnote-divider-heading-text { flex: 0 1 auto; min-width: 0; max-width: 85%; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.footnote-dialog-checkbox { display: flex; align-items: center; gap: 7px; margin: 6px 0; cursor: pointer; }
+.footnote-dialog-checkbox input { width: 15px; height: 15px; margin: 0; }
 .footnote-width-handle { position: absolute; z-index: 4; top: 50%; left: 0; display: grid; place-items: center; width: 14px; height: 32px; padding: 0; border: 1px solid var(--accent-line); border-radius: 3px; background: var(--panel); color: var(--text-dim); cursor: ew-resize; pointer-events: auto; touch-action: none; transform: translateY(-50%); }
 .footnote-width-handle::before { width: 3px; height: 14px; border-right: 1px solid currentColor; border-left: 1px solid currentColor; content: ''; }
 .footnote-width-handle:hover { color: var(--text); background: var(--hover); }
 .footnote-item { position: absolute; display: flex; align-items: flex-start; gap: var(--footnote-number-gap, 5px); box-sizing: border-box; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .footnote-item { pointer-events: auto; cursor: text; }
 .footnote-item.footnote-frame-visible { outline: 0.25px solid rgba(61, 139, 255, 0.45); outline-offset: 0; }
+.footnote-item.footnote-all-selected .footnote-number { background: #b3d4ff; }
 .footnote-number { display: inline-flex; flex: none; align-items: baseline; gap: 1px; white-space: nowrap; unicode-bidi: isolate; }
 .footnote-content { display: block; flex: 1; min-width: 0; }
 .footnote-item > .rich-editor { flex: 1; width: 0; min-width: 0; height: 100%; }
@@ -619,7 +635,23 @@ svg { display: block; }
 .footnote-dialog-field { display: grid; gap: 5px; margin: 8px 0; }
 .footnote-dialog textarea { min-height: 110px; resize: vertical; }
 .footnote-options-dialog { width: min(500px, calc(100vw - 32px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 12px 14px; font-size: 12px; line-height: 1.2; }
+.footnote-options-dialog { position: relative; }
 .footnote-options-dialog h2 { margin-bottom: 4px; font-size: 14px; }
+.footnote-window-grip { position: absolute; z-index: 1; top: 2px; left: 0; display: grid; place-items: center; width: 100%; height: 18px; padding: 0; border: 0; background: transparent; color: var(--text); cursor: move; opacity: 0; touch-action: none; }
+.footnote-window-grip:hover, .footnote-window-grip:focus-visible { opacity: 1; }
+.footnote-options-tabs { display: flex; gap: 2px; margin: 4px 0 8px; border-bottom: 1px solid var(--border); }
+.footnote-options-tabs button { padding: 7px 10px; border-bottom: 2px solid transparent; color: var(--text-dim); }
+.footnote-options-tabs button:hover { background: var(--hover); color: var(--text); }
+.footnote-options-tabs button.on { border-bottom-color: var(--accent-line); color: var(--text); }
+.footnote-rule-decoration-field { display: grid; gap: 4px; margin: 6px 0; }
+.footnote-rule-decoration-picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.footnote-rule-decoration-picker button { display: grid; place-items: center; min-width: 0; height: 34px; padding: 4px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-field); color: var(--text-dim); cursor: pointer; }
+.footnote-rule-decoration-picker button:hover { border-color: var(--border-strong); color: var(--text); }
+.footnote-rule-decoration-picker button.selected { border-color: var(--accent-line); background: var(--hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.footnote-rule-decoration-picker button:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.footnote-rule-decoration-picker svg { display: block; width: 100%; height: 100%; }
+.footnote-style-panel { min-width: 240px; padding: 10px; direction: rtl; }
+.footnote-style-panel select { width: 100%; min-height: 30px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-field); color: var(--text); }
 .footnote-options-dialog .footnote-dialog-field { gap: 2px; margin: 3px 0; font-size: 12px; }
 .footnote-options-dialog input, .footnote-options-dialog select { min-height: 26px; padding: 3px 6px; font-size: 12px; }
 .footnote-options-dialog .modal-buttons { gap: 6px; margin-top: 7px; }

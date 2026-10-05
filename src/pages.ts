@@ -27,6 +27,8 @@ export interface ParentOverride extends ParentShadowRef {
 /** Everything the user has made: the settings and the objects on the pages. It is what undo / save / open handle. */
 export interface DocContent {
   doc: DocSettings
+  /** front-to-back layer order; absent in older documents */
+  layerOrder?: string[]
   frames: TextFrame[]
   images: ImageFrame[]
   /** picture data, by id (kept even when no frame uses it, so undo can bring the picture back) */

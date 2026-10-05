@@ -2,8 +2,9 @@ import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, type PageRect } from './pages'
-import { footnoteTextStyle, numberFootnotes } from './footnoteLayout'
-import { primaryTextFrameOrder } from './placeText'
+import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
+import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
+import { layoutEndnotes } from './endnotes'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
 import { imageGeometry, shapePath } from './shapes'
 import { flowFrames, flowFramesWithFootnoteContinuation, type FrameFlow } from './textLayout'
@@ -223,19 +224,80 @@ async function drawTextDom(
         footnotes.className = 'footnotes-area'
         Object.assign(footnotes.style, {
           position: 'absolute',
-          left: '0',
-          right: '0',
+          left: `${flow.footnoteAreaX ?? 0}px`,
+          right: flow.footnoteAreaX === undefined ? '0' : 'auto',
           bottom: '0',
+          width: `${flow.footnoteAreaWidth ?? frame.w}px`,
           height: `${flow.footnoteHeight}px`,
           direction: 'rtl',
           whiteSpace: 'pre-wrap',
           overflow: 'hidden',
           color: '#111',
         })
-        const divider = document.createElement('div')
-        divider.className = 'footnote-divider'
-        Object.assign(divider.style, { position: 'absolute', top: `${footnoteConfig.dividerGap}px`, right: '0', width: '35%', borderTop: '1px solid currentColor', opacity: '0.7' })
-        footnotes.appendChild(divider)
+        if (footnoteConfig.dividerMode === 'heading') {
+          const headingStyle = footnoteDividerTextStyle(footnoteConfig, content.paragraphStyles)
+          const heading = document.createElement('div')
+          heading.className = 'footnote-divider-heading'
+          heading.dir = 'rtl'
+          Object.assign(heading.style, {
+            position: 'absolute',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'none',
+            top: `${footnoteConfig.dividerGap}px`,
+            width: `${footnoteConfig.dividerWidth}%`,
+            height: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
+            left: '50%',
+            right: 'auto',
+            transform: 'translateX(-50%)',
+            gap: footnoteConfig.dividerHeadingLines ? `${Math.max(6, headingStyle.fontSize * 0.4)}px` : '0',
+            color: headingStyle.color ?? '#111111',
+            fontFamily: headingStyle.fontFamily,
+            fontSize: `${headingStyle.fontSize}px`,
+            fontWeight: String(headingStyle.weight),
+            fontStyle: headingStyle.italic ? 'italic' : 'normal',
+            lineHeight: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
+            letterSpacing: headingStyle.tracking ? `${(headingStyle.tracking / 1000) * headingStyle.fontSize}px` : undefined,
+          })
+          const appendRule = (side: 'right' | 'left') => {
+            if (footnoteConfig.dividerHeadingDecoration === 'needle') {
+              const segment = document.createElement('span')
+              segment.className = `footnote-divider-heading-line side-${side} decor-needle`
+              Object.assign(segment.style, { border: '0', height: `${Math.max(1, footnoteConfig.dividerThickness)}px` })
+              heading.appendChild(segment)
+              return
+            }
+            const segment = document.createElement('span')
+            segment.className = `footnote-divider-heading-line side-${side} decor-${footnoteConfig.dividerHeadingDecoration}`
+            segment.style.borderTopWidth = `${footnoteConfig.dividerThickness}px`
+            heading.appendChild(segment)
+          }
+          if (footnoteConfig.dividerHeadingLines) appendRule('right')
+          const title = document.createElement('span')
+          title.className = 'footnote-divider-heading-text'
+          title.textContent = footnoteConfig.dividerText
+          heading.appendChild(title)
+          if (footnoteConfig.dividerHeadingLines) appendRule('left')
+          footnotes.appendChild(heading)
+        } else {
+          const divider = document.createElement('div')
+          divider.className = 'footnote-divider'
+          Object.assign(divider.style, {
+            position: 'absolute',
+            top: `${footnoteConfig.dividerGap}px`,
+            left: footnoteConfig.dividerAlignment === 'left' ? '0' : footnoteConfig.dividerAlignment === 'center' ? '50%' : 'auto',
+            right: footnoteConfig.dividerAlignment === 'right' ? '0' : 'auto',
+            transform: footnoteConfig.dividerAlignment === 'center' ? 'translateX(-50%)' : 'none',
+            width: `${footnoteConfig.dividerWidth}%`,
+            borderTop: `${footnoteConfig.dividerThickness}px solid currentColor`,
+            opacity: '0.7',
+          })
+          footnotes.appendChild(divider)
+        }
         for (const note of flow.footnotes) {
           const noteStyle = note.style ?? footnoteTextStyle(footnoteConfig, content.paragraphStyles)
           const item = document.createElement('div')
@@ -245,7 +307,7 @@ async function drawTextDom(
             display: 'flex',
             alignItems: 'flex-start',
             gap: `${footnoteConfig.numberTextGap}px`,
-            left: `${frame.w - note.x - note.width}px`,
+            left: `${(flow.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`,
             top: `${note.y}px`,
             width: `${note.width}px`,
             height: `${note.height}px`,
@@ -453,21 +515,31 @@ export async function exportPdf(
    *  popup once the (multi-page, `await`-heavy) render work below is done */
   viewWindow?: Window | null,
 ) {
-  const rects = pageRects(content.doc)
+  const documentRects = pageRects(content.doc)
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
-  const provisionalFlows = flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
+  const primaryFrameIds = primaryTextFrameOrder(content.doc, content.frames)
+  const sharedFootnoteGroups = primaryTextFramePageGroups(content.doc, content.frames)
+  const provisionalFlows = sharedFootnoteGroups.length
+    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, new Map(), primaryFrameIds, content.paragraphStyles, undefined, sharedFootnoteGroups)
+    : flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
   const frameById = new Map(content.frames.map((frame) => [frame.id, frame]))
   const numbering = numberFootnotes([...provisionalFlows].flatMap(([frameId, flow]) => {
     const frame = frameById.get(frameId)
     if (!frame) return []
-    const page = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
-    const pageRect = rects[page]
+    const page = ownerPage(documentRects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+    const pageRect = documentRects[page]
     const spread = pageRect ? Math.round(pageRect.y * 1000) : page
     return flow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
   }), footnoteConfig, content.doc.binding)
-  const flows = numbering.size
-    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, numbering, primaryTextFrameOrder(content.doc, content.frames), content.paragraphStyles)
+  const bodyFlows = numbering.size
+    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, numbering, primaryFrameIds, content.paragraphStyles, undefined, sharedFootnoteGroups)
     : provisionalFlows
+  const endnotePages = layoutEndnotes(content.doc, content.frames, footnoteConfig, numbering, content.paragraphStyles)
+  const renderContent = endnotePages.frames.length
+    ? { ...content, doc: endnotePages.doc, frames: [...content.frames, ...endnotePages.frames] }
+    : content
+  const rects = pageRects(renderContent.doc)
+  const flows = new Map([...bodyFlows, ...endnotePages.flows])
   const from = options.range ? Math.max(1, options.range.from) : 1
   const to = options.range ? Math.min(rects.length, options.range.to) : rects.length
   const total = Math.max(0, to - from + 1)
@@ -482,7 +554,7 @@ export async function exportPdf(
     const sheetH = page.h + 2 * bleedPt + 2 * marksMargin
     if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [sheetW, sheetH], orientation: sheetW > sheetH ? 'landscape' : 'portrait' })
     else pdf.addPage([sheetW, sheetH])
-    const canvas = await renderPage(content, flows, page, bleedPt, options.dpi)
+    const canvas = await renderPage(renderContent, flows, page, bleedPt, options.dpi)
     const imgData = canvas.toDataURL('image/png')
     pdf.addImage(imgData, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
     if (options.cropMarks) drawCropMarks(pdf, page, marksMargin, marksMargin, bleedPt)

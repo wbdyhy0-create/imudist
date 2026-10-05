@@ -16,9 +16,14 @@ export type FootnoteRestart = 'continuous' | 'page' | 'spread'
 export type FootnoteNumberStyle = 'arabic' | 'hebrew' | 'roman'
 export type FootnoteMarkerFormat = 'plain' | 'dot' | 'dotBefore' | 'rightParen' | 'doubleRightParen' | 'leftParen' | 'doubleLeftParen' | 'round' | 'square'
 export type FootnoteAlignment = 'right' | 'center'
+export type FootnotePlacementMode = 'footnotes' | 'endnotes'
+export type FootnoteDividerAlignment = 'right' | 'center' | 'left'
+export type FootnoteDividerMode = 'line' | 'heading'
+export type FootnoteHeadingDecoration = 'none' | 'outer' | 'both' | 'curl' | 'needle'
 export const FOOTNOTE_REFERENCE_SCALE = 0.6
 
 export interface FootnoteLayoutConfig {
+  placement: FootnotePlacementMode
   mode: FootnoteLayoutMode
   columns: 1 | 2
   /** main-story reference size relative to its current run font size, 0.25–1 */
@@ -32,6 +37,14 @@ export interface FootnoteLayoutConfig {
   minSpacingBetweenInline: number
   maxFootnoteHeight: number
   dividerGap: number
+  dividerWidth: number
+  dividerThickness: number
+  dividerAlignment: FootnoteDividerAlignment
+  dividerMode: FootnoteDividerMode
+  dividerText: string
+  dividerHeadingLines: boolean
+  dividerHeadingDecoration: FootnoteHeadingDecoration
+  dividerHeadingStyleId?: string
   spaceBefore: number
   startAt: number
   restart: FootnoteRestart
@@ -83,6 +96,7 @@ export const TOC_PAGE_MARKER = '\uE010'
 export const TOC_LEADER_MARKER = '\uE011'
 
 export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
+  placement: 'footnotes',
   mode: 'vertical',
   columns: 1,
   referenceScale: FOOTNOTE_REFERENCE_SCALE,
@@ -92,6 +106,13 @@ export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
   minSpacingBetweenInline: 8,
   maxFootnoteHeight: 1000,
   dividerGap: 8,
+  dividerWidth: 35,
+  dividerThickness: 1,
+  dividerAlignment: 'right',
+  dividerMode: 'line',
+  dividerText: 'הערות שוליים',
+  dividerHeadingLines: true,
+  dividerHeadingDecoration: 'none',
   spaceBefore: 8,
   startAt: 1,
   restart: 'continuous',
@@ -338,7 +359,7 @@ export interface TextFrame extends TextStyle {
    * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
    * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
    */
-  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number })[]
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number })[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number
@@ -375,16 +396,25 @@ export interface TextFrame extends TextStyle {
    */
   paraKeepFirstLines?: (number | null)[]
   paraKeepLastLines?: (number | null)[]
+  /**
+   * "Keep with next": 1 = the paragraph never ends a frame without the first lines of the paragraph after it - it moves on
+   * to the next frame together with it (a verse or a heading is never left alone at the bottom of a page). Same shape and
+   * lifecycle as `paraKeepFirstLines`; read by textLayout.ts's `flowFrames`.
+   */
+  paraKeepWithNext?: (number | null)[]
 }
 
 /** A named, reusable paragraph style (Paragraph Styles panel): a patch of the properties it sets, applied over `basedOnId`'s own resolved ones. */
+/** The value of `TextFrame.paraKeepFirstLines` / `paraKeepLastLines` that means "all of the paragraph's lines": a paragraph set to keep its lines together never splits between frames. */
+export const KEEP_ALL_LINES = 999
+
 export interface ParagraphStyleRecord {
   id: string
   name: string
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number }
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean }
 }
 
 /** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */

@@ -15,6 +15,7 @@ export const zOfShape = (sh: ShapeFrame) => sh.z ?? DEFAULT_FRAME_Z
 export interface StackItem {
   kind: 'frame' | 'image' | 'shape'
   id: string
+  layerId: string
   z: number
   /** where the object is, to tell which objects lie on top of each other */
   box: { x: number; y: number; w: number; h: number }
@@ -24,14 +25,15 @@ const boxOf = (o: { x: number; y: number; w: number; h: number }) => ({ x: o.x, 
 const overlaps = (a: StackItem['box'], b: StackItem['box']) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
 /** Every object from back to front. Objects on the same layer keep their creation order (pictures first). */
-export function stackOrder(frames: TextFrame[], images: ImageFrame[], shapes: ShapeFrame[] = []): StackItem[] {
+export function stackOrder(frames: TextFrame[], images: ImageFrame[], shapes: ShapeFrame[] = [], layerOrder: string[] = ['layer-1']): StackItem[] {
   const items: StackItem[] = [
-    ...images.map((i): StackItem => ({ kind: 'image', id: i.id, z: zOfImage(i), box: boxOf(i) })),
-    ...shapes.map((sh): StackItem => ({ kind: 'shape', id: sh.id, z: zOfShape(sh), box: boxOf(sh) })),
-    ...frames.map((f): StackItem => ({ kind: 'frame', id: f.id, z: zOfFrame(f), box: boxOf(f) })),
+    ...images.map((i): StackItem => ({ kind: 'image', id: i.id, layerId: i.layerId ?? 'layer-1', z: zOfImage(i), box: boxOf(i) })),
+    ...shapes.map((sh): StackItem => ({ kind: 'shape', id: sh.id, layerId: sh.layerId ?? 'layer-1', z: zOfShape(sh), box: boxOf(sh) })),
+    ...frames.map((f): StackItem => ({ kind: 'frame', id: f.id, layerId: f.layerId ?? 'layer-1', z: zOfFrame(f), box: boxOf(f) })),
   ]
-  // Array.prototype.sort is stable, so ties keep the order above
-  return items.sort((a, b) => a.z - b.z)
+  const layerRank = new Map(layerOrder.map((id, index) => [id, index]))
+  // Layers are ordered front-to-back; each layer's own objects remain back-to-front by z.
+  return items.sort((a, b) => (layerRank.get(b.layerId) ?? layerOrder.length) - (layerRank.get(a.layerId) ?? layerOrder.length) || a.z - b.z)
 }
 
 /** The layer for a new object: in front of everything (like other layout programs). */
@@ -54,9 +56,13 @@ export function arrange(
   id: string,
   op: ArrangeOp,
   shapes: ShapeFrame[] = [],
+  layerOrder: string[] = ['layer-1'],
 ): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } | null {
-  const order = stackOrder(frames, images, shapes)
-  const from = order.findIndex((o) => o.id === id)
+  const allItems = stackOrder(frames, images, shapes, layerOrder)
+  const selected = allItems.find((item) => item.id === id)
+  if (!selected) return null
+  const order = allItems.filter((item) => item.layerId === selected.layerId)
+  const from = order.findIndex((item) => item.id === id)
   if (from < 0) return null
   let to: number
   if (op === 'front') to = order.length - 1
@@ -76,8 +82,20 @@ export function arrange(
   order.splice(to, 0, moved)
   const zById = new Map(order.map((o, index) => [o.id, index]))
   return {
-    frames: frames.map((f) => (f.z === zById.get(f.id) ? f : { ...f, z: zById.get(f.id) })),
-    images: images.map((i) => (i.z === zById.get(i.id) ? i : { ...i, z: zById.get(i.id) })),
-    shapes: shapes.map((sh) => (sh.z === zById.get(sh.id) ? sh : { ...sh, z: zById.get(sh.id) })),
+    frames: frames.map((frame) => {
+      if ((frame.layerId ?? 'layer-1') !== selected.layerId) return frame
+      const z = zById.get(frame.id)
+      return z === undefined || frame.z === z ? frame : { ...frame, z }
+    }),
+    images: images.map((image) => {
+      if ((image.layerId ?? 'layer-1') !== selected.layerId) return image
+      const z = zById.get(image.id)
+      return z === undefined || image.z === z ? image : { ...image, z }
+    }),
+    shapes: shapes.map((shape) => {
+      if ((shape.layerId ?? 'layer-1') !== selected.layerId) return shape
+      const z = zById.get(shape.id)
+      return z === undefined || shape.z === z ? shape : { ...shape, z }
+    }),
   }
 }

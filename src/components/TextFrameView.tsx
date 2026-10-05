@@ -127,7 +127,7 @@ interface Props {
   startParaIndex: number
   /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
   atParaStart: boolean
-  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
+  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'secondLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
@@ -138,7 +138,13 @@ interface Props {
   footnoteAlignment?: 'right' | 'center'
   footnotes?: FootnotePlacement[]
   footnoteHeight: number
+  footnoteAreaX?: number
+  footnoteAreaWidth?: number
   footnoteDividerGap?: number
+  footnoteDividerWidth?: number
+  footnoteDividerThickness?: number
+  footnoteDividerAlignment?: 'right' | 'center' | 'left'
+  footnoteDividerHeading?: { text: string; height: number; style: TextStyle; showLines: boolean; decoration: 'none' | 'outer' | 'both' }
   footnoteNumberGap?: number
   footnoteWidthScale?: number
   footnoteMode?: 'vertical' | 'horizontal'
@@ -146,6 +152,7 @@ interface Props {
   onFootnoteWidthPreview?: (scale: number | null) => void
   onFootnoteWidthCommit?: (scale: number) => void
   onFootnoteEdit?: (id: string, localOffset: number, fragmentOffset: number) => void
+  onFootnoteSelectionStart?: (id: string) => void
   footnoteRequest?: (SelRequest & { noteId: string }) | null
   editingFootnoteOffset?: number | null
   footnoteSelection?: { noteId: string; all: boolean; allNotes?: boolean } | null
@@ -209,7 +216,7 @@ function RichText({
   firstLineIndent: (paragraphIndex: number) => number
   baseAlign: TextStyle['align']
   continuesParagraphAtEnd: boolean
-  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
+  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'secondLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
   baseFontSize: number
   footnoteMarkers?: Record<number, string>
   tocPageMarkers?: Record<number, string>
@@ -262,7 +269,8 @@ function RichText({
         lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined,
         paddingTop: gapsBefore ? `${gapsBefore * scale}px` : undefined,
         paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined,
-        paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined,
+        paddingRight: patch?.indentRight || patch?.secondLineIndent ? `${((patch.indentRight ?? 0) + (patch.secondLineIndent ?? 0)) * scale}px` : undefined,
+        textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined,
         boxSizing: 'border-box',
       }
       if (pageOffset >= 0 && leaderAt >= lineStart) {
@@ -346,13 +354,14 @@ function RichText({
       ))}
       {paragraphNodes.map((paragraph) => {
         const patch = paragraphPatches?.[paragraph.index]
-        const wordSpacing = patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
+        const isJustified = (patch?.align ?? baseAlign) === 'justify' || (patch?.align ?? baseAlign) === 'justifyCenter'
+        const wordSpacing = isJustified && (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined) ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
         const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
         // the same rule as richtext.ts's buildParagraphNodes: a window only opens a paragraph that starts here, and the
         // spacer closing the previous paragraph sits on its first line (so the floated band starts that much lower)
         const windowWidth = patch?.windowIndent && (paragraph.index > startParaIndex || atParaStart) ? patch.windowIndent * scale : 0
         const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
-        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight ? `${patch.indentRight * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight || patch?.secondLineIndent ? `${((patch.indentRight ?? 0) + (patch.secondLineIndent ?? 0)) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{paragraph.nodes}</div>
       })}
     </>
   )
@@ -530,8 +539,47 @@ export function TextFrameView(p: Props) {
       </div>
       {!!p.footnotes?.length && (
         <div className="footnotes-scale" style={{ width: frame.w, height: frame.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${style.leading ?? defaultLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
-          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: 0, left: 'auto', width: frame.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
-            <div className="footnote-divider" style={{ top: p.footnoteDividerGap ?? 0 }} />
+          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: p.footnoteAreaX === undefined ? 0 : 'auto', left: p.footnoteAreaX ?? 'auto', width: p.footnoteAreaWidth ?? frame.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+            {p.footnoteDividerHeading ? (
+              <div
+                className="footnote-divider-heading"
+                dir="rtl"
+                style={{
+                  top: p.footnoteDividerGap ?? 0,
+                  width: `${p.footnoteDividerWidth ?? 35}%`,
+                  height: p.footnoteDividerHeading.height,
+                  justifyContent: 'center',
+                  left: '50%',
+                  right: 'auto',
+                  transform: 'translateX(-50%)',
+                  gap: p.footnoteDividerHeading.showLines ? `${Math.max(6, p.footnoteDividerHeading.style.fontSize * 0.4)}px` : '0',
+                  color: p.footnoteDividerHeading.style.color ?? '#111111',
+                  fontFamily: p.footnoteDividerHeading.style.fontFamily,
+                  fontSize: `${p.footnoteDividerHeading.style.fontSize}px`,
+                  fontWeight: p.footnoteDividerHeading.style.weight,
+                  fontStyle: p.footnoteDividerHeading.style.italic ? 'italic' : 'normal',
+                  lineHeight: `${p.footnoteDividerHeading.height}px`,
+                  letterSpacing: p.footnoteDividerHeading.style.tracking ? `${(p.footnoteDividerHeading.style.tracking / 1000) * p.footnoteDividerHeading.style.fontSize}px` : undefined,
+                }}
+              >
+                {p.footnoteDividerHeading.showLines && (p.footnoteDividerHeading.decoration === 'needle'
+                  ? <span className="footnote-divider-heading-line side-right decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px` }} />
+                  : <span className={`footnote-divider-heading-line side-right decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px` }} />)}
+                <span className="footnote-divider-heading-text">{p.footnoteDividerHeading.text}</span>
+                {p.footnoteDividerHeading.showLines && (p.footnoteDividerHeading.decoration === 'needle'
+                  ? <span className="footnote-divider-heading-line side-left decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px` }} />
+                  : <span className={`footnote-divider-heading-line side-left decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px` }} />)}
+              </div>
+            ) : (
+              <div className="footnote-divider" style={{
+                top: p.footnoteDividerGap ?? 0,
+                width: `${p.footnoteDividerWidth ?? 35}%`,
+                borderTop: `${p.footnoteDividerThickness ?? 1}px solid currentColor`,
+                left: p.footnoteDividerAlignment === 'left' ? 0 : p.footnoteDividerAlignment === 'center' ? '50%' : 'auto',
+                right: p.footnoteDividerAlignment === 'right' ? 0 : 'auto',
+                transform: p.footnoteDividerAlignment === 'center' ? 'translateX(-50%)' : 'none',
+              }} />
+            )}
             {!!p.editingFootnoteId && p.editingFootnoteFrameId === frame.id && showEdge && (
               <button
                 type="button"
@@ -571,6 +619,7 @@ export function TextFrameView(p: Props) {
                   title="לחיצה לעריכת הערת השוליים"
                   onPointerDown={(event) => {
                     event.stopPropagation()
+                    if (event.button === 0) p.onFootnoteSelectionStart?.(note.id)
                     if (isEditingFootnote || event.button !== 0) return
                     // the editor only exists once edit mode is entered, so a drag that starts on the still-static text
                     // would show no selection until release: enter edit mode on the press itself (caret at the press
@@ -613,7 +662,7 @@ export function TextFrameView(p: Props) {
                     window.addEventListener('pointercancel', stop)
                   }}
                   onClick={(event) => event.stopPropagation()}
-                  style={{ left: `${frame.w - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
+                  style={{ left: `${(p.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
                 >
                   {!note.continued && (
                     <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>

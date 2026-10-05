@@ -103,6 +103,28 @@ export function primaryTextFrameOrder(doc: DocSettings, frames: TextFrame[]): st
   )
 }
 
+export interface PrimaryTextFramePageGroup {
+  page: number
+  frameIds: string[]
+  x: number
+  width: number
+}
+
+export function primaryTextFramePageGroups(doc: DocSettings, frames: TextFrame[]): PrimaryTextFramePageGroup[] {
+  if (!doc.primaryTextFrame || doc.columns < 2) return []
+  const rects = pageRects(doc)
+  const sides = pageSides(doc)
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.5
+  return rects.flatMap((rect, page) => {
+    const boxes = columnBoxes(doc, rect, sides[page], page)
+    const pageFrames = boxes.map((box) => frames.find((frame) => near(frame.x, box.x) && near(frame.y, box.y) && near(frame.w, box.w) && near(frame.h, box.h)))
+    if (pageFrames.some((frame) => !frame)) return []
+    const x = Math.min(...boxes.map((box) => box.x))
+    const right = Math.max(...boxes.map((box) => box.x + box.w))
+    return [{ page, frameIds: pageFrames.map((frame) => frame!.id), x, width: right - x }]
+  })
+}
+
 /** Expand existing automatic primary frames into per-column frames when a document gains columns. */
 export function expandPrimaryFramesForColumns(content: DocContent, previousDoc: DocSettings, previousFrames: TextFrame[]): DocContent {
   if (content.doc.columns <= previousDoc.columns) return content
@@ -177,6 +199,7 @@ export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocCo
       ...(sourceHead.paraSpaceAfter ? { paraSpaceAfter: sourceHead.paraSpaceAfter } : {}),
       ...(sourceHead.paraKeepFirstLines ? { paraKeepFirstLines: sourceHead.paraKeepFirstLines } : {}),
       ...(sourceHead.paraKeepLastLines ? { paraKeepLastLines: sourceHead.paraKeepLastLines } : {}),
+      ...(sourceHead.paraKeepWithNext ? { paraKeepWithNext: sourceHead.paraKeepWithNext } : {}),
       ...(sourceHead.tocPageReferences ? { tocPageReferences: sourceHead.tocPageReferences } : {}),
       ...(sourceHead.tocFootnoteReferences ? { tocFootnoteReferences: sourceHead.tocFootnoteReferences } : {}),
     }
@@ -195,6 +218,7 @@ export function withPrimaryFrames(c: DocContent, pages: 'all' | number[]): DocCo
         paraSpaceAfter: undefined,
         paraKeepFirstLines: undefined,
         paraKeepLastLines: undefined,
+        paraKeepWithNext: undefined,
         tocPageReferences: undefined,
         tocFootnoteReferences: undefined,
       }

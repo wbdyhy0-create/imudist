@@ -1,4 +1,4 @@
-import { cssTextAlign, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, type CharStyle, type Run, type TextAlign } from './document'
+import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Run, type TextAlign } from './document'
 import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 import { hexToRgb } from './colorModels'
@@ -245,9 +245,12 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
 /** Layout a single paragraph may override on its own (a paragraph style applied to it, or settings changed for it). */
 export interface ParagraphPatch {
   leading?: number
+  wordSpacingMin?: number
+  wordSpacingMax?: number
   indentLeft?: number
   indentRight?: number
   firstLineIndent?: number
+  secondLineIndent?: number
   align?: TextAlign
   /**
    * points, unscaled: "a window in the text" (טיפוגרפיה > יצירת חלון בטקסט) - the paragraph's SECOND line starts this far
@@ -259,7 +262,7 @@ export interface ParagraphPatch {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || !!p.indentLeft || !!p.indentRight || p.align !== undefined || !!p.windowIndent)
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent)
 
 /**
  * The empty float that makes a paragraph's second line shorter on the right (the reading start side) by `width`:
@@ -338,8 +341,15 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     }
     if (needsLastLineJustify && end === text.length) block.style.textAlignLast = 'justify'
     if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
+    if (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined) {
+      const paragraphStyle = styleAtChar(runs, pos, DEFAULT_TEXT_STYLE)
+      const spacing = wordSpacingPt({ ...DEFAULT_TEXT_STYLE, ...paragraphStyle, align: patch.align ?? baseAlign ?? DEFAULT_TEXT_STYLE.align, ...patch })
+      if (spacing) block.style.wordSpacing = `${spacing * scale}px`
+    }
     if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
-    if (patch?.indentRight) block.style.paddingRight = `${patch.indentRight * scale}px`
+    const rightIndent = (patch?.indentRight ?? 0) + (patch?.secondLineIndent ?? 0)
+    if (rightIndent) block.style.paddingRight = `${rightIndent * scale}px`
+    if (patch?.secondLineIndent) block.style.textIndent = `${-patch.secondLineIndent * scale}px`
     block.style.boxSizing = 'border-box'
     const line = text.slice(pos, end)
     const pageMarkerAt = line.indexOf(TOC_PAGE_MARKER)

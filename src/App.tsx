@@ -15,6 +15,7 @@ import { buildMenus, findShortcut } from './menus'
 import { baseName, pickFiles } from './fileio'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
+import { readEpsFile } from './importEps'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
@@ -29,7 +30,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'footnote-style', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
@@ -40,6 +41,7 @@ const newImportedImageId = () => globalThis.crypto?.randomUUID?.() ?? `pdf-image
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
 const isDocumentFile = (f: File) => f.name.toLowerCase().endsWith(FILE_EXT)
 const isPdfFile = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+const isEpsFile = (f: File) => f.name.toLowerCase().endsWith('.eps') || f.type === 'application/postscript'
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
@@ -155,6 +157,24 @@ export default function App() {
       }
       return
     }
+    const epsFiles = files.filter(isEpsFile)
+    if (epsFiles.length > 0) {
+      if (epsFiles.length !== 1 || files.length !== 1) {
+        session.showError('ייבוא EPS', new ImportError('יש לבחור קובץ EPS אחד בכל פעם.'))
+        return
+      }
+      if (!session.doc || preview) {
+        session.notify('צור או פתח מסמך לפני ייבוא EPS')
+        return
+      }
+      try {
+        const shapes = await readEpsFile(epsFiles[0])
+        if (!ws.current?.placeVectorShapes(shapes)) throw new ImportError('לא ניתן להוסיף את הצורות לעמוד הנוכחי.')
+      } catch (e) {
+        session.showError('לא ניתן לייבא את קובץ ה-EPS', e instanceof ImportError ? e : new ImportError(typeof e === 'string' ? e : e instanceof Error ? e.message : 'קובץ ה-EPS לא נקרא כראוי.'))
+      }
+      return
+    }
     const pictures = files.filter(isImageFile)
     try {
       if (pictures.length > 0) {
@@ -266,7 +286,7 @@ export default function App() {
   }
   const importFiles = async () => {
     const files = await pickFiles(
-      `${FILE_EXT},.docx,.pdf,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+      `${FILE_EXT},.docx,.pdf,.eps,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -489,6 +509,8 @@ export default function App() {
               onShowGuides={() => setShowGuides(true)}
               shapes={editingParent ? editingParent.shapes : preview ? NO_SHAPES : session.shapes}
               onShapesChange={editingParent ? (next, key) => updateParent({ shapes: next }, key) : preview ? noop : session.changeShapes}
+              layerOrder={editingParent ? ['layer-1'] : session.layerOrder}
+              onLayerStackChange={editingParent ? noop : preview ? noop : session.changeLayerOrder}
               paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
               onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}
               parents={preview ? NO_PARENTS : session.parents}

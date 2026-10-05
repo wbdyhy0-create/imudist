@@ -129,51 +129,80 @@ export function editStory(
   }
 }
 
-/** [from, to) ranges of `text` that are "extra" whitespace: every space or paragraph break beyond the first of a run. */
-function extraSpacingRanges(text: string, from: number, to: number): [number, number][] {
+/** a blank that is shown: a space (or a no-break one) - the kind that is collapsed when it comes twice in a row */
+const isBlank = (c: string) => c === ' ' || c === ' '
+/** characters that show nothing at all: blanks, and the directional / zero-width marks Hebrew text carries around */
+const isInvisible = (c: string) => isBlank(c) || /[​-‏‪-‮⁠-⁤؜﻿]/.test(c)
+
+/**
+ * The [from, to) ranges of `text` that spacing cleanup removes:
+ * - a paragraph with nothing in it - empty, or only blanks and invisible marks (a "\n \n" or "\n‏\n" is as much
+ *   an empty paragraph as "\n\n") - together with its own paragraph break, wherever it is, including at the very
+ *   start of the story; one that is the story's last paragraph loses its content and leaves the break before it;
+ * - in every other paragraph, the blanks of a run of two or more after the first (a no-break space counts as a blank).
+ * Only paragraphs inside [from, to) are looked at; ranges come back in order and never overlap.
+ */
+export function cleanSpacingRanges(text: string, from = 0, to = text.length): [number, number][] {
+  return cleanSpacingPlan(text, from, to).ranges
+}
+
+/** `cleanSpacingRanges`, and which paragraphs (by their index in `text`) go away altogether - for the per-paragraph lists that follow the text. */
+export function cleanSpacingPlan(text: string, from = 0, to = text.length): { ranges: [number, number][]; dropped: number[] } {
   const ranges: [number, number][] = []
-  let i = Math.max(from, 1) // a run can never start at 0: there is no character before it to repeat
-  while (i < to) {
-    const c = text[i]
-    if ((c === ' ' || c === '\n') && text[i - 1] === c) {
-      let j = i + 1
-      while (j < to && text[j] === c) j++
-      ranges.push([i, j])
-      i = j
-    } else i++
+  const dropped: number[] = []
+  let start = 0
+  let index = -1
+  while (start <= text.length) {
+    index++
+    const nl = text.indexOf('\n', start)
+    const end = nl < 0 ? text.length : nl
+    if (end >= from && start <= to) {
+      let empty = true
+      for (let i = start; i < end; i++) {
+        if (!isInvisible(text[i])) {
+          empty = false
+          break
+        }
+      }
+      if (empty && start >= from && end <= to) {
+        // a paragraph that is only its own break goes with it; the last paragraph has no break after it to take along
+        if (nl >= 0) {
+          ranges.push([start, nl + 1])
+          dropped.push(index)
+        } else if (end > start) ranges.push([start, end])
+      } else if (!empty) {
+        let i = Math.max(start, from)
+        const limit = Math.min(end, to)
+        while (i < limit) {
+          if (isBlank(text[i]) && i > start && isBlank(text[i - 1])) {
+            let j = i + 1
+            while (j < limit && isBlank(text[j])) j++
+            ranges.push([i, j])
+            i = j
+          } else i++
+        }
+      }
+    }
+    if (nl < 0) break
+    start = nl + 1
   }
-  return ranges
+  return { ranges, dropped }
 }
 
 /**
- * Removes repeated spaces and empty paragraphs (2+ spaces → 1, 2+ consecutive paragraph breaks → 1) from [from, to)
- * of the story (the whole story by default). One story-wide edit, reusing `editStory` per run so styling and run
- * merging stay correct; ranges are applied back to front so earlier offsets stay valid.
+ * Removes repeated spaces and empty paragraphs (see `cleanSpacingRanges`) from [from, to) of the story (the whole
+ * story by default). One story-wide edit, reusing `editStory` per run so styling and run merging stay correct; ranges are
+ * applied back to front so earlier offsets stay valid. (The paragraph lists and footnote anchors of a frame are
+ * the caller's: findReplace.ts's `replaceInStory` does that for each of these ranges.)
  */
 export function cleanSpacing(text: string, runs: Run[], base: CharStyle, from = 0, to = text.length): { text: string; runs: Run[] } {
-  const ranges = extraSpacingRanges(text, from, to)
+  const ranges = cleanSpacingRanges(text, from, to)
   let out = { text, runs }
   for (let k = ranges.length - 1; k >= 0; k--) {
     const [a, b] = ranges[k]
     out = editStory(out.text, out.runs, a, b, '', base)
   }
   return out
-}
-
-/** Map a text offset through cleanSpacing's removal of repeated spaces and paragraph breaks in [from, to). */
-export function cleanSpacingOffset(text: string, offset: number, from = 0, to = text.length): number {
-  const start = Math.max(0, Math.min(from, text.length))
-  const end = Math.max(start, Math.min(to, text.length))
-  const at = Math.max(0, Math.min(offset, text.length))
-  const countRemovedBefore = (limit: number) => {
-    let removed = 0
-    for (let index = Math.max(start, 1); index < Math.min(limit, end); index++) {
-      const char = text[index]
-      if ((char === ' ' || char === '\n') && text[index - 1] === char) removed++
-    }
-    return removed
-  }
-  return at - countRemovedBefore(at)
 }
 
 /** The 0-based index of the paragraph ("\n"-separated piece of `text`) that character offset `i` belongs to. */
@@ -201,6 +230,15 @@ export function withParaOverride(overrides: (number | null)[] | undefined, index
   const out = overrides ? overrides.slice() : []
   while (out.length <= index) out.push(null)
   out[index] = value
+  return out
+}
+
+/** `withParaOverride`, or - with no value - the paragraph's own override taken away (back to `null`, "none"). */
+export function setParaOverride(overrides: (number | null)[] | undefined, index: number, value: number | undefined): (number | null)[] | undefined {
+  if (value !== undefined) return withParaOverride(overrides, index, value)
+  if (overrides?.[index] == null) return overrides
+  const out = overrides.slice()
+  out[index] = null
   return out
 }
 

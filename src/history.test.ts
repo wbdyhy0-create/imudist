@@ -12,3 +12,4 @@ describe('shouldMergeChange', () => {
     expect(shouldMergeChange(null, 'gap:gesture-1', 110)).toBe(false)
   })
 })
+

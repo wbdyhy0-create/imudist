@@ -1672,6 +1672,7 @@ dependencies = [
 name = "imudist"
 version = "0.0.8"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "tauri",

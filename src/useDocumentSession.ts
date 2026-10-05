@@ -111,6 +111,7 @@ export function useDocumentSession() {
   const parents = state?.parents ?? NO_PARENTS
   const pageParents = state?.pageParents ?? NO_PAGE_PARENTS
   const sections = state?.sections ?? NO_SECTIONS
+  const layerOrder = state?.layerOrder ?? ['layer-1']
   const parentOverrides = state?.parentOverrides ?? NO_PARENT_OVERRIDES
   const colorSamples = state?.colorSamples ?? NO_COLOR_SAMPLES
   const file = active?.file ?? null
@@ -208,6 +209,10 @@ export function useDocumentSession() {
   const changeParents = (next: ParentPage[], key?: string) => change((s) => (next !== s.parents ? { ...s, parents: next } : s), key)
   const changePageParents = (next: (string | null)[], key?: string) => change((s) => (next !== s.pageParents ? { ...s, pageParents: next } : s), key)
   const changeSections = (next: PageSection[], key?: string) => change((s) => (next !== s.sections ? { ...s, sections: next } : s), key)
+  const changeLayerOrder = (next: string[]) => change((s) => {
+    const current = s.layerOrder ?? ['layer-1']
+    return current.length === next.length && current.every((id, index) => id === next[index]) ? s : { ...s, layerOrder: next }
+  }, 'layers:order')
 
   const pages: PageOps = {
     insert: (at, count, beside, parentId) =>
@@ -555,6 +560,7 @@ export function useDocumentSession() {
     parents,
     pageParents,
     sections,
+    layerOrder,
     parentOverrides,
     colorSamples,
     history,
@@ -566,6 +572,7 @@ export function useDocumentSession() {
     changeParents,
     changePageParents,
     changeSections,
+    changeLayerOrder,
     pages,
     file,
     dirty,

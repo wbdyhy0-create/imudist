@@ -124,6 +124,7 @@ export function ShapeFrameView({
   const shapeFill = shape.frame ? 'none' : shape.fill ?? 'none'
   const gradientId = `shape-gradient-${shape.id}`
   const fillPaint = shape.fillGradient ? `url(#${gradientId})` : shapeFill
+  const pathInteriorHit = isPath && (shape.closed !== false || !shape.frame && (shape.fill != null || !!shape.fillGradient))
   const gradientStops = shape.fillGradient?.stops?.length
     ? shape.fillGradient.stops
     : shape.fillGradient
@@ -190,16 +191,26 @@ export function ShapeFrameView({
         )}
         {!img ? (
           <>
+            {isPath && shape.closed === false && !shape.frame && (
+              <rect
+                width={w}
+                height={h}
+                fill="transparent"
+                pointerEvents={ghost ? 'none' : 'all'}
+                onPointerDown={onPointerDown}
+                onDoubleClick={onDoubleClick}
+              />
+            )}
             {(isLine || isPath) && (
               // a thin (or even 1pt) line is genuinely hard to click exactly on — this invisible, much wider twin
               // of the same path takes the click/hover instead, so getting NEAR the line is enough to select it
               <path
                 d={shapePath(shape, zoom)}
-                fill={isPath && shape.closed !== false ? 'transparent' : 'none'}
+                fill={pathInteriorHit ? 'transparent' : 'none'}
                 stroke="transparent"
                 strokeWidth={Math.max(lineStrokeWidth, 12)}
                 strokeLinecap="round"
-                pointerEvents={ghost ? 'none' : isPath && shape.closed !== false ? 'all' : 'stroke'}
+                pointerEvents={ghost ? 'none' : pathInteriorHit ? 'all' : 'stroke'}
                 onPointerDown={onPointerDown}
                 onDoubleClick={onDoubleClick}
               />

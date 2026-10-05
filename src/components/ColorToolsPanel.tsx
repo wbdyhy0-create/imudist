@@ -8,6 +8,7 @@ import { Group } from './PropertiesPanel'
 interface Props {
   tool: 'color' | 'gradient' | 'swatches'
   shape: ShapeFrame | null
+  selectedShapes?: ShapeFrame[]
   textStyle?: CharStyle | null
   textId?: string | null
   onShape: (patch: Partial<ShapeFrame>) => void
@@ -40,17 +41,20 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample }: Props) {
+  const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
+  const targetShape = shapeTargets[0] ?? null
+  const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
   const [model, setModel] = useState<ColorModel>('CMYK')
   const isTextTarget = !!textId && !!onTextColor
   const textTargetColor = textColorTarget === 'outline' ? textStyle?.outlineColor ?? '#000000' : textStyle?.color ?? '#111111'
-  const initialColor = isTextTarget ? textTargetColor : shape?.fill ?? '#0066ff'
+  const initialColor = isTextTarget ? textTargetColor : targetShape?.fill ?? '#0066ff'
   const [color, setColor] = useState(initialColor)
   const [baseColor, setBaseColor] = useState<string | null>(initialColor)
-  const baseColors = useRef({ fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' })
+  const baseColors = useRef({ fill: targetShape?.fill ?? '#0066ff', stroke: targetShape?.stroke ?? '#000000' })
   const [tint, setTint] = useState(100)
-  const [opacity, setOpacity] = useState(shape?.opacity ?? 1)
-  const [gradient, setGradient] = useState<GradientFill>(normalizedGradient(shape?.fillGradient ?? DEFAULT_GRADIENT))
+  const [opacity, setOpacity] = useState(targetShape?.opacity ?? 1)
+  const [gradient, setGradient] = useState<GradientFill>(normalizedGradient(targetShape?.fillGradient ?? DEFAULT_GRADIENT))
   const [swatches, setSwatches] = useState(INITIAL_SWATCHES)
   const activeStopDrag = useRef<{ index: number; pointerId: number; startY: number } | null>(null)
   const deleteStopCandidate = useRef<number | null>(null)
@@ -58,15 +62,15 @@ export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTex
   const [dragOverRamp, setDragOverRamp] = useState(false)
 
   useEffect(() => {
-    baseColors.current = { fill: shape?.fill ?? '#0066ff', stroke: shape?.stroke ?? '#000000' }
+    baseColors.current = { fill: targetShape?.fill ?? '#0066ff', stroke: targetShape?.stroke ?? '#000000' }
     // the panel stays open while the selection moves to another shape: show that shape's colours, not the last one's
     const selectedColor = isTextTarget ? textTargetColor : baseColors.current[target]
     setBaseColor(selectedColor)
     setColor(selectedColor)
-    setOpacity(shape?.opacity ?? 1)
+    setOpacity(targetShape?.opacity ?? 1)
     setTint(100)
-    if (shape?.fillGradient) setGradient(normalizedGradient(shape.fillGradient))
-  }, [shape?.id, textId, textTargetColor, textColorTarget])
+    if (targetShape?.fillGradient) setGradient(normalizedGradient(targetShape.fillGradient))
+  }, [shapeSelectionKey, targetShape?.id, textId, textTargetColor, textColorTarget])
 
   useEffect(() => {
     const targetColor = isTextTarget ? textTargetColor : baseColors.current[target]
@@ -93,12 +97,12 @@ export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTex
     const tinted = tintHex(baseColor, value)
     if (isTextTarget && textColorTarget === 'outline') onTextOutlineColor?.(tinted)
     else if (isTextTarget) onTextColor?.(tinted)
-    else if (shape) onShape(target === 'fill' ? { fill: tinted } : { stroke: tinted })
+    else if (targetShape) onShape(target === 'fill' ? { fill: tinted } : { stroke: tinted })
   }
   const updateGradient = (patch: Partial<GradientFill>) => {
     const next = { ...gradient, ...patch }
     setGradient(next)
-    if (shape) onShape({ fill: null, fillGradient: next })
+    if (targetShape) onShape({ fill: null, fillGradient: next })
   }
   const updateStop = (index: number, patch: Partial<{ offset: number; color: string }>) => {
     const stops = (gradient.stops ?? [{ offset: 0, color: gradient.start }, { offset: 1, color: gradient.end }]).map((stop, stopIndex) => stopIndex === index ? { ...stop, ...patch } : stop)
@@ -222,7 +226,8 @@ export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTex
           </div>
         )}
       </Group>
-      {!shape && !isTextTarget && tool !== 'gradient' ? <p className="muted">צבע שנבחר יחול על הצורה הבאה שתיצור.</p> : tool === 'gradient' && isTextTarget ? (
+      {shapeTargets.length > 1 && <p className="muted">השינוי יחול על {shapeTargets.length} הצורות שנבחרו.</p>}
+      {!targetShape && !isTextTarget && tool !== 'gradient' ? <p className="muted">צבע שנבחר יחול על הצורה הבאה שתיצור.</p> : tool === 'gradient' && isTextTarget ? (
         <Group title="מעבר צבע"><p className="muted">מעבר צבע זמין לצורות; צבע הטקסט הנבחר הוא אחיד.</p></Group>
       ) : tool === 'gradient' ? (
         <>
@@ -335,11 +340,11 @@ export function ColorToolsPanel({ tool, shape, textStyle, textId, onShape, onTex
             <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} /></>}
           </Group>
           <Group title="דוגמיות צבע">
-            <FillPicker label="דוגמיות צבע" value={isTextTarget ? textTargetColor : target === 'fill' ? shape?.fill ?? null : shape?.stroke ?? null} onChange={applyColor} />
+            <FillPicker label="דוגמיות צבע" value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
           </Group>
         </>
       )}
-      {tool === 'swatches' && (shape || isTextTarget) && <>
+      {tool === 'swatches' && (targetShape || isTextTarget) && <>
         <Group title="ספריית צבעים">
           <ColorLibrary mode={isTextTarget ? 'solids' : 'all'} onColor={(next) => applyColor(next)} onGradient={(next) => { onTarget('fill'); updateGradient(next) }} />
         </Group>

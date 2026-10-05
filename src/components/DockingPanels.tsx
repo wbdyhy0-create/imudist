@@ -95,10 +95,10 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
     if (drag.floating) setFloatingPos({ x: Math.max(8, event.clientX - 120), y: Math.max(36, event.clientY - 18) })
   }
 
-  const startDrag = (id: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+  const startDrag = (id: string, event: ReactPointerEvent<HTMLButtonElement>, canFloat = floatingId === id) => {
     if (event.button !== 0) return
     event.preventDefault()
-    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingId === id, canFloat: floatingId === id }
+    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingId === id, canFloat }
     window.addEventListener('pointermove', moveDrag)
     window.addEventListener('pointerup', finishDrag)
     window.addEventListener('pointercancel', finishDrag)
@@ -127,10 +127,11 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
           {ordered.map((panel) => (
             <button
               key={panel.id}
-              className={'dock-tab' + (open?.id === panel.id ? ' open' : '') + (dockOverId === panel.id && dragLayerId !== panel.id ? ' drop-target' : '')}
-              draggable
-              aria-expanded={open?.id === panel.id}
+              className={'dock-tab' + (open?.id === panel.id || floating?.id === panel.id ? ' open' : '') + (dockOverId === panel.id && dragLayerId !== panel.id ? ' drop-target' : '')}
+              draggable={!panel.floating}
+              aria-expanded={open?.id === panel.id || floating?.id === panel.id}
               title={panel.label}
+              onPointerDown={panel.floating ? (event) => startDrag(panel.id, event, true) : undefined}
               onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/layer', panel.id); setDragLayerId(panel.id); dragRef.current = null }}
               onDragEnd={() => { setDragLayerId(null); setDockOverId(null) }}
               onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const from = event.dataTransfer.getData('text/layer'); if (from && from !== panel.id) setDockOverId(panel.id) }}

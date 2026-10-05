@@ -73,6 +73,7 @@ export interface DocumentFile {
   version: number
   savedAt: string
   settings: DocSettings
+  layerOrder?: string[]
   frames: TextFrame[]
   /** version 2+: pictures on the pages, and the data of the pictures they use */
   images: ImageFrame[]
@@ -102,6 +103,7 @@ export function serializeDocument(c: DocContent): string {
     version: VERSION,
     savedAt: new Date().toISOString(),
     settings: c.doc,
+    layerOrder: c.layerOrder ?? ['layer-1'],
     frames: c.frames,
     images: c.images,
     assets,
@@ -215,6 +217,7 @@ function parseSettings(v: unknown, name: string): DocSettings {
 function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
   const raw = isObj(value) ? value : {}
   return {
+    placement: oneOf(raw.placement, ['footnotes', 'endnotes'], DEFAULT_FOOTNOTE_CONFIG.placement),
     mode: oneOf(raw.mode, ['vertical', 'horizontal'], DEFAULT_FOOTNOTE_CONFIG.mode),
     columns: raw.columns === 2 ? 2 : 1,
     referenceScale: num(raw.referenceScale, DEFAULT_FOOTNOTE_CONFIG.referenceScale, 0.25, 1),
@@ -224,6 +227,14 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
     minSpacingBetweenInline: num(raw.minSpacingBetweenInline, DEFAULT_FOOTNOTE_CONFIG.minSpacingBetweenInline, 0, 100),
     maxFootnoteHeight: num(raw.maxFootnoteHeight, DEFAULT_FOOTNOTE_CONFIG.maxFootnoteHeight, 12, MAX_PAGE_PT),
     dividerGap: num(raw.dividerGap, DEFAULT_FOOTNOTE_CONFIG.dividerGap, 0, MAX_PAGE_PT),
+    dividerWidth: num(raw.dividerWidth, DEFAULT_FOOTNOTE_CONFIG.dividerWidth, 1, 100),
+    dividerThickness: num(raw.dividerThickness, DEFAULT_FOOTNOTE_CONFIG.dividerThickness, 0.1, 10),
+    dividerAlignment: oneOf(raw.dividerAlignment, ['right', 'center', 'left'], DEFAULT_FOOTNOTE_CONFIG.dividerAlignment),
+    dividerMode: oneOf(raw.dividerMode, ['line', 'heading'], DEFAULT_FOOTNOTE_CONFIG.dividerMode),
+    dividerText: str(raw.dividerText, DEFAULT_FOOTNOTE_CONFIG.dividerText).slice(0, 200),
+    dividerHeadingLines: bool(raw.dividerHeadingLines, DEFAULT_FOOTNOTE_CONFIG.dividerHeadingLines),
+    dividerHeadingDecoration: oneOf(raw.dividerHeadingDecoration, ['none', 'outer', 'both', 'curl', 'needle'], DEFAULT_FOOTNOTE_CONFIG.dividerHeadingDecoration),
+    ...(typeof raw.dividerHeadingStyleId === 'string' && raw.dividerHeadingStyleId ? { dividerHeadingStyleId: raw.dividerHeadingStyleId.slice(0, 100) } : {}),
     spaceBefore: num(raw.spaceBefore, DEFAULT_FOOTNOTE_CONFIG.spaceBefore, 0, MAX_PAGE_PT),
     startAt: int(raw.startAt, DEFAULT_FOOTNOTE_CONFIG.startAt, 1, 9999),
     restart: oneOf(raw.restart, ['continuous', 'page', 'spread'], DEFAULT_FOOTNOTE_CONFIG.restart),
@@ -263,6 +274,7 @@ const zOf = (raw: Record<string, unknown>): { z?: number } => (typeof raw.z === 
 const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
   typeof raw.rotation === 'number' && Number.isFinite(raw.rotation) && raw.rotation !== 0 ? { rotation: normalizeDeg(raw.rotation) } : {}
 const groupOf = (raw: Record<string, unknown>): { groupId?: string } => typeof raw.groupId === 'string' && raw.groupId ? { groupId: raw.groupId } : {}
+const layerIdOf = (raw: Record<string, unknown>): { layerId?: string } => typeof raw.layerId === 'string' && raw.layerId.length > 0 && raw.layerId.length <= 64 ? { layerId: raw.layerId } : {}
 /** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
 type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
 const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields> => ({
@@ -280,9 +292,14 @@ const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields
 /** per-paragraph spaceBefore/spaceAfter overrides: each entry is a clamped number or null ("no override") */
 const parseParaOverrides = (v: unknown): (number | null)[] | undefined =>
   Array.isArray(v) ? v.map((e) => (typeof e === 'number' && Number.isFinite(e) ? num(e, 0, 0, MAX_PAGE_PT) : null)) : undefined
-const paraOverridesOf = (raw: Record<string, unknown>): { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] } => ({
+type ParaOverrides = Pick<TextFrame, 'paraSpaceBefore' | 'paraSpaceAfter' | 'paraKeepFirstLines' | 'paraKeepLastLines' | 'paraKeepWithNext'>
+const paraOverridesOf = (raw: Record<string, unknown>): ParaOverrides => ({
   ...(parseParaOverrides(raw.paraSpaceBefore) ? { paraSpaceBefore: parseParaOverrides(raw.paraSpaceBefore) } : {}),
   ...(parseParaOverrides(raw.paraSpaceAfter) ? { paraSpaceAfter: parseParaOverrides(raw.paraSpaceAfter) } : {}),
+  // keep lines together / keep with next: saved with the frame, so they have to be read back too
+  ...(parseParaOverrides(raw.paraKeepFirstLines) ? { paraKeepFirstLines: parseParaOverrides(raw.paraKeepFirstLines) } : {}),
+  ...(parseParaOverrides(raw.paraKeepLastLines) ? { paraKeepLastLines: parseParaOverrides(raw.paraKeepLastLines) } : {}),
+  ...(parseParaOverrides(raw.paraKeepWithNext) ? { paraKeepWithNext: parseParaOverrides(raw.paraKeepWithNext) } : {}),
 })
 const paragraphStyleIdsOf = (raw: Record<string, unknown>): { paragraphStyleIds?: string[] } => ({
   ...(Array.isArray(raw.paragraphStyleIds) ? { paragraphStyleIds: raw.paragraphStyleIds.filter((id): id is string => typeof id === 'string').slice(0, 100000) } : {}),
@@ -328,6 +345,8 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.indentRight === 'number' && Number.isFinite(s.indentRight) ? { indentRight: num(s.indentRight, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.firstLineIndent === 'number' && Number.isFinite(s.firstLineIndent) ? { firstLineIndent: num(s.firstLineIndent, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.tint === 'number' && Number.isFinite(s.tint) ? { tint: num(s.tint, 100, 0, 100) } : {}),
+    ...(typeof s.keepLinesTogether === 'boolean' ? { keepLinesTogether: s.keepLinesTogether } : {}),
+    ...(typeof s.keepWithNext === 'boolean' ? { keepWithNext: s.keepWithNext } : {}),
     ...(typeof s.overprintFill === 'boolean' ? { overprintFill: s.overprintFill } : {}),
     ...(typeof s.overprintStroke === 'boolean' ? { overprintStroke: s.overprintStroke } : {}),
     ...(typeof s.strokeWidth === 'number' && Number.isFinite(s.strokeWidth) ? { strokeWidth: num(s.strokeWidth, 0, 0, 200) } : {}),
@@ -400,6 +419,7 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
     frames.push({
       ...base,
       ...groupOf(raw),
+      ...layerIdOf(raw),
       ...(raw.rasterized === true ? { rasterized: true } : {}),
       ...(isObj(raw.textFlowBox) && typeof raw.textFlowBox.w === 'number' && typeof raw.textFlowBox.h === 'number' ? { textFlowBox: { w: raw.textFlowBox.w, h: raw.textFlowBox.h } } : {}),
       ...(isObj(raw.textScale) && typeof raw.textScale.x === 'number' && typeof raw.textScale.y === 'number' ? { textScale: { x: raw.textScale.x, y: raw.textScale.y } } : {}),
@@ -484,6 +504,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
     out.push({
       id,
       ...groupOf(raw),
+      ...layerIdOf(raw),
       ...(typeof raw.label === 'string' && raw.label ? { label: raw.label.slice(0, 120) } : {}),
       assetId,
       x: num(raw.x, 0, -1e6, 1e6),
@@ -665,6 +686,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
     out.push({
       id,
       ...groupOf(raw),
+      ...layerIdOf(raw),
       kind,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -830,8 +852,21 @@ export function parseDocument(text: string, name: string): DocContent {
   const frames = parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles)
   const images = parseImages(data.images, assets)
   const shapes = parseShapes(data.shapes, assets)
+  const scoreByLayer = new Map<string, number>()
+  for (const frame of frames) scoreByLayer.set(frame.layerId ?? 'layer-1', Math.max(scoreByLayer.get(frame.layerId ?? 'layer-1') ?? -Infinity, frame.z ?? 1))
+  for (const image of images) scoreByLayer.set(image.layerId ?? 'layer-1', Math.max(scoreByLayer.get(image.layerId ?? 'layer-1') ?? -Infinity, image.z ?? 0))
+  for (const shape of shapes) scoreByLayer.set(shape.layerId ?? 'layer-1', Math.max(scoreByLayer.get(shape.layerId ?? 'layer-1') ?? -Infinity, shape.z ?? 1))
+  if (!scoreByLayer.has('layer-1')) scoreByLayer.set('layer-1', -Infinity)
+  const inferredLayerOrder = [...scoreByLayer].sort((a, b) => b[1] - a[1]).map(([id]) => id)
+  const savedLayerOrder = Array.isArray(data.layerOrder)
+    ? [...new Set(data.layerOrder.filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64))]
+    : []
+  const layerOrder = savedLayerOrder.length
+    ? [...savedLayerOrder, ...inferredLayerOrder.filter((id) => !savedLayerOrder.includes(id))]
+    : inferredLayerOrder
   return {
     doc,
+    layerOrder,
     frames,
     images,
     assets,

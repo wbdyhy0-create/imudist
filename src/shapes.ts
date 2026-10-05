@@ -15,6 +15,15 @@ export const vertexPoint = (v: PathVertex): Pt => (Array.isArray(v) ? v : v.p)
 export const vertexHi = (v: PathVertex): Pt | undefined => (Array.isArray(v) ? undefined : v.hi)
 /** Its handle toward the next point, if it has one. */
 export const vertexHo = (v: PathVertex): Pt | undefined => (Array.isArray(v) ? undefined : v.ho)
+/** Open a closed ring at one anchor, or split an already-open path at an interior anchor. */
+export function splitPathVerticesAt<T>(vertices: T[], index: number, closed: boolean): T[][] | null {
+  if (closed) {
+    if (vertices.length < 3 || index < 0 || index >= vertices.length) return null
+    return [[...vertices.slice(index), ...vertices.slice(0, index + 1)]]
+  }
+  if (vertices.length < 3 || index <= 0 || index >= vertices.length - 1) return null
+  return [vertices.slice(0, index + 1), vertices.slice(index)]
+}
 
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
