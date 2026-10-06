@@ -589,6 +589,10 @@ export function sheetSizeOf(page: PageRect, options: PageDrawOptions): { w: numb
   return { w: page.w + 2 * bleedPt + 2 * marksMargin, h: page.h + 2 * bleedPt + 2 * marksMargin }
 }
 
+/** about as much as a PDF can hold in the browser: it is one string, and a string cannot be longer than about 512 MB */
+const MAX_PDF_BYTES = 380 * 1024 * 1024
+export const TOO_LARGE_MESSAGE = 'הקובץ יהיה גדול מדי כדי להיווצר. בחר איכות של 150 DPI, או ייצא טווח עמודים קטן יותר (ספר: בחלקים).'
+
 /** Pages `from`..`to` (1-based) of a prepared document, added to the PDF (which is made with the first one when there is none yet). */
 export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport, options: PageDrawOptions, from: number, to: number, onPage?: (done: number, total: number) => void): Promise<jsPDF | null> {
   const bleedPt = options.bleed ? options.bleedPt : 0
@@ -597,6 +601,7 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
   const first = Math.max(1, from)
   const total = Math.max(0, last - first + 1)
   let target = pdf
+  let written = 0
   for (let i = first; i <= last; i++) {
     const page = prepared.rects[i - 1]
     if (!page) continue
@@ -604,12 +609,30 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     if (!target) target = new jsPDF({ unit: 'pt', format: [sheet.w, sheet.h], orientation: sheet.w > sheet.h ? 'landscape' : 'portrait' })
     else target.addPage([sheet.w, sheet.h])
     const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
-    target.addImage(canvas.toDataURL('image/png'), 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
+    const picture = canvas.toDataURL('image/png')
+    // jsPDF takes a PNG apart into raw pixels and, unless it is told to compress them, writes those: a 300 DPI A4 page is 26 MB of them.
+    // Compressed again (lossless, as the PNG was) it takes about what the PNG did
+    target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
+    written += picture.length * 0.75
+    // a PDF is built as one string, and a string cannot be longer than about 512 MB: say so before drawing the rest of the pages
+    if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
     if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt)
     onPage?.(i - first + 1, total)
   }
   return target
 }
+
+/** the PDF as a string overflows ("Invalid string length") when it is too big: say what to do instead */
+function tooLarge<T>(make: () => T): T {
+  try {
+    return make()
+  } catch (error) {
+    if (error instanceof RangeError || /Invalid string length/i.test(String(error))) throw new Error(TOO_LARGE_MESSAGE)
+    throw error
+  }
+}
+const outputBlob = (pdf: jsPDF) => tooLarge(() => pdf.output('blob'))
+const outputBuffer = (pdf: jsPDF) => tooLarge(() => pdf.output('arraybuffer'))
 
 /** Gives the finished PDF to the user: the save dialog of the desktop app, or a download and a window in the browser. */
 export async function deliverPdf(pdf: jsPDF, fileBaseName: string, viewWindow?: Window | null): Promise<boolean> {
@@ -619,7 +642,7 @@ export async function deliverPdf(pdf: jsPDF, fileBaseName: string, viewWindow?: 
     const { openPath } = await import('@tauri-apps/plugin-opener')
     const path = await save({ defaultPath: `${fileBaseName}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] })
     if (!path) return false
-    await writeFile(path, new Uint8Array(pdf.output('arraybuffer')))
+    await writeFile(path, new Uint8Array(outputBuffer(pdf)))
     try {
       await openPath(path)
     } catch (error) {
@@ -627,7 +650,7 @@ export async function deliverPdf(pdf: jsPDF, fileBaseName: string, viewWindow?: 
     }
     return true
   }
-  const blob = pdf.output('blob')
+  const blob = outputBlob(pdf)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
