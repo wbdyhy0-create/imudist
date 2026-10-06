@@ -124,7 +124,7 @@ describe('collectHits', () => {
     if (!compiled || !compiled.ok) throw new Error('no pattern')
     const a = frame('אבא', { id: 'a', footnotes: [{ id: 'n', anchor: 0, content: 'דא', runs: [] }] })
     const b = frame('בגד', { id: 'b' })
-    const toc = frame('אאא', { id: 'toc', tocPageReferences: [{ offset: 0, headId: 'a', id: 'x' }] as TextFrame['tocPageReferences'] })
+    const toc = frame('אאא', { id: 'toc', tocPageReferences: [{ offset: 0, headId: 'a', id: 'x' }] as unknown as TextFrame['tocPageReferences'] })
     expect(collectHits([a, b, toc], compiled, { footnotes: true }).map((hit) => [hit.head.id, hit.matches.length, hit.notes.length])).toEqual([['a', 2, 1]])
     expect(collectHits([a, b, toc], compiled, { footnotes: false }).map((hit) => hit.notes.length)).toEqual([0])
     expect(collectHits([a, b], compiled, { footnotes: true, range: { headId: 'a', a: 0, b: 2 } }).map((hit) => hit.matches.length)).toEqual([1])

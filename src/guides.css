@@ -205,3 +205,12 @@
 .table-dialog-row { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
 .table-dialog-row .dlg-check { flex: 1; }
 .table-dialog-number { width: 72px; }
+
+/* character styles panel */
+.character-style-row { display: flex; align-items: center; gap: 4px; }
+.character-style-row .paragraph-style-row { flex: 1; min-width: 0; }
+.character-style-row .icon-button { flex: none; width: 26px; height: 26px; }
+.character-style-setting { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.character-style-setting.off { opacity: 0.4; pointer-events: none; }
+.nested-styles-editor { display: flex; flex-direction: column; gap: 10px; }
+.nested-rule { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; }

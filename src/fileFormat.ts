@@ -23,6 +23,9 @@ import {
   type Asset,
   type Assets,
   type ColorSample,
+  type CharacterStyleRecord,
+  type CharacterStyleSettings,
+  type NestedStyleRule,
   type CharStyle,
   type DocSettings,
   type FootnoteItem,
@@ -83,6 +86,8 @@ export interface DocumentFile {
   shapes: ShapeFrame[]
   /** version 2+ (this field only from a later Imudist build): the document's named paragraph styles */
   paragraphStyles: ParagraphStyleRecord[]
+  /** the document's named character styles (absent in files from before they existed) */
+  characterStyles?: CharacterStyleRecord[]
   /** version 2+ (this field only from a later Imudist build): the document's parent (master) pages */
   parents: ParentPage[]
   /** which parent page applies to each document page, by index */
@@ -111,6 +116,7 @@ export function serializeDocument(c: DocContent): string {
     guides: c.guides,
     shapes: c.shapes,
     paragraphStyles: c.paragraphStyles,
+    characterStyles: c.characterStyles ?? [],
     parents: c.parents,
     pageParents: c.pageParents,
     sections: c.sections,
@@ -261,6 +267,8 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
     tracking: num(s.tracking, fallback.tracking, -1000, 1000),
     ...(color ? { color } : {}),
     ...(outlineColor ? { outlineColor } : {}),
+    ...(typeof s.charStyleId === 'string' && s.charStyleId && s.charStyleId.length <= 100 ? { charStyleId: s.charStyleId } : {}),
+    ...(typeof s.baselineShift === 'number' && Number.isFinite(s.baselineShift) && s.baselineShift !== 0 ? { baselineShift: num(s.baselineShift, 0, -999, 999) } : {}),
     ...(typeof s.outlineWidth === 'number' && Number.isFinite(s.outlineWidth) ? { outlineWidth: num(s.outlineWidth, 0, 0, 100) } : fallback.outlineWidth !== undefined ? { outlineWidth: fallback.outlineWidth } : {}),
     ...(typeof s.shadowOffsetX === 'number' && Number.isFinite(s.shadowOffsetX) ? { shadowOffsetX: num(s.shadowOffsetX, 0, -100, 100) } : fallback.shadowOffsetX !== undefined ? { shadowOffsetX: fallback.shadowOffsetX } : {}),
     ...(typeof s.shadowOffsetY === 'number' && Number.isFinite(s.shadowOffsetY) ? { shadowOffsetY: num(s.shadowOffsetY, 6, -100, 100) } : typeof s.shadowOffset === 'number' && Number.isFinite(s.shadowOffset) ? { shadowOffsetY: num(s.shadowOffset, 6, -100, 100) } : fallback.shadowOffsetY !== undefined ? { shadowOffsetY: fallback.shadowOffsetY } : fallback.shadowOffset !== undefined ? { shadowOffsetY: fallback.shadowOffset } : {}),
@@ -355,6 +363,26 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
 }
 
 /** The document's named paragraph styles (Paragraph Styles panel). Missing (an older file) or empty falls back to the built-in two. */
+/** a paragraph style's nested style rules: at most 20, each pointing at a style by id (a style that is gone is skipped when they are applied) */
+function parseNestedRules(v: unknown): { nested?: NestedStyleRule[] } {
+  if (!Array.isArray(v)) return {}
+  const rules: NestedStyleRule[] = []
+  for (const raw of v) {
+    if (!isObj(raw) || rules.length >= 20) continue
+    const styleId = str(raw.styleId, '').slice(0, 100)
+    if (!styleId) continue
+    const unit = oneOf<NestedStyleRule['unit']>(raw.unit, ['words', 'letters', 'sentences', 'delimiter'], 'words')
+    rules.push({
+      styleId,
+      unit,
+      count: int(raw.count, 1, 1, 1000),
+      ...(unit === 'delimiter' && typeof raw.delimiter === 'string' && raw.delimiter ? { delimiter: raw.delimiter.slice(0, 10) } : {}),
+      inclusive: bool(raw.inclusive, false),
+    })
+  }
+  return rules.length ? { nested: rules } : {}
+}
+
 function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
   if (!Array.isArray(v)) return DEFAULT_PARAGRAPH_STYLES
   const used = new Set<string>()
@@ -370,6 +398,7 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
       ...(typeof raw.basedOnId === 'string' && raw.basedOnId ? { basedOnId: raw.basedOnId } : {}),
       ...(typeof raw.nextStyleId === 'string' && raw.nextStyleId ? { nextStyleId: raw.nextStyleId } : {}),
       patch: parseParagraphStylePatch(raw.patch),
+      ...parseNestedRules(raw.nested),
     })
   }
   if (styles.length === 0) return DEFAULT_PARAGRAPH_STYLES
@@ -380,6 +409,36 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
     ...(s.basedOnId && !ids.has(s.basedOnId) ? { basedOnId: undefined } : {}),
     ...(s.nextStyleId && !ids.has(s.nextStyleId) ? { nextStyleId: undefined } : {}),
   }))
+}
+
+/** the settings of a character style: every one optional, and only the ones that make sense */
+function parseCharacterStyleSettings(v: unknown): CharacterStyleSettings {
+  const s = isObj(v) ? v : {}
+  return {
+    ...(typeof s.fontFamily === 'string' && s.fontFamily ? { fontFamily: s.fontFamily.slice(0, 100) } : {}),
+    ...(typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? { color: s.color } : {}),
+    ...(typeof s.outlineColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.outlineColor) ? { outlineColor: s.outlineColor } : {}),
+    ...(typeof s.outlineWidth === 'number' && Number.isFinite(s.outlineWidth) ? { outlineWidth: num(s.outlineWidth, 0, 0, 100) } : {}),
+    ...(typeof s.fontSize === 'number' && Number.isFinite(s.fontSize) ? { fontSize: num(s.fontSize, 14, 1, 999) } : {}),
+    ...(typeof s.weight === 'number' && Number.isFinite(s.weight) ? { weight: num(s.weight, 400, 1, 1000) } : {}),
+    ...(typeof s.italic === 'boolean' ? { italic: s.italic } : {}),
+    ...(typeof s.tracking === 'number' && Number.isFinite(s.tracking) ? { tracking: num(s.tracking, 0, -1000, 1000) } : {}),
+    ...(typeof s.baselineShift === 'number' && Number.isFinite(s.baselineShift) ? { baselineShift: num(s.baselineShift, 0, -999, 999) } : {}),
+  }
+}
+
+function parseCharacterStyles(v: unknown): CharacterStyleRecord[] {
+  if (!Array.isArray(v)) return []
+  const used = new Set<string>()
+  const styles: CharacterStyleRecord[] = []
+  for (const raw of v) {
+    if (!isObj(raw) || styles.length >= 500) continue
+    let id = str(raw.id, '').slice(0, 100)
+    if (!id || used.has(id)) id = `character-style-${styles.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    styles.push({ id, name: str(raw.name, id).slice(0, 200), patch: parseCharacterStyleSettings(raw.patch) })
+  }
+  return styles
 }
 
 function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_FOOTNOTE_CONFIG, paragraphStyles: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES): TextFrame[] {
@@ -850,6 +909,7 @@ export function parseDocument(text: string, name: string): DocContent {
   const doc = parseSettings(data.settings, name)
   const parents = parseParents(data.parents, assets)
   const paragraphStyles = parseParagraphStyles(data.paragraphStyles)
+  const characterStyles = parseCharacterStyles(data.characterStyles)
   const frames = parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles)
   const images = parseImages(data.images, assets)
   const shapes = parseShapes(data.shapes, assets)
@@ -874,6 +934,7 @@ export function parseDocument(text: string, name: string): DocContent {
     guides: parseGuides(data.guides, doc.pages),
     shapes,
     paragraphStyles,
+    characterStyles,
     parents,
     pageParents: parsePageParents(data.pageParents, parents, doc.pages),
     sections: parseSections(data.sections, doc.pages),

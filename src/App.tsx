@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
@@ -30,8 +30,9 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
+const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
@@ -512,6 +513,7 @@ export default function App() {
               layerOrder={editingParent ? ['layer-1'] : session.layerOrder}
               onLayerStackChange={editingParent ? noop : preview ? noop : session.changeLayerOrder}
               paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
+              characterStyles={preview ? NO_CHARACTER_STYLES : session.characterStyles}
               onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}
               parents={preview ? NO_PARENTS : session.parents}
               onParentsChange={preview ? noop : session.changeParents}

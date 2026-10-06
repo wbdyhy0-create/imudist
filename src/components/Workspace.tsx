@@ -63,6 +63,8 @@ import {
   type ImageFrame,
   type PageSection,
   type Run,
+  type CharacterStyleRecord,
+  type CharacterStyleSettings,
   type TextAlign,
   type TextFrame,
   type TextStyle,
@@ -97,7 +99,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { charStyleOf, cleanSpacingPlan, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, withParaOverride } from '../story'
+import { applyCharacterStyle, applyParagraphLook, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
@@ -130,6 +132,8 @@ import { PagesPanel, type InsertWhere } from './PagesPanel'
 import { LayersPanel } from './LayersPanel'
 import { TocDialog } from './TocDialog'
 import { InsertTableDialog, type InsertTableOptions } from './InsertTableDialog'
+import { CharacterStylesPanel } from './CharacterStylesPanel'
+import { applyNestedStyles } from '../nestedStyles'
 import { TableOptionsDialog } from './TableOptionsDialog'
 import { CellOptionsDialog, type CellPatch } from './CellOptionsDialog'
 import type { TableSelection } from './TableView'
@@ -140,7 +144,7 @@ import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { RunningHeaderDialog } from './RunningHeaderDialog'
-import { FirstWordStylerDialog } from './FirstWordStylerDialog'
+import { FirstWordStylerDialog, type FirstWordTarget } from './FirstWordStylerDialog'
 import { WindowTextDialog, type WindowTextResult } from './WindowTextDialog'
 import { FindReplacePanel, type FindSearch, type FindSummary } from './FindReplacePanel'
 import { SpreadView } from './SpreadView'
@@ -228,6 +232,9 @@ const stepZoom = (z: number, dir: 1 | -1) =>
     : ([...ZOOM_STEPS].reverse().find((s) => s < z / 1.001) ?? ZOOM_MIN)
 
 /** what the Table menu can do to the selected table */
+/** the settings a character style can hold, as keys of a text's look */
+const CHAR_LOOK_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking', 'baselineShift', 'color', 'outlineColor', 'outlineWidth'] as const satisfies readonly (keyof CharacterStyleSettings)[]
+
 export type TableOp = 'select-row' | 'select-column' | 'select-table' | 'row-above' | 'row-below' | 'col-start' | 'col-end' | 'delete-row' | 'delete-col' | 'merge' | 'unmerge' | 'options' | 'cell-options'
 
 export interface WorkspaceHandle {
@@ -328,6 +335,8 @@ interface Props {
   layerOrder: string[]
   onLayerStackChange: (layerOrder: string[]) => void
   paragraphStyles: ParagraphStyleRecord[]
+  /** the document's named character styles */
+  characterStyles: CharacterStyleRecord[]
   onParagraphStylesChange: (styles: ParagraphStyleRecord[], coalesceKey?: string) => void
   /** the document's parent (master) pages */
   parents: ParentPage[]
@@ -437,6 +446,7 @@ export function Workspace({
   layerOrder,
   onLayerStackChange,
   paragraphStyles,
+  characterStyles,
   onParagraphStylesChange,
   parents,
   onParentsChange,
@@ -1376,8 +1386,10 @@ export function Workspace({
     return wordEnd > cursor ? [cursor, wordEnd] : null
   }
 
-  const applyFirstWordStyle = (sourceId: string, targetId: string, scope: 'document' | 'selection') => {
-    const resolved = resolveParagraphStyle(targetId)
+  const applyFirstWordStyle = (sourceId: string, target: FirstWordTarget, scope: 'document' | 'selection') => {
+    const record = target.kind === 'character' ? characterStyles.find((style) => style.id === target.id) : undefined
+    if (target.kind === 'character' && !record) return
+    const resolved = target.kind === 'paragraph' ? resolveParagraphStyle(target.id) : {}
     const charPatch = Object.fromEntries(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'fontSize', 'weight', 'italic', 'tracking'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])) as Partial<CharStyle>
     const selectedHead = textSel?.headId
     const nextFrames = frames.map((frame) => {
@@ -1395,7 +1407,7 @@ export function Workspace({
         offset = end + 1
       })
       if (ranges.length === 0) return frame
-      const nextRuns = ranges.reduce((runs, range) => styleRange(runs, range[0], range[1], charPatch), normalizeRuns(frame.text, frame.runs, frame))
+      const nextRuns = ranges.reduce((runs, range) => (record ? applyCharacterStyle(runs, range[0], range[1], record) : styleRange(runs, range[0], range[1], charPatch)), normalizeRuns(frame.text, frame.runs, frame))
       return { ...frame, runs: nextRuns }
     })
     onFramesChange(nextFrames, 'first-word-style')
@@ -6364,6 +6376,175 @@ export function Workspace({
     const nextSeen = new Set(seen).add(id)
     return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
   }
+
+  // ── character styles ────────────────────────────────────────────────────────
+  /** how a paragraph looks before any character style: the story's own look, then what its paragraph style says */
+  const paragraphLookAt = (head: TextFrame, offset: number): CharStyle => {
+    const id = paragraphStyleIdOf(head, paraIndexAt(head.text, offset))
+    const resolved = id ? resolveParagraphStyle(id) : {}
+    const look: Record<string, unknown> = { ...charStyleOf(head) }
+    for (const key of CHAR_LOOK_KEYS) {
+      const value = (resolved as Record<string, unknown>)[key]
+      if (value !== undefined) look[key] = value
+    }
+    return look as unknown as CharStyle
+  }
+
+  /** a story's head with `change` applied to the runs of its text and of each of its notes (`base`: the look a text goes back to) */
+  const withStoryRuns = (frame: TextFrame, change: (text: string, runs: Run[], base: (paragraphStart: number) => Partial<CharStyle>) => Run[]): TextFrame => {
+    let next = frame
+    if (frame.text) {
+      const runs = normalizeRuns(frame.text, frame.runs, frame)
+      const changed = change(frame.text, runs, (start) => paragraphLookAt(frame, start))
+      if (changed !== runs) next = { ...next, runs: changed }
+    }
+    if (frame.footnotes?.length) {
+      let touched = false
+      const footnotes = frame.footnotes.map((item) => {
+        const base = item.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, item.paragraphStyleId)
+        const runs = normalizeRuns(item.content, item.runs, base)
+        const changed = change(item.content, runs, () => base)
+        if (changed === runs) return item
+        touched = true
+        return { ...item, runs: changed }
+      })
+      if (touched) next = { ...next, footnotes }
+    }
+    return next
+  }
+
+  /**
+   * The nested styles of the paragraph styles in `styles` given to the paragraphs of a story that are in those styles
+   * (`onlyStyleId`: just that one; `onlyIndexes`: just those paragraphs). `formerly`: styles the rules of `onlyStyleId` used
+   * before, which are let go of too.
+   */
+  const applyNestedToFrame = (frame: TextFrame, styles: ParagraphStyleRecord[], onlyStyleId?: string, onlyIndexes?: ReadonlySet<number>, formerly: Iterable<string> = []): TextFrame => {
+    if (!frame.text || characterStyles.length === 0) return frame
+    const rulesOf = new Map(styles.filter((style) => (!onlyStyleId || style.id === onlyStyleId) && (style.nested?.length || (onlyStyleId && [...formerly].length > 0))).map((style) => [style.id, style.nested ?? []]))
+    if (rulesOf.size === 0) return frame
+    let runs = normalizeRuns(frame.text, frame.runs, frame)
+    let changed = false
+    let offset = 0
+    frame.text.split('\n').forEach((paragraph, index) => {
+      const start = offset
+      offset += paragraph.length + 1
+      if (onlyIndexes && !onlyIndexes.has(index)) return
+      const styleId = paragraphStyleIdOf(frame, index)
+      const rules = styleId ? rulesOf.get(styleId) : undefined
+      if (!rules) return
+      const next = applyNestedStyles(frame.text, runs, start, start + paragraph.length, rules, characterStyles, (at) => paragraphLookAt(frame, at), formerly)
+      if (next !== runs) {
+        runs = next
+        changed = true
+      }
+    })
+    return changed ? { ...frame, runs } : frame
+  }
+
+  /** the nested styles of one paragraph style, given again to all the paragraphs that are in it */
+  const applyNestedStylesCmd = (styleId: string) => {
+    const nextFrames = frames.map((frame) => applyNestedToFrame(frame, paragraphStyles, styleId))
+    if (nextFrames.some((frame, index) => frame !== frames[index])) onFramesChange(nextFrames, `nested-styles:${styleId}`)
+  }
+
+  /**
+   * The frames with a character style on the selected text (or on the whole text when nothing is picked) - null as the
+   * record takes the style off - or null when there is no text to give it to.
+   */
+  const characterStyleApplied = (record: CharacterStyleRecord | null): TextFrame[] | null => {
+    if (footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      if (!head || !note) return null
+      const selectedNotes = new Set(footnoteSel.allNotes ? (head.footnotes ?? []).map((item) => item.id) : [note.id])
+      const nextNotes = (head.footnotes ?? []).map((item) => {
+        if (!selectedNotes.has(item.id)) return item
+        const base = item.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, item.paragraphStyleId)
+        const runs = normalizeRuns(item.content, item.runs, base)
+        const partial = !footnoteSel.allNotes && item.id === note.id && footnoteSel.a !== footnoteSel.b
+        const from = partial ? Math.min(footnoteSel.a, footnoteSel.b) : 0
+        const to = partial ? Math.max(footnoteSel.a, footnoteSel.b) : item.content.length
+        if (to <= from) return item
+        return { ...item, runs: record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(item.content, runs, from, to, characterStyles, () => base) }
+      })
+      return frames.map((frame) => (frame.id === head.id ? { ...frame, footnotes: nextNotes } : frame))
+    }
+    if (!panelHead) return null
+    const runs = normalizeRuns(panelHead.text, panelHead.runs, panelHead)
+    const from = panelSel ? Math.min(panelSel.a, panelSel.b) : 0
+    const to = panelSel ? Math.max(panelSel.a, panelSel.b) : panelHead.text.length
+    if (to <= from) return null
+    const nextRuns = record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(panelHead.text, runs, from, to, characterStyles, (start) => paragraphLookAt(panelHead, start))
+    return frames.map((frame) => (frame.id === panelHead.id ? { ...frame, runs: nextRuns } : frame))
+  }
+
+  /** a character style on the selected text; null takes the style off */
+  const applyCharacterStyleCmd = (styleId: string | null) => {
+    const record = styleId ? characterStyles.find((style) => style.id === styleId) : undefined
+    if (styleId && !record) return
+    const next = characterStyleApplied(record ?? null)
+    if (next) onFramesChange(next, `charstyle:${styleId ?? 'none'}`)
+  }
+
+  /** a new style, given to the selected text right away when asked: one undo step for both */
+  const createCharacterStyle = (name: string, patch: CharacterStyleSettings, apply: boolean) => {
+    const record: CharacterStyleRecord = { id: `character-style-${newFrameId()}`, name, patch }
+    const next = apply ? characterStyleApplied(record) : null
+    pageOps.commit({ characterStyles: [...characterStyles, record], ...(next ? { frames: next } : {}) })
+  }
+
+  /** a character style was edited: the text that has it follows, in one undo step with the style itself */
+  const changeCharacterStyle = (id: string, name: string, patch: CharacterStyleSettings) => {
+    const before = characterStyles.find((style) => style.id === id)
+    if (!before) return
+    const nextStyles = characterStyles.map((style) => (style.id === id ? { ...style, name, patch } : style))
+    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => updateCharacterStyleRuns(text, runs, id, before.patch, patch, base)))
+    pageOps.commit({ characterStyles: nextStyles, ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
+  }
+
+  /** deleting a style takes it off all the text that has it first, so nothing is left tied to a style that is gone */
+  const deleteCharacterStyle = (id: string) => {
+    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => (characterStyleIdsIn(runs).has(id) ? clearCharacterStyle(text, runs, 0, text.length, characterStyles, base) : runs)))
+    pageOps.commit({ characterStyles: characterStyles.filter((style) => style.id !== id), ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
+  }
+
+  /** the character style of the selected text: undefined = no text is selected, null = it has none */
+  const activeCharacterStyleId: string | null | undefined = (() => {
+    if (footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      if (!note) return undefined
+      const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+      return styleAtChar(normalizeRuns(note.content, note.runs, base), Math.min(footnoteSel.a, footnoteSel.b), base).charStyleId ?? null
+    }
+    if (!panelHead) return undefined
+    const runs = normalizeRuns(panelHead.text, panelHead.runs, panelHead)
+    return styleAtChar(runs, panelSel ? Math.min(panelSel.a, panelSel.b) : 0, panelHead).charStyleId ?? null
+  })()
+
+  /** what the selected text sets beyond its paragraph's own look: the start of a style made from it */
+  const characterStyleSelectionLook = (): CharacterStyleSettings => {
+    let style: CharStyle
+    let base: Partial<CharStyle>
+    if (footnoteSel) {
+      const head = frames.find((frame) => frame.id === footnoteSel.headId)
+      const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
+      if (!note) return {}
+      const noteBase = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+      style = styleAtChar(normalizeRuns(note.content, note.runs, noteBase), Math.min(footnoteSel.a, footnoteSel.b), noteBase)
+      base = noteBase
+    } else if (panelHead) {
+      const at = panelSel ? Math.min(panelSel.a, panelSel.b) : 0
+      style = styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), at, panelHead)
+      base = paragraphLookAt(panelHead, at)
+    } else return {}
+    const patch: Record<string, unknown> = {}
+    for (const key of CHAR_LOOK_KEYS) {
+      const value = style[key]
+      if (value !== undefined && value !== base[key]) patch[key] = value
+    }
+    return patch as CharacterStyleSettings
+  }
   // the paragraph style the selection (or caret) is in, and whether its text carries changes of its own beyond that style
   // "+": the paragraph(s) the selection is in have changed since we started looking at them - not "differ from the
   // style's own definition" (an older document, or a paragraph a Word import mapped to the wrong style, may already
@@ -6479,7 +6660,7 @@ export function Workspace({
       paragraphStyleIds.forEach((styleId, index) => {
         const end = index + 1 < paragraphStyleIds.length ? (frame.text.indexOf('\n', start) + 1 || frame.text.length) : frame.text.length
         if (styleId === id) {
-          runs = styleRange(runs, start, end, charPatch)
+          runs = applyParagraphLook(runs, start, end, charPatch, characterStyles)
           // a window under the opening words is not part of the style: it stays when the style is edited
           const keptWindow = paragraphStylePatches[index]?.windowIndent
           const keptWindowWords = paragraphStylePatches[index]?.windowWords
@@ -6498,7 +6679,8 @@ export function Workspace({
       const sameStyle = paragraphStyleIds.length > 0 && paragraphStyleIds.every((styleId) => styleId === id)
       return { ...frame, ...(sameStyle ? frameLook : {}), paragraphStylePatches, paraSpaceBefore, paraSpaceAfter, paraKeepFirstLines, paraKeepLastLines, paraKeepWithNext, runs }
     }
-    onFramesChange(frames.map((frame) => updateImportedParagraphs(updateFootnoteStyles(frame))), `paragraph-style-edit:${id}`)
+    const formerlyNested = (paragraphStyles.find((style) => style.id === id)?.nested ?? []).map((rule) => rule.styleId)
+    onFramesChange(frames.map((frame) => applyNestedToFrame(updateImportedParagraphs(updateFootnoteStyles(frame)), nextStyles, id, undefined, formerlyNested)), `paragraph-style-edit:${id}`)
   }
   const createParagraphStyle = () => {
     // an id from the clock, not the list length: deleting a style and adding another must never reuse an id
@@ -6772,7 +6954,7 @@ export function Workspace({
       patches[index] = layout
       // keepLook: the text already looks the way the style says (a style made from it), it is only tagged
       if (keepLook) continue
-      runs = styleRange(runs, start, end, charPatch)
+      runs = applyParagraphLook(runs, start, end, charPatch, characterStyles)
       paraSpaceBefore = override(paraSpaceBefore, index, layout.spaceBefore)
       paraSpaceAfter = override(paraSpaceAfter, index, layout.spaceAfter)
       paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, keepAll)
@@ -6783,7 +6965,8 @@ export function Workspace({
     const whole = new Set(indexes).size >= count
     const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
     const paragraphStyleId = whole ? targetId : !hadLists || frame.paragraphStyleId === sourceId ? undefined : frame.paragraphStyleId
-    return { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, paraKeepFirstLines, paraKeepLastLines, paraKeepWithNext, runs }
+    const restyled: TextFrame = { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, paraKeepFirstLines, paraKeepLastLines, paraKeepWithNext, runs }
+    return applyNestedToFrame(restyled, styles, targetId, new Set(indexes))
   }
 
   const swapParagraphStyles = (sourceId: string, targetId: string, removeSource: boolean) => {
@@ -8098,7 +8281,12 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} />,
+            },
+            {
+              id: 'character-styles',
+              label: 'סגנונות תו',
+              content: <CharacterStylesPanel styles={characterStyles} activeId={activeCharacterStyleId} canApply={!!panelHead || !!footnoteSel} onApply={applyCharacterStyleCmd} onSelectionLook={characterStyleSelectionLook} onCreate={createCharacterStyle} onChange={changeCharacterStyle} onDelete={deleteCharacterStyle} />,
             },
             {
               id: 'style-manager',
@@ -8193,7 +8381,7 @@ export function Workspace({
         <TocDialog styles={paragraphStyles} initial={doc.toc} onConfirm={createTableOfContents} onClose={() => setTocDialogOpen(false)} />
       )}
       {firstWordDialog && (
-        <FirstWordStylerDialog styles={paragraphStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />
+        <FirstWordStylerDialog styles={paragraphStyles} characterStyles={characterStyles} hasSelection={!!textSel && textSel.a !== textSel.b} onApply={applyFirstWordStyle} onClose={() => setFirstWordDialog(false)} />
       )}
       {insertTableOpen && <InsertTableDialog onConfirm={insertTableShape} onClose={() => setInsertTableOpen(false)} />}
       {tableOptionsOpen && (() => {

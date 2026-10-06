@@ -43,7 +43,7 @@ const MODES: { id: FindMode; label: string }[] = [
 ]
 
 /** what was used last time (a per-user convenience: nothing breaks when storage is unavailable) */
-function loadSaved(): Partial<FindSearch> & { options?: Partial<FindOptions> } {
+function loadSaved(): { options?: Partial<FindOptions>; notes?: boolean } {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
     if (!raw || typeof raw !== 'object') return {}

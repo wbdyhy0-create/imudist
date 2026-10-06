@@ -198,6 +198,23 @@ export interface CharStyle {
   italic: boolean
   /** letter-spacing (tracking), 1/1000 em: 0 = normal; negative tightens (typical for headlines, about -5 to -15) */
   tracking: number
+  /** points; raises the text above its line (negative lowers it) without changing the line's height: small raised letters, hanging letters */
+  baselineShift?: number
+  /**
+   * The character style (`CharacterStyleRecord`) this text was given. Its settings are written into the fields above
+   * - the way a paragraph style's are - and this id is the link that lets a change of the style reach the text again.
+   */
+  charStyleId?: string
+}
+
+/** The settings a character style can hold; one that is missing is not set by the style, and the text keeps the look it already has. */
+export type CharacterStyleSettings = Partial<Pick<CharStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'fontSize' | 'weight' | 'italic' | 'tracking' | 'baselineShift'>>
+
+/** A named, reusable character style (Character Styles panel): a set of character settings for pieces of text inside a paragraph. */
+export interface CharacterStyleRecord {
+  id: string
+  name: string
+  patch: CharacterStyleSettings
 }
 
 /** Default character formatting of a story plus its paragraph-level settings (which apply to the whole story). */
@@ -409,9 +426,23 @@ export interface TextFrame extends TextStyle {
 /** The value of `TextFrame.paraKeepFirstLines` / `paraKeepLastLines` that means "all of the paragraph's lines": a paragraph set to keep its lines together never splits between frames. */
 export const KEEP_ALL_LINES = 999
 
+/** one rule of a paragraph style's nested styles: the first `count` words / characters / sentences, or everything up to the `count`th `delimiter`, get a character style */
+export interface NestedStyleRule {
+  /** the character style to give */
+  styleId: string
+  unit: 'words' | 'letters' | 'sentences' | 'delimiter'
+  count: number
+  /** unit 'delimiter': the character (or text) that ends the piece; missing = ':' */
+  delimiter?: string
+  /** whether the delimiter, or a sentence's closing mark, is part of the styled piece */
+  inclusive: boolean
+}
+
 export interface ParagraphStyleRecord {
   id: string
   name: string
+  /** nested styles: character styles given automatically to the opening of every paragraph in this style */
+  nested?: NestedStyleRule[]
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string

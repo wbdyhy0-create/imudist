@@ -224,7 +224,7 @@ describe('shared page footnotes', () => {
       id, anchor, referenceNumber: anchor + 1, content: `note ${id}`, x: 0, y: 1,
       width: 60, height: 10, computedWidth: 60, computedHeight: 10,
     })
-    const makeFlow = (id: string, note: FrameFlow['footnotes'][number]): FrameFlow => ({
+    const makeFlow = (_id: string, note: FrameFlow['footnotes'][number]): FrameFlow => ({
       headId: 'story', prevId: null, style: DEFAULT_TEXT_STYLE, story: '', start: 0, end: 0, slice: '', runs: [],
       overflow: false, paraGaps: [], startParaIndex: 0, atParaStart: true, spaceBeforeFirst: 0, spaceAfterLast: 0,
       footnotes: [note], footnoteReferences: [], footnoteHeight: 11, footnoteOverflowItems: [],

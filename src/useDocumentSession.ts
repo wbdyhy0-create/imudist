@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -27,6 +27,7 @@ const NO_ASSETS = {}
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
+const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
@@ -108,6 +109,7 @@ export function useDocumentSession() {
   const guides = state?.guides ?? NO_GUIDES
   const shapes = state?.shapes ?? NO_SHAPES
   const paragraphStyles = state?.paragraphStyles ?? NO_PARAGRAPH_STYLES
+  const characterStyles = state?.characterStyles ?? NO_CHARACTER_STYLES
   const parents = state?.parents ?? NO_PARENTS
   const pageParents = state?.pageParents ?? NO_PAGE_PARENTS
   const sections = state?.sections ?? NO_SECTIONS
@@ -557,6 +559,7 @@ export function useDocumentSession() {
     guides,
     shapes,
     paragraphStyles,
+    characterStyles,
     parents,
     pageParents,
     sections,

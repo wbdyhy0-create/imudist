@@ -305,6 +305,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         dock('paragraph', 'פסקה', 'Ctrl+Alt+L'),
         { separator: true },
         dock('paragraph-styles', 'סגנונות פסקה'),
+        dock('character-styles', 'סגנונות תו'),
         dock('style-manager', 'ניהול סגנונות'),
         dock('color', 'צבע'),
         dock('gradient', 'מעבר צבע'),

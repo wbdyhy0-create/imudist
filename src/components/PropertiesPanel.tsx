@@ -109,6 +109,10 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { st
               <NumberField value={style.tracking} step={5} min={-500} max={500} onChange={(v) => onCharStyle({ tracking: v })} />
             </Labeled>
             <p className="muted">0 לטקסט רגיל; ערך שלילי (בערך 5- עד 15-) מקרב את האותיות ונותן מראה צפוף לכותרות.</p>
+            <Labeled label="הסטת קו בסיס (נקודות)">
+              <NumberField value={style.baselineShift ?? 0} step={0.5} min={-99} max={99} onChange={(v) => onCharStyle({ baselineShift: v === 0 ? undefined : v })} />
+            </Labeled>
+            <p className="muted">ערך חיובי מגביה את הטקסט מעל השורה, ושלילי מנמיך אותו, בלי לשנות את גובה השורה. מתאים לאותיות זעירות ותלויות.</p>
             <Labeled label="קו מתאר לאותיות">
               <div className="outline-controls">
                 <FillPicker label="צבע קו מתאר" value={style.outlineColor ?? '#000000'} onChange={(color) => onCharStyle({ outlineColor: color ?? '#000000' })} />

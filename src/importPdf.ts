@@ -47,7 +47,10 @@ class EncoderPool {
   private readonly jobs = new Map<Worker, { resolve: (encoded: Encoded) => void; reject: (error: Error) => void }>()
   private nextId = 1
 
-  private constructor(readonly workers: Worker[]) {
+  readonly workers: Worker[]
+
+  private constructor(workers: Worker[]) {
+    this.workers = workers
     this.idle = [...workers]
     for (const worker of workers) {
       worker.onmessage = (event: MessageEvent<EncodeReply>) => {

@@ -1,8 +1,9 @@
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { useRef } from 'react'
+import type { FootnoteHeadingDecoration } from '../document'
 import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { caretOffsetAt, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle } from '../richtext'
+import { baselineShiftCss, caretOffsetAt, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -144,7 +145,7 @@ interface Props {
   footnoteDividerWidth?: number
   footnoteDividerThickness?: number
   footnoteDividerAlignment?: 'right' | 'center' | 'left'
-  footnoteDividerHeading?: { text: string; height: number; style: TextStyle; showLines: boolean; decoration: 'none' | 'outer' | 'both' }
+  footnoteDividerHeading?: { text: string; height: number; style: TextStyle; showLines: boolean; decoration: FootnoteHeadingDecoration }
   footnoteNumberGap?: number
   footnoteWidthScale?: number
   footnoteMode?: 'vertical' | 'horizontal'
@@ -316,6 +317,7 @@ function RichText({
       fontStyle: part.run.style.italic ? 'italic' : 'normal',
       letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
       textShadow: textShadow(part.run.style, scale) || undefined,
+      ...baselineShiftCss(part.run.style, scale),
     }
     const pageMarkerAt = part.text.indexOf(TOC_PAGE_MARKER)
     const leaderMarkerAt = pageMarkerAt < 0 ? -1 : part.text.lastIndexOf(TOC_LEADER_MARKER, pageMarkerAt)
@@ -608,7 +610,7 @@ export function TextFrameView(p: Props) {
                 ? note.runs.map((run, index) => {
                     const text = note.content.slice(offset, offset + run.len)
                     offset += run.len
-                    return <span key={index} style={{ fontFamily: run.style.fontFamily, fontSize: `${run.style.fontSize}px`, fontWeight: run.style.weight, fontStyle: run.style.italic ? 'italic' : 'normal', color: run.style.color ?? noteStyle.color, letterSpacing: run.style.tracking ? `${(run.style.tracking / 1000) * run.style.fontSize}px` : undefined, textShadow: textShadow(run.style, 1) || undefined }}>{text}</span>
+                    return <span key={index} style={{ fontFamily: run.style.fontFamily, fontSize: `${run.style.fontSize}px`, fontWeight: run.style.weight, fontStyle: run.style.italic ? 'italic' : 'normal', color: run.style.color ?? noteStyle.color, letterSpacing: run.style.tracking ? `${(run.style.tracking / 1000) * run.style.fontSize}px` : undefined, textShadow: textShadow(run.style, 1) || undefined, ...baselineShiftCss(run.style, 1) }}>{text}</span>
                   })
                 : note.content
               return (

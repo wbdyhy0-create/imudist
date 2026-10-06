@@ -1,4 +1,4 @@
-import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { removeFrame } from './frames'
 import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
 import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
@@ -39,6 +39,8 @@ export interface DocContent {
   shapes: ShapeFrame[]
   /** named paragraph styles (Paragraph Styles panel); every document has at least one */
   paragraphStyles: ParagraphStyleRecord[]
+  /** named character styles (Character Styles panel); absent in older documents */
+  characterStyles?: CharacterStyleRecord[]
   /** the document's parent (master) pages */
   parents: ParentPage[]
   /** which parent page applies to each document page, by index (null / missing = none) */

@@ -1,4 +1,4 @@
-import type { CharStyle, Run, TextFrame } from './document'
+import type { CharacterStyleRecord, CharacterStyleSettings, CharStyle, Run, TextFrame } from './document'
 
 /**
  * Pure helpers for a story's formatted text. A story is a string plus `runs`: consecutive pieces that share a
@@ -15,6 +15,8 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
   ...(s.shadowOffset !== undefined ? { shadowOffset: s.shadowOffset } : {}),
   ...(s.shadowColor ? { shadowColor: s.shadowColor } : {}),
   ...(s.shadowOpacity !== undefined ? { shadowOpacity: s.shadowOpacity } : {}),
+  ...(s.charStyleId ? { charStyleId: s.charStyleId } : {}),
+  ...(s.baselineShift ? { baselineShift: s.baselineShift } : {}),
   fontSize: s.fontSize,
   weight: s.weight,
   italic: s.italic,
@@ -22,7 +24,7 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
 })
 
 const sameStyle = (a: CharStyle, b: CharStyle) =>
-  a.fontFamily === b.fontFamily && a.color === b.color && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth && a.shadowOffsetX === b.shadowOffsetX && (a.shadowOffsetY ?? a.shadowOffset) === (b.shadowOffsetY ?? b.shadowOffset) && a.shadowColor === b.shadowColor && a.shadowOpacity === b.shadowOpacity && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking
+  a.fontFamily === b.fontFamily && a.color === b.color && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth && a.shadowOffsetX === b.shadowOffsetX && (a.shadowOffsetY ?? a.shadowOffset) === (b.shadowOffsetY ?? b.shadowOffset) && a.shadowColor === b.shadowColor && a.shadowOpacity === b.shadowOpacity && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking && a.charStyleId === b.charStyleId && (a.baselineShift ?? 0) === (b.baselineShift ?? 0)
 
 /** Drop empty runs and join neighbours that have the same style. */
 export function mergeRuns(runs: Run[]): Run[] {
@@ -330,3 +332,99 @@ export function wordEnd(text: string, i: number): number {
   while (k < text.length && !/\s/.test(text[k])) k++
   return k
 }
+
+// ── character styles ────────────────────────────────────────────────────────────
+
+/** every piece of the runs inside [a, b), cut at paragraph breaks, with `change` deciding its new style (paragraphStart: where its paragraph begins) */
+function mapPieces(text: string, runs: Run[], a: number, b: number, change: (style: CharStyle, paragraphStart: number) => CharStyle): Run[] {
+  const out: Run[] = []
+  let pos = 0
+  for (const r of runs) {
+    const end = pos + r.len
+    let at = pos
+    while (at < end) {
+      const inside = at >= a && at < b
+      // the next place where something changes: the end of the run, a range edge, or a paragraph break
+      let stop = end
+      if (at < a && a < stop) stop = a
+      if (at < b && b < stop) stop = b
+      if (inside) {
+        const br = text.indexOf('\n', at)
+        if (br >= 0 && br + 1 < stop) stop = br + 1
+      }
+      if (inside) {
+        const paragraphStart = text.lastIndexOf('\n', at - 1) + 1
+        out.push({ len: stop - at, style: change(r.style, paragraphStart) })
+      } else out.push({ len: stop - at, style: r.style })
+      at = stop
+    }
+    pos = end
+  }
+  return mergeRuns(out)
+}
+
+/** the style without its link to a character style */
+const withoutLink = (style: CharStyle): CharStyle => {
+  const { charStyleId: _link, ...rest } = style
+  return rest
+}
+
+/** the settings of a character style written over [a, b), and the link that keeps the text tied to the style */
+export function applyCharacterStyle(runs: Run[], a: number, b: number, record: CharacterStyleRecord): Run[] {
+  return styleRange(runs, a, b, { ...record.patch, charStyleId: record.id })
+}
+
+const ALWAYS_SET = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking']
+
+/** `style` with every setting in `keys` taken back from `base` (a paragraph's own look), where `base` has one */
+function restoreKeys(style: CharStyle, keys: string[], base: Partial<CharStyle>): CharStyle {
+  const next: Record<string, unknown> = { ...style }
+  for (const key of keys) {
+    const value = (base as Record<string, unknown>)[key]
+    // a setting every text has (size, weight...) is never left empty: with nothing to go back to, it stays as it is
+    if (value !== undefined) next[key] = value
+    else if (!ALWAYS_SET.includes(key)) delete next[key]
+  }
+  return next as unknown as CharStyle
+}
+
+/**
+ * Takes the character style off [a, b): the text goes back to the look of its paragraph (`baseAt` says what that is for
+ * the paragraph starting at an offset) in every setting the style had set, and the link is dropped. Text with no style,
+ * or with one that is no longer there, only loses the link.
+ */
+export function clearCharacterStyle(text: string, runs: Run[], a: number, b: number, records: CharacterStyleRecord[], baseAt: (paragraphStart: number) => Partial<CharStyle>, only?: ReadonlySet<string>): Run[] {
+  const byId = new Map(records.map((record) => [record.id, record]))
+  return mapPieces(text, runs, a, b, (style, paragraphStart) => {
+    if (!style.charStyleId || (only && !only.has(style.charStyleId))) return style
+    const record = byId.get(style.charStyleId)
+    const restored = record ? restoreKeys(style, Object.keys(record.patch), baseAt(paragraphStart)) : style
+    return withoutLink(restored)
+  })
+}
+
+/**
+ * A character style was edited (`before` → `after`): every piece of text that has it gets the new settings, and a setting
+ * the style no longer holds goes back to the look of the paragraph (`baseAt`).
+ */
+export function updateCharacterStyleRuns(text: string, runs: Run[], id: string, before: CharacterStyleSettings, after: CharacterStyleSettings, baseAt: (paragraphStart: number) => Partial<CharStyle>): Run[] {
+  if (!runs.some((r) => r.style.charStyleId === id)) return runs
+  const dropped = Object.keys(before).filter((key) => (after as Record<string, unknown>)[key] === undefined)
+  return mapPieces(text, runs, 0, text.length, (style, paragraphStart) => {
+    if (style.charStyleId !== id) return style
+    return { ...(dropped.length ? restoreKeys(style, dropped, baseAt(paragraphStart)) : style), ...after }
+  })
+}
+
+/**
+ * Paragraph style settings written over [a, b) the way a paragraph style does it - except where a character style owns a
+ * setting: that text keeps the look of its character style (the stronger of the two).
+ */
+export function applyParagraphLook(runs: Run[], a: number, b: number, patch: Partial<CharStyle>, records: CharacterStyleRecord[]): Run[] {
+  if (records.length === 0 || !runs.some((r) => r.style.charStyleId)) return styleRange(runs, a, b, patch)
+  const byId = new Map(records.map((record) => [record.id, record]))
+  return restyleRange(runs, a, b, (style) => ({ ...patch, ...(style.charStyleId ? byId.get(style.charStyleId)?.patch : undefined) }))
+}
+
+/** the ids of the character styles used anywhere in the runs */
+export const characterStyleIdsIn = (runs: Run[]): Set<string> => new Set(runs.flatMap((r) => (r.style.charStyleId ? [r.style.charStyleId] : [])))

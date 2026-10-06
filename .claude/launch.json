@@ -4,8 +4,28 @@
     {
       "name": "imudist-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--host",
+        "127.0.0.1"
+      ],
       "port": 5174
+    },
+    {
+      "name": "imudist-dev-5177",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5177"
+      ],
+      "port": 5177
     }
   ]
 }

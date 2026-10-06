@@ -37,7 +37,14 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) 
   el.style.textShadow = textShadow(style, scale)
   // tracking is 1/1000 em (the standard typographic unit)
   el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
+  // baseline shift: moved by `top`, not by vertical-align, so the line keeps its height
+  el.style.position = style.baselineShift ? 'relative' : ''
+  el.style.top = style.baselineShift ? `${-style.baselineShift * scale}px` : ''
 }
+
+/** the same shift for a React style object */
+export const baselineShiftCss = (style: CharStyle, scale: number): { position: 'relative'; top: string } | undefined =>
+  style.baselineShift ? { position: 'relative', top: `${-style.baselineShift * scale}px` } : undefined
 
 /** One piece of a run's text for formatting-mark rendering: a run of plain characters, or a single space / paragraph break. */
 export interface MarkPiece {
