@@ -79,14 +79,11 @@ export async function addRecentPath(path: string, name: string): Promise<RecentE
 }
 
 export async function removeRecent(entry: RecentEntry): Promise<RecentEntry[]> {
-  try {
-    const list = (await read()).filter((e) => {
-      if (entry.path) return !e.path || e.path.replace(/\\/g, '/').toLowerCase() !== entry.path!.replace(/\\/g, '/').toLowerCase()
-      return e.handle !== entry.handle && e.name !== entry.name
-    })
-    await write(list)
-    return list
-  } catch {
-    return listRecent()
-  }
+  const pathKey = entry.path?.replace(/\\/g, '/').toLowerCase()
+  const list = (await read()).filter((e) => {
+    if (pathKey) return !e.path || e.path.replace(/\\/g, '/').toLowerCase() !== pathKey
+    return !!e.path || e.name !== entry.name || e.at !== entry.at
+  })
+  await write(list)
+  return list
 }

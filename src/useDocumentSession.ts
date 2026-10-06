@@ -522,9 +522,24 @@ export function useDocumentSession() {
         await openWithInputFallback()
       }
     } catch (e) {
-      if (!entry.path) setRecent(await removeRecent(entry))
+      if (!entry.path) {
+        try {
+          setRecent(await removeRecent(entry))
+        } catch (removeError) {
+          console.warn(`Could not remove missing recent document "${entry.name}".`, removeError)
+        }
+      }
       const message = entry.path ? messageOf(e) : `הקובץ "${entry.name}" לא נמצא. ייתכן שהוא הועבר או נמחק.`
       fail('לא ניתן לפתוח את הקובץ', new Error(message))
+    }
+  }
+
+  const forgetRecent = async (entry: RecentEntry) => {
+    try {
+      setRecent(await removeRecent(entry))
+      notify(`"${entry.name}" הוסר מרשימת האחרונים.`)
+    } catch (e) {
+      fail('לא ניתן להסיר את הקובץ מרשימת האחרונים', e)
     }
   }
 
@@ -601,6 +616,7 @@ export function useDocumentSession() {
     openTextFile,
     openHandle,
     openRecent,
+    forgetRecent,
     save,
     saveAs,
     autosave,

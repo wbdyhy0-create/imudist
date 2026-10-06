@@ -10,6 +10,7 @@ interface Props {
   onNew: (preset?: PagePreset, unit?: Unit) => void
   onOpen: () => void
   onOpenRecent: (entry: RecentEntry) => void
+  onRemoveRecent: (entry: RecentEntry) => void
 }
 
 type PresetCategory = 'print' | 'digital'
@@ -17,7 +18,7 @@ type PresetCategory = 'print' | 'digital'
 const formatDate = (ms: number) =>
   new Date(ms).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
+export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRecent }: Props) {
   const [category, setCategory] = useState<PresetCategory>('print')
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const thumbnailTasks = useRef(new Map<string, Promise<string | null>>())
@@ -125,6 +126,17 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
                   </span>
                   <span className="recent-name">{r.name}</span>
                   <span className="recent-date">{formatDate(r.at)}</span>
+                </button>
+                <button
+                  className="recent-remove"
+                  type="button"
+                  title="הסר מרשימת האחרונים"
+                  aria-label={`הסר את ${r.name} מרשימת האחרונים`}
+                  onClick={() => onRemoveRecent(r)}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 7 10 10M17 7 7 17" />
+                  </svg>
                 </button>
               </li>
             ))}

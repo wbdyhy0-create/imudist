@@ -660,6 +660,7 @@ export default function App() {
               onNew={openNewDocument}
               onOpen={() => void session.openFile()}
               onOpenRecent={(entry) => void session.openRecent(entry)}
+              onRemoveRecent={(entry) => void session.forgetRecent(entry)}
             />
           )}
           {dialogOpen && !preview && <div className="stage-dim" />}

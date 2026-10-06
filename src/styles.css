@@ -880,10 +880,13 @@ svg { display: block; }
   background: #101010; border: 1px solid var(--border-strong); border-radius: 6px; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); pointer-events: none;
 }
 .recent-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
-.recent-list li { min-width: 0; }
+.recent-list li { min-width: 0; position: relative; }
 .recent-list button { width: 100%; min-height: 148px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 8px; border-radius: 8px; text-align: center; }
 .recent-list button:hover { background: var(--bg-raised); }
 .recent-list svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+.recent-list .recent-remove { position: absolute; inset-block-start: 8px; inset-inline-end: 8px; z-index: 1; width: 28px; height: 28px; min-height: 0; padding: 0; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-panel); color: var(--text-dim); }
+.recent-list .recent-remove:hover, .recent-list .recent-remove:focus-visible { background: var(--hover); border-color: var(--border-strong); color: var(--text); outline: none; }
+.recent-list .recent-remove svg { width: 16px; height: 16px; stroke: currentColor; }
 .recent-thumb-wrap { width: 84px; height: 68px; display: grid; place-items: center; flex: none; }
 .recent-thumb { display: block; max-width: 84px; max-height: 68px; object-fit: contain; border: 1px solid #aaa; }
 .recent-thumb-placeholder { width: 44px; height: 68px; }
