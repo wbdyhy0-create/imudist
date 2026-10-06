@@ -23,10 +23,14 @@ interface Props {
   keepFirstMixed?: boolean
   keepLastMixed?: boolean
   onKeepLinesChange: (patch: KeepLinesPatch) => void
+  /** every selected paragraph keeps with the one after it (a verse, a heading: never alone at the bottom of a frame) */
+  keepWithNext?: boolean
+  keepWithNextMixed?: boolean
+  onKeepWithNextChange?: (on: boolean) => void
 }
 
 /** Window > פסקה (Ctrl+Alt+L): paragraph layout, spacing, indents and line-break controls. */
-export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingChange, keepFirstLines, keepLastLines, keepFirstMixed, keepLastMixed, onKeepLinesChange }: Props) {
+export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingChange, keepFirstLines, keepLastLines, keepFirstMixed, keepLastMixed, onKeepLinesChange, keepWithNext = false, keepWithNextMixed = false, onKeepWithNextChange }: Props) {
   return (
     <aside className="props-panel" aria-label="פסקה">
       <h2 className="props-title">פסקה</h2>
@@ -102,6 +106,21 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
             </div>
             <p className="muted">0 מבטל את ההגבלה. הכללים חלים על כל הפסקאות שבבחירה.</p>
           </Group>
+
+          {onKeepWithNextChange && (
+            <Group title="שמירה על רצף">
+              <label className="page-bar-check" title="הפסקאות שבבחירה לא יישארו לבד בתחתית עמוד: הן עוברות לעמוד הבא יחד עם תחילת הפסקה שאחריהן">
+                <input
+                  type="checkbox"
+                  checked={keepWithNext && !keepWithNextMixed}
+                  ref={(el) => { if (el) el.indeterminate = keepWithNextMixed }}
+                  onChange={(event) => onKeepWithNextChange(event.target.checked)}
+                />
+                שמור עם הפסקה הבאה
+              </label>
+              <p className="muted">חל רק על הפסקאות שבבחירה (או על הפסקה שבה הסמן), בלי לשנות את הסגנון שלהן. אם כמה פסקאות רצופות מסומנות, הן עוברות יחד.</p>
+            </Group>
+          )}
 
         </>
       )}

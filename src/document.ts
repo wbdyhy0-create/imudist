@@ -214,6 +214,8 @@ export type CharacterStyleSettings = Partial<Pick<CharStyle, 'fontFamily' | 'col
 export interface CharacterStyleRecord {
   id: string
   name: string
+  /** the style this one is based on: what this one does not set itself it takes from there */
+  basedOnId?: string
   patch: CharacterStyleSettings
 }
 
@@ -377,7 +379,7 @@ export interface TextFrame extends TextStyle {
    * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
    * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
    */
-  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number })[]
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number })[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number
@@ -446,7 +448,7 @@ export interface ParagraphStyleRecord {
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean }
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number }
 }
 
 /** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */

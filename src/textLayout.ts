@@ -284,18 +284,19 @@ function lineStartAtOffset(
   offset: number,
   paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale'>,
   patches?: ParagraphPatch[],
+  floats: WrapFloat[] = [],
 ): number {
   const prefixEnd = Math.min(end, offset + 1)
   const prefix = story.slice(start, prefixEnd)
   const prefixRuns = sliceRuns(runs, start, prefixEnd)
-  const lines = countWrappedLines(m, prefix, prefixRuns, paraOpts, patches)
+  const lines = countWrappedLines(m, prefix, prefixRuns, paraOpts, patches, floats)
   if (lines <= 1) return start
 
   let low = start + 1
   let high = prefixEnd
   while (low < high) {
     const middle = (low + high) >> 1
-    const count = countWrappedLines(m, story.slice(start, middle), sliceRuns(runs, start, middle), paraOpts, patches)
+    const count = countWrappedLines(m, story.slice(start, middle), sliceRuns(runs, start, middle), paraOpts, patches, floats)
     if (count >= lines) high = middle
     else low = middle + 1
   }
@@ -314,12 +315,12 @@ function lineStartAtOffset(
 /**
  * Keeps a paragraph's own first/last lines (`TextFrame.paraKeepFirstLines`/`paraKeepLastLines`) from splitting off
  * alone into the next frame (a widow/orphan): `end`, as `fitEnd` found it, may fall inside a paragraph that asked
- * for this. If cutting there would leave fewer than the wanted number of lines on either side of the cut, the whole
- * paragraph is pushed into the next frame instead - not just its last few lines, which would need re-measuring the
- * cut point line by line; simpler, and still what the reader actually notices (no stranded line), at the cost of
- * sometimes leaving a little more blank room at the bottom of the earlier frame than strictly necessary. Never moves
- * `end` before `start`: a paragraph that's the very first thing in its frame has nowhere earlier to go, and is left
- * as `fitEnd` found it rather than emptying the frame.
+ * for this. With too few of its FIRST lines before the cut (an orphan) the whole paragraph moves to the next frame:
+ * lines cannot be pulled forward from there. With too few of its LAST lines after the cut (a widow) only the missing
+ * lines are taken back from the end of this frame, as many as it takes for the next one to open with enough of them,
+ * as long as the part that stays still has its own minimum; only when it would not, the whole paragraph moves. Never
+ * moves `end` before `start`: a paragraph that's the very first thing in its frame has nowhere earlier to go as a
+ * whole (it can still give back lines), and is otherwise left as `fitEnd` found it rather than emptying the frame.
  */
 function adjustForKeepLines(
   m: HTMLDivElement,
@@ -353,6 +354,17 @@ function adjustForKeepLines(
   const violatesFirst = keepFirst > 0 && linesBefore < Math.min(keepFirst, totalLines)
   const violatesLast = keepLast > 0 && linesAfter > 0 && linesAfter < keepLast
   if (!violatesFirst && !violatesLast) return end
+  if (violatesLast && !violatesFirst) {
+    // the next frame would open with too few of the paragraph's last lines: give it the missing ones from here, if what
+    // stays keeps at least its own minimum
+    const missing = keepLast - linesAfter
+    if (linesBefore - missing >= Math.max(1, Math.min(keepFirst, totalLines))) {
+      let cut = end
+      const floor = Math.max(start, paraStart)
+      for (let line = 0; line < missing && cut > floor; line++) cut = lineStartAtOffset(m, story, runs, start, cut, cut - 1, paraOpts, patches, floats)
+      if (cut > floor) return cut
+    }
+  }
   return paraStart > start ? paraStart : end
 }
 

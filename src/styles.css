@@ -666,6 +666,9 @@ svg { display: block; }
    reorders correctly within that — that part is the browser's ordinary bidi algorithm, not tied to this setting. */
 .text-frame-scale > .text-frame-body, .text-frame-scale > .rich-editor { position: absolute; top: var(--text-body-top, 0); left: 0; }
 .text-frame-body { width: 100%; height: var(--text-body-height, 100%); overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.paragraph-list-item { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: start; }
+.paragraph-list-item::before { content: attr(data-list-marker); display: block; grid-column: 1; grid-row: 1; width: auto; direction: ltr; unicode-bidi: isolate; text-align: end; line-height: inherit; transform: translateY(var(--list-marker-offset, 0px)); white-space: nowrap; user-select: none; pointer-events: none; }
+.paragraph-list-content { display: block; grid-column: 2; grid-row: 1; min-width: 0; white-space: pre-wrap; }
 .wrap-float { pointer-events: none; user-select: none; }
 .rich-editor {
   display: block; width: 100%; height: var(--text-body-height, 100%); overflow: hidden; outline: 0; white-space: pre-wrap; overflow-wrap: anywhere;

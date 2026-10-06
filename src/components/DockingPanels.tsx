@@ -27,6 +27,17 @@ interface DragState {
   canFloat: boolean
 }
 
+const TAB_ORDER_KEY = 'imudist.dockTabOrder'
+
+function loadTabOrder(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) ?? 'null')
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => panel.id), openId, onOpenChange }: Props) {
   const available = panels.filter((panel) => panel.visible !== false && enabledPanelIds.includes(panel.id))
   // panels stay mounted (just hidden) once opened: their own state — the Layers panel's list of layers, the selected
@@ -36,18 +47,21 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
   // a floating panel (the style manager) opens from its tab, never by itself: on start it used to sit open over the canvas
   const [floatingId, setFloatingId] = useState<string | null>(null)
   const [floatingPos, setFloatingPos] = useState({ x: 0, y: 60 })
-  const [tabOrder, setTabOrder] = useState<string[]>([])
+  const [tabOrder, setTabOrder] = useState<string[]>(loadTabOrder)
   const [dragLayerId, setDragLayerId] = useState<string | null>(null)
   const [dockOverId, setDockOverId] = useState<string | null>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   useEffect(() => {
+    // ids of tabs that aren't available right now stay in the saved order, so hiding a panel doesn't forget its place
     setTabOrder((current) => {
-      const ids = available.map((panel) => panel.id)
-      const next = [...current.filter((id) => ids.includes(id)), ...ids.filter((id) => !current.includes(id))]
-      return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next
+      const next = [...current, ...available.map((panel) => panel.id).filter((id) => !current.includes(id))]
+      return next.length === current.length ? current : next
     })
   }, [panels])
+  useEffect(() => {
+    try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(tabOrder)) } catch { /* a convenience only */ }
+  }, [tabOrder])
   const ordered = [...available].sort((a, b) => tabOrder.indexOf(a.id) - tabOrder.indexOf(b.id))
 
   const moveTab = (from: string, to: string) => setTabOrder((current) => {

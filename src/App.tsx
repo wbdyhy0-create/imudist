@@ -13,6 +13,7 @@ import { emptyPrimaryFrameIds } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
 import { baseName, pickFiles } from './fileio'
+import { mergeCharacterStyles, remapNestedStyles } from './characterStyleTree'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { readEpsFile } from './importEps'
@@ -293,13 +294,16 @@ export default function App() {
     if (files.length > 0) await placeFiles(files)
   }
   // Paragraph Styles panel's "ייבוא סגנונות" (Load Paragraph Styles…): read another Imudist file and merge
-  // its paragraph styles into this document's, renaming/renumbering ids as needed so nothing collides.
+  // its paragraph and character styles into this document's, renaming/renumbering ids as needed so nothing collides.
   const importParagraphStyles = async () => {
     const [file] = await pickFiles(FILE_EXT)
     if (!file) return
     try {
       const parsed = parseDocument(await file.text(), baseName(file.name))
-      sessionRef.current.changeParagraphStyles(mergeParagraphStyles(sessionRef.current.paragraphStyles, parsed.paragraphStyles))
+      // the character styles come along, and the nested rules of the paragraph styles are pointed at their new ids; one undo step
+      const characters = mergeCharacterStyles(sessionRef.current.characterStyles, parsed.characterStyles ?? [])
+      const paragraphs = mergeParagraphStyles(sessionRef.current.paragraphStyles, remapNestedStyles(parsed.paragraphStyles, characters.idMap))
+      sessionRef.current.pages.commit({ paragraphStyles: paragraphs, ...(characters.styles !== sessionRef.current.characterStyles ? { characterStyles: characters.styles } : {}) })
     } catch (e) {
       session.showError('לא ניתן לייבא את הסגנונות', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }

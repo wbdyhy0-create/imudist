@@ -1,6 +1,14 @@
-import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharStyle, type Run, type TextAlign, type TextStyle, type TocFootnoteReference, type TocPageReference } from './document'
+import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharacterStyleSettings, type CharStyle, type Run, type TextAlign, type TextStyle, type TocFootnoteReference, type TocPageReference } from './document'
 import { mergeRuns } from './story'
 import { unzipEntry } from './zip'
+
+/** a Word character style that text in the document uses: it comes in as a character style of the document */
+export interface ImportedCharacterStyle {
+  /** the Word style id; the runs of the imported text carry it as `charStyleId` until the styles are matched with the document's */
+  wordId: string
+  name: string
+  patch: CharacterStyleSettings
+}
 
 /** Text (with character formatting) brought in from another file, ready to be placed into frames. */
 export interface PlacedText {
@@ -12,6 +20,8 @@ export interface PlacedText {
   style: TextStyle
   /** Word paragraph styles found in the source document, keyed by their Word style id. */
   paragraphStyles?: ImportedParagraphStyle[]
+  /** Word character styles that runs of `text` use (a run says which one in its `charStyleId`). */
+  characterStyles?: ImportedCharacterStyle[]
   /** One Word style id for every paragraph in `text`, in paragraph order. */
   paragraphStyleIds?: string[]
   /** Display names matching paragraphStyleIds, kept as a stable fallback when local ids change. */
@@ -91,6 +101,8 @@ interface RProps {
   font?: string
   fontCs?: string
   color?: string
+  /** points, positive raises (w:position) */
+  baselineShift?: number
   align?: TextAlign
 }
 interface ThemeFonts {
@@ -147,6 +159,8 @@ function readRPr(rPr: Element | null, theme?: ThemeFonts): RProps {
   else if (csTheme === 'minorBidi') props.fontCs = theme?.minorBidi
   const color = attr(child(rPr, 'color'), 'val')
   if (color && /^[0-9a-f]{6}$/i.test(color)) props.color = `#${color}`
+  const position = Number(attr(child(rPr, 'position'), 'val'))
+  if (Number.isFinite(position) && position !== 0) props.baselineShift = position / 2
   return props
 }
 
@@ -201,7 +215,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   }
 
   // styles: paragraph / character styles with inheritance, plus the document's defaults
-  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string }>()
+  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string; isDefault: boolean }>()
   let defaults: RProps = {}
   let defaultParagraphStyle: string | null = null
   if (stylesXml) {
@@ -210,7 +224,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     for (const s of elements(sdoc, 'style')) {
       const id = attr(s, 'styleId')
       if (!id) continue
-      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '' })
+      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '', isDefault: attr(s, 'default') === '1' })
       if (attr(s, 'type') === 'paragraph' && attr(s, 'default') === '1') defaultParagraphStyle = id
     }
   }
@@ -219,6 +233,31 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     return s ? { ...overlay(resolve(s.basedOn, depth + 1), s.props), ...(s.align ? { align: s.align } : {}) } : {}
   }
   const baseSize = defaults.size ?? 12
+  // Word character styles that runs use (not the default one): they come in as character styles, and the runs stay tied to them
+  const usedCharStyles = new Map<string, ImportedCharacterStyle>()
+  const linkCharStyle = (id: string | null | undefined): string | undefined => {
+    const style = id ? styles.get(id) : undefined
+    if (!id || !style || style.type !== 'character' || style.isDefault) return undefined
+    if (!usedCharStyles.has(id)) {
+      // only what the style itself sets, in the Hebrew (complex script) variants first: these books are Hebrew
+      const r = resolve(id)
+      const size = r.sizeCs ?? r.size
+      const font = r.fontCs ?? r.font
+      usedCharStyles.set(id, {
+        wordId: id,
+        name: style.name,
+        patch: {
+          ...(r.bold !== undefined ? { weight: r.bold ? 700 : 400 } : {}),
+          ...(r.italic !== undefined ? { italic: r.italic } : {}),
+          ...(size !== undefined ? { fontSize: size } : {}),
+          ...(font ? { fontFamily: font } : {}),
+          ...(r.color ? { color: r.color } : {}),
+          ...(r.baselineShift ? { baselineShift: r.baselineShift } : {}),
+        },
+      })
+    }
+    return id
+  }
   const baseFont = defaults.font ?? DEFAULT_TEXT_STYLE.fontFamily
 
   const wordFootnotes = new Map<string, Omit<ImportedFootnote, 'anchor'>>()
@@ -261,6 +300,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
           const props = overlay(overlay(paragraphProps, resolve(attr(child(rPr, 'rStyle'), 'val'))), readRPr(rPr, themeFonts))
           if (props.hidden) continue
           const rtl = HEBREW_OR_ARABIC.test(runText)
+          const link = linkCharStyle(attr(child(rPr, 'rStyle'), 'val'))
           last = {
             fontFamily: (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
             fontSize: (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
@@ -268,6 +308,8 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
             weight: props.bold ? 700 : 400,
             italic: !!props.italic,
             tracking: 0,
+            ...(props.baselineShift ? { baselineShift: props.baselineShift } : {}),
+            ...(link ? { charStyleId: link } : {}),
           }
           if (!noteStyle) noteStyle = { ...DEFAULT_TEXT_STYLE, ...last, align: align ?? alignFor(runText), ...(align ? { align } : {}) }
           noteParts.push({ text: runText, style: last })
@@ -348,6 +390,8 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
       // superscript numbers looked like another typeface. It takes the font and size of the text right before it instead.
       const referenceOnly = runReferences.length > 0 && !text.split(FOOTNOTE_MARKER).join('').trim()
       const inherit = referenceOnly && firstRun ? last : null
+      // a run that holds a footnote mark is Word's "footnote reference" run: it is not a character style of the text
+      const link = runReferences.length === 0 ? linkCharStyle(attr(child(rPr, 'rStyle'), 'val')) : undefined
       last = {
         fontFamily: inherit?.fontFamily ?? (rtl ? props.fontCs : undefined) ?? props.font ?? props.fontCs ?? baseFont,
         fontSize: inherit?.fontSize ?? (rtl ? props.sizeCs : undefined) ?? props.size ?? baseSize,
@@ -355,6 +399,8 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
         weight: props.bold ? 700 : 400,
         italic: !!props.italic,
         tracking: 0,
+        ...(props.baselineShift && !inherit ? { baselineShift: props.baselineShift } : {}),
+        ...(link ? { charStyleId: link } : {}),
       }
       if (!firstRun) firstRun = last
       pieces.push({ text, style: last })
@@ -417,7 +463,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     const source = wordFootnotes.get(wordId)
     return source && anchor < text.length ? [{ anchor, ...source }] : []
   })
-  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(footnotes.length ? { footnotes } : {}) }
+  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(footnotes.length ? { footnotes } : {}), ...(usedCharStyles.size ? { characterStyles: [...usedCharStyles.values()] } : {}) }
 }
 
 /** Read a file the user picked (or dropped): .docx or plain text. */

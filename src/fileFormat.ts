@@ -62,6 +62,7 @@ import {
 import { footnoteTextStyle } from './footnoteLayout'
 import { normalizeDeg } from './frames'
 import type { DocContent, ParentOverride } from './pages'
+import { repairBasedOn } from './characterStyleTree'
 import { sanitizeTable } from './table'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
@@ -324,6 +325,8 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
             ? {
                 ...paragraphStyleOf(value),
                 ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}),
+                ...(value.listKind === 'bullet' || value.listKind === 'number' ? { listKind: value.listKind } : {}),
+                ...(typeof value.listGap === 'number' && Number.isFinite(value.listGap) ? { listGap: num(value.listGap, 4, 0, 100) } : {}),
                 ...(typeof value.windowIndent === 'number' && Number.isFinite(value.windowIndent) && value.windowIndent > 0
                   ? { windowIndent: num(value.windowIndent, 0, 0, MAX_PAGE_PT), ...(typeof value.windowWords === 'number' && Number.isFinite(value.windowWords) ? { windowWords: int(value.windowWords, 1, 1, 4) } : {}) }
                   : {}),
@@ -356,6 +359,8 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.tint === 'number' && Number.isFinite(s.tint) ? { tint: num(s.tint, 100, 0, 100) } : {}),
     ...(typeof s.keepLinesTogether === 'boolean' ? { keepLinesTogether: s.keepLinesTogether } : {}),
     ...(typeof s.keepWithNext === 'boolean' ? { keepWithNext: s.keepWithNext } : {}),
+    ...(s.listKind === 'bullet' || s.listKind === 'number' ? { listKind: s.listKind } : {}),
+    ...(typeof s.listGap === 'number' && Number.isFinite(s.listGap) ? { listGap: num(s.listGap, 4, 0, 100) } : {}),
     ...(typeof s.overprintFill === 'boolean' ? { overprintFill: s.overprintFill } : {}),
     ...(typeof s.overprintStroke === 'boolean' ? { overprintStroke: s.overprintStroke } : {}),
     ...(typeof s.strokeWidth === 'number' && Number.isFinite(s.strokeWidth) ? { strokeWidth: num(s.strokeWidth, 0, 0, 200) } : {}),
@@ -436,9 +441,9 @@ function parseCharacterStyles(v: unknown): CharacterStyleRecord[] {
     let id = str(raw.id, '').slice(0, 100)
     if (!id || used.has(id)) id = `character-style-${styles.length}-${Math.random().toString(36).slice(2, 8)}`
     used.add(id)
-    styles.push({ id, name: str(raw.name, id).slice(0, 200), patch: parseCharacterStyleSettings(raw.patch) })
+    styles.push({ id, name: str(raw.name, id).slice(0, 200), ...(typeof raw.basedOnId === 'string' && raw.basedOnId ? { basedOnId: raw.basedOnId.slice(0, 100) } : {}), patch: parseCharacterStyleSettings(raw.patch) })
   }
-  return styles
+  return repairBasedOn(styles)
 }
 
 function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_FOOTNOTE_CONFIG, paragraphStyles: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES): TextFrame[] {

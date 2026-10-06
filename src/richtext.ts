@@ -95,6 +95,8 @@ export interface RunNodeOpts {
    */
   paraGaps?: (number | undefined)[]
   startParaIndex?: number
+  /** unscaled story line height, used to offset list markers by paragraph spacing only */
+  baseLeading?: number
   /**
    * points, unscaled: indents the first line of EVERY paragraph by this much (not just the story's very first
    * paragraph) — a `.para-indent` spacer, the width twin of `.para-gap`, placed right before each paragraph's own
@@ -259,6 +261,8 @@ export interface ParagraphPatch {
   firstLineIndent?: number
   secondLineIndent?: number
   align?: TextAlign
+  listKind?: 'bullet' | 'number'
+  listGap?: number
   /**
    * points, unscaled: "a window in the text" (טיפוגרפיה > יצירת חלון בטקסט) - the paragraph's SECOND line starts this far
    * in from the side the text starts on, leaving room under the (larger) opening word(s) of the first line.
@@ -269,7 +273,20 @@ export interface ParagraphPatch {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent)
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind)
+
+/** A CSS-generated marker for a list paragraph; adjacent numbered paragraphs continue their count. */
+export function paragraphListMarker(patches: ParagraphPatch[] | undefined, paragraph: number): string | undefined {
+  const kind = patches?.[paragraph]?.listKind
+  if (kind === 'bullet') return '•'
+  if (kind !== 'number') return undefined
+  let number = 1
+  for (let index = paragraph - 1; index >= 0 && patches?.[index]?.listKind === 'number'; index--) number++
+  return `.${number}`
+}
+
+export const paragraphListMarkerWidth = (marker: string) => Math.max(0.75, marker.length * 0.65 + 0.15)
+export const paragraphListMarkerOffset = (gap: number, leading: number, scale = 1) => Math.max(0, gap - leading * scale)
 
 /**
  * The empty float that makes a paragraph's second line shorter on the right (the reading start side) by `width`:
@@ -341,6 +358,14 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     const end = nl < 0 ? text.length : nl + 1
     const block = document.createElement('div')
     const patch = patches?.[paragraph]
+    const marker = paragraphListMarker(patches, paragraph)
+    if (marker && (pos > 0 || !!opts.atParaStart)) {
+      block.className = 'paragraph-list-item'
+      block.dataset.listMarker = marker
+      block.style.display = 'grid'
+      block.style.gridTemplateColumns = `${paragraphListMarkerWidth(marker)}em minmax(0, 1fr)`
+      block.style.columnGap = `${(patch?.listGap ?? 4) * scale}px`
+    }
     if (patch?.align) {
       const css = cssTextAlign(patch.align)
       block.style.textAlign = css.textAlign
@@ -398,6 +423,10 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     const spacers: HTMLElement[] = []
     const gapBefore = pos > 0 ? (opts.paraGaps ? opts.paraGaps[paragraph - 1] : opts.paraLineHeight) ?? 0 : 0
     if (gapBefore) spacers.push(paraGap(gapBefore * scale))
+    if (marker && gapBefore) {
+      const leading = patch?.leading ?? opts.baseLeading ?? Math.round(styleAtChar(runs, pos, DEFAULT_TEXT_STYLE).fontSize * 1.25)
+      block.style.setProperty('--list-marker-offset', `${paragraphListMarkerOffset(gapBefore * scale, leading, scale)}px`)
+    }
     const indent = indentOf(paragraph)
     if (indent && isOpening) spacers.push(paraIndent(indent * scale))
     if (lead) for (const spacer of spacers.reverse()) lead.insertBefore(spacer, lead.firstChild)
@@ -406,7 +435,12 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       block.style.minHeight = windowBlockMinHeight(gapBefore * scale)
       block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale))
     }
-    block.appendChild(nodes)
+    if (marker && (pos > 0 || !!opts.atParaStart)) {
+      const content = document.createElement('span')
+      content.className = 'paragraph-list-content'
+      content.appendChild(nodes)
+      block.appendChild(content)
+    } else block.appendChild(nodes)
     frag.appendChild(block)
     pos = end
     paragraph++
@@ -460,7 +494,9 @@ function locate(root: HTMLElement, target: number): [Node, number] {
   let last: Text | null = null
   for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
     last = n
-    if (target <= pos + n.data.length) return [n, target - pos]
+    // an offset between two paragraphs is the start of the later one: the end of the earlier one, after its break, is
+    // a place with no box of its own, where the caret is not drawn and an arrow key finds no line to move from
+    if (target < pos + n.data.length || (target === pos + n.data.length && !n.data.endsWith('\n'))) return [n, target - pos]
     pos += n.data.length
   }
   return last ? [last, last.data.length] : [root, 0]

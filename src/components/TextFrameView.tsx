@@ -3,7 +3,7 @@ import { useRef } from 'react'
 import type { FootnoteHeadingDecoration } from '../document'
 import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { baselineShiftCss, caretOffsetAt, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle } from '../richtext'
+import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -107,6 +107,8 @@ interface Props {
   overflow: boolean
   /** the last visible paragraph continues in the next frame */
   continuesParagraphAtEnd: boolean
+  /** the story goes on in a linked frame after this one (this frame is not where it ends) */
+  storyContinues?: boolean
   hasPrev: boolean
   zoom: number
   /** screen position of world (0, 0) inside the sheet */
@@ -128,7 +130,7 @@ interface Props {
   startParaIndex: number
   /** true when `slice`'s first character is itself a paragraph's first character, not a wrapped continuation */
   atParaStart: boolean
-  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'secondLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
+  paragraphPatches?: ParagraphPatch[]
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
@@ -180,7 +182,7 @@ interface Props {
   onCopyText: () => string | null
   onBackspaceAtStart: () => void
   onStopEditing: () => void
-  onLineBoundary?: (dir: 1 | -1, x: number) => void
+  onLineBoundary?: (dir: 1 | -1, x: number, toStart?: boolean) => void
   onDragOutside?: (clientX: number, clientY: number, anchor: number) => void
 }
 
@@ -200,6 +202,7 @@ function RichText({
   continuesParagraphAtEnd,
   paragraphPatches,
   baseFontSize,
+  baseLeading,
   footnoteMarkers,
   tocPageMarkers,
   tocLeaderMarkers,
@@ -217,8 +220,9 @@ function RichText({
   firstLineIndent: (paragraphIndex: number) => number
   baseAlign: TextStyle['align']
   continuesParagraphAtEnd: boolean
-  paragraphPatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'firstLineIndent' | 'secondLineIndent' | 'indentLeft' | 'indentRight' | 'align'>> & { windowIndent?: number })[]
+  paragraphPatches?: ParagraphPatch[]
   baseFontSize: number
+  baseLeading: number
   footnoteMarkers?: Record<number, string>
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
@@ -356,6 +360,7 @@ function RichText({
       ))}
       {paragraphNodes.map((paragraph) => {
         const patch = paragraphPatches?.[paragraph.index]
+        const marker = paragraph.index > startParaIndex || atParaStart ? paragraphListMarker(paragraphPatches, paragraph.index) : undefined
         const isJustified = (patch?.align ?? baseAlign) === 'justify' || (patch?.align ?? baseAlign) === 'justifyCenter'
         const wordSpacing = isJustified && (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined) ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
         const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
@@ -363,7 +368,9 @@ function RichText({
         // spacer closing the previous paragraph sits on its first line (so the floated band starts that much lower)
         const windowWidth = patch?.windowIndent && (paragraph.index > startParaIndex || atParaStart) ? patch.windowIndent * scale : 0
         const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
-        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : undefined} style={{ ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight || patch?.secondLineIndent ? `${((patch.indentRight ?? 0) + (patch.secondLineIndent ?? 0)) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{paragraph.nodes}</div>
+        const markerOffset = marker ? paragraphListMarkerOffset(windowGap, patch?.leading ?? baseLeading, scale) : 0
+        const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px` } as CSSProperties : {}
+        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined, paddingRight: patch?.indentRight || patch?.secondLineIndent ? `${((patch.indentRight ?? 0) + (patch.secondLineIndent ?? 0)) * scale}px` : undefined, gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
       })}
     </>
   )
@@ -494,9 +501,11 @@ export function TextFrameView(p: Props) {
           startParaIndex={p.startParaIndex}
           atParaStart={p.atParaStart}
           firstLineIndent={style.firstLineIndent ?? 0}
+          baseLeading={style.leading ?? defaultLeading(style)}
           paragraphPatches={paragraphPatches}
           baseAlign={style.align}
           continuesAtEnd={p.continuesParagraphAtEnd}
+          storyContinues={p.storyContinues}
           footnoteMarkers={p.footnoteMarkers}
           tocPageMarkers={p.tocPageMarkers}
           tocLeaderMarkers={p.tocLeaderMarkers}
@@ -533,6 +542,7 @@ export function TextFrameView(p: Props) {
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
             baseFontSize={style.fontSize}
+            baseLeading={style.leading ?? defaultLeading(style)}
             baseAlign={style.align}
             continuesParagraphAtEnd={p.continuesParagraphAtEnd}
           />

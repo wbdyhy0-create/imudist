@@ -134,13 +134,22 @@ export function editStory(
 /** a blank that is shown: a space (or a no-break one) - the kind that is collapsed when it comes twice in a row */
 const isBlank = (c: string) => c === ' ' || c === ' '
 /** characters that show nothing at all: blanks, and the directional / zero-width marks Hebrew text carries around */
-const isInvisible = (c: string) => isBlank(c) || /[​-‏‪-‮⁠-⁤؜﻿]/.test(c)
+const isInvisibleMark = (c: string) => isBlank(c) || /[​-‏‪-‮⁠-⁤؜﻿]/.test(c)
+
+/**
+ * What a paragraph can hold and still be an empty one: blanks and the invisible marks above, tabs, every kind of space
+ * (en, em, thin, narrow no-break, ideographic...), and any other formatting character (soft hyphen, line separator...). The
+ * private-use characters the program puts into a story (footnote references, page numbers) are none of these, so a
+ * paragraph that holds one is never taken for empty.
+ */
+const isInvisible = (c: string) => isInvisibleMark(c) || /[\p{White_Space}\p{Cf}\u00AD\u180E]/u.test(c)
 
 /**
  * The [from, to) ranges of `text` that spacing cleanup removes:
  * - a paragraph with nothing in it - empty, or only blanks and invisible marks (a "\n \n" or "\n‏\n" is as much
  *   an empty paragraph as "\n\n") - together with its own paragraph break, wherever it is, including at the very
- *   start of the story; one that is the story's last paragraph loses its content and leaves the break before it;
+ *   start of the story; empty paragraphs at the very end of the story go with the break that leads into them, so the
+ *   story ends where its last paragraph with text does (no empty line is left under it for the caret to sit on);
  * - in every other paragraph, the blanks of a run of two or more after the first (a no-break space counts as a blank).
  * Only paragraphs inside [from, to) are looked at; ranges come back in order and never overlap.
  */
@@ -188,7 +197,38 @@ export function cleanSpacingPlan(text: string, from = 0, to = text.length): { ra
     if (nl < 0) break
     start = nl + 1
   }
-  return { ranges, dropped }
+  return withTrailingBreaksRemoved(text, from, to, ranges, dropped)
+}
+
+/**
+ * The empty paragraphs at the end of the story go with the break in front of them: "א\n\n" is "א", not "א\n" (that left an
+ * empty paragraph, and a caret line, under the last line of text). Only when the whole end of the story is in the cleaned
+ * part, and only when there is a paragraph with text before it to end the story on.
+ */
+function withTrailingBreaksRemoved(text: string, from: number, to: number, ranges: [number, number][], dropped: number[]): { ranges: [number, number][]; dropped: number[] } {
+  if (to < text.length) return { ranges, dropped }
+  // where the last paragraph that has something in it ends, and how many paragraphs follow it
+  let lastEnd = -1
+  let after = 0
+  let index = 0
+  for (let start = 0; start <= text.length; index++) {
+    const nl = text.indexOf('\n', start)
+    const end = nl < 0 ? text.length : nl
+    let empty = true
+    for (let i = start; i < end; i++) if (!isInvisible(text[i])) { empty = false; break }
+    if (!empty) {
+      lastEnd = end
+      after = 0
+    } else after++
+    if (nl < 0) break
+    start = nl + 1
+  }
+  if (lastEnd < 0 || after === 0 || lastEnd < from) return { ranges, dropped }
+  const firstGone = index - after + 1
+  return {
+    ranges: [...ranges.filter(([a]) => a < lastEnd), [lastEnd, text.length]],
+    dropped: [...dropped.filter((d) => d < firstGone), ...Array.from({ length: after }, (_, k) => firstGone + k)],
+  }
 }
 
 /**

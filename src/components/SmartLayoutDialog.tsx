@@ -3,6 +3,8 @@ import { NumberField } from './NumberField'
 
 export interface SmartLayoutRequest {
   scope: 'doc' | 'selection'
+  /** only the paragraphs in this paragraph style (the running text, say); '' = every paragraph in the scope */
+  styleId: string
   keepLines: boolean
   keepFirst: number
   keepLast: number
@@ -15,7 +17,10 @@ export interface SmartLayoutRequest {
 interface Props {
   /** a text selection or a selected text frame exists right now, so "בחירה בלבד" has something to act on */
   hasSelection: boolean
-  onApply: (r: SmartLayoutRequest) => void
+  /** the document's paragraph styles, to limit the tools to one of them */
+  styles: { id: string; name: string }[]
+  /** how many paragraphs the tools acted on (0: none was in the chosen style, so nothing happened and the dialog stays) */
+  onApply: (r: SmartLayoutRequest) => number
   onClose: () => void
 }
 
@@ -32,8 +37,20 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  *  first/last lines together across a frame break, keeping its last word from breaking off alone, and tightening a
  *  short last line - because the same content (a paragraph's line breaks) decides all three, and the first and
  *  third can work against each other (see the tracking field's own note below). */
-export function SmartLayoutDialog({ hasSelection, onApply, onClose }: Props) {
+const STYLE_KEY = 'imudist.smartLayoutStyle'
+
+export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Props) {
   const [scope, setScope] = useState<'doc' | 'selection'>(hasSelection ? 'selection' : 'doc')
+  // the style used last time, when it is still there
+  const [styleId, setStyleId] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STYLE_KEY) ?? ''
+      return styles.some((style) => style.id === saved) ? saved : ''
+    } catch {
+      return ''
+    }
+  })
+  const [nothingMatched, setNothingMatched] = useState(false)
   const [keepLines, setKeepLines] = useState(true)
   const [keepFirst, setKeepFirst] = useState(2)
   const [keepLast, setKeepLast] = useState(2)
@@ -68,6 +85,21 @@ export function SmartLayoutDialog({ hasSelection, onApply, onClose }: Props) {
             בחירה בלבד
           </button>
         </div>
+
+        <label className="field-label">החל על פסקאות בסגנון
+          <select
+            className="select"
+            value={styleId}
+            onChange={(e) => {
+              setStyleId(e.target.value)
+              setNothingMatched(false)
+            }}
+          >
+            <option value="">כל הפסקאות</option>
+            {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+          </select>
+        </label>
+        {nothingMatched && <p className="dlg-summary" role="alert">אין בטווח שבחרת פסקאות בסגנון הזה, ולכן לא שונה כלום.</p>}
 
         <fieldset className="dlg-block">
           <legend>מניעת יתומים ואלמנות</legend>
@@ -114,7 +146,10 @@ export function SmartLayoutDialog({ hasSelection, onApply, onClose }: Props) {
         </p>
 
         <div className="modal-buttons">
-          <button className="btn primary" disabled={nothingChosen} onClick={() => onApply({ scope, keepLines, keepFirst, keepLast, noBreak, smartTracking, tracking, maxWords })}>
+          <button className="btn primary" disabled={nothingChosen} onClick={() => {
+              try { localStorage.setItem(STYLE_KEY, styleId) } catch { /* a convenience only */ }
+              setNothingMatched(onApply({ scope, styleId, keepLines, keepFirst, keepLast, noBreak, smartTracking, tracking, maxWords }) === 0)
+            }}>
             החל
           </button>
           <button className="btn" onClick={onClose}>

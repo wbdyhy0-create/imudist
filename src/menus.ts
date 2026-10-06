@@ -189,7 +189,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
         sep,
         doc('יתומים, אלמנות וכיווץ…', '', (ws) => ws.openSmartLayout()),
-        { label: 'ייבוא סגנונות…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
+        { label: 'ייבוא סגנונות פסקה ותו…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
       ],
     },
     {

@@ -38,6 +38,7 @@ interface Props {
   /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
   baseAlign?: TextAlign
+  baseLeading?: number
   continuesAtEnd?: boolean
   /**
    * Where the workspace's own selection lies in this frame's text ([a, b), a === b for a caret). When the DOM is
@@ -68,9 +69,16 @@ interface Props {
   /**
    * Up/Down at the caret's first/last line, with nowhere further to go in this frame's own text (a native
    * ArrowUp/ArrowDown that didn't move the caret to a different line): `x` is the caret's horizontal position on
-   * screen, to land on the same column of the linked frame this jumps to.
+   * screen, to land on the same column of the linked frame this jumps to. `toStart`: the caret was at the very end of the
+   * paragraph that ends this frame's text, so what it moves to is the start of the next frame, not a column of its first line.
    */
-  onLineBoundary?: (dir: 1 | -1, x: number) => void
+  onLineBoundary?: (dir: 1 | -1, x: number, toStart?: boolean) => void
+  /**
+   * The story goes on in a linked frame after this one. The place right after the paragraph break that ends this frame's
+   * text is then the first place of that next frame, not an empty line of this one: no line is kept for it here, and a
+   * caret that gets there is handed over (a click below the last line stays at the end of that line).
+   */
+  storyContinues?: boolean
 }
 
 /** The caret's own client rect (a collapsed range can report none right at a line wrap; the full range then stands in). */
@@ -109,7 +117,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? p.selectionHint ?? readSelectionIn(el) : null
     if (rebuilt) {
@@ -125,6 +133,7 @@ export function RichEditor(p: Props) {
             startParaIndex: p.startParaIndex,
             atParaStart: p.atParaStart,
             firstLineIndent: p.firstLineIndent,
+            baseLeading: p.baseLeading,
             footnoteMarkers: p.footnoteMarkers,
             tocPageMarkers: p.tocPageMarkers,
             tocLeaderMarkers: p.tocLeaderMarkers,
@@ -136,8 +145,10 @@ export function RichEditor(p: Props) {
         ),
       )
       // keeps the empty last line reachable - inside the last paragraph's own block when there is one (a block-level
-      // sibling after it would start a whole new, unstyled line of its own instead of extending that paragraph)
-      if (p.text.endsWith('\n')) {
+      // sibling after it would start a whole new, unstyled line of its own instead of extending that paragraph). Only at the
+      // end of the story: in a frame the story goes on after, that line would be a place of its own for the caret under the
+      // last line, when the place after the break is really the next frame's first
+      if (p.text.endsWith('\n') && !p.storyContinues) {
         const lastBlock = el.lastElementChild
         ;(lastBlock?.tagName === 'DIV' ? lastBlock : el).appendChild(document.createElement('br'))
       }
@@ -268,7 +279,16 @@ export function RichEditor(p: Props) {
         const editor = event.currentTarget
         requestAnimationFrame(() => {
           const selection = readSelectionIn(editor)
-          if (selection) live.current.onSelect(selection[0], selection[1])
+          if (!selection) return
+          const l = live.current
+          // a click under the last line of a frame the story goes on after: the caret stays at the end of that line
+          if (selection[0] === selection[1] && l.storyContinues && l.text.endsWith('\n') && selection[0] >= l.text.length) {
+            const at = l.text.length - 1
+            setSelectionIn(editor, at, at)
+            l.onSelect(at, at)
+            return
+          }
+          l.onSelect(selection[0], selection[1])
         })
       }}
       onPointerDown={(e) => {
@@ -302,34 +322,51 @@ export function RichEditor(p: Props) {
         if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyA' || e.key.toLowerCase() === 'a') && live.current.onSelectAll) {
           e.preventDefault()
           e.stopPropagation()
-          const selection = document.getSelection()
-          const range = document.createRange()
-          range.selectNodeContents(e.currentTarget)
-          selection?.removeAllRanges()
-          selection?.addRange(range)
-          requestAnimationFrame(() => live.current.onSelectAll?.())
+          live.current.onSelectAll()
           return
         }
         if (e.key === 'Escape') {
           e.currentTarget.blur()
           return
         }
+        // an arrow at the very end of the paragraph that ends this frame's text, when the story goes on: the next place is the
+        // first place of the next frame, so the caret goes there (its start) - whether the arrow could not move it any further
+        // (Down on the last line, forward in the text's direction) or was the one that crossed the break
+        let atFrameEnd = false
+        if ((e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && live.current.storyContinues && live.current.onLineBoundary && live.current.text.endsWith('\n')) {
+          const el = e.currentTarget
+          const now = readSelectionIn(el)
+          atFrameEnd = !!now && now[0] === now[1] && now[0] >= live.current.text.length - 1
+          if (atFrameEnd) {
+            requestAnimationFrame(() => {
+              if (document.activeElement !== el) return
+              const at = readSelectionIn(el)
+              const l = live.current
+              // a Left/Right that moved the caret back into the text is not a step forward
+              if (!at || at[0] !== at[1] || at[0] < l.text.length - 1) return
+              l.onLineBoundary?.(1, 0, true)
+            })
+          }
+        }
         // a plain Up/Down (no selection, no modifier) at the edge of this frame's own text: let the browser try to
         // move the caret first, then check whether it actually changed line - if not, there is nowhere further to
         // go here, so hand off to the linked frame at the same horizontal position
-        if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && p.onLineBoundary) {
+        if (!atFrameEnd && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && p.onLineBoundary) {
           const el = e.currentTarget
           const sel = document.getSelection()
           const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
           if (range && range.collapsed) {
             const before = caretRect(range)
+            // measured from the top of this box, not of the screen: a caret on the last visible line makes the browser scroll the
+            // view as it moves, so that on screen it can stay exactly where it was while it did move to the next line
+            const beforeTop = before.top - el.getBoundingClientRect().top
             const dir = e.key === 'ArrowDown' ? 1 : -1
             const x = (before.left + before.right) / 2
             requestAnimationFrame(() => {
               if (document.activeElement !== el) return
               const s = document.getSelection()
               const r = s && s.rangeCount > 0 ? s.getRangeAt(0) : null
-              if (r && r.collapsed && Math.abs(caretRect(r).top - before.top) < 1) live.current.onLineBoundary?.(dir, x)
+              if (r && r.collapsed && Math.abs(caretRect(r).top - el.getBoundingClientRect().top - beforeTop) < 1) live.current.onLineBoundary?.(dir, x)
             })
           }
         }

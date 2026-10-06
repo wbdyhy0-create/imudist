@@ -214,3 +214,8 @@
 .character-style-setting.off { opacity: 0.4; pointer-events: none; }
 .nested-styles-editor { display: flex; flex-direction: column; gap: 10px; }
 .nested-rule { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; }
+.style-modified { margin-inline-start: 4px; color: var(--accent-line); font-weight: 700; }
+.paragraph-style-row.focused:not(.active) { box-shadow: inset 3px 0 0 var(--accent-line); }
+.character-style-actions { flex-wrap: wrap; }
+.character-style-find { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.character-style-find-buttons { display: flex; gap: 6px; }

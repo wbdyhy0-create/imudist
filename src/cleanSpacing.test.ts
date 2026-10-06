@@ -20,12 +20,24 @@ describe('cleanSpacing', () => {
     expect(clean('א\n\n\n\nב')).toBe('א\nב')
   })
 
-  it('also at the start of the story, and leaves a single break at the end', () => {
+  it('also at the start of the story, and at the end of it: the story ends on its last paragraph with text', () => {
     expect(clean('\n\nא\nב')).toBe('א\nב')
     expect(clean('  \nא')).toBe('א')
-    expect(clean('א\n')).toBe('א\n')
-    expect(clean('א\n\n')).toBe('א\n')
-    expect(clean('א\n   ')).toBe('א\n')
+    expect(clean('א\n')).toBe('א')
+    expect(clean('א\n\n')).toBe('א')
+    expect(clean('א\n\n\n\n')).toBe('א')
+    expect(clean('א\n   ')).toBe('א')
+    expect(clean('א\nב\n \n\n')).toBe('א\nב')
+  })
+
+  it('counts tabs, every kind of space and other invisible characters as nothing in a paragraph', () => {
+    expect(clean('א\n\t\nב')).toBe('א\nב')
+    expect(clean('א\n\u2003\u202F\nב')).toBe('א\nב')
+    expect(clean('א\n\u00AD\nב')).toBe('א\nב')
+    expect(clean('א\n\u3000 \t\u200F\nב')).toBe('א\nב')
+    // ...but not a paragraph with a character in it, or one that holds a footnote reference
+    expect(clean('א\nב\nג')).toBe('א\nב\nג')
+    expect(clean('א\n\uE006\nג')).toBe('א\n\uE006\nג')
   })
 
   it('leaves a paragraph of text alone, tabs and single spaces included', () => {
@@ -42,6 +54,8 @@ describe('cleanSpacing', () => {
   it('ranges come back in order and never overlap', () => {
     const ranges = cleanSpacingRanges('  \nא  ב\n\n\nג')
     expect(ranges).toEqual([[0, 3], [5, 6], [8, 9], [9, 10]])
+    // a story that ends with empty paragraphs: one range takes them and the break in front of them
+    expect(cleanSpacingRanges('א  ב\n\n\n')).toEqual([[2, 3], [4, 7]])
   })
 })
 
@@ -69,5 +83,14 @@ describe('cleaning a frame keeps what belongs to each paragraph that stays', () 
     expect(out.text).toBe('כותרת\nפסקה\nסוף')
     expect(out.paragraphStyleIds).toEqual(['heading', 'body', 'end'])
     expect(out.paraSpaceBefore).toEqual([20, 5, 9])
+  })
+
+  it('a story that ends with empty paragraphs loses them, and their entries in the lists, but not what belongs to the last real paragraph', () => {
+    const f = frame('א\nב\n\n \n', { paragraphStyleIds: ['a', 'b', 'x', 'y', 'z'], paraSpaceBefore: [1, 2, null, null, null] })
+    const { ranges, dropped } = cleanSpacingPlan(f.text)
+    const out = replaceInStory(f, ranges.map(([start, end]) => ({ start, end, replacement: '' })), { dropParagraphs: dropped })
+    expect(out.text).toBe('א\nב')
+    expect(out.paragraphStyleIds).toEqual(['a', 'b'])
+    expect(out.paraSpaceBefore).toEqual([1, 2])
   })
 })

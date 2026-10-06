@@ -26,6 +26,7 @@ import {
   KEEP_ALL_LINES,
   DEFAULT_SHAPE_STROKE,
   DEFAULT_TEXT_STYLE,
+  DEFAULT_SPACE_AFTER,
   FOOTNOTE_MARKER,
   frameSpaceAfter,
   frameSpaceBefore,
@@ -82,7 +83,7 @@ import {
 import { isTyping } from '../dom'
 import { HANDLES, angleOf, chainOf, dragBox, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
-import { countWords, type ImportedParagraphStyle, type PlacedText } from '../importText'
+import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, columnBoxes, pourText, primaryTextFrameOrder, primaryTextFramePageGroups, type FlowMode } from '../placeText'
@@ -134,6 +135,7 @@ import { TocDialog } from './TocDialog'
 import { InsertTableDialog, type InsertTableOptions } from './InsertTableDialog'
 import { CharacterStylesPanel } from './CharacterStylesPanel'
 import { applyNestedStyles } from '../nestedStyles'
+import { descendantsOf, ownSettings, resolveCharacterPatch, resolvedRecords, withoutCharacterStyle } from '../characterStyleTree'
 import { TableOptionsDialog } from './TableOptionsDialog'
 import { CellOptionsDialog, type CellPatch } from './CellOptionsDialog'
 import type { TableSelection } from './TableView'
@@ -392,6 +394,27 @@ interface TextSel {
   a: number
   b: number
 }
+interface SampledTextDesign {
+  character: CharStyle
+  paragraph: {
+    align: TextAlign
+    leading?: number
+    wordSpacingMin?: number
+    wordSpacingMax?: number
+    spaceBefore: number
+    spaceAfter: number
+    indentLeft?: number
+    indentRight?: number
+    firstLineIndent?: number
+    secondLineIndent?: number
+    windowIndent?: number
+    windowWords?: number
+  }
+  keepFirstLines: number
+  keepLastLines: number
+  keepWithNext: number
+  feather?: GradientFeather
+}
 
 interface FootnoteSel {
   headId: string
@@ -586,7 +609,7 @@ export function Workspace({
     window.addEventListener('keydown', cancel)
     return () => window.removeEventListener('keydown', cancel)
   }, [colorSamplerActive])
-  const [sampledTextStyle, setSampledTextStyle] = useState<CharStyle | null>(null)
+  const [sampledTextStyle, setSampledTextStyle] = useState<SampledTextDesign | null>(null)
   const [space, setSpace] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
   useEffect(() => {
@@ -1070,6 +1093,10 @@ export function Workspace({
       if (paragraphLists.paragraphStyleNames) paragraphLists.paragraphStyleNames = setAt(paragraphLists.paragraphStyleNames, style.name)
       paragraphLists.paragraphStylePatches = setAt(paragraphLists.paragraphStylePatches ?? paragraphLists.paragraphStyleIds!.map(() => ({})), layoutPatch)
     }
+    // nested styles follow the typing: the paragraph(s) the edit touched have the opening styled again
+    const touched = new Set<number>()
+    for (let index = paraIndexAt(r.text, from), last = paraIndexAt(r.text, from + insert.length); index <= last; index++) touched.add(index)
+    runs = applyNestedToFrame({ ...head, ...paragraphLists, text: r.text, runs, footnotes }, paragraphStyles, undefined, touched).runs ?? runs
     commitStory(headId, r.text, runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
@@ -1737,8 +1764,8 @@ export function Workspace({
   }
 
   /** an Up/Down that ran out of lines in `frameId`: hand the caret to the previous/next frame of its thread, same column */
-  const pendingLineJump = useRef<{ frameId: string; x: number; dir: 1 | -1 } | null>(null)
-  const jumpToLine = (frameId: string, dir: 1 | -1, x: number) => {
+  const pendingLineJump = useRef<{ frameId: string; x: number; dir: 1 | -1; toStart: boolean } | null>(null)
+  const jumpToLine = (frameId: string, dir: 1 | -1, x: number, toStart = false) => {
     const fl = flow.get(frameId)
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
@@ -1746,12 +1773,12 @@ export function Workspace({
     const index = chain.findIndex((f) => f.id === frameId)
     const target = chain[index + dir]
     if (!target) return
-    pendingLineJump.current = { frameId: target.id, x, dir }
+    pendingLineJump.current = { frameId: target.id, x, dir, toStart }
     setSelectedId(target.id)
     setEditingId(target.id)
     const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
     setSelectedPage(page)
-    goTo(spreadOfPage(page))
+    // no jump to the page as a whole: the view moves only as far as it takes for the line the caret lands on to show (below)
   }
   // the target frame's editor mounts only once `editingId` reaches it; then its DOM is up so caretOffsetAt can place
   // the caret at the requested column, on its first line (arriving from above) or its last (arriving from below) -
@@ -1764,10 +1791,51 @@ export function Workspace({
     pendingLineJump.current = null
     const el = document.querySelector('.rich-editor')
     if (!(el instanceof HTMLElement)) return
+    // the edge the caret arrives at (the top of the frame coming from above, its bottom coming from below) is brought into
+    // the view, with a little room round it, by the smallest scroll that does it - and nothing at all when it is in view
+    // already, so the arrows keep going from where the eye is
+    const viewport = vpRef.current
+    if (viewport) {
+      const room = 48
+      const box = viewport.getBoundingClientRect()
+      const frameBox = el.getBoundingClientRect()
+      const edge = pending.dir === 1 ? frameBox.top + 4 : frameBox.bottom - 4
+      const dy = edge < box.top + room ? edge - (box.top + room) : edge > box.bottom - room ? edge - (box.bottom - room) : 0
+      const across = Math.min(Math.max(pending.toStart ? frameBox.right - 4 : pending.x, frameBox.left), frameBox.right)
+      const dx = across < box.left + room ? across - (box.left + room) : across > box.right - room ? across - (box.right - room) : 0
+      if (dy !== 0) viewport.scrollTop += dy
+      if (dx !== 0) setScrollX(viewport, getScrollX(viewport) + dx)
+    }
+    // from the very end of the last paragraph of the previous frame: the start of this one, not a column of its first line
+    if (pending.toStart) {
+      askSelection(pending.frameId, 0, 0)
+      return
+    }
     const rect = el.getBoundingClientRect()
-    const y = pending.dir === 1 ? rect.top + 4 : rect.bottom - 4
-    const offset = caretOffsetAt(pending.x, y, el)
-    if (offset !== null) askSelection(pending.frameId, offset, offset)
+    // a point inside the line the caret arrives on: the frame's own edge can lie in empty room under the last line (a frame
+    // whose text ends short of its bottom), where there is no text to hit - so the last paragraph's own box is measured
+    const block = pending.dir === 1 ? el.firstElementChild : el.lastElementChild
+    const blockBox = block instanceof HTMLElement ? block.getBoundingClientRect() : null
+    const y = pending.dir === 1 ? rect.top + 4 : blockBox && blockBox.height > 0 ? Math.min(rect.bottom - 4, blockBox.bottom - 3) : rect.bottom - 4
+    const column = Math.min(Math.max(pending.x, rect.left + 2), rect.right - 2)
+    // a point at the very edge of the frame can be over one of its selection handles, which are not part of its text: when it
+    // misses, the next tries are a little further in along the line, and a little further in from the edge of the frame
+    const inward = Math.sign((rect.left + rect.right) / 2 - column) || 1
+    let offset: number | null = null
+    for (const deeper of [0, 10]) {
+      for (const across of [0, 8]) {
+        offset = caretOffsetAt(column + inward * across, pending.dir === 1 ? y + deeper : y - deeper, el)
+        if (offset !== null) break
+      }
+      if (offset !== null) break
+    }
+    if (offset === null) return
+    // below the last line of a frame the story goes on after, the place after its last break is the next frame's first: the
+    // caret stays on that last line
+    const landed = flow.get(pending.frameId)
+    const last = landed && landed.end < landed.story.length && landed.story[landed.end - 1] === '\n' ? Math.max(0, landed.end - landed.start - 1) : Infinity
+    const at = Math.min(offset, last)
+    askSelection(pending.frameId, at, at)
   }, [editingId])
 
   /**
@@ -1817,16 +1885,16 @@ export function Workspace({
     // keep a selection that runs across several frames (Ctrl+A, or a drag from one frame into another) while the
     // browser reports only this frame's part of it: the editing frame's own selection change would otherwise overwrite
     // the whole range with just its own piece, so a drag from page 2 up into page 1 ended up selecting page 1 alone
-    if (textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
-      const ownA = Math.max(textSel.a, fl.start) - fl.start
-      const ownB = Math.min(textSel.b, fl.end) - fl.start
-      if (a === ownA && b === ownB) return
-    }
-    setTextSel((prev) =>
-      prev && prev.headId === fl.headId && prev.a === fl.start + a && prev.b === fl.start + b
+    setTextSel((prev) => {
+      if (prev && prev.headId === fl.headId && (prev.a < fl.start || prev.b > fl.end)) {
+        const ownA = Math.max(prev.a, fl.start) - fl.start
+        const ownB = Math.min(prev.b, fl.end) - fl.start
+        if (a === ownA && b === ownB) return prev
+      }
+      return prev && prev.headId === fl.headId && prev.a === fl.start + a && prev.b === fl.start + b
         ? prev
-        : { headId: fl.headId, a: fl.start + a, b: fl.start + b },
-    )
+        : { headId: fl.headId, a: fl.start + a, b: fl.start + b }
+    })
   }
 
   /** text for the clipboard when the selection spans several frames */
@@ -1928,8 +1996,91 @@ export function Workspace({
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
     const selected = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length
-    const style = selected && textSel ? styleAtChar(runs, textSel.a, head) : charStyleOf(head)
-    setSampledTextStyle(style)
+    const offset = Math.max(0, Math.min(head.text.length, selected && textSel ? Math.min(textSel.a, textSel.b) : fl.start))
+    const paragraphIndex = paraIndexAt(head.text, offset)
+    const paragraphOverride = head.paragraphStylePatches?.[paragraphIndex] ?? {}
+    const style = charStyleOf(styleAtChar(runs, offset, head))
+    setSampledTextStyle({
+      character: style,
+      paragraph: {
+        align: paragraphOverride.align ?? head.align,
+        leading: paragraphOverride.leading ?? head.leading,
+        wordSpacingMin: paragraphOverride.wordSpacingMin ?? head.wordSpacingMin,
+        wordSpacingMax: paragraphOverride.wordSpacingMax ?? head.wordSpacingMax,
+        spaceBefore: head.paraSpaceBefore?.[paragraphIndex] ?? paragraphOverride.spaceBefore ?? (paragraphIndex === 0 ? head.spaceBefore ?? 0 : 0),
+        spaceAfter: head.paraSpaceAfter?.[paragraphIndex] ?? paragraphOverride.spaceAfter ?? head.spaceAfter ?? DEFAULT_SPACE_AFTER,
+        indentLeft: paragraphOverride.indentLeft ?? head.indentLeft,
+        indentRight: paragraphOverride.indentRight ?? head.indentRight,
+        firstLineIndent: paragraphOverride.firstLineIndent ?? head.firstLineIndent,
+        secondLineIndent: paragraphOverride.secondLineIndent ?? head.secondLineIndent,
+        windowIndent: paragraphOverride.windowIndent,
+        windowWords: paragraphOverride.windowWords,
+      },
+      keepFirstLines: head.paraKeepFirstLines?.[paragraphIndex] ?? 0,
+      keepLastLines: head.paraKeepLastLines?.[paragraphIndex] ?? 0,
+      keepWithNext: head.paraKeepWithNext?.[paragraphIndex] ?? 0,
+      feather: head.feather,
+    })
+  }
+
+  const applySampledTextStyle = (id: string, sampled: SampledTextDesign) => {
+    const part = flow.get(id)
+    const head = part && frames.find((frame) => frame.id === part.headId)
+    if (!part || !head) return
+    const chainIds = new Set(chainOf(frames, id).map((frame) => frame.id))
+    const runs = normalizeRuns(head.text, head.runs, head)
+    const characterPatch: Partial<CharStyle> = {
+      fontFamily: sampled.character.fontFamily,
+      color: sampled.character.color,
+      outlineColor: sampled.character.outlineColor,
+      outlineWidth: sampled.character.outlineWidth,
+      shadowOffsetX: sampled.character.shadowOffsetX,
+      shadowOffsetY: sampled.character.shadowOffsetY,
+      shadowOffset: sampled.character.shadowOffset,
+      shadowColor: sampled.character.shadowColor,
+      shadowOpacity: sampled.character.shadowOpacity,
+      fontSize: sampled.character.fontSize,
+      weight: sampled.character.weight,
+      italic: sampled.character.italic,
+      tracking: sampled.character.tracking,
+      baselineShift: sampled.character.baselineShift,
+      charStyleId: sampled.character.charStyleId,
+    }
+    const paragraphPatch = sampled.paragraph
+    const paragraphCount = head.text.split('\n').length
+    const paragraphStylePatches = Array.from({ length: paragraphCount }, () => ({ ...paragraphPatch }))
+    const paraSpaceBefore = Array.from({ length: paragraphCount }, () => paragraphPatch.spaceBefore)
+    const paraSpaceAfter = Array.from({ length: paragraphCount }, () => paragraphPatch.spaceAfter)
+    const paraKeepFirstLines = Array.from({ length: paragraphCount }, () => sampled.keepFirstLines || null)
+    const paraKeepLastLines = Array.from({ length: paragraphCount }, () => sampled.keepLastLines || null)
+    const paraKeepWithNext = Array.from({ length: paragraphCount }, () => sampled.keepWithNext || null)
+    onFramesChange(frames.map((frame) => {
+      if (!chainIds.has(frame.id)) return frame
+      return {
+        ...frame,
+        ...characterPatch,
+        align: paragraphPatch.align,
+        leading: paragraphPatch.leading,
+        wordSpacingMin: paragraphPatch.wordSpacingMin,
+        wordSpacingMax: paragraphPatch.wordSpacingMax,
+        spaceBefore: paragraphPatch.spaceBefore,
+        spaceAfter: paragraphPatch.spaceAfter,
+        indentLeft: paragraphPatch.indentLeft,
+        indentRight: paragraphPatch.indentRight,
+        firstLineIndent: paragraphPatch.firstLineIndent,
+        secondLineIndent: paragraphPatch.secondLineIndent,
+        feather: sampled.feather,
+        ...(frame.id === head.id ? {
+          runs: styleRange(runs, 0, head.text.length, characterPatch),
+          paragraphStylePatches,
+          paraSpaceBefore,
+          paraSpaceAfter,
+          paraKeepFirstLines,
+          paraKeepLastLines,
+          paraKeepWithNext,
+        } : {}),
+      }
+    }), `eyedropper-text:${head.id}`)
   }
 
   const applyAlign = (id: string, align: TextAlign) => {
@@ -1983,6 +2134,19 @@ export function Workspace({
       if (patch.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, i, patch.spaceAfter)
     }
     onFramesChange(frames.map((f) => (f.id === head.id ? { ...f, paraSpaceBefore, paraSpaceAfter } : f)), `parastyle:${id}:${Object.keys(patch).join(',')}`)
+  }
+
+  /** "keep with next" for the selected paragraphs only (or the caret's), without touching their paragraph style */
+  const applyParagraphKeepWithNext = (id: string, on: boolean) => {
+    const flowPart = flow.get(id)
+    const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
+    if (!flowPart || !head) return
+    const range = textSel?.headId === head.id && textSel.b <= head.text.length
+      ? { a: Math.min(textSel.a, textSel.b), b: Math.max(textSel.a, textSel.b) }
+      : { a: flowPart.start, b: Math.max(flowPart.start + 1, flowPart.end) }
+    let paraKeepWithNext = head.paraKeepWithNext
+    for (const index of paragraphsInRange(head.text, range.a, range.b)) paraKeepWithNext = setParaOverride(paraKeepWithNext, index, on ? 1 : undefined)
+    onFramesChange(frames.map((frame) => (frame.id === head.id ? { ...frame, paraKeepWithNext } : frame)), `paragraph-keep-next:${id}`)
   }
 
   const applyParagraphKeepLines = (id: string, patch: Partial<{ first: number; last: number }>) => {
@@ -2043,8 +2207,44 @@ export function Workspace({
     return id
   }
 
-  const preparePlacedText = (placed: PlacedText): PlacedText => {
-    if (!placed.paragraphStyles?.length) return placed
+  /** the character style id the document gives a Word character style: a style of the same name is reused */
+  const importedCharacterStyleId = (style: ImportedCharacterStyle, used: Set<string>) => {
+    const stem = `character-style-word-${style.wordId.replace(/[^a-zA-Z0-9_-]/g, '-') || 'style'}`
+    let id = stem
+    let suffix = 2
+    while (used.has(id)) id = `${stem}-${suffix++}`
+    used.add(id)
+    return id
+  }
+
+  /**
+   * Imported text, made ready to be placed: its Word paragraph styles and character styles are matched with (or added to) the
+   * document's, and the text is told the ids. `styles` / `chars` are the lists the document will have once it is placed.
+   */
+  const preparePlacedText = (placed: PlacedText): { placed: PlacedText; styles: ParagraphStyleRecord[]; chars: CharacterStyleRecord[] } => {
+    const nextChars = [...characterStyles]
+    const charIds = new Map<string, string>()
+    if (placed.characterStyles?.length) {
+      const usedChars = new Set(nextChars.map((style) => style.id))
+      for (const imported of placed.characterStyles) {
+        const existing = nextChars.find((style) => style.name === imported.name)
+        const id = existing?.id ?? importedCharacterStyleId(imported, usedChars)
+        charIds.set(imported.wordId, id)
+        if (!existing) nextChars.push({ id, name: imported.name, patch: imported.patch })
+      }
+    }
+    const relinkRuns = (runs: Run[]) => runs.map((run) => {
+      const link = run.style.charStyleId
+      if (!link) return run
+      const mapped = charIds.get(link)
+      const { charStyleId: _old, ...rest } = run.style
+      return { ...run, style: mapped ? { ...rest, charStyleId: mapped } : rest }
+    })
+    const withCharacterStyles: PlacedText = charIds.size
+      ? { ...placed, runs: relinkRuns(placed.runs), ...(placed.footnotes?.length ? { footnotes: placed.footnotes.map((note) => (note.runs ? { ...note, runs: relinkRuns(note.runs) } : note)) } : {}) }
+      : placed
+    const chars = nextChars.length === characterStyles.length ? characterStyles : nextChars
+    if (!placed.paragraphStyles?.length) return { placed: withCharacterStyles, styles: paragraphStyles, chars }
     const nextStyles = [...paragraphStyles]
     const used = new Set(nextStyles.map((style) => style.id))
     const ids = new Map<string, string>()
@@ -2056,12 +2256,23 @@ export function Workspace({
     }
     if (nextStyles.length !== paragraphStyles.length) onParagraphStylesChange(nextStyles)
     return {
-      ...placed,
-      ...(placed.paragraphStyleIds?.length ? { paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) } : {}),
-      ...(placed.footnotes?.length ? { footnotes: placed.footnotes.map((note) => ({ ...note, ...(note.paragraphStyleId ? { paragraphStyleId: ids.get(note.paragraphStyleId) ?? note.paragraphStyleId } : {}) })) } : {}),
+      placed: {
+        ...withCharacterStyles,
+        ...(placed.paragraphStyleIds?.length ? { paragraphStyleIds: placed.paragraphStyleIds.map((wordId) => ids.get(wordId) ?? wordId) } : {}),
+        ...(withCharacterStyles.footnotes?.length ? { footnotes: withCharacterStyles.footnotes.map((note) => ({ ...note, ...(note.paragraphStyleId ? { paragraphStyleId: ids.get(note.paragraphStyleId) ?? note.paragraphStyleId } : {}) })) } : {}),
+      },
+      styles: nextStyles,
+      chars,
     }
   }
 
+  /** the frames of a placing result: layer, and the nested styles of the stories whose text just changed */
+  const placedFrames = (resultFrames: TextFrame[], prepared: { styles: ParagraphStyleRecord[]; chars: CharacterStyleRecord[] }, layer: (frame: TextFrame) => string | undefined) =>
+    resultFrames.map((frame) => {
+      const before = frames.find((old) => old.id === frame.id)
+      const nested = !before || before.text !== frame.text ? applyNestedToFrame(frame, prepared.styles, undefined, undefined, [], resolvedRecords(prepared.chars)) : frame
+      return { ...nested, layerId: layer(frame) }
+    })
 
   /**
    * Pour the loaded text into a frame at `target`. Shift = semi-automatic, Alt = automatic, otherwise the mode
@@ -2070,8 +2281,9 @@ export function Workspace({
   const doPlace = (target: { box: Box; frameId?: string }, mods: { shift: boolean; alt: boolean }) => {
     if (!placing) return
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
-    const result = pourText(doc, frames, images, preparePlacedText(placing), target, mode, shapes)
-    pageOps.commit({ ...result.content, frames: result.content.frames.map((frame) => ({ ...frame, layerId: activeLayerId })) })
+    const prepared = preparePlacedText(placing)
+    const result = pourText(doc, frames, images, prepared.placed, target, mode, shapes)
+    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => activeLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     onPlacingChange(result.remaining)
@@ -2080,8 +2292,9 @@ export function Workspace({
   const replaceSelectedText = (placed: PlacedText) => {
     const selected = selectedId ? frames.find((frame) => frame.id === selectedId) : undefined
     if (!selected) return false
-    const result = pourText(doc, frames, images, preparePlacedText(placed), { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, 'single', shapes)
-    pageOps.commit({ ...result.content, frames: result.content.frames.map((frame) => ({ ...frame, layerId: frame.layerId ?? activeLayerId })) })
+    const prepared = preparePlacedText(placed)
+    const result = pourText(doc, frames, images, prepared.placed, { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, 'single', shapes)
+    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? activeLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     return true
@@ -5853,7 +6066,7 @@ export function Workspace({
       e.stopPropagation()
       e.preventDefault()
       if (sampledTextStyle) {
-        applyCharStyle(id, sampledTextStyle)
+        applySampledTextStyle(id, sampledTextStyle)
         setSampledTextStyle(null)
         setTool('select')
       } else {
@@ -6249,6 +6462,7 @@ export function Workspace({
         : [0]
     : []
   const keepFirstLineValues = new Set(panelParagraphIndexes.map((index) => panelHead?.paraKeepFirstLines?.[index] ?? 0))
+  const keepWithNextValues = new Set(panelParagraphIndexes.map((index) => (panelHead?.paraKeepWithNext?.[index] ? 1 : 0)))
   const keepLastLineValues = new Set(panelParagraphIndexes.map((index) => panelHead?.paraKeepLastLines?.[index] ?? 0))
   const scopePatch = panelHead?.paragraphStylePatches?.[scopeParagraph ?? 0]
   const paragraphStyle: TextStyle | null = panelHead
@@ -6378,6 +6592,8 @@ export function Workspace({
   }
 
   // ── character styles ────────────────────────────────────────────────────────
+  /** the character styles with what each is based on already folded in: what the functions that write a style into text want */
+  const resolvedChars = resolvedRecords(characterStyles)
   /** how a paragraph looks before any character style: the story's own look, then what its paragraph style says */
   const paragraphLookAt = (head: TextFrame, offset: number): CharStyle => {
     const id = paragraphStyleIdOf(head, paraIndexAt(head.text, offset))
@@ -6416,12 +6632,18 @@ export function Workspace({
   /**
    * The nested styles of the paragraph styles in `styles` given to the paragraphs of a story that are in those styles
    * (`onlyStyleId`: just that one; `onlyIndexes`: just those paragraphs). `formerly`: styles the rules of `onlyStyleId` used
-   * before, which are let go of too.
+   * before, which are let go of too. `chars`: the character styles to use when the document's own list is about to change.
    */
-  const applyNestedToFrame = (frame: TextFrame, styles: ParagraphStyleRecord[], onlyStyleId?: string, onlyIndexes?: ReadonlySet<number>, formerly: Iterable<string> = []): TextFrame => {
-    if (!frame.text || characterStyles.length === 0) return frame
+  const applyNestedToFrame = (frame: TextFrame, styles: ParagraphStyleRecord[], onlyStyleId?: string, onlyIndexes?: ReadonlySet<number>, formerly: Iterable<string> = [], chars: CharacterStyleRecord[] = resolvedChars): TextFrame => {
+    if (!frame.text || chars.length === 0) return frame
     const rulesOf = new Map(styles.filter((style) => (!onlyStyleId || style.id === onlyStyleId) && (style.nested?.length || (onlyStyleId && [...formerly].length > 0))).map((style) => [style.id, style.nested ?? []]))
     if (rulesOf.size === 0) return frame
+    // the paragraph style a paragraph is in, looked up in `styles` (the list may be one the document does not have yet)
+    const styleIdOf = (index: number): string | undefined => {
+      const listed = frame.paragraphStyleIds?.[index]
+      const named = frame.paragraphStyleNames?.[index]
+      return styles.find((style) => style.id === listed)?.id ?? styles.find((style) => !!named && style.name === named)?.id ?? styles.find((style) => style.id === frame.paragraphStyleId)?.id ?? styles[0]?.id
+    }
     let runs = normalizeRuns(frame.text, frame.runs, frame)
     let changed = false
     let offset = 0
@@ -6429,10 +6651,10 @@ export function Workspace({
       const start = offset
       offset += paragraph.length + 1
       if (onlyIndexes && !onlyIndexes.has(index)) return
-      const styleId = paragraphStyleIdOf(frame, index)
+      const styleId = styleIdOf(index)
       const rules = styleId ? rulesOf.get(styleId) : undefined
       if (!rules) return
-      const next = applyNestedStyles(frame.text, runs, start, start + paragraph.length, rules, characterStyles, (at) => paragraphLookAt(frame, at), formerly)
+      const next = applyNestedStyles(frame.text, runs, start, start + paragraph.length, rules, chars, (at) => paragraphLookAt(frame, at), formerly)
       if (next !== runs) {
         runs = next
         changed = true
@@ -6448,8 +6670,8 @@ export function Workspace({
   }
 
   /**
-   * The frames with a character style on the selected text (or on the whole text when nothing is picked) - null as the
-   * record takes the style off - or null when there is no text to give it to.
+   * The frames with a character style (as a record that is already resolved) on the selected text, or on the whole text when
+   * nothing is picked - null as the record takes the style off - or null when there is no text to give it to.
    */
   const characterStyleApplied = (record: CharacterStyleRecord | null): TextFrame[] | null => {
     if (footnoteSel) {
@@ -6465,7 +6687,7 @@ export function Workspace({
         const from = partial ? Math.min(footnoteSel.a, footnoteSel.b) : 0
         const to = partial ? Math.max(footnoteSel.a, footnoteSel.b) : item.content.length
         if (to <= from) return item
-        return { ...item, runs: record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(item.content, runs, from, to, characterStyles, () => base) }
+        return { ...item, runs: record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(item.content, runs, from, to, resolvedChars, () => base) }
       })
       return frames.map((frame) => (frame.id === head.id ? { ...frame, footnotes: nextNotes } : frame))
     }
@@ -6474,52 +6696,70 @@ export function Workspace({
     const from = panelSel ? Math.min(panelSel.a, panelSel.b) : 0
     const to = panelSel ? Math.max(panelSel.a, panelSel.b) : panelHead.text.length
     if (to <= from) return null
-    const nextRuns = record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(panelHead.text, runs, from, to, characterStyles, (start) => paragraphLookAt(panelHead, start))
+    const nextRuns = record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(panelHead.text, runs, from, to, resolvedChars, (start) => paragraphLookAt(panelHead, start))
     return frames.map((frame) => (frame.id === panelHead.id ? { ...frame, runs: nextRuns } : frame))
   }
 
   /** a character style on the selected text; null takes the style off */
   const applyCharacterStyleCmd = (styleId: string | null) => {
-    const record = styleId ? characterStyles.find((style) => style.id === styleId) : undefined
+    const record = styleId ? resolvedChars.find((style) => style.id === styleId) : undefined
     if (styleId && !record) return
     const next = characterStyleApplied(record ?? null)
     if (next) onFramesChange(next, `charstyle:${styleId ?? 'none'}`)
   }
 
   /** a new style, given to the selected text right away when asked: one undo step for both */
-  const createCharacterStyle = (name: string, patch: CharacterStyleSettings, apply: boolean) => {
-    const record: CharacterStyleRecord = { id: `character-style-${newFrameId()}`, name, patch }
-    const next = apply ? characterStyleApplied(record) : null
-    pageOps.commit({ characterStyles: [...characterStyles, record], ...(next ? { frames: next } : {}) })
+  const createCharacterStyle = (name: string, patch: CharacterStyleSettings, apply: boolean, basedOnId?: string) => {
+    const record: CharacterStyleRecord = { id: `character-style-${newFrameId()}`, name, ...(basedOnId ? { basedOnId } : {}), patch }
+    const list = [...characterStyles, record]
+    const next = apply ? characterStyleApplied(resolvedRecords(list).find((style) => style.id === record.id) ?? null) : null
+    pageOps.commit({ characterStyles: list, ...(next ? { frames: next } : {}) })
   }
 
-  /** a character style was edited: the text that has it follows, in one undo step with the style itself */
-  const changeCharacterStyle = (id: string, name: string, patch: CharacterStyleSettings) => {
+  /**
+   * A character style was edited: the text that has it - and the text of every style based on it - follows, in one undo
+   * step with the styles themselves.
+   */
+  const changeCharacterStyle = (id: string, name: string, patch: CharacterStyleSettings, basedOnId?: string) => {
     const before = characterStyles.find((style) => style.id === id)
     if (!before) return
-    const nextStyles = characterStyles.map((style) => (style.id === id ? { ...style, name, patch } : style))
-    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => updateCharacterStyleRuns(text, runs, id, before.patch, patch, base)))
+    const { basedOnId: _previousBase, ...rest } = before
+    const nextStyles = characterStyles.map((style) => (style.id === id ? { ...rest, name, ...(basedOnId ? { basedOnId } : {}), patch } : style))
+    const affected = [id, ...descendantsOf(nextStyles, id)]
+    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => affected.reduce(
+      (current, styleId) => updateCharacterStyleRuns(text, current, styleId, resolveCharacterPatch(characterStyles, styleId), resolveCharacterPatch(nextStyles, styleId), base),
+      runs,
+    )))
     pageOps.commit({ characterStyles: nextStyles, ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
   }
 
-  /** deleting a style takes it off all the text that has it first, so nothing is left tied to a style that is gone */
+  /** deleting a style takes it off all the text that has it first, and the styles based on it move up to its own base */
   const deleteCharacterStyle = (id: string) => {
-    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => (characterStyleIdsIn(runs).has(id) ? clearCharacterStyle(text, runs, 0, text.length, characterStyles, base) : runs)))
-    pageOps.commit({ characterStyles: characterStyles.filter((style) => style.id !== id), ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
+    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => (characterStyleIdsIn(runs).has(id) ? clearCharacterStyle(text, runs, 0, text.length, resolvedChars, base) : runs)))
+    pageOps.commit({ characterStyles: withoutCharacterStyle(characterStyles, id), ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
   }
 
-  /** the character style of the selected text: undefined = no text is selected, null = it has none */
-  const activeCharacterStyleId: string | null | undefined = (() => {
+  /** the run style at the start of the selected text: undefined = no text is selected */
+  const activeCharacterRunStyle: CharStyle | undefined = (() => {
     if (footnoteSel) {
       const head = frames.find((frame) => frame.id === footnoteSel.headId)
       const note = head?.footnotes?.find((item) => item.id === footnoteSel.noteId)
       if (!note) return undefined
       const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
-      return styleAtChar(normalizeRuns(note.content, note.runs, base), Math.min(footnoteSel.a, footnoteSel.b), base).charStyleId ?? null
+      return styleAtChar(normalizeRuns(note.content, note.runs, base), Math.min(footnoteSel.a, footnoteSel.b), base)
     }
     if (!panelHead) return undefined
-    const runs = normalizeRuns(panelHead.text, panelHead.runs, panelHead)
-    return styleAtChar(runs, panelSel ? Math.min(panelSel.a, panelSel.b) : 0, panelHead).charStyleId ?? null
+    return styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelSel ? Math.min(panelSel.a, panelSel.b) : 0, panelHead)
+  })()
+  /** the character style of the selected text: undefined = no text is selected, null = it has none */
+  const activeCharacterStyleId: string | null | undefined = activeCharacterRunStyle === undefined ? undefined : activeCharacterRunStyle.charStyleId ?? null
+  /** the selected text differs from its character style in something the style sets: the "+" beside the style's name */
+  const activeCharacterStyleModified = (() => {
+    const id = activeCharacterRunStyle?.charStyleId
+    if (!id || !activeCharacterRunStyle) return false
+    const wanted = resolveCharacterPatch(characterStyles, id) as Record<string, unknown>
+    const have = activeCharacterRunStyle as unknown as Record<string, unknown>
+    return Object.entries(wanted).some(([key, value]) => String(have[key]).toLowerCase() !== String(value).toLowerCase())
   })()
 
   /** what the selected text sets beyond its paragraph's own look: the start of a style made from it */
@@ -6545,6 +6785,58 @@ export function Workspace({
     }
     return patch as CharacterStyleSettings
   }
+
+  /** the style becomes what the selected text looks like (what it keeps from its base is not repeated), and all text with it follows */
+  const redefineCharacterStyle = (id: string) => {
+    const record = characterStyles.find((style) => style.id === id)
+    if (!record) return
+    const patch = ownSettings(characterStyles.map((style) => (style.id === id ? { ...style, patch: characterStyleSelectionLook() } : style)), id)
+    changeCharacterStyle(id, record.name, patch, record.basedOnId)
+  }
+
+  // where a character style is used, in reading order: the body text of each story, then its notes
+  const charStyleSearchIndex = useRef<Record<string, number>>({})
+  const characterStyleHits = (id: string): FindHit[] => {
+    const out: FindHit[] = []
+    headFrames(frames).forEach((head, index) => {
+      const scan = (text: string, runs: Run[], key: (start: number) => number[], noteId?: string) => {
+        let pos = 0
+        let open: number | null = null
+        const close = (end: number) => {
+          if (open === null) return
+          // a paragraph break at the end of the piece is not part of what the style is on
+          const trimmed = text[end - 1] === '\n' ? end - 1 : end
+          if (trimmed > open) out.push({ headId: head.id, ...(noteId ? { noteId } : {}), start: open, end: trimmed, key: key(open) })
+          open = null
+        }
+        for (const run of runs) {
+          const inside = run.style.charStyleId === id
+          if (inside && open === null) open = pos
+          if (!inside) close(pos)
+          pos += run.len
+        }
+        close(pos)
+      }
+      if (head.text) scan(head.text, normalizeRuns(head.text, head.runs, head), (start) => [index, 0, 0, start])
+      for (const note of head.footnotes ?? []) {
+        const base = note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+        scan(note.content, normalizeRuns(note.content, note.runs, base), (start) => [index, 1, note.anchor, start], note.id)
+      }
+    })
+    return out
+  }
+
+  /** selects the next (previous; 0: the first) piece of text that has the character style, and says how many there are */
+  const findCharacterStyle = (id: string, direction: -1 | 0 | 1) => {
+    const hits = characterStyleHits(id)
+    if (hits.length === 0) return 0
+    const previous = charStyleSearchIndex.current[id]
+    const index = direction === 0 || previous === undefined ? (direction < 0 ? hits.length - 1 : 0) : (previous + direction + hits.length) % hits.length
+    charStyleSearchIndex.current[id] = index
+    showFindHit(hits[index])
+    return hits.length
+  }
+
   // the paragraph style the selection (or caret) is in, and whether its text carries changes of its own beyond that style
   // "+": the paragraph(s) the selection is in have changed since we started looking at them - not "differ from the
   // style's own definition" (an older document, or a paragraph a Word import mapped to the wrong style, may already
@@ -6642,11 +6934,19 @@ export function Workspace({
       const usesDefaultStyle = !frame.paragraphStyleId && !hasParagraphStyles && paragraphStyles[0]?.id === id
       if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id) && !usesDefaultStyle) return frame
       // the story as a whole is on this style: its look becomes the frame's own (the keep setting is a paragraph one, not a frame field)
-      const { keepLinesTogether, keepWithNext, ...frameLook } = resolved
+      const { keepLinesTogether, keepWithNext, listKind, listGap, ...frameLook } = resolved
       if ((hasFrameStyle || usesDefaultStyle) && !hasParagraphStyles) {
         const count = frame.text.split('\n').length
         const keep = Array.from({ length: count }, () => (keepLinesTogether ? KEEP_ALL_LINES : null))
-        return { ...frame, ...frameLook, paraKeepFirstLines: keepLinesTogether ? keep : undefined, paraKeepLastLines: keepLinesTogether ? keep : undefined, paraKeepWithNext: keepWithNext ? Array.from({ length: count }, () => 1) : undefined, runs: refreshStyleRuns(frame) }
+        const paragraphStylePatches = Array.from({ length: count }, (_, index) => {
+          const patch = { ...(frame.paragraphStylePatches?.[index] ?? {}) }
+          if (listKind) patch.listKind = listKind
+          else delete patch.listKind
+          if (listKind && listGap !== undefined) patch.listGap = listGap
+          else delete patch.listGap
+          return patch
+        })
+        return { ...frame, ...frameLook, paragraphStylePatches, paraKeepFirstLines: keepLinesTogether ? keep : undefined, paraKeepLastLines: keepLinesTogether ? keep : undefined, paraKeepWithNext: keepWithNext ? Array.from({ length: count }, () => 1) : undefined, runs: refreshStyleRuns(frame) }
       }
       const paragraphStyleIds = frame.paragraphStyleIds ?? []
       const paragraphStylePatches: NonNullable<TextFrame['paragraphStylePatches']> = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
@@ -6660,12 +6960,14 @@ export function Workspace({
       paragraphStyleIds.forEach((styleId, index) => {
         const end = index + 1 < paragraphStyleIds.length ? (frame.text.indexOf('\n', start) + 1 || frame.text.length) : frame.text.length
         if (styleId === id) {
-          runs = applyParagraphLook(runs, start, end, charPatch, characterStyles)
+          runs = applyParagraphLook(runs, start, end, charPatch, resolvedChars)
           // a window under the opening words is not part of the style: it stays when the style is edited
           const keptWindow = paragraphStylePatches[index]?.windowIndent
           const keptWindowWords = paragraphStylePatches[index]?.windowWords
           paragraphStylePatches[index] = {
             ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
+            ...(listKind ? { listKind } : {}),
+            ...(listKind && listGap !== undefined ? { listGap } : {}),
             ...(keptWindow ? { windowIndent: keptWindow, ...(keptWindowWords ? { windowWords: keptWindowWords } : {}) } : {}),
           }
           if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
@@ -6764,16 +7066,17 @@ export function Workspace({
   /** every story touched by the chosen scope, paired with which of its paragraphs are in it: every paragraph of
    *  every story for "doc"; for "selection", the paragraphs the current text selection spans, or (nothing text-
    *  selected, but a frame is) that frame's whole story. */
-  const scopedParagraphs = (scope: 'doc' | 'selection'): { head: TextFrame; indexes: number[] }[] => {
+  const scopedParagraphs = (scope: 'doc' | 'selection', styleId = ''): { head: TextFrame; indexes: number[] }[] => {
+    const inStyle = (head: TextFrame, indexes: number[]) => (styleId ? indexes.filter((index) => paragraphStyleIdOf(head, index) === styleId) : indexes)
     const allIndexes = (text: string) => Array.from({ length: text.split('\n').length }, (_, i) => i)
-    if (scope === 'doc') return headFrames(frames).map((head) => ({ head, indexes: allIndexes(head.text) }))
+    if (scope === 'doc') return headFrames(frames).map((head) => ({ head, indexes: inStyle(head, allIndexes(head.text)) }))
     if (textSel) {
       const head = frames.find((f) => f.id === textSel.headId)
-      return head ? [{ head, indexes: paragraphsInRange(head.text, Math.min(textSel.a, textSel.b), Math.max(textSel.a, textSel.b)) }] : []
+      return head ? [{ head, indexes: inStyle(head, paragraphsInRange(head.text, Math.min(textSel.a, textSel.b), Math.max(textSel.a, textSel.b))) }] : []
     }
     const headId = selectedId ? flow.get(selectedId)?.headId : null
     const head = headId ? frames.find((f) => f.id === headId) : undefined
-    return head ? [{ head, indexes: allIndexes(head.text) }] : []
+    return head ? [{ head, indexes: inStyle(head, allIndexes(head.text)) }] : []
   }
 
   /** Sets (or clears, with 0) the minimum first/last lines of the scope's paragraphs that must stay together with
@@ -6786,6 +7089,8 @@ export function Workspace({
       let paraKeepFirstLines = f.paraKeepFirstLines
       let paraKeepLastLines = f.paraKeepLastLines
       for (const index of target.indexes) {
+        // a paragraph that keeps ALL its lines together (a paragraph style's option) is stricter than any minimum: it stays so
+        if (f.paraKeepFirstLines?.[index] === KEEP_ALL_LINES && f.paraKeepLastLines?.[index] === KEEP_ALL_LINES) continue
         paraKeepFirstLines = withParaOverride(paraKeepFirstLines, index, keepFirst)
         paraKeepLastLines = withParaOverride(paraKeepLastLines, index, keepLast)
       }
@@ -6807,9 +7112,11 @@ export function Workspace({
         const [start, boundEnd] = paragraphBounds(text, index)
         const end = text[boundEnd - 1] === '\n' ? boundEnd - 1 : boundEnd
         const trimmed = text.slice(start, end).replace(/\s+$/, '')
-        const lastSpace = trimmed.lastIndexOf(' ')
-        if (lastSpace <= 0) continue // a single word, or nothing earlier to keep it together with
-        text = text.slice(0, start + lastSpace) + NBSP + text.slice(start + lastSpace + 1)
+        // the gap before the last word: a space, or already a non-breaking one (then the word is glued and the paragraph is left alone,
+        // so running the tool again does not glue one more word to the tail each time)
+        const lastGap = Math.max(trimmed.lastIndexOf(' '), trimmed.lastIndexOf(NBSP))
+        if (lastGap <= 0 || trimmed[lastGap] === NBSP) continue // a single word, or nothing earlier to keep it together with, or done already
+        text = text.slice(0, start + lastGap) + NBSP + text.slice(start + lastGap + 1)
       }
       return text === f.text ? f : { ...f, text }
     })
@@ -6844,11 +7151,15 @@ export function Workspace({
   /** SmartLayoutDialog's "החל": chains every tool that was turned on onto the SAME frames array (each tool above
    *  is a pure `frames -> frames` step, not an `onFramesChange` of its own), so they combine into one array and
    *  one `onFramesChange` / undo step instead of each undoing whichever ran before it. */
-  const applySmartLayout = (r: SmartLayoutRequest) => {
-    const targets = scopedParagraphs(r.scope)
+  const applySmartLayout = (r: SmartLayoutRequest): number => {
+    // only the stories that have a paragraph in the chosen style (and, with a style, only those paragraphs) are touched
+    const targets = scopedParagraphs(r.scope, r.styleId).filter((target) => target.indexes.length > 0)
+    const matched = targets.reduce((sum, target) => sum + target.indexes.length, 0)
     if (targets.length === 0) {
+      // with a style chosen, "nothing in it" is worth telling: the dialog stays and says so
+      if (r.styleId) return 0
       setSmartLayoutDialog(false)
-      return
+      return 0
     }
     let next = frames
     if (r.keepLines) next = withKeepLinesTogether(next, targets, r.keepFirst, r.keepLast)
@@ -6856,6 +7167,7 @@ export function Workspace({
     if (r.smartTracking) next = withSmartTracking(next, targets, r.tracking, r.maxWords)
     if (next !== frames) onFramesChange(next, 'smart-layout')
     setSmartLayoutDialog(false)
+    return matched
   }
 
   const paragraphUsesStyle = (frame: TextFrame, index: number, styleId: string) => {
@@ -6922,7 +7234,10 @@ export function Workspace({
     if ((hardReset || leaving.tracking !== undefined) && charPatch.tracking === undefined) charPatch.tracking = 0
     if ((hardReset || leaving.outlineWidth !== undefined) && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
     if ((hardReset || leaving.outlineColor !== undefined) && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
-    const layout = pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align']) as NonNullable<TextFrame['paragraphStylePatches']>[number]
+    const layout = {
+      ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
+      ...(resolved.listKind ? { listKind: resolved.listKind } : {}),
+    } as NonNullable<TextFrame['paragraphStylePatches']>[number]
     const count = frame.text.split('\n').length
     const hadLists = !!frame.paragraphStyleIds?.length
     const carriesSource = hadLists ? new Set<number>() : new Set(paragraphsWithStyle(frame, sourceId))
@@ -6954,7 +7269,7 @@ export function Workspace({
       patches[index] = layout
       // keepLook: the text already looks the way the style says (a style made from it), it is only tagged
       if (keepLook) continue
-      runs = applyParagraphLook(runs, start, end, charPatch, characterStyles)
+      runs = applyParagraphLook(runs, start, end, charPatch, resolvedChars)
       paraSpaceBefore = override(paraSpaceBefore, index, layout.spaceBefore)
       paraSpaceAfter = override(paraSpaceAfter, index, layout.spaceAfter)
       paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, keepAll)
@@ -7882,6 +8197,7 @@ export function Workspace({
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
                     continuesParagraphAtEnd={fl.end < fl.story.length && fl.story[fl.end - 1] !== '\n' && !endsWithFootnoteReference}
+                    storyContinues={fl.end < fl.story.length}
                     hasPrev={fl.prevId !== null}
                     zoom={zoom}
                     tx={tx}
@@ -7912,7 +8228,7 @@ export function Workspace({
                     onSelect={(a, b) => handleSelect(f.id, a, b)}
                     onCopyText={() => copyText(f.id)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
-                    onLineBoundary={(dir, x) => jumpToLine(f.id, dir, x)}
+                    onLineBoundary={(dir, x, toStart) => jumpToLine(f.id, dir, x, toStart)}
                     onDragOutside={(x, y, anchor) => extendSelectionAcrossFrames(f.id, x, y, anchor)}
                     onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}
                   />
@@ -8276,7 +8592,7 @@ export function Workspace({
               id: 'paragraph',
               label: 'פסקה',
               visible: true,
-              content: <ParagraphPanel frame={selFrame} style={paragraphStyle} scope={panelSel ? 'selection' : 'all'} unit={doc.unit} onChange={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)} onSpacingChange={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)} keepFirstLines={panelHead?.paraKeepFirstLines?.[scopeParagraph ?? 0] ?? 0} keepLastLines={panelHead?.paraKeepLastLines?.[scopeParagraph ?? 0] ?? 0} keepFirstMixed={keepFirstLineValues.size > 1} keepLastMixed={keepLastLineValues.size > 1} onKeepLinesChange={(patch) => selFrame && applyParagraphKeepLines(selFrame.id, patch)} />,
+              content: <ParagraphPanel frame={selFrame} style={paragraphStyle} scope={panelSel ? 'selection' : 'all'} unit={doc.unit} onChange={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)} onSpacingChange={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)} keepFirstLines={panelHead?.paraKeepFirstLines?.[scopeParagraph ?? 0] ?? 0} keepLastLines={panelHead?.paraKeepLastLines?.[scopeParagraph ?? 0] ?? 0} keepFirstMixed={keepFirstLineValues.size > 1} keepLastMixed={keepLastLineValues.size > 1} onKeepLinesChange={(patch) => selFrame && applyParagraphKeepLines(selFrame.id, patch)} keepWithNext={keepWithNextValues.has(1)} keepWithNextMixed={keepWithNextValues.size > 1} onKeepWithNextChange={(on) => selFrame && applyParagraphKeepWithNext(selFrame.id, on)} />,
             },
             {
               id: 'paragraph-styles',
@@ -8286,7 +8602,7 @@ export function Workspace({
             {
               id: 'character-styles',
               label: 'סגנונות תו',
-              content: <CharacterStylesPanel styles={characterStyles} activeId={activeCharacterStyleId} canApply={!!panelHead || !!footnoteSel} onApply={applyCharacterStyleCmd} onSelectionLook={characterStyleSelectionLook} onCreate={createCharacterStyle} onChange={changeCharacterStyle} onDelete={deleteCharacterStyle} />,
+              content: <CharacterStylesPanel styles={characterStyles} activeId={activeCharacterStyleId} modified={activeCharacterStyleModified} canApply={!!panelHead || !!footnoteSel} onApply={applyCharacterStyleCmd} onSelectionLook={characterStyleSelectionLook} onCreate={createCharacterStyle} onChange={changeCharacterStyle} onDelete={deleteCharacterStyle} onRedefine={redefineCharacterStyle} onFind={findCharacterStyle} />,
             },
             {
               id: 'style-manager',
@@ -8504,6 +8820,7 @@ export function Workspace({
       {smartLayoutDialog && (
         <SmartLayoutDialog
           hasSelection={!!textSel || !!(selectedId && flow.get(selectedId))}
+          styles={paragraphStyles.map((style) => ({ id: style.id, name: style.name }))}
           onApply={applySmartLayout}
           onClose={() => setSmartLayoutDialog(false)}
         />
