@@ -89,6 +89,20 @@ export function styleRange(runs: Run[], a: number, b: number, patch: Partial<Cha
   return mergeRuns(out)
 }
 
+/** Clear a paragraph's visible first-line indent without removing its paragraph break or style. */
+export function clearParagraphFirstLineIndent(
+  patches: TextFrame['paragraphStylePatches'],
+  index: number,
+  paragraphCount: number,
+  inheritedIndent: number,
+): TextFrame['paragraphStylePatches'] | null {
+  if (!((patches?.[index]?.firstLineIndent ?? inheritedIndent) > 0)) return null
+  const next = patches?.slice() ?? Array.from({ length: paragraphCount }, () => ({}))
+  while (next.length <= index) next.push({})
+  next[index] = { ...next[index], firstLineIndent: 0 }
+  return next
+}
+
 /** Change the characters [a, b) relative to what each has now: `change` gets a run's style and returns the patch for it. */
 export function restyleRange(runs: Run[], a: number, b: number, change: (style: CharStyle) => Partial<CharStyle>): Run[] {
   const out: Run[] = []

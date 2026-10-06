@@ -181,6 +181,7 @@ interface Props {
   onSelect: (a: number, b: number) => void
   onCopyText: () => string | null
   onBackspaceAtStart: () => void
+  onBackspaceAtParagraphStart?: (offset: number) => boolean
   onStopEditing: () => void
   onLineBoundary?: (dir: 1 | -1, x: number, toStart?: boolean) => void
   onDragOutside?: (clientX: number, clientY: number, anchor: number) => void
@@ -518,6 +519,7 @@ export function TextFrameView(p: Props) {
           onEdit={p.onEdit}
           onSelect={p.onSelect}
           onBackspaceAtStart={p.onBackspaceAtStart}
+          onBackspaceAtParagraphStart={p.onBackspaceAtParagraphStart}
           onCopyText={p.onCopyText}
           onStop={p.onStopEditing}
           onLineBoundary={p.onLineBoundary}

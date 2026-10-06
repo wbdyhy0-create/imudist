@@ -273,7 +273,7 @@ export interface ParagraphPatch extends ParagraphBox {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
 
 /** the room (points, unscaled) a paragraph's fill or line keeps between itself and the text at the sides */
 const BOX_INSET = 3

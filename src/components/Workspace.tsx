@@ -102,7 +102,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { applyCharacterStyle, applyParagraphLook, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
+import { applyCharacterStyle, applyParagraphLook, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
@@ -245,6 +245,8 @@ const CHAR_LOOK_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking'
 export type TableOp = 'select-row' | 'select-column' | 'select-table' | 'row-above' | 'row-below' | 'col-start' | 'col-end' | 'delete-row' | 'delete-col' | 'merge' | 'unmerge' | 'options' | 'cell-options'
 
 export interface WorkspaceHandle {
+  /** show a problem of the preflight check: select what it is about and bring it to the middle of the view */
+  goToIssue: (issue: PreflightIssue) => void
   selectTool: (tool: ToolId) => void
   zoomIn: () => void
   zoomOut: () => void
@@ -1811,6 +1813,27 @@ export function Workspace({
     if (fl && fl.start > 0) applyEdit(fl.headId, fl.start - 1, fl.start, '')
   }
 
+  const backspaceAtParagraphStart = (frameId: string, offset: number): boolean => {
+    const fl = flow.get(frameId)
+    const head = fl && frames.find((frame) => frame.id === fl.headId)
+    if (!fl || !head) return false
+    const absolute = fl.start + offset
+    if (absolute > 0 && head.text[absolute - 1] !== '\n') return false
+    const index = paraIndexAt(head.text, absolute)
+    const patches = clearParagraphFirstLineIndent(
+      head.paragraphStylePatches,
+      index,
+      head.text.split('\n').length,
+      head.firstLineIndent ?? 0,
+    )
+    if (!patches) return false
+    onFramesChange(
+      frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame),
+      `first-line-indent:${head.id}:${index}`,
+    )
+    return true
+  }
+
   /** an Up/Down that ran out of lines in `frameId`: hand the caret to the previous/next frame of its thread, same column */
   const pendingLineJump = useRef<{ frameId: string; x: number; dir: 1 | -1; toStart: boolean } | null>(null)
   const jumpToLine = (frameId: string, dir: 1 | -1, x: number, toStart = false) => {
@@ -3259,6 +3282,7 @@ export function Workspace({
   }
 
   useImperativeHandle(ref, () => ({
+    goToIssue,
     selectTool: activateTool,
     zoomIn: () => zoomAt(stepZoom(zoom, 1), vp.w / 2, vp.h / 2),
     zoomOut: () => zoomAt(stepZoom(zoom, -1), vp.w / 2, vp.h / 2),
@@ -8324,6 +8348,7 @@ export function Workspace({
                     onSelect={(a, b) => handleSelect(f.id, a, b)}
                     onCopyText={() => copyText(f.id)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
+                    onBackspaceAtParagraphStart={(offset) => backspaceAtParagraphStart(f.id, offset)}
                     onLineBoundary={(dir, x, toStart) => jumpToLine(f.id, dir, x, toStart)}
                     onDragOutside={(x, y, anchor) => extendSelectionAcrossFrames(f.id, x, y, anchor)}
                     onStopEditing={() => setEditingId((c) => (c === f.id ? null : c))}

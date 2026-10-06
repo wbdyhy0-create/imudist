@@ -55,6 +55,7 @@ interface Props {
   onSelectAll?: () => void
   onSelectToStart?: (offset: number) => void
   onBackspaceAtStart: () => void
+  onBackspaceAtParagraphStart?: (offset: number) => boolean
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
   onStop: () => void
@@ -193,6 +194,7 @@ export function RichEditor(p: Props) {
           break
         case 'deleteContentBackward':
           if (a !== b) edit(a, b, '')
+          else if (p.onBackspaceAtParagraphStart?.(a)) break
           else if (a > 0) edit(a - 1, a, '')
           else if (p.hasPrev) p.onBackspaceAtStart()
           break
