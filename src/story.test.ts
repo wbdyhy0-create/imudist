@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { mergeRuns, normalizeRuns, styleRange } from './story'
+import { atParaEnd, mergeRuns, normalizeRuns, styleRange } from './story'
 
 const base = { fontFamily: 'Arial', fontSize: 14, weight: 400, italic: false, tracking: 0 }
+
+describe('paragraph end positions', () => {
+  it('identifies only the position before a paragraph break or the end of the story', () => {
+    const text = 'פסוק\nטקסט רץ'
+
+    expect(atParaEnd(text, 4)).toBe(true)
+    expect(atParaEnd(text, 5)).toBe(false)
+    expect(atParaEnd(text, text.length)).toBe(true)
+    expect(atParaEnd(text, 0)).toBe(false)
+  })
+})
 
 describe('character outlines', () => {
   it('preserves outline formatting on a selected run', () => {

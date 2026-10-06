@@ -273,6 +273,9 @@ export const paraIndexAt = (text: string, i: number): number => {
  *  wrapped continuation of the previous line? */
 export const atParaStart = (text: string, i: number): boolean => i === 0 || text[i - 1] === '\n'
 
+/** Is offset `i` at the end of its paragraph, immediately before its break or at the end of the story? */
+export const atParaEnd = (text: string, i: number): boolean => i >= 0 && i <= text.length && (i === text.length || text[i] === '\n')
+
 /** The 0-based indices of every paragraph touched by [a, b) of `text` — always at least one, even for a === b. */
 export function paragraphsInRange(text: string, a: number, b: number): number[] {
   const first = paraIndexAt(text, a)
