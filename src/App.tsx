@@ -24,6 +24,7 @@ import { useAutosave } from './useAutosave'
 import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
+import type { PagePreset } from './units'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -80,6 +81,7 @@ export default function App() {
   const [nextName, setNextName] = useState(1)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
+  const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
   /** the left-hand dialog: creating a document, or changing the open document's settings */
   const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | null>(null)
   const dialogOpen = dialog !== null
@@ -461,6 +463,12 @@ export default function App() {
   const closeDialog = () => {
     setDialog(null)
     setPreview(null)
+    setNewPreset(null)
+  }
+
+  const openNewDocument = (preset?: PagePreset) => {
+    setNewPreset(preset ?? null)
+    setDialog('new')
   }
 
   const create = (d: DocSettings) =>
@@ -478,6 +486,15 @@ export default function App() {
     : preview
       ? [preview.width, preview.height, preview.perRow, preview.rowsCustom, JSON.stringify(preview.pageJoins), JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
       : String(session.docId)
+  const newDocInitial = {
+    ...lastSettings,
+    ...(newPreset
+      ? lastSettings.width > lastSettings.height
+        ? { width: newPreset.height, height: newPreset.width }
+        : { width: newPreset.width, height: newPreset.height }
+      : {}),
+    name: `ללא שם-${nextName}`,
+  }
 
   return (
     <div className="app">
@@ -549,7 +566,7 @@ export default function App() {
                         autosave={autosave.state}
                         onSelect={session.switchTo}
                         onClose={(id) => session.closeDocument(id)}
-                        onNew={() => setDialog('new')}
+                        onNew={() => openNewDocument()}
                       />
                     )
               }
@@ -562,7 +579,7 @@ export default function App() {
             <Home
               appName={APP_NAME}
               recent={session.recent}
-              onNew={() => setDialog('new')}
+              onNew={openNewDocument}
               onOpen={() => void session.openFile()}
               onOpenRecent={(entry) => void session.openRecent(entry)}
             />
@@ -587,7 +604,7 @@ export default function App() {
         )}
         {dialog === 'new' && (
           <NewDocumentDialog
-            initial={{ ...lastSettings, name: `ללא שם-${nextName}` }}
+            initial={newDocInitial}
             onCreate={create}
             onClose={closeDialog}
             onPreview={setPreview}
