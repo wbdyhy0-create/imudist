@@ -24,7 +24,7 @@ import { useAutosave } from './useAutosave'
 import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
-import type { PagePreset } from './units'
+import type { PagePreset, Unit } from './units'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -82,6 +82,7 @@ export default function App() {
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
+  const [newPresetUnit, setNewPresetUnit] = useState<Unit | null>(null)
   /** the left-hand dialog: creating a document, or changing the open document's settings */
   const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | null>(null)
   const dialogOpen = dialog !== null
@@ -464,10 +465,12 @@ export default function App() {
     setDialog(null)
     setPreview(null)
     setNewPreset(null)
+    setNewPresetUnit(null)
   }
 
-  const openNewDocument = (preset?: PagePreset) => {
+  const openNewDocument = (preset?: PagePreset, unit?: Unit) => {
     setNewPreset(preset ?? null)
+    setNewPresetUnit(unit ?? null)
     setDialog('new')
   }
 
@@ -489,10 +492,11 @@ export default function App() {
   const newDocInitial = {
     ...lastSettings,
     ...(newPreset
-      ? lastSettings.width > lastSettings.height
+      ? newPreset.rotateWithDocument !== false && lastSettings.width > lastSettings.height
         ? { width: newPreset.height, height: newPreset.width }
         : { width: newPreset.width, height: newPreset.height }
       : {}),
+    unit: newPresetUnit ?? newPreset?.unit ?? lastSettings.unit,
     name: `ללא שם-${nextName}`,
   }
 

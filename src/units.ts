@@ -53,9 +53,12 @@ export function parseLength(text: string, fallbackUnit: Unit): number | null {
 export interface PagePreset {
   id: string
   label: string
-  /** portrait size, points */
+  /** Page dimensions, in points. */
   width: number
   height: number
+  unit?: Unit
+  /** By default, page presets follow the orientation of the last document. */
+  rotateWithDocument?: boolean
 }
 
 const mm = (v: number) => toPt(v, 'mm')
@@ -65,6 +68,16 @@ export const PAGE_PRESETS: PagePreset[] = [
   { id: 'A3', label: 'A3', width: mm(297), height: mm(420) },
   { id: 'A5', label: 'A5', width: mm(148), height: mm(210) },
   { id: 'B5', label: 'B5', width: mm(176), height: mm(250) },
+]
+
+const px = (v: number) => toPt(v, 'px')
+
+export const DIGITAL_PRESETS: PagePreset[] = [
+  { id: 'story', label: 'סטורי / סטטוס', width: px(1080), height: px(1920), unit: 'px', rotateWithDocument: false },
+  { id: 'square-post', label: 'פוסט ריבועי', width: px(1080), height: px(1080), unit: 'px', rotateWithDocument: false },
+  { id: 'wide-post', label: 'פוסט לרוחב', width: px(1200), height: px(630), unit: 'px', rotateWithDocument: false },
+  { id: 'facebook-cover', label: 'קאבר פייסבוק', width: px(851), height: px(315), unit: 'px', rotateWithDocument: false },
+  { id: 'full-hd', label: 'Full HD', width: px(1920), height: px(1080), unit: 'px', rotateWithDocument: false },
 ]
 
 /** The preset whose size matches (in either orientation), or null for a custom size. */

@@ -85,16 +85,25 @@ svg { display: block; }
 .home h2 { margin: 40px 0 14px; font-size: 14px; font-weight: 600; }
 .home-actions { display: flex; gap: 12px; }
 .muted { color: var(--text-dim); margin: 0; }
-.home-presets { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.home-preset-tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.home-preset-tabs button { padding: 8px 12px; color: var(--text-dim); border-bottom: 2px solid transparent; }
+.home-preset-tabs button:hover { color: var(--text); background: var(--hover); }
+.home-preset-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.home-presets { display: grid; gap: 10px; }
+.home-presets.print { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.home-presets.digital { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .home-card {
-  min-width: 0; min-height: 108px; padding: 10px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  min-width: 0; min-height: 116px; padding: 8px 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   background: var(--bg-raised); border-radius: 6px; border: 1px solid transparent;
 }
 .home-card:hover { background: var(--hover); border-color: var(--border-strong); }
 .home-page-preview { position: relative; flex: none; display: block; background: #fff; border: 1px solid #aaa; }
 .home-page-preview::after { content: ''; position: absolute; inset: 10%; border: 1px solid #24a6ff; }
 .home-page-preview.custom { width: 36px; height: 56px; background: none; border: 1px dashed #aaa; }
+.home-page-preview.custom-web { width: 56px; height: 36px; }
 .home-page-preview.custom::after { display: none; }
+.home-card-label { max-width: 100%; text-align: center; line-height: 1.2; }
+.home-card-size { color: var(--text-dim); font-size: 9px; direction: ltr; white-space: nowrap; }
 
 /* ── new document panel ───────────────────────────────────── */
 .nd-panel {

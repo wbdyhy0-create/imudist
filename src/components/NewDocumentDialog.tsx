@@ -10,7 +10,7 @@ import {
   type DocSettings,
   type Sides,
 } from '../document'
-import { PAGE_PRESETS, UNIT_OPTIONS, matchPreset, type Unit } from '../units'
+import { PAGE_PRESETS, UNIT_OPTIONS, matchPreset, type PagePreset, type Unit } from '../units'
 import { NumberField } from './NumberField'
 
 interface Props {
@@ -50,7 +50,12 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
   }
 
   const activePreset = matchPreset(d.width, d.height)
-  const pickPreset = (w: number, h: number) => (landscape ? patch({ width: h, height: w }) : patch({ width: w, height: h }))
+  const pickPreset = (preset: PagePreset) =>
+    patch({
+      width: landscape ? preset.height : preset.width,
+      height: landscape ? preset.width : preset.height,
+      unit: preset.unit ?? 'mm',
+    })
 
   const create = () => {
     if (!error) onCreate({ ...d, name: setup ? initial.name : d.name.trim() || 'ללא שם' })
@@ -79,7 +84,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
               <button
                 key={p.id}
                 className={'preset' + (activePreset?.id === p.id ? ' active' : '')}
-                onClick={() => pickPreset(pw, ph)}
+                onClick={() => pickPreset(p)}
               >
                 <span className="preset-page" style={{ width: pw * scale, height: ph * scale }} />
                 <span>{p.label}</span>
