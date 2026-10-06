@@ -67,7 +67,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
           <button className="home-card" onClick={() => onNew(undefined, category === 'print' ? 'mm' : 'px')}>
             <span className={'home-page-preview custom' + (category === 'digital' ? ' custom-web' : '')} aria-hidden="true" />
             <span className="home-card-label">{category === 'print' ? 'מידה מותאמת' : 'אתר / מידה מותאמת'}</span>
-            <span className="home-card-size">{category === 'print' ? 'הזנת מידות' : 'רוחב וגובה ב־px'}</span>
+            <span className="home-card-size">{category === 'print' ? 'הזנת מידות' : 'רוחב התחלתי: 1200 px'}</span>
           </button>
         </div>
 

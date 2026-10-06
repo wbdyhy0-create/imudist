@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
@@ -489,13 +489,24 @@ export default function App() {
     : preview
       ? [preview.width, preview.height, preview.perRow, preview.rowsCustom, JSON.stringify(preview.pageJoins), JSON.stringify(preview.pageSizes), preview.pages, preview.facingPages, preview.binding, preview.startPage].join('|')
       : String(session.docId)
+  const customWebSize =
+    !newPreset && newPresetUnit === 'px'
+      ? {
+          width: 1200,
+          height: Math.min(
+            1200,
+            MAX_PAGE_PT,
+            Math.max(MIN_PAGE_PT, (1200 * Math.min(lastSettings.width, lastSettings.height)) / Math.max(lastSettings.width, lastSettings.height)),
+          ),
+        }
+      : {}
   const newDocInitial = {
     ...lastSettings,
     ...(newPreset
       ? newPreset.rotateWithDocument !== false && lastSettings.width > lastSettings.height
         ? { width: newPreset.height, height: newPreset.width }
         : { width: newPreset.width, height: newPreset.height }
-      : {}),
+      : customWebSize),
     unit: newPresetUnit ?? newPreset?.unit ?? lastSettings.unit,
     name: `ללא שם-${nextName}`,
   }
