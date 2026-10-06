@@ -55,17 +55,19 @@ export function ParagraphStylesPanel({ styles, unit, onApply, onChange, onCreate
   const sectionRef = useRef<HTMLElement>(null)
   const fontCatalog = useFontCatalog()
   const active = styles.find((style) => style.id === activeId) ?? styles[0]
+  // before the early return below: a hook after it would be called on some renders and not on others (no styles yet)
+  const activeListKind = active?.patch.listKind
+  useEffect(() => {
+    if (!editing || category !== 'lists') return
+    const select = sectionRef.current?.querySelector<HTMLSelectElement>('.paragraph-style-modal-body select')
+    if (select) select.selectedIndex = activeListKind === 'bullet' ? 1 : activeListKind === 'number' ? 2 : 0
+  }, [editing, category, active?.id, activeListKind])
   if (!active) return null
   const shownId = highlightId === undefined ? active.id : highlightId
   const value = <K extends keyof ParagraphStyleRecord['patch']>(key: K, fallback: NonNullable<ParagraphStyleRecord['patch'][K]>) => active.patch[key] ?? fallback
   const selectedFamily = fontCatalog.families.find((family) => family.family === value('fontFamily', 'Segoe UI'))
   const selectedFace = `${value('weight', 400)}|${value('italic', false) ? 1 : 0}`
   const edit = (patch: ParagraphStyleRecord['patch']) => onChange(active.id, { patch })
-  useEffect(() => {
-    if (!editing || category !== 'lists') return
-    const select = sectionRef.current?.querySelector<HTMLSelectElement>('.paragraph-style-modal-body select')
-    if (select) select.selectedIndex = active.patch.listKind === 'bullet' ? 1 : active.patch.listKind === 'number' ? 2 : 0
-  }, [editing, category, active.id, active.patch.listKind])
     const chooseStyle = (styleId: string, extend: boolean) => {
       setActiveId(styleId)
       if (extend) {

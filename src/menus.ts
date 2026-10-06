@@ -51,6 +51,11 @@ export interface MenuContext {
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
   exportPdf: () => void
+  /** a new book (a set of documents kept together as chapters) */
+  newBook: () => void
+  openBook: () => void
+  bookPanelOpen: boolean
+  toggleBookPanel: () => void
 }
 
 const off = (label: string, shortcut?: string): MenuItem => ({ label, shortcut, disabled: true })
@@ -86,11 +91,12 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           label: 'חדש',
           submenu: [
             { label: 'מסמך…', shortcut: 'Ctrl+N', onClick: c.newDocument },
-            off('ספר…'),
+            { label: 'ספר…', onClick: c.newBook },
             off('ספרייה…'),
           ],
         },
         { label: 'פתח…', shortcut: 'Ctrl+O', onClick: c.openFile },
+        { label: 'פתח ספר…', onClick: c.openBook },
         {
           label: 'פתח אחרון',
           submenu: c.recent.length
@@ -312,6 +318,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         dock('swatches', 'דוגמיות'),
         dock('layers', 'שכבות'),
         dock('links', 'קישורים'),
+        { label: 'ספר', checked: c.bookPanelOpen, onClick: c.toggleBookPanel },
         ...(c.openDocs.length > 0
           ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
           : []),

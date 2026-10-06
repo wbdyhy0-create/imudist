@@ -254,6 +254,13 @@ export function useDocumentSession() {
     setDocs((list) => [...list, { id, h: newHistory(content), file: ref, saved: content, rev: 0, last: null, view: null }])
     setActiveId(id)
   }
+  /** the open documents and the files they live in, as they are now (for a book to tell which of its chapters are open) */
+  const openFiles = () => latest.current.docs.map((d) => ({ id: d.id, file: d.file, dirty: d.saved !== d.h.present }))
+  /** one open document's content as it is now */
+  const contentOf = (id: number): DocContent | null => entryOf(id)?.h.present ?? null
+  /** change one open document (by id) as one undo step, whether or not it is the one shown */
+  const changeDoc = (id: number, next: (prev: DocContent) => DocContent) =>
+    update(id, (d) => ({ ...d, h: changeHistory(d.h, (prev) => next(prev) ?? prev, false), last: null }))
   const switchTo = (id: number) => {
     if (latest.current.docs.some((d) => d.id === id)) setActiveId(id)
   }
@@ -543,6 +550,16 @@ export function useDocumentSession() {
     }
   }
 
+  /** Open the file at a path (the desktop app), e.g. a chapter of a book. */
+  const openPath = async (path: string) => {
+    try {
+      const { readTextFile } = await import('@tauri-apps/plugin-fs')
+      await loadText(await readTextFile(path), { name: path.split(/[\\/]/).pop() ?? path, handle: null, path })
+    } catch (e) {
+      fail('לא ניתן לפתוח את הקובץ', e)
+    }
+  }
+
   /** Throw away the changes made since the last save and reload the file. */
   const revert = () => {
     const id = latest.current.activeId
@@ -616,7 +633,11 @@ export function useDocumentSession() {
     openTextFile,
     openHandle,
     openRecent,
+    openPath,
     forgetRecent,
+    openFiles,
+    contentOf,
+    changeDoc,
     save,
     saveAs,
     autosave,

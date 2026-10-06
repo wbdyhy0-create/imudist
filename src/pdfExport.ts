@@ -530,15 +530,32 @@ export async function renderPage(
  *  engine draws every line, the same one already proven correct for Hebrew throughout the app, so nothing here can
  *  scramble RTL/BiDi the way a hand-rolled vector-text-plus-embedded-font pipeline realistically could), then
  *  downloads it and opens it in a new tab. `onProgress(done, total)` fires after each page renders. */
-export async function exportPdf(
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[] },
-  options: PdfExportOptions,
-  fileBaseName: string,
-  onProgress?: (done: number, total: number) => void,
-  /** a window opened synchronously from the triggering click, so navigating it to the result isn't blocked as a
-   *  popup once the (multi-page, `await`-heavy) render work below is done */
-  viewWindow?: Window | null,
-) {
+/** What a document needs to be drawn: its pages, content and styles. */
+export interface ExportContent {
+  doc: DocSettings
+  frames: TextFrame[]
+  images: ImageFrame[]
+  shapes: ShapeFrame[]
+  assets: Assets
+  paragraphStyles: ParagraphStyleRecord[]
+  sections: PageSection[]
+}
+
+/** A document laid out and ready to be drawn page by page. */
+export interface PreparedExport {
+  content: ExportContent
+  flows: Map<string, FrameFlow>
+  rects: PageRect[]
+}
+
+/** The look of the pages of a PDF: bleed around them, crop marks outside it, the resolution of what is drawn. */
+export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi'>
+
+/**
+ * Lays a document out for export: the footnotes are numbered and placed, the endnote pages are added. Nothing is drawn
+ * yet - `addPagesToPdf` does that, a page at a time.
+ */
+export function prepareExport(content: ExportContent): PreparedExport {
   const documentRects = pageRects(content.doc)
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
   const primaryFrameIds = primaryTextFrameOrder(content.doc, content.frames)
@@ -562,32 +579,40 @@ export async function exportPdf(
   const renderContent = endnotePages.frames.length
     ? { ...content, doc: endnotePages.doc, frames: [...content.frames, ...endnotePages.frames] }
     : content
-  const rects = pageRects(renderContent.doc)
-  const flows = new Map([...bodyFlows, ...endnotePages.flows])
-  const from = options.range ? Math.max(1, options.range.from) : 1
-  const to = options.range ? Math.min(rects.length, options.range.to) : rects.length
-  const total = Math.max(0, to - from + 1)
+  return { content: renderContent, flows: new Map([...bodyFlows, ...endnotePages.flows]), rects: pageRects(renderContent.doc) }
+}
+
+/** The size of the sheet a page is drawn on: the page, the bleed around it and room for the crop marks outside that. */
+export function sheetSizeOf(page: PageRect, options: PageDrawOptions): { w: number; h: number } {
+  const bleedPt = options.bleed ? options.bleedPt : 0
+  const marksMargin = options.cropMarks ? 20 : 0
+  return { w: page.w + 2 * bleedPt + 2 * marksMargin, h: page.h + 2 * bleedPt + 2 * marksMargin }
+}
+
+/** Pages `from`..`to` (1-based) of a prepared document, added to the PDF (which is made with the first one when there is none yet). */
+export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport, options: PageDrawOptions, from: number, to: number, onPage?: (done: number, total: number) => void): Promise<jsPDF | null> {
   const bleedPt = options.bleed ? options.bleedPt : 0
   const marksMargin = options.cropMarks ? 20 : 0 // room outside the bleed for the crop marks themselves
-
-  let pdf: jsPDF | null = null
-  for (let i = from; i <= to; i++) {
-    const page = rects[i - 1]
+  const last = Math.min(prepared.rects.length, to)
+  const first = Math.max(1, from)
+  const total = Math.max(0, last - first + 1)
+  let target = pdf
+  for (let i = first; i <= last; i++) {
+    const page = prepared.rects[i - 1]
     if (!page) continue
-    const sheetW = page.w + 2 * bleedPt + 2 * marksMargin
-    const sheetH = page.h + 2 * bleedPt + 2 * marksMargin
-    if (!pdf) pdf = new jsPDF({ unit: 'pt', format: [sheetW, sheetH], orientation: sheetW > sheetH ? 'landscape' : 'portrait' })
-    else pdf.addPage([sheetW, sheetH])
-    const canvas = await renderPage(renderContent, flows, page, bleedPt, options.dpi)
-    const imgData = canvas.toDataURL('image/png')
-    pdf.addImage(imgData, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
-    if (options.cropMarks) drawCropMarks(pdf, page, marksMargin, marksMargin, bleedPt)
-    onProgress?.(i - from + 1, total)
+    const sheet = sheetSizeOf(page, options)
+    if (!target) target = new jsPDF({ unit: 'pt', format: [sheet.w, sheet.h], orientation: sheet.w > sheet.h ? 'landscape' : 'portrait' })
+    else target.addPage([sheet.w, sheet.h])
+    const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
+    target.addImage(canvas.toDataURL('image/png'), 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
+    if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt)
+    onPage?.(i - first + 1, total)
   }
-  if (!pdf) {
-    viewWindow?.close()
-    return false
-  }
+  return target
+}
+
+/** Gives the finished PDF to the user: the save dialog of the desktop app, or a download and a window in the browser. */
+export async function deliverPdf(pdf: jsPDF, fileBaseName: string, viewWindow?: Window | null): Promise<boolean> {
   if (isTauri) {
     const { save } = await import('@tauri-apps/plugin-dialog')
     const { writeFile } = await import('@tauri-apps/plugin-fs')
@@ -614,6 +639,26 @@ export async function exportPdf(
   else window.open(url, '_blank')
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
   return true
+}
+
+export async function exportPdf(
+  content: ExportContent,
+  options: PdfExportOptions,
+  fileBaseName: string,
+  onProgress?: (done: number, total: number) => void,
+  /** a window opened synchronously from the triggering click, so navigating it to the result isn't blocked as a
+   *  popup once the (multi-page, `await`-heavy) render work below is done */
+  viewWindow?: Window | null,
+) {
+  const prepared = prepareExport(content)
+  const from = options.range ? Math.max(1, options.range.from) : 1
+  const to = options.range ? Math.min(prepared.rects.length, options.range.to) : prepared.rects.length
+  const pdf = await addPagesToPdf(null, prepared, options, from, to, onProgress)
+  if (!pdf) {
+    viewWindow?.close()
+    return false
+  }
+  return deliverPdf(pdf, fileBaseName, viewWindow)
 }
 
 /** Crop marks around a page whose trim box sits at (originX + bleedPt, originY + bleedPt) on the sheet. */

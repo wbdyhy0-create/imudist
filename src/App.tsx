@@ -22,6 +22,8 @@ import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } fro
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { useAutosave } from './useAutosave'
+import { useBook } from './useBook'
+import { BookExportDialog, BookPanel, ChapterPicker, SyncDialog } from './components/BookPanel'
 import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
@@ -53,6 +55,27 @@ export default function App() {
   // menu items are memoized, so they call the session through this ref and never run an outdated action
   const sessionRef = useRef(session)
   sessionRef.current = session
+  /** the open book (several documents kept together as chapters) */
+  const book = useBook({
+    openChapter: async (ref) => {
+      if (ref.handle) await sessionRef.current.openHandle(ref.handle)
+      else if (ref.path) await sessionRef.current.openPath(ref.path)
+    },
+    notify: (message) => sessionRef.current.notify(message),
+    showError: (title, error) => sessionRef.current.showError(title, error),
+    openFiles: () => sessionRef.current.openFiles(),
+    contentOf: (id) => sessionRef.current.contentOf(id),
+    changeDoc: (id, next) => sessionRef.current.changeDoc(id, next),
+    switchTo: (id) => sessionRef.current.switchTo(id),
+    goToIssue: (docId, issue) => {
+      // only once that document is the one shown and its workspace is there
+      if (sessionRef.current.activeId !== docId || !ws.current) return false
+      ws.current.goToIssue(issue)
+      return true
+    },
+  })
+  const bookRef = useRef(book)
+  bookRef.current = book
   const { doc, history } = session
   /** autosave on or off (the "שמירה אוטומטית" item of the file menu): on unless the user turned it off, and remembered */
   const [autosaveOn, setAutosaveOn] = useState(() => {
@@ -398,9 +421,13 @@ export default function App() {
         toggleGuides: () => setShowGuides((v) => !v),
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
         exportPdf: () => setDialog('export'),
+        newBook: () => void bookRef.current.create(),
+        openBook: () => void bookRef.current.open(),
+        bookPanelOpen: book.panelOpen,
+        toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn],
+    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn],
   )
 
   useEffect(() => {
@@ -490,8 +517,14 @@ export default function App() {
     }
   }, [doc])
   // the desktop app gets dropped files as paths (the webview doesn't hand them over as File objects), so pictures can be linked
-  const dropPaths = useRef((_paths: string[]) => {})
-  dropPaths.current = (paths) => {
+  const dropPaths = useRef((_paths: string[], _position?: { x: number; y: number }) => {})
+  dropPaths.current = (paths, position) => {
+    // dropped on the Book panel: the document files become chapters of the book
+    const overBook = !!position && !!bookRef.current.book && !!document.elementFromPoint(position.x / window.devicePixelRatio, position.y / window.devicePixelRatio)?.closest('.book-panel')
+    if (overBook) {
+      void bookRef.current.dropFiles({ paths })
+      return
+    }
     if (!doc && !paths.some((path) => path.toLowerCase().endsWith(FILE_EXT))) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
     else void placePaths(paths)
   }
@@ -502,7 +535,7 @@ export default function App() {
     void import('@tauri-apps/api/webview')
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent((event) => {
-          if (event.payload.type === 'drop') dropPaths.current(event.payload.paths)
+          if (event.payload.type === 'drop') dropPaths.current(event.payload.paths, event.payload.position)
         }),
       )
       .then((unlisten) => (disposed ? unlisten() : (stop = unlisten)))
@@ -694,6 +727,10 @@ export default function App() {
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
+      <BookPanel controller={book} />
+      <ChapterPicker controller={book} />
+      <SyncDialog controller={book} />
+      <BookExportDialog controller={book} />
       {session.modal && <Modal spec={session.modal} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes) => void confirmDocxImport(replaceSelected, includeFootnotes)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
