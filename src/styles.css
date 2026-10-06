@@ -78,32 +78,33 @@ svg { display: block; }
 
 /* ── home ─────────────────────────────────────────────────── */
 .home { flex: 1; overflow: auto; background: var(--bg-app); }
-.home-inner { max-width: 900px; margin: 0 auto; padding: 56px 40px; }
-.home-title { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.home-inner { width: 100%; max-width: 1280px; margin: 0 auto; padding: 64px 48px; }
+.home-title { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
 .home-title h1 { margin: 0; }
-.home h1 { margin: 0 0 24px; font-size: 22px; font-weight: 600; }
-.home h2 { margin: 40px 0 14px; font-size: 14px; font-weight: 600; }
+.home h1 { margin: 0 0 26px; font-size: 26px; font-weight: 600; }
+.home h2 { margin: 42px 0 16px; font-size: 16px; font-weight: 600; }
 .home-actions { display: flex; gap: 12px; }
+.home-actions .btn { height: 40px; padding: 0 24px; font-size: 14px; }
 .muted { color: var(--text-dim); margin: 0; }
-.home-preset-tabs { display: flex; gap: 4px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
-.home-preset-tabs button { padding: 8px 12px; color: var(--text-dim); border-bottom: 2px solid transparent; }
+.home-preset-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--line); }
+.home-preset-tabs button { padding: 9px 14px; color: var(--text-dim); font-size: 13px; border-bottom: 2px solid transparent; }
 .home-preset-tabs button:hover { color: var(--text); background: var(--hover); }
 .home-preset-tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
-.home-presets { display: grid; gap: 10px; }
+.home-presets { display: grid; gap: 14px; }
 .home-presets.print { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .home-presets.digital { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .home-card {
-  min-width: 0; min-height: 116px; padding: 8px 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
-  background: var(--bg-raised); border-radius: 6px; border: 1px solid transparent;
+  min-width: 0; min-height: 148px; padding: 12px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--bg-raised); border-radius: 8px; border: 1px solid transparent;
 }
 .home-card:hover { background: var(--hover); border-color: var(--border-strong); }
 .home-page-preview { position: relative; flex: none; display: block; background: #fff; border: 1px solid #aaa; }
 .home-page-preview::after { content: ''; position: absolute; inset: 10%; border: 1px solid #24a6ff; }
-.home-page-preview.custom { width: 36px; height: 56px; background: none; border: 1px dashed #aaa; }
-.home-page-preview.custom-web { width: 56px; height: 36px; }
+.home-page-preview.custom { width: 44px; height: 68px; background: none; border: 1px dashed #aaa; }
+.home-page-preview.custom-web { width: 68px; height: 44px; }
 .home-page-preview.custom::after { display: none; }
-.home-card-label { max-width: 100%; text-align: center; line-height: 1.2; }
-.home-card-size { color: var(--text-dim); font-size: 9px; direction: ltr; white-space: nowrap; }
+.home-card-label { max-width: 100%; text-align: center; font-size: 13px; line-height: 1.25; }
+.home-card-size { color: var(--text-dim); font-size: 11px; direction: ltr; white-space: nowrap; }
 
 /* ── new document panel ───────────────────────────────────── */
 .nd-panel {
@@ -878,16 +879,16 @@ svg { display: block; }
   position: fixed; z-index: 150; bottom: 44px; inset-inline-start: 50%; transform: translateX(50%); padding: 8px 16px;
   background: #101010; border: 1px solid var(--border-strong); border-radius: 6px; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); pointer-events: none;
 }
-.recent-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.recent-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
 .recent-list li { min-width: 0; }
-.recent-list button { width: 100%; min-height: 116px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 5px; border-radius: 6px; text-align: center; }
+.recent-list button { width: 100%; min-height: 148px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 8px; border-radius: 8px; text-align: center; }
 .recent-list button:hover { background: var(--bg-raised); }
 .recent-list svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
-.recent-thumb-wrap { width: 68px; height: 56px; display: grid; place-items: center; flex: none; }
-.recent-thumb { display: block; max-width: 68px; max-height: 56px; object-fit: contain; border: 1px solid #aaa; }
-.recent-thumb-placeholder { width: 36px; height: 56px; }
-.recent-list .recent-name { width: 100%; min-width: 0; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recent-list .recent-date { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.recent-thumb-wrap { width: 84px; height: 68px; display: grid; place-items: center; flex: none; }
+.recent-thumb { display: block; max-width: 84px; max-height: 68px; object-fit: contain; border: 1px solid #aaa; }
+.recent-thumb-placeholder { width: 44px; height: 68px; }
+.recent-list .recent-name { width: 100%; min-width: 0; flex: none; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.recent-list .recent-date { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 /* ── side panels: pages + properties ─────────────────────── */
 .side-panels { width: 250px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-panel); border-inline-start: 1px solid var(--line); }
 .side-panels .props-panel { width: auto; flex: 1 1 0; min-height: 0; border-inline-start: 0; }

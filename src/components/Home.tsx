@@ -61,7 +61,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
     <div className="home">
       <div className="home-inner">
         <div className="home-title">
-          <AppLogo size={44} />
+          <AppLogo size={50} />
           <h1>ברוכים הבאים אל {appName}</h1>
         </div>
         <div className="home-actions">
@@ -81,7 +81,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
         </div>
         <div id="home-preset-panel" className={'home-presets ' + category} role="tabpanel" aria-labelledby={`home-preset-${category}-tab`}>
           {presets.map((preset) => {
-            const scale = Math.min(68 / preset.width, 56 / preset.height)
+            const scale = Math.min(84 / preset.width, 68 / preset.height)
             const width = preset.width * scale
             const height = preset.height * scale
             const dimensions =
