@@ -67,6 +67,7 @@ import {
   type CharacterStyleRecord,
   type CharacterStyleSettings,
   type TextAlign,
+  type ParagraphBox,
   type TextFrame,
   type TextStyle,
   PAGE_NUMBER_MARKER,
@@ -100,7 +101,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { applyCharacterStyle, applyParagraphLook, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
+import { applyCharacterStyle, applyParagraphLook, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
@@ -1100,8 +1101,8 @@ export function Workspace({
     commitStory(headId, r.text, runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
-      paraKeepFirstLines: spliceParaOverrides(head.paraKeepFirstLines, head.text, from, to, insert),
-      paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert),
+      paraKeepFirstLines: spliceParaOverrides(head.paraKeepFirstLines, head.text, from, to, insert, true),
+      paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert, true),
       paraKeepWithNext: spliceParaOverrides(head.paraKeepWithNext, head.text, from, to, insert),
       ...paragraphLists,
       footnotes: alignFootnotesToMarkers(r.text, footnotes),
@@ -6583,6 +6584,12 @@ export function Workspace({
     return only ?? undefined
   })()
 
+  /** a style's fill and line, as a paragraph carries them (a line needs a width; its colour defaults to black) */
+  const paragraphBoxOf = (look: ParagraphStyleRecord['patch']): ParagraphBox => ({
+    ...(look.background ? { background: look.background } : {}),
+    ...(look.borderWidth ? { borderWidth: look.borderWidth, borderColor: look.borderColor ?? '#000000' } : {}),
+  })
+
   const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => {
     if (seen.has(id)) return {}
     const style = source.find((candidate) => candidate.id === id)
@@ -6934,19 +6941,27 @@ export function Workspace({
       const usesDefaultStyle = !frame.paragraphStyleId && !hasParagraphStyles && paragraphStyles[0]?.id === id
       if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id) && !usesDefaultStyle) return frame
       // the story as a whole is on this style: its look becomes the frame's own (the keep setting is a paragraph one, not a frame field)
-      const { keepLinesTogether, keepWithNext, listKind, listGap, ...frameLook } = resolved
+      const { keepLinesTogether, keepWithNext, listKind, listGap, background, borderColor, borderWidth, ...frameLook } = resolved
       if ((hasFrameStyle || usesDefaultStyle) && !hasParagraphStyles) {
         const count = frame.text.split('\n').length
-        const keep = Array.from({ length: count }, () => (keepLinesTogether ? KEEP_ALL_LINES : null))
+        // "keep all lines" follows the style; a minimum of first/last lines set on a paragraph itself stays
+        const keepOf = (list: (number | null)[] | undefined) => {
+          const kept = Array.from({ length: count }, (_, index) => styleKeepOverride(list?.[index], !!keepLinesTogether) ?? null)
+          return kept.some((value) => value) ? kept : undefined
+        }
         const paragraphStylePatches = Array.from({ length: count }, (_, index) => {
           const patch = { ...(frame.paragraphStylePatches?.[index] ?? {}) }
           if (listKind) patch.listKind = listKind
           else delete patch.listKind
           if (listKind && listGap !== undefined) patch.listGap = listGap
           else delete patch.listGap
+          delete patch.background
+          delete patch.borderColor
+          delete patch.borderWidth
+          Object.assign(patch, paragraphBoxOf(resolved))
           return patch
         })
-        return { ...frame, ...frameLook, paragraphStylePatches, paraKeepFirstLines: keepLinesTogether ? keep : undefined, paraKeepLastLines: keepLinesTogether ? keep : undefined, paraKeepWithNext: keepWithNext ? Array.from({ length: count }, () => 1) : undefined, runs: refreshStyleRuns(frame) }
+        return { ...frame, ...frameLook, paragraphStylePatches, paraKeepFirstLines: keepOf(frame.paraKeepFirstLines), paraKeepLastLines: keepOf(frame.paraKeepLastLines), paraKeepWithNext: keepWithNext ? Array.from({ length: count }, () => 1) : undefined, runs: refreshStyleRuns(frame) }
       }
       const paragraphStyleIds = frame.paragraphStyleIds ?? []
       const paragraphStylePatches: NonNullable<TextFrame['paragraphStylePatches']> = frame.paragraphStylePatches ? frame.paragraphStylePatches.slice() : paragraphStyleIds.map(() => ({}))
@@ -6968,12 +6983,13 @@ export function Workspace({
             ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
             ...(listKind ? { listKind } : {}),
             ...(listKind && listGap !== undefined ? { listGap } : {}),
+            ...paragraphBoxOf(resolved),
             ...(keptWindow ? { windowIndent: keptWindow, ...(keptWindowWords ? { windowWords: keptWindowWords } : {}) } : {}),
           }
           if (resolved.spaceBefore !== undefined) paraSpaceBefore = withParaOverride(paraSpaceBefore, index, resolved.spaceBefore)
           if (resolved.spaceAfter !== undefined) paraSpaceAfter = withParaOverride(paraSpaceAfter, index, resolved.spaceAfter)
-          paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, keepLinesTogether ? KEEP_ALL_LINES : undefined)
-          paraKeepLastLines = setParaOverride(paraKeepLastLines, index, keepLinesTogether ? KEEP_ALL_LINES : undefined)
+          paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, styleKeepOverride(paraKeepFirstLines?.[index], !!keepLinesTogether))
+          paraKeepLastLines = setParaOverride(paraKeepLastLines, index, styleKeepOverride(paraKeepLastLines?.[index], !!keepLinesTogether))
           paraKeepWithNext = setParaOverride(paraKeepWithNext, index, keepWithNext ? 1 : undefined)
         }
         start = end
@@ -7237,6 +7253,7 @@ export function Workspace({
     const layout = {
       ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
       ...(resolved.listKind ? { listKind: resolved.listKind } : {}),
+      ...paragraphBoxOf(resolved),
     } as NonNullable<TextFrame['paragraphStylePatches']>[number]
     const count = frame.text.split('\n').length
     const hadLists = !!frame.paragraphStyleIds?.length
@@ -7260,7 +7277,7 @@ export function Workspace({
     let paraKeepLastLines = frame.paraKeepLastLines
     let paraKeepWithNext = frame.paraKeepWithNext
     // "keep lines together": the paragraph never splits between frames - its first and its last lines both stay with the rest
-    const keepAll = resolved.keepLinesTogether ? KEEP_ALL_LINES : undefined
+    const keepsAll = !!resolved.keepLinesTogether
     const keepNext = resolved.keepWithNext ? 1 : undefined
     for (const index of indexes) {
       const [start, end] = paragraphBounds(frame.text, index)
@@ -7272,8 +7289,8 @@ export function Workspace({
       runs = applyParagraphLook(runs, start, end, charPatch, resolvedChars)
       paraSpaceBefore = override(paraSpaceBefore, index, layout.spaceBefore)
       paraSpaceAfter = override(paraSpaceAfter, index, layout.spaceAfter)
-      paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, keepAll)
-      paraKeepLastLines = setParaOverride(paraKeepLastLines, index, keepAll)
+      paraKeepFirstLines = setParaOverride(paraKeepFirstLines, index, styleKeepOverride(paraKeepFirstLines?.[index], keepsAll))
+      paraKeepLastLines = setParaOverride(paraKeepLastLines, index, styleKeepOverride(paraKeepLastLines?.[index], keepsAll))
       paraKeepWithNext = setParaOverride(paraKeepWithNext, index, keepNext)
     }
     // every paragraph moved: the story as a whole is now on the target style too

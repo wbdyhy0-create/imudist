@@ -1,4 +1,4 @@
-import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Run, type TextAlign } from './document'
+import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type ParagraphBox, type Run, type TextAlign } from './document'
 import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 import { hexToRgb } from './colorModels'
@@ -252,7 +252,7 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
 }
 
 /** Layout a single paragraph may override on its own (a paragraph style applied to it, or settings changed for it). */
-export interface ParagraphPatch {
+export interface ParagraphPatch extends ParagraphBox {
   leading?: number
   wordSpacingMin?: number
   wordSpacingMax?: number
@@ -273,8 +273,30 @@ export interface ParagraphPatch {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind)
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
 
+/** the room (points, unscaled) a paragraph's fill or line keeps between itself and the text at the sides */
+const BOX_INSET = 3
+
+/** true when the paragraph has a fill behind it or a line around it */
+export const paragraphHasBox = (p: ParagraphBox | undefined) => !!p && (!!p.background || (p.borderWidth ?? 0) > 0)
+
+/** CSS for a paragraph block's own fill and line */
+export function paragraphBoxStyle(p: ParagraphBox | undefined, scale: number): { backgroundColor?: string; border?: string } {
+  if (!p) return {}
+  return {
+    ...(p.background ? { backgroundColor: p.background } : {}),
+    ...((p.borderWidth ?? 0) > 0 ? { border: `${p.borderWidth! * scale}px solid ${p.borderColor ?? '#000000'}` } : {}),
+  }
+}
+
+/** a paragraph block's side padding: its indents, plus the room that keeps the text off its fill / line */
+export function paragraphSidePadding(p: (ParagraphBox & Pick<ParagraphPatch, 'indentLeft' | 'indentRight' | 'secondLineIndent'>) | undefined, scale: number): { paddingLeft?: string; paddingRight?: string } {
+  const inset = paragraphHasBox(p) ? BOX_INSET : 0
+  const left = (p?.indentLeft ?? 0) + inset
+  const right = (p?.indentRight ?? 0) + (p?.secondLineIndent ?? 0) + inset
+  return { ...(left ? { paddingLeft: `${left * scale}px` } : {}), ...(right ? { paddingRight: `${right * scale}px` } : {}) }
+}
 /** A CSS-generated marker for a list paragraph; adjacent numbered paragraphs continue their count. */
 export function paragraphListMarker(patches: ParagraphPatch[] | undefined, paragraph: number): string | undefined {
   const kind = patches?.[paragraph]?.listKind
@@ -378,9 +400,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       const spacing = wordSpacingPt({ ...DEFAULT_TEXT_STYLE, ...paragraphStyle, align: patch.align ?? baseAlign ?? DEFAULT_TEXT_STYLE.align, ...patch })
       if (spacing) block.style.wordSpacing = `${spacing * scale}px`
     }
-    if (patch?.indentLeft) block.style.paddingLeft = `${patch.indentLeft * scale}px`
-    const rightIndent = (patch?.indentRight ?? 0) + (patch?.secondLineIndent ?? 0)
-    if (rightIndent) block.style.paddingRight = `${rightIndent * scale}px`
+    Object.assign(block.style, paragraphSidePadding(patch, scale), paragraphBoxStyle(patch, scale))
     if (patch?.secondLineIndent) block.style.textIndent = `${-patch.secondLineIndent * scale}px`
     block.style.boxSizing = 'border-box'
     const line = text.slice(pos, end)

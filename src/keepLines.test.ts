@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { KEEP_ALL_LINES } from './document'
-import { setParaOverride } from './story'
+import { setParaOverride, spliceParaOverrides, styleKeepOverride } from './story'
 
 describe('setParaOverride', () => {
   it('sets a paragraph\'s own value, padding the list with "none" up to it', () => {
@@ -30,5 +30,34 @@ describe('the keep settings survive saving and opening the file', () => {
     expect(back.frames[0].paraKeepWithNext).toEqual([1, null, null])
     expect(back.paragraphStyles[0].patch.keepLinesTogether).toBe(true)
     expect(back.paragraphStyles[0].patch.keepWithNext).toBe(true)
+  })
+})
+
+describe('styleKeepOverride', () => {
+  it('puts "keep all lines" on and off with the style', () => {
+    expect(styleKeepOverride(null, true)).toBe(KEEP_ALL_LINES)
+    expect(styleKeepOverride(KEEP_ALL_LINES, false)).toBeUndefined()
+    expect(styleKeepOverride(undefined, false)).toBeUndefined()
+  })
+
+  it('leaves a minimum of lines set on the paragraph itself alone when a style is applied or redefined', () => {
+    expect(styleKeepOverride(2, false)).toBe(2)
+    // ...unless the style keeps every line together, which is stricter
+    expect(styleKeepOverride(2, true)).toBe(KEEP_ALL_LINES)
+    expect(styleKeepOverride(0, false)).toBeUndefined()
+  })
+})
+
+describe('orphan/widow control when a paragraph is split', () => {
+  // three paragraphs, the middle one with "keep at least 2 lines"
+  const text = 'אא\nבב\nגג'
+  const overrides = [null, 2, null]
+
+  it('gives the paragraph an Enter creates the control of the one it was split from', () => {
+    expect(spliceParaOverrides(overrides, text, 4, 4, '\n', true)).toEqual([null, 2, 2, null])
+  })
+
+  it('does not, without asking, which is what space overrides want', () => {
+    expect(spliceParaOverrides(overrides, text, 4, 4, '\n')).toEqual([null, 2, null, null])
   })
 })

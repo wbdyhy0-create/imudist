@@ -379,7 +379,7 @@ export interface TextFrame extends TextStyle {
    * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
    * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
    */
-  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number })[]
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   x: number
@@ -440,6 +440,14 @@ export interface NestedStyleRule {
   inclusive: boolean
 }
 
+/** a paragraph's own box: a fill behind it and/or a line around it (the line exists only when orderWidth is above 0; its colour defaults to black) */
+export interface ParagraphBox {
+  background?: string
+  borderColor?: string
+  /** points */
+  borderWidth?: number
+}
+
 export interface ParagraphStyleRecord {
   id: string
   name: string
@@ -448,7 +456,7 @@ export interface ParagraphStyleRecord {
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number }
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
 }
 
 /** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */

@@ -1,4 +1,5 @@
 import type { CharacterStyleRecord, CharacterStyleSettings, CharStyle, Run, TextFrame } from './document'
+import { KEEP_ALL_LINES } from './document'
 
 /**
  * Pure helpers for a story's formatted text. A story is a string plus `runs`: consecutive pieces that share a
@@ -275,6 +276,17 @@ export function withParaOverride(overrides: (number | null)[] | undefined, index
   return out
 }
 
+/**
+ * What a paragraph's first/last-lines override (orphan and widow control) becomes when its paragraph style is applied or
+ * redefined. "Keep all lines together" is the style's own setting, so it is put on or taken off with the style; a minimum
+ * number of lines set on the paragraph itself (the orphan/widow dialog, the paragraph panel) is the paragraph's own and stays -
+ * applying a style used to wipe it, and the widows it had prevented came back.
+ */
+export function styleKeepOverride(current: number | null | undefined, styleKeepsAll: boolean): number | undefined {
+  if (styleKeepsAll) return KEEP_ALL_LINES
+  return current && current !== KEEP_ALL_LINES ? current : undefined
+}
+
 /** `withParaOverride`, or - with no value - the paragraph's own override taken away (back to `null`, "none"). */
 export function setParaOverride(overrides: (number | null)[] | undefined, index: number, value: number | undefined): (number | null)[] | undefined {
   if (value !== undefined) return withParaOverride(overrides, index, value)
@@ -299,13 +311,15 @@ export function spliceParaOverrides(
   from: number,
   to: number,
   insert: string,
+  /** a paragraph the edit creates takes the override of the paragraph it was split from (Enter), instead of starting with none */
+  inherit = false,
 ): (number | null)[] | undefined {
   if (!overrides || overrides.length === 0) return overrides
   const startPara = paraIndexAt(oldText, from)
   const removedParas = paraIndexAt(oldText, to) - startPara
   const addedParas = (insert.match(/\n/g) ?? []).length
   const out = overrides.slice()
-  out.splice(startPara + 1, removedParas, ...Array<number | null>(addedParas).fill(null))
+  out.splice(startPara + 1, removedParas, ...Array<number | null>(addedParas).fill(inherit ? overrides[startPara] ?? null : null))
   return out.some((v) => v !== null) ? out : undefined
 }
 

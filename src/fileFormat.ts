@@ -317,6 +317,14 @@ const paragraphStyleIdsOf = (raw: Record<string, unknown>): { paragraphStyleIds?
 const paragraphStyleNamesOf = (raw: Record<string, unknown>): { paragraphStyleNames?: string[] } => ({
   ...(Array.isArray(raw.paragraphStyleNames) ? { paragraphStyleNames: raw.paragraphStyleNames.filter((name): name is string => typeof name === 'string').slice(0, 100000) } : {}),
 })
+/** a paragraph's fill and line (see ParagraphBox): the same checks for a paragraph's own patch and for a paragraph style's */
+const parseParagraphBox = (s: Record<string, unknown>): { background?: string; borderColor?: string; borderWidth?: number } => ({
+  ...(typeof s.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.background) ? { background: s.background } : {}),
+  ...(typeof s.borderWidth === 'number' && Number.isFinite(s.borderWidth) && s.borderWidth > 0
+    ? { borderWidth: num(s.borderWidth, 1, 0, 100), ...(typeof s.borderColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.borderColor) ? { borderColor: s.borderColor } : {}) }
+    : {}),
+})
+
 const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStylePatches?: TextFrame['paragraphStylePatches'] } => ({
   ...(Array.isArray(raw.paragraphStylePatches)
     ? {
@@ -327,6 +335,7 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
                 ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}),
                 ...(value.listKind === 'bullet' || value.listKind === 'number' ? { listKind: value.listKind } : {}),
                 ...(typeof value.listGap === 'number' && Number.isFinite(value.listGap) ? { listGap: num(value.listGap, 4, 0, 100) } : {}),
+                ...parseParagraphBox(value),
                 ...(typeof value.windowIndent === 'number' && Number.isFinite(value.windowIndent) && value.windowIndent > 0
                   ? { windowIndent: num(value.windowIndent, 0, 0, MAX_PAGE_PT), ...(typeof value.windowWords === 'number' && Number.isFinite(value.windowWords) ? { windowWords: int(value.windowWords, 1, 1, 4) } : {}) }
                   : {}),
@@ -361,6 +370,7 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.keepWithNext === 'boolean' ? { keepWithNext: s.keepWithNext } : {}),
     ...(s.listKind === 'bullet' || s.listKind === 'number' ? { listKind: s.listKind } : {}),
     ...(typeof s.listGap === 'number' && Number.isFinite(s.listGap) ? { listGap: num(s.listGap, 4, 0, 100) } : {}),
+    ...parseParagraphBox(s),
     ...(typeof s.overprintFill === 'boolean' ? { overprintFill: s.overprintFill } : {}),
     ...(typeof s.overprintStroke === 'boolean' ? { overprintStroke: s.overprintStroke } : {}),
     ...(typeof s.strokeWidth === 'number' && Number.isFinite(s.strokeWidth) ? { strokeWidth: num(s.strokeWidth, 0, 0, 200) } : {}),
