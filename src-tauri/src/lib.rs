@@ -43,6 +43,62 @@ fn remember_recent_file(app: tauri::AppHandle<Wry>, path: String) -> Result<(), 
   fs::write(recent_file, serde_json::to_vec(&paths).map_err(|error| error.to_string())?).map_err(|error| error.to_string())
 }
 
+const MAX_LINKED_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+const LINKED_IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+
+#[derive(serde::Serialize)]
+struct LinkStat {
+  size: u64,
+  /// last modification, milliseconds since the Unix epoch
+  mtime: u64,
+}
+
+/// A linked picture's path comes out of a saved document, so only absolute paths of picture files are ever touched.
+fn linked_image_path(path: &str) -> Result<PathBuf, String> {
+  let path = PathBuf::from(path);
+  let is_picture = path
+    .extension()
+    .and_then(|extension| extension.to_str())
+    .map(|extension| LINKED_IMAGE_EXTENSIONS.iter().any(|known| extension.eq_ignore_ascii_case(known)))
+    == Some(true);
+  if !path.is_absolute() || !is_picture {
+    return Err("Only absolute paths of picture files can be linked.".into());
+  }
+  Ok(path)
+}
+
+fn stat_of(path: &str) -> Option<LinkStat> {
+  let path = linked_image_path(path).ok()?;
+  let metadata = fs::metadata(path).ok().filter(|metadata| metadata.is_file())?;
+  let mtime = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis() as u64;
+  Some(LinkStat { size: metadata.len(), mtime })
+}
+
+#[tauri::command]
+async fn read_linked_image(path: String) -> Result<tauri::ipc::Response, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let path = linked_image_path(&path)?;
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+      return Err("The linked picture is not a file.".to_owned());
+    }
+    if metadata.len() > MAX_LINKED_IMAGE_BYTES {
+      return Err("The linked picture is too large (over 50MB).".to_owned());
+    }
+    fs::read(&path).map(tauri::ipc::Response::new).map_err(|error| error.to_string())
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
+/// The size and modification time of each path, or null for a file that is missing: how the app notices a changed or lost link.
+#[tauri::command]
+async fn stat_linked_images(paths: Vec<String>) -> Result<Vec<Option<LinkStat>>, String> {
+  tauri::async_runtime::spawn_blocking(move || paths.iter().map(|path| stat_of(path)).collect())
+    .await
+    .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
   let source = STANDARD.decode(source_base64).map_err(|_| "לא ניתן לקרוא את נתוני קובץ ה-EPS.".to_owned())?;
@@ -164,7 +220,7 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![app_name, remember_recent_file, convert_eps_to_pdf])
+    .invoke_handler(tauri::generate_handler![app_name, remember_recent_file, convert_eps_to_pdf, read_linked_image, stat_linked_images])
     .run(tauri::generate_context!())
     .expect("error while running Imudist");
 }

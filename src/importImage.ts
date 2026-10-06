@@ -31,6 +31,9 @@ export function imageMime(file: File): string | null {
 
 export const isImageFile = (file: File) => imageMime(file) !== null
 
+/** The picture type from a file name's extension, or null if it isn't one we import. */
+export const imageMimeOfName = (name: string): string | null => MIME_BY_EXT[extOf(name)] ?? null
+
 function toBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunk = 0x8000

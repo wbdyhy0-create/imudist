@@ -1,5 +1,6 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
-import { useFontCatalog, weightName } from '../fonts'
+import { fontInstalled, useFontCatalog, weightName } from '../fonts'
+import { runPreflight, type PreflightIssue } from '../preflight'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
@@ -131,6 +132,9 @@ import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg 
 import { ShapeProperties } from './ShapeProperties'
 import { ShapeToolDialog } from './ShapeToolDialog'
 import { PagesPanel, type InsertWhere } from './PagesPanel'
+import { LinksPanel, type LinkUse } from './LinksPanel'
+import { embedLinkedAsset, pickOneImagePath, relinkAsset, updateLinkedAsset, useLinkWatcher } from '../imageLinks'
+import { isTauri } from '../fileio'
 import { LayersPanel } from './LayersPanel'
 import { TocDialog } from './TocDialog'
 import { InsertTableDialog, type InsertTableOptions } from './InsertTableDialog'
@@ -554,6 +558,35 @@ export function Workspace({
   const documentSpreads = useMemo(() => computeLayout(doc).spreads, [doc])
   const { spreads, bounds } = useMemo(() => computeLayout(viewDoc), [viewDoc])
   const rects = useMemo(() => pageRects(viewDoc), [viewDoc])
+  // the check behind the status bar's light, run again whenever the document or its layout changes
+  const fontAvailable = useMemo(() => {
+    const installed = fontCatalog.status === 'system' ? new Set(fontCatalog.families.map((family) => family.family.toLowerCase())) : null
+    return (family: string) => !!installed?.has(family.toLowerCase()) || fontInstalled(family)
+  }, [fontCatalog])
+  const preflightIssues = useMemo(
+    () => runPreflight({ doc, frames, images, shapes, assets, flows: flow, pageRects: rects, isFontAvailable: fontAvailable }),
+    [doc, frames, images, shapes, assets, flow, rects, fontAvailable],
+  )
+  useLinkWatcher(assets)
+  const assetsRef = useRef(assets)
+  assetsRef.current = assets
+  /** where each linked picture is used, for the Links panel */
+  const linkUses = useMemo(() => {
+    const uses: Record<string, LinkUse[]> = {}
+    const numbers = new Map(documentSpreads.flatMap((s) => s.pages.map((p) => [p.index, p.number] as const)))
+    const pageAt = (x: number, y: number) => {
+      const index = ownerPage(rects, x, y)
+      return numbers.get(index) ?? index + 1
+    }
+    const add = (assetId: string, use: LinkUse) => void (assets[assetId]?.link && (uses[assetId] ??= []).push(use))
+    for (const im of images) add(im.assetId, { id: im.id, page: pageAt(im.x + im.w / 2, im.y + im.h / 2) })
+    for (const sh of shapes) if (sh.image) add(sh.image.assetId, { id: sh.id, page: pageAt(sh.x + sh.w / 2, sh.y + sh.h / 2) })
+    for (const parent of parents) {
+      for (const im of parent.images) add(im.assetId, { id: im.id, page: null, parentName: parent.name })
+      for (const sh of parent.shapes) if (sh.image) add(sh.image.assetId, { id: sh.id, page: null, parentName: parent.name })
+    }
+    return uses
+  }, [assets, images, shapes, parents, rects, documentSpreads])
   const tocMarkersByHead = useMemo(() => new Map(headFrames(frames).flatMap((head) => head.tocPageReferences?.length
     ? [[head.id, tocDisplayMarkers(head.tocPageReferences, head.text, 0, head.text.length, frames, flow, rects, sections, doc, doc.toc?.leader ?? '.', head.tocFootnoteReferences) ]]
     : [])), [frames, flow, rects, sections, doc])
@@ -930,6 +963,20 @@ export function Workspace({
   // ── pages ──────────────────────────────────────────────────────────────────────
   const selPage = Math.min(selectedPage, doc.pages - 1)
   const spreadOfPage = (i: number) => Math.max(0, spreads.findIndex((s) => s.pages.some((p) => p.index === i)))
+
+  /** from the list of problems: select what a problem is about and bring it to the middle of the view */
+  const goToIssue = (issue: PreflightIssue) => {
+    setEditingId(null)
+    setSelectedPage(issue.page)
+    if (!issue.target) {
+      goTo(spreadOfPage(issue.page))
+      return
+    }
+    setSelectedId(issue.target.id)
+    const target = [...frames, ...images, ...shapes].find((item) => item.id === issue.target!.id)
+    if (target) applyView(zoom, target.x + target.w / 2, target.y + target.h / 2, vp.w / 2, vp.h / 2)
+    else goTo(spreadOfPage(issue.page))
+  }
 
   // after the pages changed, scroll to the page in question once the new layout is in place
   useEffect(() => {
@@ -3805,7 +3852,6 @@ export function Workspace({
       const repaired = repairImageStroke(source, stroke.points, stroke.radius)
       const nextAssetId = newFrameId()
       const nextAsset: Asset = {
-        ...asset,
         name: `${asset.name.replace(/\.png$/i, '')} — תיקון.png`,
         mime: 'image/png',
         dataUrl: canvasDataUrl(repaired),
@@ -7469,6 +7515,39 @@ export function Workspace({
   const applyParentToPage = (parentId: string | null, pageIndex: number) => applyParentToPages(parentId, [pageIndex])
   const detachSelectedPagesFromParent = () => detachPagesFromParent(selectedPages)
 
+  // ── linked pictures (Links panel) ───────────────────────────────────────────────
+  /** Changes the given linked pictures one by one (those that fail keep their old state); one undo step. Resolves to what went wrong. */
+  const changeLinkedAssets = async (assetIds: string[], change: (asset: Asset) => Promise<Asset>): Promise<string | null> => {
+    const changed: Assets = {}
+    const problems: string[] = []
+    for (const id of assetIds) {
+      const asset = assetsRef.current[id]
+      if (!asset?.link) continue
+      try {
+        changed[id] = await change(asset)
+      } catch (e) {
+        problems.push(e instanceof Error ? e.message : String(e))
+      }
+    }
+    if (Object.keys(changed).length > 0) pageOps.commit({ assets: { ...assetsRef.current, ...changed } })
+    return problems.length > 0 ? problems.join('\n') : null
+  }
+  const updateLinks = (assetIds: string[]) => changeLinkedAssets(assetIds, updateLinkedAsset)
+  const embedLinks = (assetIds: string[]) => changeLinkedAssets(assetIds, embedLinkedAsset)
+  const relinkLink = async (assetId: string) => {
+    const path = await pickOneImagePath()
+    return path ? changeLinkedAssets([assetId], () => relinkAsset(path)) : null
+  }
+  /** selects a picture that uses the link and brings its page into view */
+  const showLinkedPicture = (assetId: string) => {
+    const use = linkUses[assetId]?.find((u) => u.page !== null)
+    if (!use) return
+    const target = images.find((im) => im.id === use.id) ?? shapes.find((sh) => sh.id === use.id)
+    if (!target) return
+    setSelectedId(target.id)
+    goTo(spreadOfPage(ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)))
+  }
+
   /**
    * Finds every paragraph carrying `tag` (or just the first, when `all` is off) and gives it `styleId` - through
    * `restyleParagraphs`, the same path every other "apply this style to these paragraphs" action in this file uses,
@@ -8633,6 +8712,11 @@ export function Workspace({
               content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={documentSpreads} currentSpread={Math.min(cur, documentSpreads.length - 1)} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onApplyParentToPage={applyParentToPage} onDetachParent={detachSelectedPagesFromParent} sections={sections} onSectionsChange={onSectionsChange} canEditPages={!editingParentId} />,
             },
             {
+              id: 'links',
+              label: 'קישורים',
+              content: <LinksPanel assets={assets} uses={linkUses} available={isTauri} onShow={showLinkedPicture} onUpdate={updateLinks} onRelink={relinkLink} onEmbed={embedLinks} />,
+            },
+            {
               id: 'color',
               label: 'צבע',
               content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
@@ -8852,6 +8936,8 @@ export function Workspace({
         spreadCount={spreads.length}
         onGo={goTo}
         onGoToPage={goToPage}
+        issues={preflightIssues}
+        onGoToIssue={goToIssue}
       />
     </div>
   )

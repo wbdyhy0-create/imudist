@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Assets, DocSettings, ImageFrame, PageSection, ParagraphStyleRecord, ShapeFrame, TextFrame } from '../document'
 import { exportPdf } from '../pdfExport'
 import { isTauri } from '../fileio'
+import { linkStatus } from '../imageLinks'
 import { formatNumber, fromPt, toPt, type Unit } from '../units'
 import { NumberField } from './NumberField'
 
@@ -36,6 +37,12 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, paragraph
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const unit: Unit = doc.unit
+  const staleLinks = new Set(
+    [...images.map((im) => im.assetId), ...shapes.flatMap((sh) => (sh.image ? [sh.image.assetId] : []))].filter((id) => {
+      const link = assets[id]?.link
+      return link && linkStatus(link) !== 'ok'
+    }),
+  ).size
 
   const clampedFrom = Math.min(Math.max(1, from), doc.pages)
   const clampedTo = Math.min(Math.max(clampedFrom, to), doc.pages)
@@ -142,6 +149,11 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, paragraph
         </p>
 
         {error && <p className="muted" style={{ color: '#e5484d' }}>{error}</p>}
+        {staleLinks > 0 && (
+          <p className="muted" style={{ color: '#e5a000' }}>
+            {staleLinks === 1 ? 'תמונה מקושרת אחת חסרה או שונתה' : `${staleLinks} תמונות מקושרות חסרות או שונו`} בדיסק. הייצוא ישתמש במה שנטען במסמך (לתמונה חסרה - בתצוגה מקדימה באיכות נמוכה). כדאי לעדכן או לקשר מחדש בלוח הקישורים לפני הייצוא.
+          </p>
+        )}
 
         <div className="modal-buttons">
           <button className="btn primary" onClick={() => void run()} disabled={!!busy || doc.pages === 0}>

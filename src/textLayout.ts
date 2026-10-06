@@ -179,6 +179,81 @@ const isSpace = (c: string) => /\s/.test(c)
 const capacityOf = (box: { w: number; h: number }, fontSize: number) =>
   Math.max(8, Math.floor((box.w * box.h) / (fontSize * fontSize * 0.55 * LINE_HEIGHT)))
 
+/** The text nodes of a rendered slice with where each begins, so a character's box can be asked for by its index. */
+interface TextIndex {
+  nodes: { node: Text; from: number }[]
+  total: number
+}
+
+function indexText(root: HTMLElement): TextIndex {
+  const nodes: { node: Text; from: number }[] = []
+  let total = 0
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    nodes.push({ node, from: total })
+    total += node.data.length
+  }
+  return { nodes, total }
+}
+
+/** The box of the character at `index` - null where it has none (a paragraph break, a collapsed space). */
+function charBox(text: TextIndex, index: number): { rect: DOMRect; element: Element | null } | null {
+  let lo = 0
+  let hi = text.nodes.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (text.nodes[mid].from <= index) lo = mid
+    else hi = mid - 1
+  }
+  const entry = text.nodes[lo]
+  if (!entry || index - entry.from >= entry.node.data.length) return null
+  const range = document.createRange()
+  range.setStart(entry.node, index - entry.from)
+  range.setEnd(entry.node, index - entry.from + 1)
+  for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) return { rect, element: entry.node.parentElement }
+  return null
+}
+
+/** The first character at or after `index` (within a short distance) that has a box. */
+function nextCharBox(text: TextIndex, index: number): { index: number; rect: DOMRect; element: Element | null } | null {
+  for (let i = index; i < Math.min(text.total, index + 64); i++) {
+    const box = charBox(text, i)
+    if (box) return { index: i, ...box }
+  }
+  return null
+}
+
+/** Where the line box of a character ends, from its glyph box and the line height it is set in (the glyph box is not the line box). */
+function lineBottomOf(box: { rect: DOMRect; element: Element | null }): number {
+  const lineHeight = box.element ? parseFloat(getComputedStyle(box.element).lineHeight) : NaN
+  return box.rect.top + (box.rect.height + (Number.isFinite(lineHeight) ? lineHeight : box.rect.height)) / 2
+}
+
+/**
+ * The index (in `text`) of the first character on the line that the character at `index` is on, found from where the
+ * characters sit on screen: the line's characters share one top. A paragraph break right before it is not part of it.
+ */
+function lineFirstChar(text: TextIndex, index: number): number | null {
+  // the character itself, or else the closest one before it that has a box (a space or a break at the end of its line)
+  let here: { index: number; rect: DOMRect } | null = null
+  for (let i = Math.min(index, text.total - 1); i >= Math.max(0, index - 64); i--) {
+    const box = charBox(text, i)
+    if (box) {
+      here = { index: i, rect: box.rect }
+      break
+    }
+  }
+  if (!here) return null
+  let first = here.index
+  for (let i = here.index - 1; i >= 0; i--) {
+    const box = charBox(text, i)
+    if (!box) continue
+    if (Math.abs(box.rect.top - here.rect.top) > 1) break
+    first = i
+  }
+  return first
+}
+
 /**
  * End index of the largest part of `story` starting at `start` that fits into the box.
  * `hint` is a guess for how many characters fit (e.g. from the last layout). The search starts there and widens,
@@ -220,11 +295,66 @@ function fitEnd(
   }
 
   const guess = Math.min(len, start + Math.max(1, hint ?? Math.round(capacityOf(box, fontSize) * 1.05)))
-  if (probe(guess)) {
-    let step = Math.max(8, guess - start)
+
+  /**
+   * A guess for the answer from ONE render of somewhat more text than should fit: the answer is where the first line that
+   * does not fit begins, and every character's place on screen says which line that is. Only a guess - the exact check below
+   * (the same `fits` the search uses) decides - so anything unusual (the rendered text not matching the slice, a character
+   * without a box where one is needed) just gives up and leaves the search to do it the long way.
+   */
+  const candidate = (): number | null => {
+    const limit = box.h - Math.min(Math.max(1, fontSize * 0.15), Math.max(1, box.h / 6))
+    let upTo = Math.min(len, start + Math.max(16, Math.round((guess - start) * 1.2)))
+    for (let attempt = 0; attempt < 5; attempt++) {
+      inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(story.slice(start, upTo), sliceRuns(runs, start, upTo), 1, paraOpts, patches))
+      const bounds = inner.getBoundingClientRect()
+      if (bounds.height <= limit) {
+        // all of this fits: either it is the end of the story, or more has to be shown
+        if (upTo >= len) return len
+        upTo = Math.min(len, start + Math.round((upTo - start) * 1.6) + 16)
+        continue
+      }
+      const text = indexText(inner)
+      if (text.total !== upTo - start) return null
+      // the first character whose line ends below the limit
+      let low = 0
+      let high = text.total - 1
+      let found: number | null = null
+      while (low <= high) {
+        const mid = (low + high) >> 1
+        const charAt = nextCharBox(text, mid)
+        if (!charAt) {
+          // nothing with a box from here on to the end of the slice: look earlier
+          high = mid - 1
+          continue
+        }
+        if (lineBottomOf(charAt) - bounds.top > limit) {
+          found = charAt.index
+          high = mid - 1
+        } else low = charAt.index + 1
+      }
+      if (found === null) return null
+      const first = lineFirstChar(text, found)
+      return first === null ? null : start + first
+    }
+    return null
+  }
+
+  const seed = candidate()
+  if (seed !== null) {
+    if (seed >= len) return len
+    // the exact check: the largest end that fits is the one where the next character does not
+    if (seed <= start || probe(seed)) probe(Math.max(seed, start) + 1)
+    else hi = seed
+  }
+  if (hi > len) {
+    // no upper bound yet: widen from what fits (or from the guess) until something does not
+    let step = Math.max(8, seed !== null ? 48 : guess - start)
+    let next = seed !== null && lo > start ? Math.min(len, lo + step) : guess
     while (lo < len) {
-      if (!probe(Math.min(len, lo + step))) break
+      if (!probe(next)) break
       step *= 2
+      next = Math.min(len, lo + step)
     }
     if (lo >= len) return len
   }
@@ -289,18 +419,29 @@ function lineStartAtOffset(
   const prefixEnd = Math.min(end, offset + 1)
   const prefix = story.slice(start, prefixEnd)
   const prefixRuns = sliceRuns(runs, start, prefixEnd)
-  const lines = countWrappedLines(m, prefix, prefixRuns, paraOpts, patches, floats)
-  if (lines <= 1) return start
+  // the character the line holds, and where that line begins, from where the characters sit on one render of the text
+  let lineStart: number
+  const inner = m.firstElementChild as HTMLElement
+  inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(prefix, prefixRuns, 1, paraOpts, patches))
+  const text = indexText(inner)
+  const first = text.total === prefix.length && prefix.length > 0 ? lineFirstChar(text, prefix.length - 1) : null
+  if (first !== null) {
+    if (first <= 0) return start
+    lineStart = start + first
+  } else {
+    const lines = countWrappedLines(m, prefix, prefixRuns, paraOpts, patches, floats)
+    if (lines <= 1) return start
 
-  let low = start + 1
-  let high = prefixEnd
-  while (low < high) {
-    const middle = (low + high) >> 1
-    const count = countWrappedLines(m, story.slice(start, middle), sliceRuns(runs, start, middle), paraOpts, patches, floats)
-    if (count >= lines) high = middle
-    else low = middle + 1
+    let low = start + 1
+    let high = prefixEnd
+    while (low < high) {
+      const middle = (low + high) >> 1
+      const count = countWrappedLines(m, story.slice(start, middle), sliceRuns(runs, start, middle), paraOpts, patches, floats)
+      if (count >= lines) high = middle
+      else low = middle + 1
+    }
+    lineStart = low - 1
   }
-  let lineStart = low - 1
   while (lineStart > start && !isSpace(story[lineStart - 1])) lineStart--
   while (lineStart > start && isSpace(story[lineStart - 1])) lineStart--
   if (lineStart >= offset) {
@@ -608,7 +749,20 @@ export function fitStoryEnd(
 }
 
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
-const cache = new Map<string, { text: string; runs: Run[]; sig: string; reuseSig: string; flows: FrameFlow[] }>()
+const cache = new Map<
+  string,
+  {
+    text: string
+    runs: Run[]
+    sig: string
+    reuseSig: string
+    flows: FrameFlow[]
+    /** the story's runs as the layout used them, the footnotes it placed and the notes carried into each frame: what the frames after an edit are compared with */
+    normalizedRuns: Run[]
+    notes: FootnoteLayoutItem[]
+    carried: string
+  }
+>()
 const footnoteMeasurementCache = new Map<string, { width: number; height: number }>()
 if (typeof document !== 'undefined' && 'fonts' in document) document.fonts.addEventListener('loadingdone', () => footnoteMeasurementCache.clear())
 /** last number of characters per frame, the starting point of the next search */
@@ -797,11 +951,32 @@ export function flowFrames(
        * the line holding the first reference beyond it may still fit WITHOUT that note's own height being reserved
        * for the lines above it, so that cut (a whole line, back to before the reference) is tried too.
        */
+      const lengthChange = hit ? story.length - hit.text.length : 0
+      const carriedKey = JSON.stringify(chain.map((frame) => footnoteContinuations.get(frame.id) ?? null))
+      const sameNote = (a: FootnoteLayoutItem, b: FootnoteLayoutItem) =>
+        a.id === b.id && String(a.referenceNumber) === String(b.referenceNumber) && a.content === b.content && JSON.stringify(a.runs) === JSON.stringify(b.runs) && JSON.stringify(a.style) === JSON.stringify(b.style)
+      /**
+       * After frame `i` was laid out and ends at `end`: can the frames after it be taken from the last layout, shifted by what the
+       * edit added? Only when they would come out the same: that frame ends where it did (shifted), the text and the runs after it
+       * are the same, so are the notes anchored after it (the same notes, the same numbers, the same distance from that point), and
+       * what is carried into the frames is the same.
+       */
+      const canKeepRest = (i: number, end: number): boolean => {
+        if (!hit || hit.reuseSig !== reuseSig || dirtyOffset === undefined || hit.flows.length !== chain.length || i + 1 >= chain.length) return false
+        const before = hit.flows[i].end
+        if (end !== before + lengthChange || end <= dirtyOffset) return false
+        if (hit.carried !== carriedKey) return false
+        if (hit.text.slice(before) !== story.slice(end)) return false
+        if (JSON.stringify(sliceRuns(hit.normalizedRuns, before, hit.text.length)) !== JSON.stringify(sliceRuns(runs, end, story.length))) return false
+        const oldNotes = hit.notes.filter((item) => item.anchor >= before)
+        const newNotes = footnoteItems.filter((item) => item.anchor >= end)
+        return oldNotes.length === newNotes.length && oldNotes.every((item, k) => sameNote(item, newNotes[k]) && item.anchor - before === newNotes[k].anchor - end)
+      }
       const calculateRanges = () => {
         const ranges: { start: number; end: number }[] = reusablePrefix.map(({ start, end }) => ({ start, end }))
         let start = ranges.length ? ranges[ranges.length - 1].end : 0
-        chain.forEach((f, i) => {
-          if (i < reusablePrefix.length) return
+        for (let i = reusablePrefix.length; i < chain.length; i++) {
+          const f = chain[i]
           const isFirst = i === 0
           const isLast = i === chain.length - 1
           const flowFrame = f.textFlowBox ? { ...f, w: f.textFlowBox.w, h: f.textFlowBox.h } : f
@@ -882,7 +1057,13 @@ export function flowFrames(
           }
           ranges.push({ start, end: chosen.end })
           start = chosen.end
-        })
+          if (canKeepRest(i, chosen.end)) {
+            // this frame ends exactly where it did before, shifted by what the edit added, and nothing after it changed: every
+            // frame after it is laid out just as it was (shifted the same way) - measuring them all again would give the same
+            for (let k = i + 1; k < chain.length; k++) ranges.push({ start: hit!.flows[k].start + lengthChange, end: hit!.flows[k].end + lengthChange })
+            break
+          }
+        }
         return ranges
       }
       const assignFootnotes = (ranges: { start: number; end: number }[]) => {
@@ -939,7 +1120,7 @@ export function flowFrames(
           footnoteOverflowItems: noteLayouts.get(f.id)?.overflowItems ?? [],
         })
       })
-      cache.set(cacheKey, { text: story, runs: head.runs, sig, reuseSig, flows })
+      cache.set(cacheKey, { text: story, runs: head.runs, sig, reuseSig, flows, normalizedRuns: runs, notes: footnoteItems, carried: carriedKey })
     }
     chain.forEach((f, i) => result.set(f.id, flows[i]))
   }

@@ -736,16 +736,29 @@ export interface PageSection {
   prefix: string
 }
 
+/** Where a linked picture lives: the document keeps this path and a small preview instead of the whole file. */
+export interface AssetLink {
+  /** absolute path of the original file */
+  path: string
+  /** the file's size and modification time (ms) when it was last read, to notice a change on disk */
+  size: number
+  mtime: number
+  /** a small picture (data: URL) saved in the document, shown when the original can't be found */
+  preview: string
+}
+
 /** The data of an imported picture. Several frames can show the same asset. */
 export interface Asset {
   /** the file's name, for the user */
   name: string
   mime: string
-  /** the whole file as a data: URL, so it travels inside the .imudist file */
+  /** the whole file as a data: URL, so it travels inside the .imudist file. A linked picture's is a temporary blob: URL instead (never saved) */
   dataUrl: string
   /** size in pixels */
   width: number
   height: number
+  /** set for a picture that is linked to its file instead of embedded */
+  link?: AssetLink
 }
 
 export type Assets = Record<string, Asset>

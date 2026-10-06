@@ -128,6 +128,13 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap,
               )}
             </p>
             {ppi !== null && ppi < 150 && <p className="props-warning">הרזולוציה נמוכה להדפסה (מומלץ 150 ppi ומעלה).</p>}
+            {asset.link ? (
+              <p className="muted" dir="ltr" style={{ textAlign: 'left', wordBreak: 'break-all' }}>
+                🔗 {asset.link.path}
+              </p>
+            ) : (
+              <p className="muted">מוטמעת במסמך.</p>
+            )}
           </>
         ) : (
           <p className="props-warning">נתוני התמונה חסרים בקובץ.</p>

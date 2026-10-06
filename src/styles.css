@@ -963,6 +963,21 @@ svg { display: block; }
 .image-frame.selected { outline: 2px solid #ffb02e; }
 .viewport.selecttool .image-frame { cursor: move; }
 .image-missing { display: grid; place-items: center; width: 100%; height: 100%; background: #e6e6e6; color: #777; font-size: 11px; }
+/* a linked picture's mark: not part of the print, so it is only drawn with the frame edges */
+.link-badge { position: absolute; top: 2px; inset-inline-start: 2px; z-index: 1; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 2px; border-radius: 3px; background: rgba(20, 20, 20, 0.75); color: #fff; font-size: 10px; line-height: 1; pointer-events: none; }
+.link-badge.modified { background: #c98a00; }
+.link-badge.missing { background: #d13438; font-weight: 700; }
+.links-list { list-style: none; margin: 0 0 8px; padding: 0; max-height: 220px; overflow-y: auto; direction: rtl; }
+.link-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid transparent; border-radius: 3px; cursor: default; user-select: none; }
+.link-row:hover { background: var(--hover); }
+.link-row.sel { background: var(--hover); border-color: var(--accent-line); }
+.link-mark { flex: none; width: 18px; text-align: center; font-size: 12px; }
+.link-mark.modified { color: #ffb02e; }
+.link-mark.missing { color: var(--danger); font-weight: 700; }
+.link-text { display: flex; flex-direction: column; min-width: 0; }
+.link-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-where { font-size: 11px; }
+.link-path { margin-bottom: 8px; font-size: 11px; word-break: break-all; text-align: left; }
 .place-thumb { width: 44px; height: 44px; object-fit: contain; border-radius: 4px; background: repeating-conic-gradient(#3a3030 0 25%, #2b2222 0 50%) 50% / 12px 12px; }
 .file-name { margin: 0 0 4px; word-break: break-all; }
 .low-res { color: var(--danger); }

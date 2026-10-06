@@ -12,10 +12,11 @@ import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
 import { buildMenus, findShortcut } from './menus'
-import { baseName, pickFiles } from './fileio'
+import { baseName, isTauri, pickFiles } from './fileio'
 import { mergeCharacterStyles, remapNestedStyles } from './characterStyleTree'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
+import { IMAGE_FILE_EXTENSIONS, fileNameOf, isImagePath, readLinkedImage } from './imageLinks'
 import { readEpsFile } from './importEps'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
@@ -32,7 +33,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'color', 'gradient', 'swatches', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'links', 'color', 'gradient', 'swatches', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
@@ -140,6 +141,14 @@ export default function App() {
     }
   }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes, session.parentOverrides])
 
+  /** pictures read and waiting for a click on the page; whatever could not be read is reported */
+  const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
+    if (problems.length > 0) session.showError(read.length > 0 ? 'חלק מהתמונות לא יובאו' : 'לא ניתן לייבא את התמונה', new Error(problems.join('\n')))
+    if (read.length > 0) {
+      setPlacing(null)
+      setPlacingImages(read)
+    }
+  }
   /**
    * Files chosen, dropped or pasted: pictures are queued for the image cursor, a Word / text file is loaded into
    * the text cursor. Only one kind is loaded at a time.
@@ -192,11 +201,7 @@ export default function App() {
             problems.push(e instanceof Error ? e.message : String(f.name))
           }
         }
-        if (problems.length > 0) session.showError(read.length > 0 ? 'חלק מהתמונות לא יובאו' : 'לא ניתן לייבא את התמונה', new Error(problems.join('\n')))
-        if (read.length > 0) {
-          setPlacing(null)
-          setPlacingImages(read)
-        }
+        queuePlacedImages(read, problems)
       } else if (files.length > 0) {
         if (files[0].name.toLowerCase().endsWith('.docx')) {
           setImportOptionsFile(files[0])
@@ -289,7 +294,43 @@ export default function App() {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
+  /**
+   * Files chosen or dropped in the desktop app, which (unlike a browser) knows where they are: pictures are linked to
+   * their files instead of copied into the document, anything else is read and goes the usual way.
+   */
+  const placePaths = async (paths: string[]) => {
+    if (paths.length === 0) return
+    if (paths.every(isImagePath)) {
+      const read: PlacedImage[] = []
+      const problems: string[] = []
+      for (const path of paths) {
+        try {
+          read.push(await readLinkedImage(path))
+        } catch (e) {
+          problems.push(e instanceof Error ? e.message : fileNameOf(path))
+        }
+      }
+      queuePlacedImages(read, problems)
+      return
+    }
+    try {
+      const { readFile } = await import('@tauri-apps/plugin-fs')
+      await placeFiles(await Promise.all(paths.map(async (path) => new File([await readFile(path)], fileNameOf(path)))))
+    } catch (e) {
+      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+    }
+  }
   const importFiles = async () => {
+    if (isTauri) {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const picked = await open({
+        multiple: true,
+        directory: false,
+        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'docx', 'pdf', 'eps', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
+      })
+      await placePaths(picked ?? [])
+      return
+    }
     const files = await pickFiles(
       `${FILE_EXT},.docx,.pdf,.eps,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
@@ -448,6 +489,28 @@ export default function App() {
       window.removeEventListener('drop', onDrop)
     }
   }, [doc])
+  // the desktop app gets dropped files as paths (the webview doesn't hand them over as File objects), so pictures can be linked
+  const dropPaths = useRef((_paths: string[]) => {})
+  dropPaths.current = (paths) => {
+    if (!doc && !paths.some((path) => path.toLowerCase().endsWith(FILE_EXT))) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+    else void placePaths(paths)
+  }
+  useEffect(() => {
+    if (!isTauri) return
+    let stop: (() => void) | undefined
+    let disposed = false
+    void import('@tauri-apps/api/webview')
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (event.payload.type === 'drop') dropPaths.current(event.payload.paths)
+        }),
+      )
+      .then((unlisten) => (disposed ? unlisten() : (stop = unlisten)))
+    return () => {
+      disposed = true
+      stop?.()
+    }
+  }, [])
   // double-clicking a .imudist file in Windows (when the app is installed) hands the file to the running app
   useEffect(() => {
     const queue = (window as unknown as { launchQueue?: { setConsumer: (fn: (p: { files: FileSystemFileHandle[] }) => void) => void } }).launchQueue

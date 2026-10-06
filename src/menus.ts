@@ -311,6 +311,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         dock('gradient', 'מעבר צבע'),
         dock('swatches', 'דוגמיות'),
         dock('layers', 'שכבות'),
+        dock('links', 'קישורים'),
         ...(c.openDocs.length > 0
           ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
           : []),

@@ -4,6 +4,7 @@ import { featherCss } from '../feather'
 import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { useDisplaySrc } from '../imageProxy'
+import { useLinkStatus } from '../imageLinks'
 
 interface Props {
   image: ImageFrame
@@ -31,6 +32,7 @@ const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' } as const
 
 /** A picture in its frame. The picture is drawn by the browser, scaled to the frame according to `image.fit`. */
 export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty, selected, locked, marked, showEdge, onPointerDown, onDoubleClick, onHandleDown, onRotateDown }: Props) {
+  const linkState = useLinkStatus(asset?.link)
   // a big picture (a 300-DPI page from a PDF) is drawn from a smaller copy while it is shown small - see imageProxy.ts
   const aspect = asset && asset.height > 0 ? asset.width / asset.height : 1
   const neededPx = Math.ceil(Math.max(image.w, image.h * aspect) * zoom * (window.devicePixelRatio || 1))
@@ -68,6 +70,11 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
         />
       ) : (
         <div className="image-missing">התמונה חסרה</div>
+      )}
+      {linkState && showEdge && (
+        <span className={'link-badge ' + linkState} title={linkState === 'ok' ? `מקושר: ${asset?.link?.path}` : linkState === 'modified' ? 'הקובץ המקושר השתנה בדיסק — עדכן אותו בלוח הקישורים' : 'הקובץ המקושר חסר — קשר מחדש בלוח הקישורים'}>
+          {linkState === 'ok' ? '🔗' : linkState === 'modified' ? '⚠' : '?'}
+        </span>
       )}
       {selected && showEdge && HANDLES.map((h) => <div key={h} className={'handle ' + h} onPointerDown={(e) => onHandleDown(h, e)} />)}
       {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown(c, e)} />)}

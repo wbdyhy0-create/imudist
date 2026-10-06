@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
+import type { PreflightIssue } from '../preflight'
+import { PreflightButton } from './PreflightPanel'
 
 interface Props {
+  /** what the check found, kept up to date as the document changes */
+  issues: PreflightIssue[]
+  onGoToIssue: (issue: PreflightIssue) => void
   zoom: number
   onZoomTo: (zoom: number) => void
   onFitPage: () => void
@@ -35,10 +40,7 @@ export function StatusBar(p: Props) {
           <svg viewBox="0 0 12 12"><path d="M9 2v8M3 2l4 4-4 4" /></svg>
         </button>
       </div>
-      <div className="status-preflight">
-        <span className="dot" />
-        אין שגיאות
-      </div>
+      <PreflightButton issues={p.issues} onGoToIssue={p.onGoToIssue} />
     </div>
   )
 }

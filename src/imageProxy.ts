@@ -107,21 +107,23 @@ export function useDisplaySrc(assetId: string, asset: Asset | undefined, neededP
     listeners.add(rerender)
     return () => void listeners.delete(rerender)
   }, [])
+  // a linked picture changes under the same id when its file is updated or relinked (and back, with undo): its copies follow what it is showing
+  const key = asset?.link ? `${assetId}|${asset.dataUrl}` : assetId
   const tier = asset ? chooseTier(neededPx, asset.width) : null
-  const entry = entries.get(assetId)
+  const entry = entries.get(key)
   // while on screen the copies of a picture are kept
   useEffect(() => {
     if (tier === null) return
-    pinned.set(assetId, (pinned.get(assetId) ?? 0) + 1)
+    pinned.set(key, (pinned.get(key) ?? 0) + 1)
     return () => {
-      const left = (pinned.get(assetId) ?? 1) - 1
-      if (left > 0) pinned.set(assetId, left)
-      else pinned.delete(assetId)
+      const left = (pinned.get(key) ?? 1) - 1
+      if (left > 0) pinned.set(key, left)
+      else pinned.delete(key)
     }
-  }, [assetId, tier])
+  }, [key, tier])
   useEffect(() => {
-    if (asset && tier !== null) requestProxy(assetId, asset)
-  }, [assetId, asset, tier])
+    if (asset && tier !== null) requestProxy(key, asset)
+  }, [key, asset, tier])
   if (!asset) return undefined
   if (tier === null || entry?.failed) return asset.dataUrl
   return entry?.urls.get(tier) ?? [...(entry?.urls ?? [])].sort((a, b) => b[0] - a[0])[0]?.[1]

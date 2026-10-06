@@ -137,7 +137,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
             <button
               className="parent-name parent-none"
               draggable
-              title="גרור אל עמוד כדי להסיר ממנו את עמוד האב"
+              title="גרור אל עמוד כדי להסיר ממנו את עמוד האב (בעמוד מתוך בחירה מרובה - מכל העמודים הנבחרים)"
               onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('application/x-imudist-parent', 'none') }}
             >
               <span className="parent-page-icon" aria-hidden="true" />
@@ -289,7 +289,10 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                       e.preventDefault()
                       const parentDrop = e.dataTransfer.getData('application/x-imudist-parent')
                       if (parentDrop) {
-                        onApplyParentToPage(parentDrop === 'none' ? null : parentDrop, p.index)
+                        const parentId = parentDrop === 'none' ? null : parentDrop
+                        // dropping on one of several selected pages applies the parent to the whole selection
+                        if (selectedPages.length > 1 && selectedPages.includes(p.index)) onApplyParent(parentId)
+                        else onApplyParentToPage(parentId, p.index)
                         return
                       }
                       const from = Number(e.dataTransfer.getData('text/plain'))

@@ -21,6 +21,7 @@ import {
   normalizeSizes,
   validateDoc,
   type Asset,
+  type AssetLink,
   type Assets,
   type ColorSample,
   type CharacterStyleRecord,
@@ -82,7 +83,8 @@ export interface DocumentFile {
   frames: TextFrame[]
   /** version 2+: pictures on the pages, and the data of the pictures they use */
   images: ImageFrame[]
-  assets: Assets
+  /** a linked picture is saved as its small preview plus where its file is (see AssetLink) */
+  assets: Record<string, Omit<Asset, 'link'> & { link?: Omit<AssetLink, 'preview'> }>
   guides: Guide[]
   shapes: ShapeFrame[]
   /** version 2+ (this field only from a later Imudist build): the document's named paragraph styles */
@@ -103,8 +105,15 @@ export interface DocumentFile {
 export function serializeDocument(c: DocContent): string {
   // a parent page's own pictures need their assets kept too, not just the document pages' own
   const used = new Set([...c.images, ...c.parents.flatMap((p) => p.images)].map((i) => i.assetId))
-  const assets: Assets = {}
-  for (const id of used) if (c.assets[id]) assets[id] = c.assets[id]
+  const assets: DocumentFile['assets'] = {}
+  for (const id of used) {
+    const asset = c.assets[id]
+    if (!asset) continue
+    if (asset.link) {
+      const { preview, ...link } = asset.link
+      assets[id] = { ...asset, dataUrl: preview, link }
+    } else assets[id] = asset
+  }
   const file: DocumentFile = {
     format: FORMAT,
     version: VERSION,
@@ -545,6 +554,14 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
 }
 
 const DATA_URL = /^data:image\/(png|jpeg|gif|webp|svg\+xml|bmp|avif);base64,/
+const IMAGE_MIME = /^image\/(png|jpeg|gif|webp|svg\+xml|bmp|avif)$/
+const ABSOLUTE_PATH = /^([a-zA-Z]:[\\/]|\\\\)/
+
+/** A linked picture's file location, if the saved asset has a usable one (the preview is the asset's own data URL). */
+function parseLink(raw: unknown, preview: string): AssetLink | undefined {
+  if (!isObj(raw) || typeof raw.path !== 'string' || !ABSOLUTE_PATH.test(raw.path)) return undefined
+  return { path: raw.path, size: num(raw.size, 0, 0), mtime: num(raw.mtime, 0, 0), preview }
+}
 
 function parseAssets(v: unknown): Assets {
   const out: Assets = Object.create(null) // no prototype: an id like "__proto__" must stay an ordinary key
@@ -553,12 +570,15 @@ function parseAssets(v: unknown): Assets {
     if (!isObj(raw) || typeof raw.dataUrl !== 'string') continue
     const m = DATA_URL.exec(raw.dataUrl)
     if (!m) continue // anything that is not a picture data URL is refused
+    const link = parseLink(raw.link, raw.dataUrl)
     const asset: Asset = {
       name: str(raw.name, 'תמונה'),
-      mime: 'image/' + m[1],
+      // a linked picture's preview is smaller than - and may be a different type from - the file it stands for
+      mime: link && typeof raw.mime === 'string' && IMAGE_MIME.test(raw.mime) ? raw.mime : 'image/' + m[1],
       dataUrl: raw.dataUrl,
       width: int(raw.width, 300, 1, 1e6),
       height: int(raw.height, 300, 1, 1e6),
+      ...(link ? { link } : {}),
     }
     out[id] = asset
   }

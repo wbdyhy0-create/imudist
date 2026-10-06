@@ -17,6 +17,7 @@ import {
 } from './fileio'
 import { changeHistory, newHistory, redoHistory, replaceHistory, shouldMergeChange, undoHistory, type History } from './history'
 import { assetsWeight } from './assetWeight'
+import { resolveLinkedAssets } from './imageLinks'
 import { applySettings, deletePages, insertPages, movePage, type DocContent, type ParentOverride } from './pages'
 import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
 import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
@@ -35,6 +36,12 @@ const NO_PARENT_OVERRIDES: ParentOverride[] = []
 const NO_COLOR_SAMPLES: ColorSample[] = []
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
+
+/** what to tell the user when a document opens with linked pictures that are missing or changed on disk */
+const linkNotice = ({ missing, modified }: { missing: number; modified: number }) => {
+  const parts = [missing > 0 && `${missing} תמונות מקושרות חסרות`, modified > 0 && `${modified} תמונות מקושרות השתנו`].filter(Boolean)
+  return parts.length > 0 ? `${parts.join(', ')} — ראה את לוח הקישורים` : null
+}
 
 /** Extras of a settings change. */
 export interface SetupOptions {
@@ -457,9 +464,10 @@ export function useDocumentSession() {
   const loadText = async (text: string, ref: FileRef) => {
     try {
       const parsed = parseDocument(text, baseName(ref.name))
+      const links = await resolveLinkedAssets(parsed.assets)
       addDoc(parsed, ref)
       await remember(ref)
-      notify(`נפתח: ${ref.name}`)
+      notify(linkNotice(links) ?? `נפתח: ${ref.name}`)
     } catch (e) {
       fail('לא ניתן לפתוח את הקובץ', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }

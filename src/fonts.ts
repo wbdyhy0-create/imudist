@@ -183,3 +183,28 @@ export function closestFace(family: FontFamily | undefined, weight: number, ital
   const pool = family.faces.some((f) => f.italic === italic) ? family.faces.filter((f) => f.italic === italic) : family.faces
   return pool.reduce((best, f) => (Math.abs(f.weight - weight) < Math.abs(best.weight - weight) ? f : best))
 }
+
+const installedFamilies = new Set<string>()
+
+/**
+ * Whether a font family can be drawn here, found by measuring text in it against the generic fonts: a family that is not
+ * there falls back to them and measures the same. Needs no permission, unlike the list of installed fonts. A "no" is not
+ * remembered (a web font may still be loading), a "yes" is.
+ */
+export function fontInstalled(family: string): boolean {
+  if (installedFamilies.has(family)) return true
+  if (typeof document === 'undefined' || !document.body) return true
+  const span = document.createElement('span')
+  span.textContent = 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJ אבגדהוזחטיכלמנסעפצקרשת 0123456789'
+  span.style.cssText = 'position:absolute;left:-100000px;top:0;visibility:hidden;white-space:nowrap;font-size:48px'
+  document.body.appendChild(span)
+  const widthIn = (stack: string) => {
+    span.style.fontFamily = stack
+    return span.getBoundingClientRect().width
+  }
+  const quoted = `"${family.replace(/"/g, '')}"`
+  const installed = ['monospace', 'serif', 'sans-serif'].some((base) => Math.abs(widthIn(`${quoted}, ${base}`) - widthIn(base)) > 0.01)
+  span.remove()
+  if (installed) installedFamilies.add(family)
+  return installed
+}
