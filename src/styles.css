@@ -878,13 +878,16 @@ svg { display: block; }
   position: fixed; z-index: 150; bottom: 44px; inset-inline-start: 50%; transform: translateX(50%); padding: 8px 16px;
   background: #101010; border: 1px solid var(--border-strong); border-radius: 6px; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); pointer-events: none;
 }
-.recent-list { margin: 0; padding: 0; list-style: none; max-width: 560px; }
-.recent-list button { width: 100%; display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 6px; text-align: start; }
+.recent-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.recent-list li { min-width: 0; }
+.recent-list button { width: 100%; min-height: 116px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px 5px; border-radius: 6px; text-align: center; }
 .recent-list button:hover { background: var(--bg-raised); }
 .recent-list svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
-.recent-list .recent-app-icon { width: 28px; height: 28px; flex: none; object-fit: contain; }
-.recent-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recent-date { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.recent-thumb-wrap { width: 68px; height: 56px; display: grid; place-items: center; flex: none; }
+.recent-thumb { display: block; max-width: 68px; max-height: 56px; object-fit: contain; border: 1px solid #aaa; }
+.recent-thumb-placeholder { width: 36px; height: 56px; }
+.recent-list .recent-name { width: 100%; min-width: 0; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-list .recent-date { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
 /* ── side panels: pages + properties ─────────────────────── */
 .side-panels { width: 250px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-panel); border-inline-start: 1px solid var(--line); }
 .side-panels .props-panel { width: auto; flex: 1 1 0; min-height: 0; border-inline-start: 0; }

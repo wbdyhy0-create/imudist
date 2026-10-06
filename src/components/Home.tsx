@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppLogo } from './AppLogo'
 import type { RecentEntry } from '../recent'
 import { DIGITAL_PRESETS, fromPt, PAGE_PRESETS, type PagePreset, type Unit } from '../units'
+import { recentThumbnail } from '../recentThumbnail'
 
 interface Props {
   appName: string
@@ -18,7 +19,43 @@ const formatDate = (ms: number) =>
 
 export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
   const [category, setCategory] = useState<PresetCategory>('print')
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
+  const thumbnailTasks = useRef(new Map<string, Promise<string | null>>())
   const presets = category === 'print' ? PAGE_PRESETS : DIGITAL_PRESETS
+
+  useEffect(() => {
+    let cancelled = false
+    const entries = recent.slice(0, 10)
+    const keys = new Set(entries.map(recentKey))
+    for (const key of thumbnailTasks.current.keys()) {
+      if (!keys.has(key)) thumbnailTasks.current.delete(key)
+    }
+
+    void (async () => {
+      for (const entry of entries) {
+        const key = recentKey(entry)
+        let task = thumbnailTasks.current.get(key)
+        if (!task) {
+          task = recentThumbnail(entry).catch((error: unknown) => {
+            console.warn(`Could not create a preview for recent document "${entry.name}".`, error)
+            return null
+          })
+          thumbnailTasks.current.set(key, task)
+        }
+        const thumbnail = await task
+        if (!cancelled && thumbnail) {
+          setThumbnails((current) => ({
+            ...Object.fromEntries(Object.entries(current).filter(([currentKey]) => keys.has(currentKey))),
+            [key]: thumbnail,
+          }))
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [recent])
 
   return (
     <div className="home">
@@ -77,9 +114,15 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
         ) : (
           <ul className="recent-list">
             {recent.map((r) => (
-              <li key={r.name + r.at}>
+              <li key={recentKey(r)}>
                 <button onClick={() => onOpenRecent(r)}>
-                  <img className="recent-app-icon" src="/icons/icon-192.png" alt="" />
+                  <span className="recent-thumb-wrap">
+                    {thumbnails[recentKey(r)] ? (
+                      <img className="recent-thumb" src={thumbnails[recentKey(r)]} alt={`העמוד הראשון במסמך ${r.name}`} />
+                    ) : (
+                      <span className="home-page-preview recent-thumb-placeholder" aria-hidden="true" />
+                    )}
+                  </span>
                   <span className="recent-name">{r.name}</span>
                   <span className="recent-date">{formatDate(r.at)}</span>
                 </button>
@@ -90,4 +133,8 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
       </div>
     </div>
   )
+}
+
+function recentKey(entry: RecentEntry) {
+  return `${entry.path ?? entry.handle?.name ?? entry.name}\u0000${entry.at}`
 }
