@@ -508,6 +508,18 @@ export function readSelectionIn(root: HTMLElement): [number, number] | null {
   return [Math.min(a, b), Math.max(a, b)]
 }
 
+/** Move a collapsed caret out of element boundaries and paragraph breaks to the canonical text-node position. */
+export function normalizeCaretIn(root: HTMLElement): boolean {
+  const sel = document.getSelection()
+  const node = sel?.anchorNode
+  if (!sel || !sel.isCollapsed || !node || !root.contains(node)) return false
+  const offset = textOffsetIn(root, node, sel.anchorOffset)
+  const [textNode, textOffset] = locate(root, offset)
+  if (node === textNode && sel.anchorOffset === textOffset) return false
+  setSelectionIn(root, offset, offset)
+  return true
+}
+
 function locate(root: HTMLElement, target: number): [Node, number] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   let pos = 0

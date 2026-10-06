@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { Run, TextAlign } from '../document'
-import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
+import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, normalizeCaretIn, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
@@ -172,6 +172,7 @@ export function RichEditor(p: Props) {
 
     const onSelectionChange = () => {
       const s = readSelectionIn(el)
+      if (s && s[0] === s[1]) normalizeCaretIn(el)
       if (s) live.current.onSelect(s[0], s[1])
       markSelectedMarkers(el)
     }
