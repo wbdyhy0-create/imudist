@@ -310,42 +310,65 @@ export function paragraphListMarker(patches: ParagraphPatch[] | undefined, parag
 export const paragraphListMarkerWidth = (marker: string) => Math.max(0.75, marker.length * 0.65 + 0.15)
 export const paragraphListMarkerOffset = (gap: number, leading: number, scale = 1) => Math.max(0, gap - leading * scale)
 
+/** The font sizes (px) that decide how tall the lines of a window paragraph are: those of its opening words and of the rest. */
+export interface WindowFonts {
+  opening: number
+  main: number
+}
+
+/** The window's font sizes for the paragraph [start, end) of a story: the first run's, and the size most of the paragraph is in. */
+export function windowFontsOf(runs: Run[], start: number, end: number, scale = 1): WindowFonts | undefined {
+  const own = sliceRuns(runs, start, end).filter((run) => run.len > 0)
+  if (own.length === 0) return undefined
+  const bySize = new Map<number, number>()
+  for (const run of own) bySize.set(run.style.fontSize, (bySize.get(run.style.fontSize) ?? 0) + run.len)
+  const main = [...bySize.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  return { opening: own[0].style.fontSize * scale, main: main * scale }
+}
+
 /**
- * The empty float that makes a paragraph's second line shorter on the right (the reading start side) by `width`:
- * its shape is blocked only in a band that lies inside the second line, so the first line and every line after the
- * second keep the full width. Heights are in `lh` (the paragraph's own line height, so a leading change needs no
- * update here).
+ * Where the window's band lies, as CSS lengths from the top of the paragraph.
  *
- * What the first line's real height depends on, and so where the second line starts, is not known up front:
- * - `gap` is the spacer that can sit on the first line of a paragraph that follows another (see `paraGap`): it sits on
- *   the baseline and reaches `gap` above it, so the line is `max(1lh, gap + below)` tall, where `below` - the part of
- *   the line under the baseline, a font-metrics matter - is somewhere around 0.15-0.35lh;
- * - an opening word set larger than the rest of the line (the point of a window) makes the line taller by about 0.3 of
- *   the size difference, up to the 0.65lh allowed for here.
- * The band therefore starts below the tallest the first line can be, and ends above the lowest the second one can
- * end - so it is always wholly inside the second line, whatever the font, and never touches the first or the third.
+ * The window is the paragraph's second line made shorter on the reading-start side, and a float can only be placed by distance
+ * from the top - so how tall the first line is decides whether the band lands on the second line, or on the first. That is not
+ * the paragraph's `lh`: a line box is as tall as the union of its inline boxes, and boxes of fonts of different sizes sit
+ * differently on the baseline. A text in 18px set in a frame whose own font is 32px (the strut of every line) has lines about
+ * twice its `lh` apart. So the heights are worked out from the sizes involved:
+ *   a line = `lh` + about half the difference between its biggest and its smallest font (`em` here is the frame's own size - the float
+ *   inherits it - the others come from the runs);
+ *   the first line also holds the opening words, and can be taller still where `gap` (the spacer of the previous paragraph's closing
+ *   gap sits on it, `max(1lh, gap + below)`).
+ * The band is the middle of the second line (from 30% to 70% of it), so it is still inside it when the figures are off by a third.
  */
-export function windowFloatStyle(width: number, gap: number) {
-  const first = `calc(max(1lh, ${gap}px + 0.35lh) + 0.65lh)`
-  const both = windowBlockMinHeight(gap)
+function windowBand(gap: number, fonts?: WindowFonts) {
+  const strut = '1em'
+  const opening = fonts ? `${fonts.opening}px` : strut
+  const main = fonts ? `${fonts.main}px` : strut
+  const second = `(1lh + 0.5 * (max(${strut}, ${main}) - min(${strut}, ${main})))`
+  const first = `max(1lh + 0.5 * (max(${strut}, ${opening}, ${main}) - min(${strut}, ${opening}, ${main})), ${gap}px + 0.35lh)`
+  return { top: `calc(${first} + 0.3 * ${second})`, bottom: `calc(${first} + 0.7 * ${second})` }
+}
+
+export function windowFloatStyle(width: number, gap: number, fonts?: WindowFonts) {
+  const { top, bottom } = windowBand(gap, fonts)
   return {
     float: 'right' as const,
     width: `${width}px`,
-    height: both,
-    shapeOutside: `polygon(${width}px 0, ${width}px ${first}, 0 ${first}, 0 ${both}, ${width}px ${both})`,
+    height: bottom,
+    shapeOutside: `polygon(${width}px 0, ${width}px ${top}, 0 ${top}, 0 ${bottom}, ${width}px ${bottom})`,
     pointerEvents: 'none' as const,
     userSelect: 'none' as const,
   }
 }
 
 /** a paragraph block that holds a window is at least as tall as the float, so the float never spills onto the next paragraph */
-export const windowBlockMinHeight = (gap: number) => `calc(max(1lh, ${gap}px + 0.15lh) + 1lh)`
+export const windowBlockMinHeight = (gap: number, fonts?: WindowFonts) => windowBand(gap, fonts).bottom
 
-function windowFloat(width: number, gap: number): HTMLElement {
+function windowFloat(width: number, gap: number, fonts?: WindowFonts): HTMLElement {
   const el = document.createElement('div')
   el.className = 'wrap-float'
   el.contentEditable = 'false'
-  Object.assign(el.style, windowFloatStyle(width, gap))
+  Object.assign(el.style, windowFloatStyle(width, gap, fonts))
   return el
 }
 
@@ -452,8 +475,9 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     if (lead) for (const spacer of spacers.reverse()) lead.insertBefore(spacer, lead.firstChild)
     // a window only belongs to a paragraph's own start, not to the tail of one that began in the previous frame
     if (patch?.windowIndent && isOpening) {
-      block.style.minHeight = windowBlockMinHeight(gapBefore * scale)
-      block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale))
+      const fonts = windowFontsOf(runs, pos, end, scale)
+      block.style.minHeight = windowBlockMinHeight(gapBefore * scale, fonts)
+      block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale, fonts))
     }
     if (marker && (pos > 0 || !!opts.atParaStart)) {
       const content = document.createElement('span')

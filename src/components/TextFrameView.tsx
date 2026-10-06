@@ -3,7 +3,7 @@ import { useRef } from 'react'
 import type { FootnoteHeadingDecoration } from '../document'
 import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch } from '../richtext'
+import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -298,7 +298,7 @@ function RichText({
   }
   // a running paragraph counter across every part, in order, so a "\n" right at a run/highlight boundary is still
   // only counted once and still gets the right entry of `paraGaps`
-  const paragraphNodes: { index: number; nodes: ReactNode[] }[] = []
+  const paragraphNodes: { index: number; nodes: ReactNode[]; sizes: Map<number, number>; opening: number }[] = []
   const tocParagraphs = new Set(text.split('\n').flatMap((line, index) => line.includes(TOC_PAGE_MARKER) ? [startParaIndex + index] : []))
   let renderParaIndex = startParaIndex
   // the spacers closing the previous paragraph, waiting to open the next one (see withMarks)
@@ -309,11 +309,13 @@ function RichText({
     let group = paragraphNodes[paragraphNodes.length - 1]
     let opening: ReactNode[] = []
     if (!group || group.index !== renderParaIndex) {
-      group = { index: renderParaIndex, nodes: [] }
+      group = { index: renderParaIndex, nodes: [], sizes: new Map(), opening: part.run.style.fontSize * scale }
       paragraphNodes.push(group)
       opening = carry
     }
     carry = trailing
+    // the sizes the paragraph is set in, for the height of its first lines (a window's band lies on its second)
+    group.sizes.set(part.run.style.fontSize * scale, (group.sizes.get(part.run.style.fontSize * scale) ?? 0) + part.text.length)
     const partStyle: CSSProperties = {
       fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
       color: part.run.style.color ?? '#111',
@@ -369,9 +371,10 @@ function RichText({
         // spacer closing the previous paragraph sits on its first line (so the floated band starts that much lower)
         const windowWidth = patch?.windowIndent && (paragraph.index > startParaIndex || atParaStart) ? patch.windowIndent * scale : 0
         const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
+        const windowFonts: WindowFonts | undefined = windowWidth && paragraph.sizes.size > 0 ? { opening: paragraph.opening, main: [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] } : undefined
         const markerOffset = marker ? paragraphListMarkerOffset(windowGap, patch?.leading ?? baseLeading, scale) : 0
         const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px` } as CSSProperties : {}
-        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
       })}
     </>
   )
