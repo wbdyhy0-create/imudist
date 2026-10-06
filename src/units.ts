@@ -64,6 +64,7 @@ export const PAGE_PRESETS: PagePreset[] = [
   { id: 'A4', label: 'A4', width: mm(210), height: mm(297) },
   { id: 'A3', label: 'A3', width: mm(297), height: mm(420) },
   { id: 'A5', label: 'A5', width: mm(148), height: mm(210) },
+  { id: 'B5', label: 'B5', width: mm(176), height: mm(250) },
 ]
 
 /** The preset whose size matches (in either orientation), or null for a custom size. */

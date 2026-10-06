@@ -30,7 +30,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
         <h2>התחל מסמך חדש</h2>
         <div className="home-presets">
           {PAGE_PRESETS.map((preset) => {
-            const height = 88
+            const height = 56
             const width = (preset.width / preset.height) * height
             return (
               <button key={preset.id} className="home-card" onClick={() => onNew(preset)}>
@@ -39,6 +39,10 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent }: Props) {
               </button>
             )
           })}
+          <button className="home-card" onClick={() => onNew()}>
+            <span className="home-page-preview custom" aria-hidden="true" />
+            <span>מותאם אישית</span>
+          </button>
         </div>
 
         <h2>אחרונים</h2>
