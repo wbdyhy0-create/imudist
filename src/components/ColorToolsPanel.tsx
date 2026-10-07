@@ -21,6 +21,7 @@ interface Props {
   samples: ColorSample[]
   onStartSampler: () => void
   onDeleteSample: (id: string) => void
+  onSelectBrushColor: (color: string) => void
   brushColor?: string | null
   brushRadius?: number
   onBrushRadiusChange?: (radius: number) => void
@@ -45,7 +46,7 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, brushColor, brushRadius = 12, onBrushRadiusChange, onExitBrush }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, onSelectBrushColor, brushColor, brushRadius = 12, onBrushRadiusChange, onExitBrush }: Props) {
   const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
   const targetShape = shapeTargets[0] ?? null
   const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
@@ -233,7 +234,10 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
           <div className="color-samples-list">
             {samples.map((sample) => (
               <div className="color-sample-row" key={sample.id}>
-                <button className="color-sample-apply" draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-imudist-color', sample.color); event.dataTransfer.setData('text/plain', sample.color); event.dataTransfer.effectAllowed = 'copy' }} onClick={() => { setTint(100); applyColor(sample.color, 100) }} title={`החל ${sample.color}`}>
+                <button className={`color-sample-apply${brushColor === sample.color ? ' brush-selected' : ''}`} aria-pressed={brushColor === sample.color} draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-imudist-color', sample.color); event.dataTransfer.setData('text/plain', sample.color); event.dataTransfer.effectAllowed = 'copy' }} onClick={() => {
+                  if (brushColor) onSelectBrushColor(sample.color)
+                  else { setTint(100); applyColor(sample.color, 100) }
+                }} title={brushColor ? `בחר ${sample.color} למברשת` : `החל ${sample.color}`}>
                   <span className="color-sample-chip" style={{ background: sample.color }} />
                   <span className="color-sample-label">{sample.label}</span>
                   <bdi className="color-sample-hex" dir="ltr">{sample.color}</bdi>

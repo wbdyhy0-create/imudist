@@ -494,6 +494,7 @@ svg { display: block; }
 .color-sample-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .color-sample-apply { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 30px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; text-align: start; }
 .color-sample-apply:hover { background: var(--hover); }
+.color-sample-apply.brush-selected { border-color: #ffeb3b; box-shadow: inset 0 0 0 1px rgba(255, 235, 59, 0.45); }
 .color-sample-apply[draggable='true'] { cursor: grab; }
 .color-sample-apply[draggable='true']:active { cursor: grabbing; }
 .color-sample-chip { width: 18px; height: 18px; flex: none; border: 1px solid rgba(255,255,255,.45); border-radius: 2px; }
