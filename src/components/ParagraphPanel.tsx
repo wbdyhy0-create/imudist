@@ -1,4 +1,4 @@
-import { DEFAULT_SPACE_AFTER, defaultLeading, MAX_PAGE_PT, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SPACE_AFTER, effectiveLeading, MAX_PAGE_PT, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import type { Unit } from '../units'
 import { ALIGNS, Group, Labeled } from './PropertiesPanel'
 import { NumberField } from './NumberField'
@@ -47,7 +47,7 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
               ))}
             </div>
             <Labeled label="מרווח שורות">
-              <NumberField value={style.leading ?? defaultLeading(style)} unit="px" unitLabel="pt" min={1} max={MAX_PAGE_PT} onChange={(leading) => onChange({ leading })} />
+              <NumberField value={effectiveLeading(style)} unit="px" unitLabel="pt" min={1} max={MAX_PAGE_PT} onChange={(leading) => onChange({ leading })} />
             </Labeled>
             <p className="muted">ריווח מילים חל רק ביישור מלא.</p>
             <div className="grid2">

@@ -25,6 +25,8 @@ interface Props {
   brushColor?: string | null
   brushRadius?: number
   onBrushRadiusChange?: (radius: number) => void
+  brushStrength?: number
+  onBrushStrengthChange?: (strength: number) => void
   onExitBrush?: () => void
 }
 
@@ -46,7 +48,7 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, onSelectBrushColor, brushColor, brushRadius = 12, onBrushRadiusChange, onExitBrush }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, onSelectBrushColor, brushColor, brushRadius = 12, onBrushRadiusChange, brushStrength = 100, onBrushStrengthChange, onExitBrush }: Props) {
   const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
   const targetShape = shapeTargets[0] ?? null
   const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
@@ -228,6 +230,13 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
             <span>גודל המברשת</span>
             <input aria-label="גודל המברשת" type="range" min="1" max="96" value={brushRadius} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
             <output>{brushRadius}</output>
+          </label>
+        )}
+        {brushColor && onBrushStrengthChange && (
+          <label className="color-brush-size">
+            <span>חוזק הצבע</span>
+            <input aria-label="חוזק הצבע" type="range" min="0" max="100" value={brushStrength} onChange={(event) => onBrushStrengthChange(Number(event.currentTarget.value))} />
+            <output>{brushStrength}%</output>
           </label>
         )}
         {samples.length === 0 ? <p className="muted color-samples-empty">אין דגימות במסמך.</p> : (

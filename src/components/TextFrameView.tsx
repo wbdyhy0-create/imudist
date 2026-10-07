@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { useRef } from 'react'
 import type { FootnoteHeadingDecoration } from '../document'
-import { cssTextAlign, defaultLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type GradientFeather, type Run, type TextFrame, type TextStyle } from '../document'
+import { cssTextAlign, effectiveLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
 import { substituteMarker } from '../numbering'
@@ -9,7 +9,8 @@ import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
 import { footnoteBlockWidth, type FootnotePlacement } from '../footnoteLayout'
-import { featherCss } from '../feather'
+import { featherMaskStyles } from '../feather'
+import type { RichTextClipboard } from '../richTextClipboard'
 
 /**
  * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
@@ -91,7 +92,7 @@ function withMarks(
 
 interface Props {
   frame: TextFrame
-  featherOverride?: GradientFeather
+  featherOverride?: Feather
   /** default style + alignment of the whole story (the first frame's) */
   style: TextStyle
   /** the part of the story shown in this frame, with its style runs */
@@ -134,6 +135,8 @@ interface Props {
   /** resolved space above the story's first line / below its last (document.ts's frameSpaceBefore/frameSpaceAfter) */
   spaceBeforeFirst: number
   spaceAfterLast: number
+  /** the first line moved down, for a leading tighter than the letters (see firstLine.ts) */
+  firstLineLift?: number
   footnoteMarkers?: Record<number, string>
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
@@ -180,6 +183,8 @@ interface Props {
   onEdit: (from: number, to: number, insert: string) => void
   onSelect: (a: number, b: number) => void
   onCopyText: () => string | null
+  onCopyFormattedText?: (a: number, b: number) => RichTextClipboard | null
+  onPasteFormattedText?: (a: number, b: number, clipboard: RichTextClipboard) => void
   onBackspaceAtStart: () => void
   onBackspaceAtParagraphStart?: (offset: number) => boolean
   onStopEditing: () => void
@@ -387,6 +392,7 @@ export function TextFrameView(p: Props) {
   const resizeWidthBasis = p.footnoteMode === 'vertical' && p.footnoteColumns === 2 ? frame.w / 2 : frame.w
   const footnoteWidthScale = p.footnoteWidthScale ?? 1
   const maskFeather = p.featherOverride ?? frame.feather
+  const textFlowBox = textFlowBoxOf(frame)
   const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
   const masterPreview = !editing && (slice.includes(PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_PAGE_NUMBER_MARKER) || slice.includes(EXTERNAL_PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_LETTER_PAGE_NUMBER_MARKER) || slice.includes(LETTER_PAGE_NUMBER_MARKER) || slice.includes(RUNNING_HEADER_MARKER))
   let masterDisplay = { text: slice, runs: p.runs }
@@ -469,31 +475,34 @@ export function TextFrameView(p: Props) {
        *  it's computed once and never re-triggers line-breaking. Matches how professional DTP tools handle zoom.
        *  Handles/ports stay OUTSIDE this wrapper, on the outer (still zoom-multiplied) box, so their own fixed
        *  on-screen size is untouched by this transform. */}
-      <div
-        className="text-frame-scale"
-        style={{
-          width: frame.w,
-          height: frame.h,
-          ...(maskFeather ? { maskImage: featherCss(maskFeather, frame.w, frame.h), WebkitMaskImage: featherCss(maskFeather, frame.w, frame.h) } : {}),
-          visibility: frame.rasterized ? 'hidden' : undefined,
-          fontSize: style.fontSize,
-          fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
-          lineHeight: `${style.leading ?? defaultLeading(style)}px`,
-          ...cssTextAlign(style.align),
-          wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : undefined,
-          // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
-          // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
-          // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
-          paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst : undefined,
-          paddingBottom: (!hasNext ? p.spaceAfterLast : 0) + p.footnoteHeight || undefined,
-          '--text-body-top': `${!p.hasPrev ? p.spaceBeforeFirst : 0}px`,
-          '--text-body-height': `${Math.max(0, frame.h - (!p.hasPrev ? p.spaceBeforeFirst : 0) - p.footnoteHeight)}px`,
-          paddingLeft: style.indentLeft || undefined,
-          paddingRight: style.indentRight || undefined,
-          transform: `scale(${p.zoom * (frame.textScale?.x ?? 1), p.zoom * (frame.textScale?.y ?? 1)})`,
-          transformOrigin: '0 0',
-        } as CSSProperties}
-      >
+      <div className="text-frame-clip">
+        <div
+          className="text-frame-scale"
+          style={{
+            width: textFlowBox.w,
+            height: textFlowBox.h,
+            ...(maskFeather ? featherMaskStyles(maskFeather, textFlowBox.w, textFlowBox.h) : {}),
+            visibility: frame.rasterized ? 'hidden' : undefined,
+            fontSize: style.fontSize,
+            fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
+            lineHeight: `${effectiveLeading(style)}px`,
+            ...cssTextAlign(style.align),
+            wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : undefined,
+            // paragraph spacing/indents belong to the whole story (like leading/align): spaceBefore only on the frame
+            // holding the story's first line, spaceAfter only on the one holding its last (firstLineIndent applies to
+            // every paragraph's own first line — see withMarks/richtext.ts's buildRunNodes — not shown as CSS here)
+            paddingTop: !p.hasPrev && p.spaceBeforeFirst ? p.spaceBeforeFirst : undefined,
+            paddingBottom: (!hasNext ? p.spaceAfterLast : 0) + p.footnoteHeight || undefined,
+            '--text-body-top': `${!p.hasPrev ? p.spaceBeforeFirst : 0}px`,
+            '--text-body-height': `${Math.max(0, textFlowBox.h - (!p.hasPrev ? p.spaceBeforeFirst : 0) - p.footnoteHeight)}px`,
+            // the first line moved down inside the text area (not the area itself: the letters of a tight leading stick out above their line)
+            '--text-first-lift': `${p.firstLineLift ?? 0}px`,
+            paddingLeft: style.indentLeft || undefined,
+            paddingRight: style.indentRight || undefined,
+            transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})`,
+            transformOrigin: '0 0',
+          } as CSSProperties}
+        >
       {editing ? (
         <RichEditor
           text={slice}
@@ -505,7 +514,7 @@ export function TextFrameView(p: Props) {
           startParaIndex={p.startParaIndex}
           atParaStart={p.atParaStart}
           firstLineIndent={style.firstLineIndent ?? 0}
-          baseLeading={style.leading ?? defaultLeading(style)}
+          baseLeading={effectiveLeading(style)}
           paragraphPatches={paragraphPatches}
           baseAlign={style.align}
           continuesAtEnd={p.continuesParagraphAtEnd}
@@ -524,6 +533,8 @@ export function TextFrameView(p: Props) {
           onBackspaceAtStart={p.onBackspaceAtStart}
           onBackspaceAtParagraphStart={p.onBackspaceAtParagraphStart}
           onCopyText={p.onCopyText}
+          onCopyFormattedText={p.onCopyFormattedText}
+          onPasteFormattedText={p.onPasteFormattedText}
           onStop={p.onStopEditing}
           onLineBoundary={p.onLineBoundary}
           onDragOutside={p.onDragOutside}
@@ -547,16 +558,16 @@ export function TextFrameView(p: Props) {
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
             baseFontSize={style.fontSize}
-            baseLeading={style.leading ?? defaultLeading(style)}
+            baseLeading={effectiveLeading(style)}
             baseAlign={style.align}
             continuesParagraphAtEnd={p.continuesParagraphAtEnd}
           />
         </div>
       )}
-      </div>
-      {!!p.footnotes?.length && (
-        <div className="footnotes-scale" style={{ width: frame.w, height: frame.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${style.leading ?? defaultLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
-          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: p.footnoteAreaX === undefined ? 0 : 'auto', left: p.footnoteAreaX ?? 'auto', width: p.footnoteAreaWidth ?? frame.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+        </div>
+        {!!p.footnotes?.length && (
+          <div className="footnotes-scale" style={{ width: textFlowBox.w, height: textFlowBox.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
+          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: p.footnoteAreaX === undefined ? 0 : 'auto', left: p.footnoteAreaX ?? 'auto', width: p.footnoteAreaWidth ?? textFlowBox.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
             {p.footnoteDividerHeading ? (
               <div
                 className="footnote-divider-heading"
@@ -679,7 +690,7 @@ export function TextFrameView(p: Props) {
                     window.addEventListener('pointercancel', stop)
                   }}
                   onClick={(event) => event.stopPropagation()}
-                  style={{ left: `${(p.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
+                  style={{ left: `${(p.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
                 >
                   {!note.continued && (
                     <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>
@@ -706,8 +717,9 @@ export function TextFrameView(p: Props) {
               )
             })}
           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {showIn && (
         <div

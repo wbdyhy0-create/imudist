@@ -29,10 +29,10 @@ import {
   type NestedStyleRule,
   type CharStyle,
   type DocSettings,
+  type Feather,
   type FootnoteItem,
   type FootnoteLayoutConfig,
   type GradientFill,
-  type GradientFeather,
   type Guide,
   type ImageFit,
   type ImageFrame,
@@ -505,7 +505,6 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       ...groupOf(raw),
       ...layerIdOf(raw),
       ...(raw.rasterized === true ? { rasterized: true } : {}),
-      ...(isObj(raw.textFlowBox) && typeof raw.textFlowBox.w === 'number' && typeof raw.textFlowBox.h === 'number' ? { textFlowBox: { w: raw.textFlowBox.w, h: raw.textFlowBox.h } } : {}),
       ...(isObj(raw.textScale) && typeof raw.textScale.x === 'number' && typeof raw.textScale.y === 'number' ? { textScale: { x: raw.textScale.x, y: raw.textScale.y } } : {}),
       ...(typeof raw.runningHeaderStyleId === 'string' && raw.runningHeaderStyleId ? { runningHeaderStyleId: raw.runningHeaderStyleId } : {}),
       ...(raw.runningHeaderStrategy === 'first' || raw.runningHeaderStrategy === 'last' ? { runningHeaderStrategy: raw.runningHeaderStrategy } : {}),
@@ -644,8 +643,24 @@ const shadowOf = (raw: Record<string, unknown>): Pick<ImageFrame, 'shadowOffsetX
   ...(typeof raw.shadowOpacity === 'number' && Number.isFinite(raw.shadowOpacity) ? { shadowOpacity: num(raw.shadowOpacity, 0, 0, 1) } : {}),
 })
 
-function parseFeather(raw: unknown): { feather?: GradientFeather } {
+function parseFeather(raw: unknown): { feather?: Feather } {
   if (!isObj(raw)) return {}
+  const radiusOf = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? num(value, 0, 0, 100) : 0
+  if (raw.type === 'basic') {
+    const radius = radiusOf(raw.radius)
+    return radius > 0 ? { feather: { type: 'basic', radius } } : {}
+  }
+  if (raw.type === 'directional') {
+    const feather = {
+      type: 'directional' as const,
+      top: radiusOf(raw.top),
+      right: radiusOf(raw.right),
+      bottom: radiusOf(raw.bottom),
+      left: radiusOf(raw.left),
+    }
+    return feather.top || feather.right || feather.bottom || feather.left ? { feather } : {}
+  }
+  if (raw.type !== undefined && raw.type !== 'gradient') return {}
   const { x0, y0, x1, y1 } = raw
   const coordinates = [x0, y0, x1, y1]
   if (!coordinates.every((value) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e4)) return {}
@@ -657,7 +672,7 @@ function parseFeather(raw: unknown): { feather?: GradientFeather } {
     .sort((a, b) => a.offset - b.offset)
     .slice(0, 8)
   if (points.length < 2) return {}
-  return { feather: { x0: x0 as number, y0: y0 as number, x1: x1 as number, y1: y1 as number, points } }
+  return { feather: { type: 'gradient', x0: x0 as number, y0: y0 as number, x1: x1 as number, y1: y1 as number, points } }
 }
 
 /** the optional two-colour (or multi-stop) fill of a shape */

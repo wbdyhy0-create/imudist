@@ -226,7 +226,7 @@ describe('shared page footnotes', () => {
     })
     const makeFlow = (_id: string, note: FrameFlow['footnotes'][number]): FrameFlow => ({
       headId: 'story', prevId: null, style: DEFAULT_TEXT_STYLE, story: '', start: 0, end: 0, slice: '', runs: [],
-      overflow: false, paraGaps: [], startParaIndex: 0, atParaStart: true, spaceBeforeFirst: 0, spaceAfterLast: 0,
+      overflow: false, paraGaps: [], startParaIndex: 0, atParaStart: true, spaceBeforeFirst: 0, firstLineLift: 0, spaceAfterLast: 0,
       footnotes: [note], footnoteReferences: [], footnoteHeight: 11, footnoteOverflowItems: [],
     })
     const frames = [frame('right', 50), frame('left', 0)]

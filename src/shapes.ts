@@ -208,6 +208,9 @@ export function replaceVertex(geom: PathGeom, index: number, v: PathVertex): Pat
 export function imageGeometry(shape: ShapeFrame, asset: { width: number; height: number }): ImageBox {
   const img = shape.image
   const fit = img?.fit ?? 'fill'
+  if (fit === 'fill' && img?.scale === undefined && img?.offset === undefined) {
+    return { x: 0, y: 0, w: shape.w, h: shape.h }
+  }
   const scale = img?.scale ?? (fit === 'fit' ? Math.min(shape.w / asset.width, shape.h / asset.height) : Math.max(shape.w / asset.width, shape.h / asset.height))
   const w = asset.width * scale
   const h = asset.height * scale

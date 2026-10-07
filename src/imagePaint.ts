@@ -1,6 +1,6 @@
 import type { ImagePixelPoint } from './imageRepair'
 
-export function paintImageStroke(source: HTMLCanvasElement, points: ImagePixelPoint[], radius: number, color: string): HTMLCanvasElement {
+export function paintImageStroke(source: HTMLCanvasElement, points: ImagePixelPoint[], radius: number, color: string, strength = 100): HTMLCanvasElement {
   if (points.length === 0) throw new Error('cannot paint an empty image stroke')
   const output = document.createElement('canvas')
   output.width = source.width
@@ -8,6 +8,7 @@ export function paintImageStroke(source: HTMLCanvasElement, points: ImagePixelPo
   const context = output.getContext('2d')
   if (!context) throw new Error('canvas context unavailable')
   context.drawImage(source, 0, 0)
+  context.globalAlpha = Math.max(0, Math.min(100, strength)) / 100
   context.beginPath()
   if (points.length === 1) {
     context.arc(points[0].x, points[0].y, Math.max(1, radius), 0, Math.PI * 2)

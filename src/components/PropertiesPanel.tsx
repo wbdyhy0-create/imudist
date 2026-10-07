@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { DEFAULT_SHADOW_OFFSET, defaultLeading, MAX_PAGE_PT, type CharStyle, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SHADOW_OFFSET, effectiveLeading, MAX_PAGE_PT, type CharStyle, type Feather, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
@@ -9,6 +9,7 @@ import { FillPicker } from './FillPicker'
 import { FontPicker } from './FontPicker'
 import { NumberField } from './NumberField'
 import { ShadowControls } from './ShadowControls'
+import { FeatherControls } from './FeatherControls'
 
 interface Props {
   frame: TextFrame | null
@@ -20,6 +21,9 @@ interface Props {
   /** position of the frame inside its story, and whether text is left over */
   thread: { index: number; count: number; overflow: boolean } | null
   onGeometry: (patch: Partial<Box>) => void
+  onFeatherChange: (feather?: Feather) => void
+  onUseFeatherTool: () => void
+  onTextScale: (axis: 'x' | 'y', percent: number) => void
   onCharStyle: (patch: Partial<CharStyle>) => void
   /** the text in scope has more than one size: the size field is blank, and its arrows move every size by the same amount */
   sizeMixed?: boolean
@@ -135,7 +139,7 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { st
   )
 }
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onCharStyle, sizeMixed, onSizeStep, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
+export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onFeatherChange, onUseFeatherTool, onTextScale, onCharStyle, sizeMixed, onSizeStep, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
   const catalog = useFontCatalog()
 
   // The panel's buttons must not take the focus away from the text being edited.
@@ -167,8 +171,24 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             </div>
           </Group>
 
+          <Group title="מתיחת הטקסט">
+            <div className="grid2">
+              <Labeled label="רוחב הטקסט">
+                <NumberField ariaLabel="קנה מידה אופקי של הטקסט" value={Math.round((frame.textScale?.x ?? 1) * 100)} min={10} max={1000} onChange={(value) => onTextScale('x', value)} />
+              </Labeled>
+              <Labeled label="גובה הטקסט">
+                <NumberField ariaLabel="קנה מידה אנכי של הטקסט" value={Math.round((frame.textScale?.y ?? 1) * 100)} min={10} max={1000} onChange={(value) => onTextScale('y', value)} />
+              </Labeled>
+            </div>
+            <p className="muted">Shift וגרירת כל ידית מגדילים את הטקסט ואת המסגרת באופן אחיד; Alt משנה את גובה האותיות בלבד.</p>
+          </Group>
+
           <Group title="סדר שכבות">
             <ArrangeButtons onArrange={onArrange} />
+          </Group>
+
+          <Group title="טשטוש קצוות (Feather)">
+            <FeatherControls feather={frame.feather} onChange={onFeatherChange} onUseGradientTool={onUseFeatherTool} />
           </Group>
 
           <Group title="טקסט">
@@ -193,7 +213,7 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             <Labeled label="מרווח בין שורות (Leading)">
               {/* leading, like font size, is always in points — not the document's ruler unit; whole points only */}
               <NumberField
-                value={style.leading ?? defaultLeading(style)}
+                value={effectiveLeading(style)}
                 unit="px"
                 unitLabel="pt"
                 min={0}

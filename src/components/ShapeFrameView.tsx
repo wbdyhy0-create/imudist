@@ -1,7 +1,7 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import type { Asset, GradientFeather, PathVertex, ShapeFrame } from '../document'
+import type { Asset, Feather, PathVertex, ShapeFrame } from '../document'
 import { linearGradientLine } from '../colorModels'
-import { featherCss } from '../feather'
+import { featherMaskStyles } from '../feather'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
@@ -21,7 +21,7 @@ export const MIN_CORNER_HANDLES = 56
 
 interface Props {
   shape: ShapeFrame
-  featherOverride?: GradientFeather
+  featherOverride?: Feather
   zoom: number
   /** screen position of world (0, 0) inside the sheet */
   tx: number
@@ -201,7 +201,7 @@ export function ShapeFrameView({
         style={{
           overflow: 'visible',
           filter: dropShadowFilter(shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, zoom, shape.shadowColor),
-          ...(maskFeather ? { maskImage: featherCss(maskFeather, w, h), WebkitMaskImage: featherCss(maskFeather, w, h) } : {}),
+          ...(maskFeather ? featherMaskStyles(maskFeather, w, h, zoom) : {}),
         }}
         aria-hidden="true"
       >

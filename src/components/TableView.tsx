@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ShapeFrame } from '../document'
+import { featherMaskStyles } from '../feather'
 import {
   borderX, cellCornerRadii, cellRect, cellSideStroke, dragColumnBorder, expandRange, insertRows, originsOf, resolveCell, setCellText, setRowMinHeight, tableCols, tableLines, tableRows,
   type CellRange, type Origin, type TableData, type TableLayout,
@@ -343,7 +344,12 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
     <div
       ref={rootRef}
       className="table-body"
-      style={{ width: px(layout.width), height: px(layout.height), background: shape.fill ?? undefined }}
+      style={{
+        width: px(layout.width),
+        height: px(layout.height),
+        background: shape.fill ?? undefined,
+        ...(shape.feather ? featherMaskStyles(shape.feather, px(layout.width), px(layout.height), zoom) : {}),
+      }}
       onContextMenu={onTableContextMenu}
     >
       {origins.map((o) => {

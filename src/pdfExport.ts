@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, defaultLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, type PageRect } from './pages'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
@@ -15,6 +15,7 @@ import { hexToRgb, linearGradientLine } from './colorModels'
 import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
+import { stackOrder } from './stacking'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -66,6 +67,25 @@ function clearCanvasShadow(ctx: CanvasRenderingContext2D) {
   ctx.shadowBlur = 0
 }
 
+function applyPaddedFeatherMask(canvas: HTMLCanvasElement, feather: Feather, x: number, y: number, width: number, height: number, scale: number) {
+  const mask = document.createElement('canvas')
+  mask.width = canvas.width
+  mask.height = canvas.height
+  const maskContext = mask.getContext('2d')!
+  maskContext.fillStyle = '#000000'
+  maskContext.fillRect(x, y, width, height)
+  maskContext.save()
+  maskContext.translate(x, y)
+  applyFeatherCanvasMask(maskContext, feather, width, height, scale)
+  maskContext.restore()
+
+  const context = canvas.getContext('2d')!
+  context.save()
+  context.globalCompositeOperation = 'destination-in'
+  context.drawImage(mask, 0, 0)
+  context.restore()
+}
+
 async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset: Asset, page: PageRect, scale: number) {
   const img = await loadImage(asset.dataUrl)
   const boxX = (image.x - page.x) * scale
@@ -78,7 +98,7 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   const layerContext = layer.getContext('2d')!
   const fit = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
   layerContext.drawImage(img, fit.x, fit.y, fit.w, fit.h)
-  if (image.feather) applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH)
+  if (image.feather) applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH, scale)
   ctx.save()
   ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
   if (image.rotation) ctx.rotate((image.rotation * Math.PI) / 180)
@@ -119,7 +139,7 @@ async function drawTextDom(
         layerContext.translate((frame.x - page.x + frame.w / 2) * scale, (frame.y - page.y + frame.h / 2) * scale)
         if (frame.rotation) layerContext.rotate((frame.rotation * Math.PI) / 180)
         layerContext.translate(-width / 2, -height / 2)
-        applyFeatherCanvasMask(layerContext, frame.feather!, width, height)
+        applyFeatherCanvasMask(layerContext, frame.feather!, width, height, scale)
         layerContext.restore()
         ctx.drawImage(layer, 0, 0)
       } else {
@@ -186,10 +206,10 @@ async function drawTextDom(
         fontSize: `${style.fontSize}px`,
         fontWeight: String(style.weight),
         fontStyle: style.italic ? 'italic' : 'normal',
-        lineHeight: `${style.leading ?? defaultLeading(style)}px`,
+        lineHeight: `${effectiveLeading(style)}px`,
         ...cssTextAlign(style.align),
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : '',
-        paddingTop: !hasPrev && flow.spaceBeforeFirst ? `${flow.spaceBeforeFirst}px` : '',
+        paddingTop: (!hasPrev ? flow.spaceBeforeFirst : 0) + flow.firstLineLift ? `${(!hasPrev ? flow.spaceBeforeFirst : 0) + flow.firstLineLift}px` : '',
         height: `${frame.h - flow.footnoteHeight + (!hasNext ? flow.spaceAfterLast : 0)}px`,
         paddingBottom: !hasNext && flow.spaceAfterLast ? `${flow.spaceAfterLast}px` : '',
         paddingLeft: style.indentLeft ? `${style.indentLeft}px` : '',
@@ -336,7 +356,7 @@ async function drawTextDom(
           const text = document.createElement('span')
           text.className = 'footnote-content'
           Object.assign(text.style, { flex: '1', minWidth: '0' })
-          Object.assign(item.style, { fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: String(noteStyle.weight), fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${noteStyle.leading ?? defaultLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : '', paddingLeft: noteStyle.indentLeft ? `${noteStyle.indentLeft}px` : '', paddingRight: noteStyle.indentRight ? `${noteStyle.indentRight}px` : '', ...cssTextAlign(noteStyle.align), color: noteStyle.color ?? '#111' })
+          Object.assign(item.style, { fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: String(noteStyle.weight), fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : '', paddingLeft: noteStyle.indentLeft ? `${noteStyle.indentLeft}px` : '', paddingRight: noteStyle.indentRight ? `${noteStyle.indentRight}px` : '', ...cssTextAlign(noteStyle.align), color: noteStyle.color ?? '#111' })
           text.appendChild(buildParagraphNodes(note.content, normalizeRuns(note.content, note.runs ?? [], noteStyle), 1))
           if (!note.continued) item.appendChild(number)
           item.appendChild(text)
@@ -373,6 +393,7 @@ async function drawTable(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
   try {
     await document.fonts?.ready
     const raster = await html2canvas(root, { backgroundColor: null, scale, width: layout.width + 2 * pad, height: layout.height + 2 * pad, logging: false })
+    if (shape.feather) applyPaddedFeatherMask(raster, shape.feather, pad * scale, pad * scale, layout.width * scale, layout.height * scale, scale)
     ctx.save()
     ctx.globalAlpha = shape.opacity ?? 1
     ctx.drawImage(raster, (shape.x - page.x - pad) * scale, (shape.y - page.y - pad) * scale, (layout.width + 2 * pad) * scale, (layout.height + 2 * pad) * scale)
@@ -394,7 +415,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     layer.height = Math.max(1, Math.ceil(h))
     const layerContext = layer.getContext('2d')!
     await drawShape(layerContext, { ...shape, x: 0, y: 0, opacity: 1, rotation: undefined, feather: undefined, shadowOpacity: 0 }, { x: 0, y: 0, w: shape.w, h: shape.h }, scale, asset)
-    applyFeatherCanvasMask(layerContext, shape.feather, w, h)
+    applyFeatherCanvasMask(layerContext, shape.feather, w, h, scale)
     ctx.save()
     ctx.translate(boxX + w / 2, boxY + h / 2)
     if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
@@ -459,7 +480,7 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
  *  gets drawn) beyond it on every side, so pictures/shapes that bleed off the page still print all the way to the
  *  cut line. */
 export async function renderPage(
-  content: { doc: DocSettings; frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[]; assets: Assets; paragraphStyles: ParagraphStyleRecord[]; sections: PageSection[] },
+  content: ExportContent,
   flows: Map<string, FrameFlow>,
   page: PageRect,
   bleedPt: number,
@@ -480,48 +501,59 @@ export async function renderPage(
   const isParentShadow = (item: { id: string }) => item.id.startsWith('parent-shadow:')
   const parentContentAbove = content.doc.parentItemsAbovePageContent ?? false
 
+  const drawObjects = async (frames: TextFrame[], images: ImageFrame[], shapes: ShapeFrame[]) => {
+    const frameById = new Map(frames.map((frame) => [frame.id, frame]))
+    const imageById = new Map(images.map((image) => [image.id, image]))
+    const shapeById = new Map(shapes.map((shape) => [shape.id, shape]))
+    const ordered = stackOrder(frames, images, shapes, content.layerOrder ?? ['layer-1'])
+    let pendingFrames: TextFrame[] = []
+    const flushFrames = async () => {
+      if (pendingFrames.length === 0) return
+      await drawTextDom(ctx, {
+        doc: content.doc,
+        frames: pendingFrames,
+        images: content.images,
+        paragraphStyles: content.paragraphStyles,
+        sections: content.sections,
+        storyFrames: content.frames,
+      }, flows, page, scale)
+      pendingFrames = []
+    }
+    for (const item of ordered) {
+      if (item.kind === 'frame') {
+        const frame = frameById.get(item.id)
+        if (frame) pendingFrames.push(frame)
+        continue
+      }
+      await flushFrames()
+      if (item.kind === 'shape') {
+        const shape = shapeById.get(item.id)
+        if (shape && overlaps(shape.x, shape.y, shape.w, shape.h)) {
+          await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
+        }
+      } else {
+        const image = imageById.get(item.id)
+        if (!image || !overlaps(image.x, image.y, image.w, image.h)) continue
+        const asset = content.assets[image.assetId]
+        if (asset) await drawImage(ctx, image, asset, page, scale)
+      }
+    }
+    await flushFrames()
+  }
+
+  const pageFrames = content.frames.filter((frame) => !isParentShadow(frame))
+  const parentFrames = content.frames.filter(isParentShadow)
+  const pageImages = content.images.filter((image) => !isParentShadow(image))
+  const parentImages = content.images.filter(isParentShadow)
+  const pageShapes = content.shapes.filter((shape) => !isParentShadow(shape))
+  const parentShapes = content.shapes.filter(isParentShadow)
   if (parentContentAbove) {
-    const pageShapes = content.shapes.filter((shape) => !isParentShadow(shape))
-    const parentShapes = content.shapes.filter(isParentShadow)
-    const pageImages = content.images.filter((image) => !isParentShadow(image))
-    const parentImages = content.images.filter(isParentShadow)
-    const pageFrames = content.frames.filter((frame) => !isParentShadow(frame))
-    const parentFrames = content.frames.filter(isParentShadow)
-
-    for (const shape of pageShapes) {
-      if (overlaps(shape.x, shape.y, shape.w, shape.h)) await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
-    }
-    for (const image of pageImages) {
-      if (!overlaps(image.x, image.y, image.w, image.h)) continue
-      const asset = content.assets[image.assetId]
-      if (asset) await drawImage(ctx, image, asset, page, scale)
-    }
-    await drawTextDom(ctx, { doc: content.doc, frames: pageFrames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections, storyFrames: content.frames }, flows, page, scale)
-    for (const shape of parentShapes) {
-      if (overlaps(shape.x, shape.y, shape.w, shape.h)) await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
-    }
-    for (const image of parentImages) {
-      if (!overlaps(image.x, image.y, image.w, image.h)) continue
-      const asset = content.assets[image.assetId]
-      if (asset) await drawImage(ctx, image, asset, page, scale)
-    }
-    await drawTextDom(ctx, { doc: content.doc, frames: parentFrames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections, storyFrames: content.frames }, flows, page, scale)
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    return canvas
+    await drawObjects(pageFrames, pageImages, pageShapes)
+    await drawObjects(parentFrames, parentImages, parentShapes)
+  } else {
+    await drawObjects(parentFrames, parentImages, parentShapes)
+    await drawObjects(pageFrames, pageImages, pageShapes)
   }
-
-  // shapes and pictures, in document order (no explicit z is fine here — this app doesn't expose a merged
-  // stacking order at this layer, and export ordering by array position matches how they were placed)
-  for (const shape of content.shapes) {
-    if (!overlaps(shape.x, shape.y, shape.w, shape.h)) continue
-    await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
-  }
-  for (const image of content.images) {
-    if (!overlaps(image.x, image.y, image.w, image.h)) continue
-    const asset = content.assets[image.assetId]
-    if (asset) await drawImage(ctx, image, asset, page, scale)
-  }
-  await drawTextDom(ctx, { doc: content.doc, frames: content.frames, images: content.images, paragraphStyles: content.paragraphStyles, sections: content.sections }, flows, page, scale)
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   return canvas
 }
@@ -536,6 +568,7 @@ export interface ExportContent {
   frames: TextFrame[]
   images: ImageFrame[]
   shapes: ShapeFrame[]
+  layerOrder?: string[]
   assets: Assets
   paragraphStyles: ParagraphStyleRecord[]
   sections: PageSection[]

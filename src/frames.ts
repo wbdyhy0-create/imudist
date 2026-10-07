@@ -192,3 +192,27 @@ export function dragBox(orig: Box, mode: 'move' | HandleId, dx: number, dy: numb
   }
   return { x, y, w, h }
 }
+
+/** Resize a box proportionally from any handle, keeping the opposite edge or corner anchored. */
+export function dragBoxUniform(orig: Box, mode: HandleId, dx: number, dy: number, min: number): Box {
+  const sx = mode.includes('e') ? 1 : mode.includes('w') ? -1 : 0
+  const sy = mode.includes('s') ? 1 : mode.includes('n') ? -1 : 0
+  const minScale = Math.max(min / orig.w, min / orig.h)
+  let scale: number
+  if (sx && sy) {
+    scale = 1 + (orig.w * sx * dx + orig.h * sy * dy) / (orig.w * orig.w + orig.h * orig.h)
+  } else if (sx) {
+    scale = Math.max(min, orig.w + sx * dx) / orig.w
+  } else {
+    scale = Math.max(min, orig.h + sy * dy) / orig.h
+  }
+  scale = Math.max(minScale, scale)
+  const w = orig.w * scale
+  const h = orig.h * scale
+  return {
+    x: sx > 0 ? orig.x : sx < 0 ? orig.x + orig.w - w : orig.x + (orig.w - w) / 2,
+    y: sy > 0 ? orig.y : sy < 0 ? orig.y + orig.h - h : orig.y + (orig.h - h) / 2,
+    w,
+    h,
+  }
+}

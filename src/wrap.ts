@@ -1,4 +1,4 @@
-import { DEFAULT_WRAP_OFFSET, defaultLeading, type ImageFrame, type TextStyle } from './document'
+import { DEFAULT_WRAP_OFFSET, effectiveLeading, type ImageFrame, type TextStyle } from './document'
 import type { Box } from './frames'
 
 /** Text wrap: how a text frame is cut into the areas where text may go, around the pictures that repel it. */
@@ -112,7 +112,7 @@ export function floatsFor(frame: Box, images: ImageFrame[], style: TextStyle, at
   const indent = style.secondLineIndent ?? 0
   if (!atStoryStart || indent <= 0) return floats
   // the story's normal reading-start side: this app's text frames are always RTL regardless of `align`
-  return [...floats, secondLineFloat('right', indent, style.leading ?? defaultLeading(style))]
+  return [...floats, secondLineFloat('right', indent, effectiveLeading(style))]
 }
 
 /**

@@ -271,6 +271,12 @@ svg { display: block; }
 .context-tool-hint { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 .shadow-controls { display: flex; flex-direction: column; gap: 4px; }
 .shadow-controls input[type='range'] { width: 100%; accent-color: var(--accent-line); }
+.feather-controls { display: grid; gap: 8px; }
+.feather-controls .place-modes { flex-wrap: wrap; }
+.feather-controls .place-modes button { padding: 0 8px; }
+.feather-range { display: grid; gap: 3px; color: var(--text-dim); font-size: 11px; }
+.feather-range input { width: 100%; margin: 0; accent-color: var(--accent-line); }
+.feather-edges { display: grid; gap: 6px; }
 .outline-controls { display: flex; flex-direction: column; gap: 8px; }
 .outline-controls .swatch-row { flex-wrap: nowrap; gap: 4px; }
 .outline-controls .swatch-chip { flex: none; }
@@ -615,6 +621,7 @@ svg { display: block; }
 /* text is laid out at a fixed 1x scale inside here (world points = css px), then the whole thing is scaled as one
    unit via `transform` (set inline, since it depends on the current zoom) — see TextFrameView.tsx's own comment.
    Positioned at the outer .text-frame's own origin, out of flow, so it never affects that box's own layout. */
+.text-frame-clip { position: absolute; inset: 0; overflow: hidden; }
 .text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; overflow: hidden; }
 .footnote-reference { font-size: 0; vertical-align: super; }
 .footnote-reference::after { content: attr(data-reference); font-size: var(--footnote-marker-size, 9px); line-height: 1; direction: inherit; unicode-bidi: isolate; }
@@ -689,6 +696,7 @@ svg { display: block; }
    with an English word would then read as a whole LTR paragraph). Mixed text (Hebrew, English, digits, punctuation) still
    reorders correctly within that — that part is the browser's ordinary bidi algorithm, not tied to this setting. */
 .text-frame-scale > .text-frame-body, .text-frame-scale > .rich-editor { position: absolute; top: var(--text-body-top, 0); left: 0; }
+.text-frame-scale > .text-frame-body, .text-frame-scale > .rich-editor { padding-top: var(--text-first-lift, 0); box-sizing: border-box; }
 .text-frame-body { width: 100%; height: var(--text-body-height, 100%); overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paragraph-list-item { display: grid; grid-template-columns: 2.5em minmax(0, 1fr); align-items: start; }
 .paragraph-list-item::before { content: attr(data-list-marker); display: block; grid-column: 1; grid-row: 1; width: auto; direction: ltr; unicode-bidi: isolate; text-align: end; line-height: inherit; transform: translateY(var(--list-marker-offset, 0px)); white-space: nowrap; user-select: none; pointer-events: none; }
@@ -788,6 +796,7 @@ svg { display: block; }
 .viewport.eyedropper { cursor: copy; }
 .sheet { position: relative; direction: ltr; }
 .sheet svg { position: absolute; left: 0; top: 0; }
+.preview-artwork { position: absolute; left: 0; top: 0; }
 .viewport::-webkit-scrollbar { width: 14px; height: 14px; }
 .viewport::-webkit-scrollbar-track { background: var(--bg-base); }
 .viewport::-webkit-scrollbar-thumb { background: #5c4e4e; border: 3px solid var(--bg-base); border-radius: 8px; }
@@ -856,6 +865,9 @@ svg { display: block; }
 /* ── file dialogs, toast, recent files ───────────────────── */
 .modal-backdrop { position: fixed; inset: 0; z-index: 2000000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.55); }
 .modal { width: min(440px, calc(100vw - 32px)); padding: 22px 24px 18px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
+.workspace-name-label { display: grid; gap: 6px; margin: 0 0 18px; color: var(--text-dim); font-size: 12px; }
+.workspace-name { width: 100%; height: 32px; padding: 0 8px; background: var(--bg-field); border: 1px solid var(--border); border-radius: 4px; color: var(--text); outline: none; }
+.workspace-name:focus { border-color: var(--accent-line); }
 .import-options-dialog { width: min(500px, calc(100vw - 32px)); }
 .import-options-dialog .file-name { margin-bottom: 12px; color: var(--text); }
 .import-pdf-options-dialog { width: min(500px, calc(100vw - 32px)); }

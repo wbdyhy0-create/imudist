@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 
 export interface DockPanelDefinition {
   id: string
@@ -11,6 +11,12 @@ export interface DockPanelDefinition {
 interface Props {
   panels: DockPanelDefinition[]
   enabledPanelIds: string[]
+  tabOrder: string[]
+  onTabOrderChange: (tabOrder: string[]) => void
+  floatingPanelId: string | null
+  onFloatingPanelChange: (id: string | null) => void
+  floatingPosition: { x: number; y: number }
+  onFloatingPositionChange: (position: { x: number; y: number }) => void
   /** which tab is open, kept by the caller (not here) so it survives this component remounting - editing a parent
    *  page does exactly that, and a panel the user had open shouldn't close just because of it */
   openId: string | null
@@ -27,52 +33,39 @@ interface DragState {
   canFloat: boolean
 }
 
-const TAB_ORDER_KEY = 'imudist.dockTabOrder'
-
-function loadTabOrder(): string[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) ?? 'null')
-    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => panel.id), openId, onOpenChange }: Props) {
+export function DockingPanels({
+  panels,
+  enabledPanelIds = panels.map((panel) => panel.id),
+  tabOrder,
+  onTabOrderChange,
+  floatingPanelId,
+  onFloatingPanelChange,
+  floatingPosition,
+  onFloatingPositionChange,
+  openId,
+  onOpenChange,
+}: Props) {
   const available = panels.filter((panel) => panel.visible !== false && enabledPanelIds.includes(panel.id))
   // panels stay mounted (just hidden) once opened: their own state — the Layers panel's list of layers, the selected
   // paragraph style — used to be thrown away every time the tab was closed or another one opened, leaving the
   // workspace (which keeps the layer hidden/locked flags) out of step with what the panel showed
   const [mounted, setMounted] = useState<string[]>(() => (openId ? [openId] : []))
-  // a floating panel (the style manager) opens from its tab, never by itself: on start it used to sit open over the canvas
-  const [floatingId, setFloatingId] = useState<string | null>(null)
-  const [floatingPos, setFloatingPos] = useState({ x: 0, y: 60 })
-  const [tabOrder, setTabOrder] = useState<string[]>(loadTabOrder)
   const [dragLayerId, setDragLayerId] = useState<string | null>(null)
   const [dockOverId, setDockOverId] = useState<string | null>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
-  useEffect(() => {
-    // ids of tabs that aren't available right now stay in the saved order, so hiding a panel doesn't forget its place
-    setTabOrder((current) => {
-      const next = [...current, ...available.map((panel) => panel.id).filter((id) => !current.includes(id))]
-      return next.length === current.length ? current : next
-    })
-  }, [panels])
-  useEffect(() => {
-    try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(tabOrder)) } catch { /* a convenience only */ }
-  }, [tabOrder])
-  const ordered = [...available].sort((a, b) => tabOrder.indexOf(a.id) - tabOrder.indexOf(b.id))
+  const fullTabOrder = [...tabOrder, ...available.map((panel) => panel.id).filter((id) => !tabOrder.includes(id))]
+  const ordered = [...available].sort((a, b) => fullTabOrder.indexOf(a.id) - fullTabOrder.indexOf(b.id))
 
-  const moveTab = (from: string, to: string) => setTabOrder((current) => {
-    const next = [...current]
+  const moveTab = (from: string, to: string) => {
+    const next = [...fullTabOrder]
     const a = next.indexOf(from)
     const b = next.indexOf(to)
-    if (a < 0 || b < 0 || a === b) return current
+    if (a < 0 || b < 0 || a === b) return
     const [moved] = next.splice(a, 1)
     next.splice(b, 0, moved)
-    return next
-  })
+    onTabOrderChange(next)
+  }
 
   const openPanel = (id: string) => {
     onOpenChange(id)
@@ -86,7 +79,7 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
     const dock = dockRef.current?.getBoundingClientRect()
     const inDock = !!dock && drag.x >= dock.left && drag.x <= dock.right && drag.y >= dock.top && drag.y <= dock.bottom
     if (drag.floating && inDock) {
-      setFloatingId(null)
+      onFloatingPanelChange(null)
       openPanel(drag.id)
     }
     dragRef.current = null
@@ -103,26 +96,26 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
     drag.y = event.clientY
     if (!drag.floating && drag.canFloat && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 8) {
       drag.floating = true
-      setFloatingId(drag.id)
+      onFloatingPanelChange(drag.id)
       openPanel(drag.id)
     }
-    if (drag.floating) setFloatingPos({ x: Math.max(8, event.clientX - 120), y: Math.max(36, event.clientY - 18) })
+    if (drag.floating) onFloatingPositionChange({ x: Math.max(8, event.clientX - 120), y: Math.max(36, event.clientY - 18) })
   }
 
-  const startDrag = (id: string, event: ReactPointerEvent<HTMLButtonElement>, canFloat = floatingId === id) => {
+  const startDrag = (id: string, event: ReactPointerEvent<HTMLButtonElement>, canFloat = floatingPanelId === id) => {
     if (event.button !== 0) return
     event.preventDefault()
-    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingId === id, canFloat }
+    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingPanelId === id, canFloat }
     window.addEventListener('pointermove', moveDrag)
     window.addEventListener('pointerup', finishDrag)
     window.addEventListener('pointercancel', finishDrag)
   }
 
   const toggle = (id: string) => {
-    if (floatingId === id) return
+    if (floatingPanelId === id) return
     const panel = available.find((candidate) => candidate.id === id)
     if (panel?.floating) {
-      setFloatingId(id)
+      onFloatingPanelChange(id)
       openPanel(id)
       return
     }
@@ -130,8 +123,8 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
     else openPanel(id)
   }
 
-  const open = available.find((panel) => panel.id === openId && panel.id !== floatingId)
-  const floating = available.find((panel) => panel.id === floatingId)
+  const open = available.find((panel) => panel.id === openId && panel.id !== floatingPanelId)
+  const floating = available.find((panel) => panel.id === floatingPanelId)
 
   return (
     <>
@@ -157,15 +150,15 @@ export function DockingPanels({ panels, enabledPanelIds = panels.map((panel) => 
           ))}
         </div>
         {available
-          .filter((panel) => mounted.includes(panel.id) && panel.id !== floatingId)
+          .filter((panel) => (mounted.includes(panel.id) || panel.id === openId) && panel.id !== floatingPanelId)
           .map((panel) => (
             <section key={panel.id} className="dock-content" style={panel.id === open?.id ? undefined : { display: 'none' }}>
               {panel.content}
             </section>
           ))}
         {floating && (
-          <section className="dock-floating" style={{ left: floatingPos.x, top: floatingPos.y }}>
-            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => { setFloatingId(null); onOpenChange(null) }}>
+          <section className="dock-floating" style={{ left: floatingPosition.x, top: floatingPosition.y }}>
+            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => { onFloatingPanelChange(null); onOpenChange(null) }}>
               <span>{floating.label}</span>
               <span aria-hidden="true">×</span>
             </button>

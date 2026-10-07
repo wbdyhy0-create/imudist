@@ -151,7 +151,7 @@ export function expandPrimaryFramesForColumns(content: DocContent, previousDoc: 
       occupied.add(index)
       const box = newBoxes[index]
       frames = frames.map((frame) => frame.id === target.id
-        ? { ...frame, ...box, textFlowBox: undefined, textScale: undefined }
+        ? { ...frame, ...box, textScale: undefined }
         : frame)
       changed = true
     }

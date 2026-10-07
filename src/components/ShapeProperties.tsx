@@ -1,4 +1,4 @@
-import { DEFAULT_SHADOW_OFFSET, MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
+import { DEFAULT_SHADOW_OFFSET, MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type Feather, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
 import type { ArrangeOp } from '../stacking'
@@ -8,12 +8,14 @@ import { FillPicker } from './FillPicker'
 import { NumberField } from './NumberField'
 import { CharControls, Group, Labeled } from './PropertiesPanel'
 import { ShadowControls } from './ShadowControls'
+import { FeatherControls } from './FeatherControls'
 
 interface Props {
   shape: ShapeFrame
   unit: Unit
   onGeometry: (patch: Partial<Box>) => void
   onChange: (patch: Partial<ShapeFrame>) => void
+  onUseFeatherTool: () => void
   onArrange: (op: ArrangeOp) => void
   onDelete: () => void
   /** "change all corners together": one setting for all shapes, kept by the workspace because the rounding handles follow it too */
@@ -35,7 +37,7 @@ interface Props {
 type Radii = [number, number, number, number]
 
 /** The properties panel of a selected shape. */
-export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, onDelete, linked, onLinkedChange, cornersPicked, onPickAllCorners, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
+export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeatherTool, onArrange, onDelete, linked, onLinkedChange, cornersPicked, onPickAllCorners, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
   const radii: Radii = shape.radii ?? [0, 0, 0, 0]
   const shown = fitRadii(radii, shape.w, shape.h)
   const setRadius = (corner: number, v: number) => {
@@ -175,7 +177,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
           <p className="muted">
             {shape.image.fit === 'fit'
               ? 'כל התמונה נכנסת בתוך המסגרת, גם אם נשאר רווח בצדדים.'
-              : 'התמונה ממלאת את המסגרת מכל צד; מה שלא נכנס נחתך על ידי המסגרת.'}{' '}
+              : 'התמונה נמתחת למידות המסגרת, כך שלא ייחתך ממנה חלק.'}{' '}
             גרור את העיגול שבאמצע התמונה כדי להזיז אותה, ואת הפינות שלה כדי לשנות את גודלה — עם כלי עריכת הנקודות.
           </p>
           <div className="props-buttons" style={{ marginTop: 8 }}>
@@ -254,6 +256,14 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onArrange, 
           onOffsetYChange={(shadowOffsetY) => onChange({ shadowOffsetY })}
           onOpacityChange={(shadowOpacity) => onChange({ shadowOpacity })}
           onColorChange={(shadowColor) => onChange({ shadowColor })}
+        />
+      </Group>
+
+      <Group title="טשטוש קצוות (Feather)">
+        <FeatherControls
+          feather={shape.feather}
+          onChange={(feather?: Feather) => onChange({ feather })}
+          onUseGradientTool={onUseFeatherTool}
         />
       </Group>
 

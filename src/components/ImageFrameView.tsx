@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { Asset, GradientFeather, ImageFrame } from '../document'
-import { featherCss } from '../feather'
+import type { Asset, Feather, ImageFrame } from '../document'
+import { featherMaskStyles } from '../feather'
 import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { useDisplaySrc } from '../imageProxy'
@@ -8,7 +8,7 @@ import { useLinkStatus } from '../imageLinks'
 
 interface Props {
   image: ImageFrame
-  featherOverride?: GradientFeather
+  featherOverride?: Feather
   asset: Asset | undefined
   zoom: number
   /** stacking rank (higher = in front) */
@@ -65,7 +65,7 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
             visibility: src ? undefined : 'hidden',
             objectFit: OBJECT_FIT[image.fit],
             filter: dropShadowFilter(image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, zoom, image.shadowColor),
-            ...((featherOverride ?? image.feather) ? { maskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom), WebkitMaskImage: featherCss(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom) } : {}),
+            ...(featherOverride ?? image.feather ? featherMaskStyles(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom, zoom) : {}),
           }}
         />
       ) : (

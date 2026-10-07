@@ -16,6 +16,65 @@ export interface CaptureItem {
   imageSource?: string
 }
 
+const CAPTURE_CONTROLS = '.handle, .rotate-handle, .port, .link-badge, .sel, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle'
+
+function cleanCaptureClone(clone: HTMLElement) {
+  clone.classList.remove('selected', 'edge', 'marked', 'locked')
+  clone.querySelectorAll('.selected, .edge, .marked, .locked, ' + CAPTURE_CONTROLS).forEach((control) => {
+    control.classList.remove('selected', 'edge', 'marked', 'locked', 'sel')
+    if (control.matches(CAPTURE_CONTROLS)) control.remove()
+  })
+}
+
+export async function captureElementRegion(element: HTMLElement, source: ScreenBox, region: ScreenBox, scale: number): Promise<HTMLCanvasElement> {
+  if (region.width <= 0 || region.height <= 0) throw new Error('cannot capture an empty region')
+  const captureScale = Math.min(
+    Math.max(1, scale),
+    12000 / region.width,
+    12000 / region.height,
+    Math.sqrt(40_000_000 / (region.width * region.height)),
+  )
+  const wrapper = document.createElement('div')
+  wrapper.className = 'viewport preview'
+  Object.assign(wrapper.style, {
+    position: 'fixed',
+    left: '-100000px',
+    top: '0',
+    width: `${region.width}px`,
+    height: `${region.height}px`,
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    background: '#fff',
+  })
+  const clone = element.cloneNode(true) as HTMLElement
+  cleanCaptureClone(clone)
+  clone.querySelectorAll('.group-selection, .page-frame, .text-frame-draft, .marquee-selection-preview').forEach((control) => control.remove())
+  Object.assign(clone.style, {
+    position: 'absolute',
+    left: `${source.left - region.left}px`,
+    top: `${source.top - region.top}px`,
+    width: `${source.width}px`,
+    height: `${source.height}px`,
+    clipPath: 'none',
+    margin: '0',
+    pointerEvents: 'none',
+  })
+  wrapper.appendChild(clone)
+  document.body.appendChild(wrapper)
+  try {
+    await document.fonts?.ready
+    return await html2canvas(wrapper, {
+      backgroundColor: '#fff',
+      scale: captureScale,
+      width: region.width,
+      height: region.height,
+      logging: false,
+    })
+  } finally {
+    wrapper.remove()
+  }
+}
+
 export async function captureObjects(items: CaptureItem[], bounds: ScreenBox, scale: number): Promise<HTMLCanvasElement> {
   if (items.length === 0 || bounds.width <= 0 || bounds.height <= 0) throw new Error('cannot capture an empty object selection')
   const captureScale = Math.min(
@@ -37,11 +96,7 @@ export async function captureObjects(items: CaptureItem[], bounds: ScreenBox, sc
   })
   for (const item of items) {
     const clone = item.element.cloneNode(true) as HTMLElement
-    clone.classList.remove('selected', 'edge', 'marked', 'locked')
-    clone.querySelectorAll('.selected, .edge, .marked, .locked, .handle, .rotate-handle, .port, .link-badge, .sel, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle').forEach((control) => {
-      control.classList.remove('selected', 'edge', 'marked', 'locked', 'sel')
-      if (control.matches('.handle, .rotate-handle, .port, .link-badge, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle')) control.remove()
-    })
+    cleanCaptureClone(clone)
     const width = item.element.offsetWidth || item.bounds.width
     const height = item.element.offsetHeight || item.bounds.height
     Object.assign(clone.style, {
@@ -74,6 +129,55 @@ export async function captureObjects(items: CaptureItem[], bounds: ScreenBox, sc
   } finally {
     wrapper.remove()
   }
+}
+
+export function clipCanvasToBoxes(source: HTMLCanvasElement, sourceBounds: ScreenBox, boxes: ScreenBox[]): HTMLCanvasElement {
+  const intersections = boxes.flatMap((box) => {
+    const left = Math.max(sourceBounds.left, box.left)
+    const top = Math.max(sourceBounds.top, box.top)
+    const right = Math.min(sourceBounds.left + sourceBounds.width, box.left + box.width)
+    const bottom = Math.min(sourceBounds.top + sourceBounds.height, box.top + box.height)
+    return right > left && bottom > top ? [{ left, top, width: right - left, height: bottom - top }] : []
+  })
+  if (intersections.length === 0) throw new Error('the selection does not intersect the page canvas')
+
+  const left = Math.min(...intersections.map((box) => box.left))
+  const top = Math.min(...intersections.map((box) => box.top))
+  const right = Math.max(...intersections.map((box) => box.left + box.width))
+  const bottom = Math.max(...intersections.map((box) => box.top + box.height))
+  const width = right - left
+  const height = bottom - top
+  const output = document.createElement('canvas')
+  output.width = Math.max(1, Math.ceil((width / sourceBounds.width) * source.width))
+  output.height = Math.max(1, Math.ceil((height / sourceBounds.height) * source.height))
+  const context = output.getContext('2d')
+  if (!context) throw new Error('canvas context unavailable')
+
+  context.drawImage(
+    source,
+    ((left - sourceBounds.left) / sourceBounds.width) * source.width,
+    ((top - sourceBounds.top) / sourceBounds.height) * source.height,
+    (width / sourceBounds.width) * source.width,
+    (height / sourceBounds.height) * source.height,
+    0,
+    0,
+    output.width,
+    output.height,
+  )
+  context.beginPath()
+  for (const box of intersections) {
+    context.rect(
+      ((box.left - left) / width) * output.width,
+      ((box.top - top) / height) * output.height,
+      (box.width / width) * output.width,
+      (box.height / height) * output.height,
+    )
+  }
+  context.globalCompositeOperation = 'destination-in'
+  context.fillStyle = '#fff'
+  context.fill()
+  context.globalCompositeOperation = 'source-over'
+  return output
 }
 
 export async function captureObject(element: HTMLElement, bounds: ScreenBox, zoom: number): Promise<HTMLCanvasElement> {

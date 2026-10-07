@@ -1,4 +1,4 @@
-import { DEFAULT_SHADOW_OFFSET, DEFAULT_WRAP_OFFSET, MAX_PAGE_PT, type Asset, type ImageFit, type ImageFrame, type WrapMode } from '../document'
+import { DEFAULT_SHADOW_OFFSET, DEFAULT_WRAP_OFFSET, MAX_PAGE_PT, type Asset, type Feather, type ImageFit, type ImageFrame, type WrapMode } from '../document'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
@@ -6,6 +6,7 @@ import { ArrangeButtons } from './ArrangeButtons'
 import { NumberField } from './NumberField'
 import { Group, Labeled } from './PropertiesPanel'
 import { ShadowControls } from './ShadowControls'
+import { FeatherControls } from './FeatherControls'
 
 interface Props {
   image: ImageFrame
@@ -16,6 +17,8 @@ interface Props {
   onWrap: (wrap: WrapMode) => void
   onWrapOffset: (offset: number) => void
   onShadowChange: (patch: Pick<ImageFrame, 'shadowOffsetX' | 'shadowOffsetY' | 'shadowColor' | 'shadowOpacity'>) => void
+  onFeatherChange: (feather?: Feather) => void
+  onUseFeatherTool: () => void
   onArrange: (op: ArrangeOp) => void
   /** make the frame the same shape as the picture (keeping its width) */
   onMatchShape: () => void
@@ -35,7 +38,7 @@ const FITS: { id: ImageFit; label: string; hint: string }[] = [
 ]
 
 /** The properties panel of a selected picture. */
-export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onShadowChange, onArrange, onMatchShape, onDelete }: Props) {
+export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onShadowChange, onFeatherChange, onUseFeatherTool, onArrange, onMatchShape, onDelete }: Props) {
   const wrap = image.wrap ?? 'none'
   // pixels per inch at the current size: a hint for print quality (72 pt = 1 inch)
   const ppi = asset ? Math.round(asset.width / (image.w / 72)) : null
@@ -110,6 +113,10 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap,
           onOpacityChange={(shadowOpacity) => onShadowChange({ shadowOpacity })}
           onColorChange={(shadowColor) => onShadowChange({ shadowColor })}
         />
+      </Group>
+
+      <Group title="טשטוש קצוות (Feather)">
+        <FeatherControls feather={image.feather} onChange={onFeatherChange} onUseGradientTool={onUseFeatherTool} />
       </Group>
 
       <Group title="קובץ">

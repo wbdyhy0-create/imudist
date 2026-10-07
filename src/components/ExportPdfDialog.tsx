@@ -11,6 +11,7 @@ interface Props {
   frames: TextFrame[]
   images: ImageFrame[]
   shapes: ShapeFrame[]
+  layerOrder: string[]
   assets: Assets
   paragraphStyles: ParagraphStyleRecord[]
   sections: PageSection[]
@@ -26,7 +27,7 @@ const DEFAULT_BLEED_MM = 3
 /** File > ייצוא ל-PDF…: every page rendered as a sharp image (see pdfExport.ts for why — this is a deliberate
  *  choice, not a shortcut: it's what actually guarantees the Hebrew text can never come out scrambled), with the
  *  print-shop essentials — page range, bleed + crop marks, picture resolution — and opens the result once it's done. */
-export function ExportPdfDialog({ doc, frames, images, shapes, assets, paragraphStyles, sections, onClose }: Props) {
+export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections, onClose }: Props) {
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(doc.pages)
@@ -61,7 +62,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, assets, paragraph
     setBusy({ done: 0, total: rangeMode === 'all' ? doc.pages : clampedTo - clampedFrom + 1 })
     try {
       const exported = await exportPdf(
-        { doc, frames, images, shapes, assets, paragraphStyles, sections },
+        { doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections },
         {
           range: rangeMode === 'all' ? null : { from: clampedFrom, to: clampedTo },
           bleed: bleedOn,

@@ -274,6 +274,12 @@ export const DEFAULT_SHADOW_OFFSET = 6
 export const defaultLeading = (style: { fontSize: number }): number => Math.round(style.fontSize * LINE_HEIGHT)
 
 /**
+ * The leading a style really has: the one set on it, else the automatic one. A leading of 0 (a field that was cleared) or less
+ * means "automatic" - lines set on top of each other, the text pushed up out of its frame, is never what is wanted.
+ */
+export const effectiveLeading = (style: { fontSize: number; leading?: number }): number => (style.leading !== undefined && style.leading > 0 ? style.leading : defaultLeading(style))
+
+/**
  * The height of the `.para-gap` spacer every "\n" gets so `spaceAfter` shows up as real space between paragraphs,
  * not just once at the edges of a frame (see richtext.ts's `buildRunNodes`). `undefined` means no spacer at all,
  * so callers can tell "no gap" apart from "a gap of zero" (not that it visibly matters, but it avoids inserting a
@@ -284,7 +290,7 @@ export const defaultLeading = (style: { fontSize: number }): number => Math.roun
  */
 export function paraLineHeightOf(style: TextStyle): number | undefined {
   const gap = style.spaceAfter ?? DEFAULT_SPACE_AFTER
-  return gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined
+  return gap > 0 ? (effectiveLeading(style)) + gap : undefined
 }
 
 /**
@@ -326,7 +332,7 @@ export function paraGaps(style: TextStyle, frame: { paraSpaceBefore?: (number | 
     const after = frame.paraSpaceAfter?.[i]
     const before = frame.paraSpaceBefore?.[i + 1]
     const gap = after != null && before != null ? Math.max(after, before) : (after ?? before ?? (style.spaceAfter ?? DEFAULT_SPACE_AFTER))
-    out.push(gap > 0 ? (style.leading ?? defaultLeading(style)) + gap : undefined)
+    out.push(gap > 0 ? (effectiveLeading(style)) + gap : undefined)
   }
   return out
 }
@@ -352,6 +358,17 @@ export interface Run {
 }
 
 /**
+ * The box a text frame's text is laid out in. A text scale draws the text bigger or smaller than it is laid out, so the layout
+ * box is the frame divided by the scale: what the frame shows is exactly what the layout filled, at any size of the frame (a
+ * box stored beside the scale went stale as soon as the frame was resized again, and text lay outside the frame unnoticed).
+ */
+export function textFlowBoxOf(frame: Pick<TextFrame, 'w' | 'h' | 'textScale'>): { w: number; h: number } {
+  const scale = frame.textScale
+  if (!scale) return { w: frame.w, h: frame.h }
+  return { w: frame.w / (scale.x > 0 ? scale.x : 1), h: frame.h / (scale.y > 0 ? scale.y : 1) }
+}
+
+/**
  * A text frame. Position and size are in world points (see layout.ts), so frames may also sit on the pasteboard.
  * Frames can be threaded: `next` is the frame the text continues into. The whole story (`text`, `runs`) lives in
  * the first frame of the chain; the other frames only display their share of it.
@@ -360,13 +377,12 @@ export interface Run {
  */
 export interface TextFrame extends TextStyle {
   id: string
-  feather?: GradientFeather
+  feather?: Feather
   /** the text remains in its thread as an invisible flow carrier after a marquee cut is rasterized */
   rasterized?: boolean
   /** Objects sharing this id form an editable group. */
   groupId?: string
-  /** frozen flow box and visual content scale used by Alt-resize of a text frame */
-  textFlowBox?: { w: number; h: number }
+  /** how much bigger (or smaller) than it is laid out the text is drawn: set by resizing with Shift or Alt and by the scale fields; see textFlowBoxOf */
   textScale?: { x: number; y: number }
   runningHeaderStyleId?: string
   runningHeaderStrategy?: RunningHeaderStrategy
@@ -465,7 +481,7 @@ export const DEFAULT_PARAGRAPH_STYLES: ParagraphStyleRecord[] = [
   { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } },
 ]
 
-/** How a picture sits in its frame: fill = cover the frame (may crop), fit = whole picture (may leave margins), stretch = distort to the frame. */
+/** How a picture sits in its frame: fit shows the whole picture; fill/stretch fill the frame (ordinary images cover-crop, graphic frames stretch). */
 export type ImageFit = 'fill' | 'fit' | 'stretch'
 
 export interface GradientFill {
@@ -479,6 +495,7 @@ export interface GradientFill {
 }
 
 export interface GradientFeather {
+  type?: 'gradient'
   /** Endpoints are fractions of the object's unrotated, unflipped box. */
   x0: number
   y0: number
@@ -486,6 +503,23 @@ export interface GradientFeather {
   y1: number
   points: { offset: number; opacity: number }[]
 }
+
+export interface BasicFeather {
+  type: 'basic'
+  /** Fade distance from every edge, in points. */
+  radius: number
+}
+
+export interface DirectionalFeather {
+  type: 'directional'
+  /** Per-edge fade distances, in points. */
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export type Feather = GradientFeather | BasicFeather | DirectionalFeather
 
 /**
  * How text flows around a picture. none: text ignores it (they may overlap). around: text runs beside it, on the
@@ -499,7 +533,7 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
-  feather?: GradientFeather
+  feather?: Feather
   /** optional label shown in the Layers panel */
   label?: string
   groupId?: string
@@ -614,7 +648,7 @@ export interface ShapeImage {
 /** A shape on a page. Position and size are in world points, like text frames. */
 export interface ShapeFrame {
   id: string
-  feather?: GradientFeather
+  feather?: Feather
   groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string

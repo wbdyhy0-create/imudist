@@ -1,4 +1,4 @@
-import { defaultLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
+import { effectiveLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
 
 export function footnoteBlockWidth(frameWidth: number, widthScale = 1): number {
   return frameWidth * Math.max(0.2, Math.min(1, widthScale))
@@ -33,7 +33,7 @@ export function footnoteDividerTextStyle(config: FootnoteLayoutConfig, styles: P
 export function footnoteDividerHeight(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[]): number {
   if (config.dividerMode === 'line') return Math.max(1, config.dividerThickness)
   const style = footnoteDividerTextStyle(config, styles)
-  return Math.max(1, style.leading ?? defaultLeading(style))
+  return Math.max(1, effectiveLeading(style))
 }
 
 export function updateFootnoteParagraphStyle(note: FootnoteItem, previous: TextStyle, next: TextStyle): FootnoteItem {

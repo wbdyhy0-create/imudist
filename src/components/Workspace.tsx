@@ -1,7 +1,7 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
 import { fontInstalled, useFontCatalog, weightName } from '../fonts'
 import { runPreflight, type PreflightIssue } from '../preflight'
-import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
+import { bridgeTransparentSeams, canvasDataUrl, captureElementRegion, captureObject, captureObjects, clipCanvasToBoxes, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
 import { deliverPng } from '../pngExport'
@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useId,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -50,6 +51,7 @@ import {
   type ColorSample,
   type CharStyle,
   type DocSettings,
+  type Feather,
   type Guide,
   type GuideAxis,
   type FootnoteItem,
@@ -81,11 +83,12 @@ import {
   RUNNING_HEADER_MARKER,
   TOC_LEADER_MARKER,
   TOC_PAGE_MARKER,
+  textFlowBoxOf,
   type TocConfig,
   type TocPageReference,
 } from '../document'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -104,12 +107,13 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
-import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
+import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
 import type { VectorShapeData } from '../importEps'
 import { floatsFor } from '../wrap'
+import type { RichTextClipboard } from '../richTextClipboard'
 import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
 import { ColorToolsPanel } from './ColorToolsPanel'
@@ -178,6 +182,12 @@ const MARGIN_HIT = 9
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 40
 const ZOOM_STEPS = [0.05, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 40]
+
+function textFrameResizeBox(orig: Box, mode: HandleId, dx: number, dy: number, shift: boolean, alt: boolean): Box {
+  return shift && !alt
+    ? dragBoxUniform(orig, mode, dx, dy, MIN_FRAME_PT)
+    : dragBox(orig, mode, dx, dy, MIN_FRAME_PT, undefined, false)
+}
 
 interface MarqueeTarget {
   id: string
@@ -259,6 +269,10 @@ export interface WorkspaceHandle {
   prevPage: () => void
   nextPage: () => void
   lastPage: () => void
+  /** zero-based page index nearest the center of the visible spread */
+  currentPageIndex: () => number
+  /** capture the visible page as displayed, clipped to its page bounds */
+  captureCurrentPage: () => Promise<{ canvas: HTMLCanvasElement; pageIndex: number }>
   /** Ctrl+A while editing text: select the whole story (all frames of the thread) */
   selectAllText: () => void
   /** add one page after the selected page / delete the selected page */
@@ -372,6 +386,12 @@ interface Props {
   dockOpenId: string | null
   onDockOpenChange: (id: string | null) => void
   enabledDockPanelIds: string[]
+  dockTabOrder: string[]
+  onDockTabOrderChange: (tabOrder: string[]) => void
+  floatingDockPanelId: string | null
+  onFloatingDockPanelChange: (id: string | null) => void
+  floatingDockPosition: { x: number; y: number }
+  onFloatingDockPositionChange: (position: { x: number; y: number }) => void
   /** what the shape tools make by a click (size, corners of the polygon), kept by the app between documents */
   shapePrefs: ShapePrefs
   onShapePrefs: (prefs: ShapePrefs) => void
@@ -422,7 +442,7 @@ interface SampledTextDesign {
   keepFirstLines: number
   keepLastLines: number
   keepWithNext: number
-  feather?: GradientFeather
+  feather?: Feather
 }
 
 interface FootnoteSel {
@@ -495,6 +515,12 @@ export function Workspace({
   dockOpenId,
   onDockOpenChange,
   enabledDockPanelIds,
+  dockTabOrder,
+  onDockTabOrderChange,
+  floatingDockPanelId,
+  onFloatingDockPanelChange,
+  floatingDockPosition,
+  onFloatingDockPositionChange,
   shapePrefs,
   onShapePrefs,
   onShowGuides,
@@ -506,6 +532,7 @@ export function Workspace({
   ref,
 }: Props) {
   const fontCatalog = useFontCatalog()
+  const previewClipId = useId().replace(/:/g, '')
   const documentRects = useMemo(() => pageRects(doc), [doc])
   const [footnotePreviewConfig, setFootnotePreviewConfig] = useState<FootnoteLayoutConfig | null>(null)
   const footnoteConfig = footnotePreviewConfig ?? doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
@@ -734,8 +761,9 @@ export function Workspace({
   const eraserDragKey = useRef<string | null>(null)
   const eraserPreviousPoint = useRef<{ x: number; y: number } | null>(null)
   const repairStroke = useRef<{ id: string; assetId: string; points: ImagePixelPoint[]; radius: number } | null>(null)
-  const paintStroke = useRef<{ kind: 'image' | 'shape'; id: string; assetId: string; points: ImagePixelPoint[]; radius: number; color: string } | null>(null)
+  const paintStroke = useRef<{ kind: 'image' | 'shape'; id: string; assetId: string; points: ImagePixelPoint[]; radius: number; color: string; strength: number } | null>(null)
   const [eraserRadius, setEraserRadius] = useState(12)
+  const [rasterBrushStrength, setRasterBrushStrength] = useState(100)
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   const activateTool = useCallback((nextTool: ToolId) => {
     setTool(nextTool)
@@ -787,7 +815,7 @@ export function Workspace({
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape'; table?: TableData } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape'; table?: TableData; origTextScale?: { x: number; y: number } } | null>(null)
   /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
   const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
   /** The "fine outline" rotation guides professional layout tools show: a faint outline of the object's box at the angle this drag
@@ -1066,6 +1094,15 @@ export function Workspace({
     onFramesChange(frames.map((f) => (f.id === id ? { ...f, ...patch } : f)), key)
   }
 
+  const setFrameTextScale = (id: string, axis: 'x' | 'y', percent: number) => {
+    const frame = frames.find((candidate) => candidate.id === id)
+    if (!frame) return
+    const scale = Math.min(10, Math.max(0.1, percent / 100))
+    const next = { x: frame.textScale?.x ?? 1, y: frame.textScale?.y ?? 1, [axis]: scale }
+    // a text at 100% both ways is just a text: no scale to keep
+    updateFrame(id, { textScale: Math.abs(next.x - 1) < 1e-6 && Math.abs(next.y - 1) < 1e-6 ? undefined : next }, `text-scale:${id}:${axis}`)
+  }
+
   const askSelection = (frameId: string, a: number, b: number) => {
     requestToken.current += 1
     setRequest({ frameId, a, b, token: requestToken.current })
@@ -1104,17 +1141,20 @@ export function Workspace({
   }
 
   /** Replace [from, to) of a story with `insert`. */
-  const applyEdit = (headId: string, from: number, to: number, insert: string, newFootnote?: Omit<FootnoteItem, 'anchor'>) => {
+  const applyEdit = (headId: string, from: number, to: number, insert: string, newFootnote?: Omit<FootnoteItem, 'anchor'>, formatted?: RichTextClipboard) => {
     const head = frames.find((f) => f.id === headId)
     if (!head) return
     const r = editStory(head.text, head.runs, from, to, insert, head)
+    const formattedPaste = formatted?.text === insert && formatted.runs.reduce((length, run) => length + run.len, 0) === insert.length
+      ? formatted
+      : undefined
     // Enter at the end of a paragraph whose style names a different "next style" (as in professional layout tools): the new paragraph follows
     // that one instead of just repeating this one's, and the "\n" just typed is restyled to it too, so whatever gets
     // typed next already looks right (editStory picks new text's look from the character right before it - the "\n")
     let base = head
     let runs = r.runs
     let nextStyleAt: { index: number; style: ParagraphStyleRecord } | null = null
-    if (insert === '\n' && from === to && atParaEnd(head.text, from)) {
+    if (!formattedPaste && insert === '\n' && from === to && atParaEnd(head.text, from)) {
       const sourceIndex = paraIndexAt(head.text, from)
       const sourceId = paragraphStyleIdOf(head, sourceIndex)
       const source = sourceId ? paragraphStyles.find((style) => style.id === sourceId) : undefined
@@ -1142,6 +1182,13 @@ export function Workspace({
         runs = styleRange(runs, from, from + 1, charPatch)
       }
     }
+    if (formattedPaste) {
+      runs = mergeRuns([
+        ...sliceRuns(r.runs, 0, from),
+        ...formattedPaste.runs,
+        ...sliceRuns(r.runs, from + insert.length, r.text.length),
+      ])
+    }
     const paragraphLists = spliceParagraphStyles(base, base.text, from, to, insert)
     const shift = insert.length - (to - from)
     const footnotes = (head.footnotes ?? []).flatMap((note) => {
@@ -1160,10 +1207,43 @@ export function Workspace({
       if (paragraphLists.paragraphStyleNames) paragraphLists.paragraphStyleNames = setAt(paragraphLists.paragraphStyleNames, style.name)
       paragraphLists.paragraphStylePatches = setAt(paragraphLists.paragraphStylePatches ?? paragraphLists.paragraphStyleIds!.map(() => ({})), layoutPatch)
     }
-    // nested styles follow the typing: the paragraph(s) the edit touched have the opening styled again
+    let copiedParagraphOverrides: Pick<TextFrame, 'paraSpaceBefore' | 'paraSpaceAfter' | 'paraKeepFirstLines' | 'paraKeepLastLines' | 'paraKeepWithNext'> = {}
+    if (formattedPaste) {
+      const paragraphCount = r.text.split('\n').length
+      const pastedAt = paraIndexAt(head.text, from)
+      const ids = Array.from({ length: paragraphCount }, (_, index) => paragraphLists.paragraphStyleIds?.[index] ?? paragraphStyleIdOf(head, index) ?? '')
+      const names = Array.from({ length: paragraphCount }, (_, index) => paragraphLists.paragraphStyleNames?.[index] ?? paragraphStyles.find((style) => style.id === ids[index])?.name ?? '')
+      const patches = Array.from({ length: paragraphCount }, (_, index) => paragraphLists.paragraphStylePatches?.[index] ?? head.paragraphStylePatches?.[index] ?? {})
+      formattedPaste.paragraphs.forEach((paragraph, index) => {
+        const target = pastedAt + index
+        if (target >= paragraphCount) return
+        ids[target] = paragraph.styleId
+        names[target] = paragraph.styleName
+        patches[target] = paragraph.patch
+      })
+      paragraphLists.paragraphStyleIds = ids.some(Boolean) ? ids : undefined
+      paragraphLists.paragraphStyleNames = names.some(Boolean) ? names : undefined
+      paragraphLists.paragraphStylePatches = patches.some((patch) => Object.keys(patch).length > 0) ? patches : undefined
+      const copyOverrides = (source: (number | null)[] | undefined, key: keyof RichTextClipboard['paragraphs'][number]) => {
+        const values = Array.from({ length: paragraphCount }, (_, index) => source?.[index] ?? null)
+        formattedPaste.paragraphs.forEach((paragraph, index) => {
+          const target = pastedAt + index
+          if (target < paragraphCount) values[target] = paragraph[key] as number | null
+        })
+        return values.some((value) => value !== null) ? values : undefined
+      }
+      copiedParagraphOverrides = {
+        paraSpaceBefore: copyOverrides(spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert), 'spaceBefore'),
+        paraSpaceAfter: copyOverrides(spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert), 'spaceAfter'),
+        paraKeepFirstLines: copyOverrides(spliceParaOverrides(head.paraKeepFirstLines, head.text, from, to, insert, true), 'keepFirstLines'),
+        paraKeepLastLines: copyOverrides(spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert, true), 'keepLastLines'),
+        paraKeepWithNext: copyOverrides(spliceParaOverrides(head.paraKeepWithNext, head.text, from, to, insert), 'keepWithNext'),
+      }
+    }
+    // nested styles follow ordinary typing; a formatted paste keeps the source's exact character runs.
     const touched = new Set<number>()
     for (let index = paraIndexAt(r.text, from), last = paraIndexAt(r.text, from + insert.length); index <= last; index++) touched.add(index)
-    runs = applyNestedToFrame({ ...head, ...paragraphLists, text: r.text, runs, footnotes }, paragraphStyles, undefined, touched).runs ?? runs
+    if (!formattedPaste) runs = applyNestedToFrame({ ...head, ...paragraphLists, text: r.text, runs, footnotes }, paragraphStyles, undefined, touched).runs ?? runs
     commitStory(headId, r.text, runs, from + insert.length, `type:${headId}`, {
       paraSpaceBefore: spliceParaOverrides(head.paraSpaceBefore, head.text, from, to, insert),
       paraSpaceAfter: spliceParaOverrides(head.paraSpaceAfter, head.text, from, to, insert),
@@ -1171,6 +1251,7 @@ export function Workspace({
       paraKeepLastLines: spliceParaOverrides(head.paraKeepLastLines, head.text, from, to, insert, true),
       paraKeepWithNext: spliceParaOverrides(head.paraKeepWithNext, head.text, from, to, insert),
       ...paragraphLists,
+      ...copiedParagraphOverrides,
       footnotes: alignFootnotesToMarkers(r.text, footnotes),
     }, from)
   }
@@ -1316,6 +1397,18 @@ export function Workspace({
       b = textSel.b
     }
     applyEdit(fl.headId, a, b, insert)
+  }
+
+  const handlePasteFormattedText = (frameId: string, from: number, to: number, clipboard: RichTextClipboard) => {
+    const fl = flow.get(frameId)
+    if (!fl) return
+    let a = fl.start + from
+    let b = fl.start + to
+    if (textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
+      a = textSel.a
+      b = textSel.b
+    }
+    applyEdit(fl.headId, a, b, clipboard.text, undefined, clipboard)
   }
 
   /**
@@ -1512,7 +1605,7 @@ export function Workspace({
   const paragraphTextWidth = (chain: TextFrame[], flows: (FrameFlow | undefined)[], storyStyle: { indentLeft?: number; indentRight?: number }, start: number) => {
     const flowIndex = Math.max(0, flows.findIndex((fl) => !!fl && start >= fl.start && start < fl.end))
     const frame = chain[flowIndex] ?? chain[0]
-    return (frame.textFlowBox?.w ?? frame.w) - (storyStyle.indentLeft ?? 0) - (storyStyle.indentRight ?? 0)
+    return textFlowBoxOf(frame).w - (storyStyle.indentLeft ?? 0) - (storyStyle.indentRight ?? 0)
   }
 
   /**
@@ -1994,6 +2087,50 @@ export function Workspace({
     return null
   }
 
+  const copyFormattedText = (frameId: string, from: number, to: number): RichTextClipboard | null => {
+    const fl = flow.get(frameId)
+    if (!fl) return null
+    const range = textSel?.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)
+      ? { a: textSel.a, b: textSel.b }
+      : { a: fl.start + Math.min(from, to), b: fl.start + Math.max(from, to) }
+    const head = frames.find((frame) => frame.id === fl.headId)
+    if (!head || range.a === range.b) return null
+    const text = fl.story.slice(range.a, range.b)
+    if (!text) return null
+    const normalizedRuns = normalizeRuns(head.text, head.runs, head)
+    const startParagraph = paraIndexAt(head.text, range.a)
+    const endParagraph = paraIndexAt(head.text, Math.max(range.a, range.b - 1))
+    const paragraphKeys = [
+      'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight',
+      'firstLineIndent', 'secondLineIndent', 'align', 'windowIndent', 'windowWords', 'listKind', 'listGap',
+      'background', 'borderWidth', 'borderColor',
+    ] as const
+    const paragraphs: RichTextClipboard['paragraphs'] = []
+    for (let index = startParagraph; index <= endParagraph; index++) {
+      const styleId = paragraphStyleIdOf(head, index) ?? ''
+      const resolved = styleId ? resolveParagraphStyle(styleId) : {}
+      const patchSource = { ...head, ...resolved, ...head.paragraphStylePatches?.[index] }
+      const patch = Object.fromEntries(paragraphKeys
+        .filter((key) => patchSource[key] !== undefined)
+        .map((key) => [key, patchSource[key]])) as RichTextClipboard['paragraphs'][number]['patch']
+      paragraphs.push({
+        styleId,
+        styleName: paragraphStyles.find((style) => style.id === styleId)?.name ?? '',
+        patch,
+        spaceBefore: head.paraSpaceBefore?.[index] ?? null,
+        spaceAfter: head.paraSpaceAfter?.[index] ?? null,
+        keepFirstLines: head.paraKeepFirstLines?.[index] ?? null,
+        keepLastLines: head.paraKeepLastLines?.[index] ?? null,
+        keepWithNext: head.paraKeepWithNext?.[index] ?? null,
+      })
+    }
+    return {
+      text,
+      runs: sliceRuns(normalizedRuns, range.a, range.b),
+      paragraphs,
+    }
+  }
+
   const selectAllStory = (frameId: string) => {
     const fl = flow.get(frameId)
     if (!fl) return
@@ -2197,7 +2334,9 @@ export function Workspace({
       : { a: flowPart.start, b: Math.max(flowPart.start + 1, flowPart.end) }
     const indexes = paragraphsInRange(head.text, range.a, range.b)
     const patches: NonNullable<TextFrame['paragraphStylePatches']> = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
-    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...patch }
+    // a leading of 0 is no leading: it takes the paragraph's own setting away (back to automatic) instead of storing a line height of nothing
+    const wanted = patch.leading !== undefined && !(patch.leading > 0) ? { ...patch, leading: undefined } : patch
+    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...wanted }
     onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
   }
 
@@ -2624,10 +2763,13 @@ export function Workspace({
     if (shape.kind === 'path' && shape.geom) patch.geom = shape.geom.map((poly) => poly.map((ring) => ring.map(flipVertex)))
     if (shape.kind === 'rect' && shape.radii) patch.radii = axis === 'x' ? [shape.radii[1], shape.radii[0], shape.radii[3], shape.radii[2]] : [shape.radii[3], shape.radii[2], shape.radii[1], shape.radii[0]]
     if (shape.kind === 'line') patch.flip = shape.flip ? undefined : true
-    if (shape.feather) patch.feather = {
+    if (shape.feather?.type === 'gradient') patch.feather = {
       ...shape.feather,
       ...(axis === 'x' ? { x0: 1 - shape.feather.x0, x1: 1 - shape.feather.x1 } : { y0: 1 - shape.feather.y0, y1: 1 - shape.feather.y1 }),
     }
+    if (shape.feather?.type === 'directional') patch.feather = axis === 'x'
+      ? { ...shape.feather, left: shape.feather.right, right: shape.feather.left }
+      : { ...shape.feather, top: shape.feather.bottom, bottom: shape.feather.top }
     if (Object.keys(patch).length > 0) updateShape(id, patch, `flip:${axis}:${id}`)
   }
 
@@ -3147,12 +3289,48 @@ export function Workspace({
     return { canvas, bounds }
   }
 
+  const captureCurrentPage = async () => {
+    const viewport = vpRef.current
+    if (!viewport) throw new Error('canvas viewport is unavailable')
+    const artwork = viewport.querySelector<HTMLElement>('.preview-artwork')
+    if (!artwork) throw new Error('page artwork is unavailable')
+    const pageIndex = currentPageIndex()
+    const page = rects[pageIndex]
+    if (!page) throw new Error('current page is unavailable')
+    const viewportBounds = viewport.getBoundingClientRect()
+    const region: ScreenBox = {
+      left: viewportBounds.left + vp.sb - getScrollX(viewport) + tx + page.x * zoom,
+      top: viewportBounds.top - viewport.scrollTop + ty + page.y * zoom,
+      width: page.w * zoom,
+      height: page.h * zoom,
+    }
+    const artworkBounds = artwork.getBoundingClientRect()
+    const canvas = await captureElementRegion(
+      artwork,
+      { left: artworkBounds.left, top: artworkBounds.top, width: artworkBounds.width, height: artworkBounds.height },
+      region,
+      300 / (72 * zoom),
+    )
+    if (canvas.width < 1 || canvas.height < 1) throw new Error('page capture returned an empty canvas')
+    return { canvas, pageIndex }
+  }
+
   const exportSelectedPng = async () => {
     if (!canExportPng) return
     try {
-      const { canvas } = await captureSelection(exportCandidates)
+      const { canvas, bounds } = await captureSelection(exportCandidates)
+      const viewport = vpRef.current
+      if (!viewport) throw new Error('canvas viewport is unavailable')
+      const viewportBounds = viewport.getBoundingClientRect()
+      const pageBoxes: ScreenBox[] = rects.map((page) => ({
+        left: viewportBounds.left + vp.sb - getScrollX(viewport) + tx + page.x * zoom,
+        top: viewportBounds.top - viewport.scrollTop + ty + page.y * zoom,
+        width: page.w * zoom,
+        height: page.h * zoom,
+      }))
+      const clippedCanvas = clipCanvasToBoxes(canvas, bounds, pageBoxes)
       const safeName = doc.name.replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*]/g, '-').trim() || 'Imudist'
-      await deliverPng(canvas, `${safeName}-selection`)
+      await deliverPng(clippedCanvas, `${safeName}-selection`)
     } catch (error) {
       console.error('Could not export the selected objects as PNG.', error)
     }
@@ -3449,6 +3627,17 @@ export function Workspace({
     onShowGuides()
   }
 
+  const currentPageIndex = () => {
+    const spread = spreads[cur]
+    if (!spread?.pages.length) return 0
+    const selected = spread.pages.find((page) => page.index === selPage)
+    if (selected) return selected.index
+    const centerX = (scroll.x + vp.w / 2 - tx) / zoom
+    return [...spread.pages].sort((a, b) =>
+      Math.abs(a.x + a.w / 2 - centerX) - Math.abs(b.x + b.w / 2 - centerX),
+    )[0].index
+  }
+
   useImperativeHandle(ref, () => ({
     goToIssue,
     selectTool: activateTool,
@@ -3461,6 +3650,8 @@ export function Workspace({
     prevPage: () => goTo(cur - 1),
     nextPage: () => goTo(cur + 1),
     lastPage: () => goTo(spreads.length - 1),
+    currentPageIndex,
+    captureCurrentPage,
     selectAllText,
     placeVectorShapes,
     addPage: () => insertPages(1, 'after'),
@@ -4104,6 +4295,7 @@ export function Workspace({
       points: [point],
       radius: Math.max(1, (eraserRadius * asset.width) / (contentWidth * zoom)),
       color,
+      strength: rasterBrushStrength,
     }
     setEraserPoint(toWorld(event.clientX, event.clientY))
     setSelectedPage(ownerPage(rects, object.x + object.w / 2, object.y + object.h / 2))
@@ -4121,7 +4313,7 @@ export function Workspace({
     if ((!image && !shape) || (image && image.assetId !== stroke.assetId) || (shape && shape.image?.assetId !== stroke.assetId) || !asset || stroke.points.length === 0) return
     try {
       const source = await samplerCanvas(asset)
-      const painted = paintImageStroke(source, stroke.points, stroke.radius, stroke.color)
+      const painted = paintImageStroke(source, stroke.points, stroke.radius, stroke.color, stroke.strength)
       const nextAssetId = newFrameId()
       const nextAsset: Asset = {
         name: `${asset.name.replace(/\.png$/i, '')} — צביעה.png`,
@@ -4245,7 +4437,8 @@ export function Workspace({
         if (rotation) context.rotate((rotation * Math.PI) / 180)
         if (sourceImage?.flipX || sourceImage?.flipY) context.scale(sourceImage.flipX ? -1 : 1, sourceImage.flipY ? -1 : 1)
         context.translate(-objectWidth / 2, -objectHeight / 2)
-        applyFeatherCanvasMask(context, sourceFeather, objectWidth, objectHeight)
+        const sourceWidth = sourceImage?.w ?? sourceShape?.w ?? sourceFrame?.w ?? target.bounds.width / live.current.zoom
+        applyFeatherCanvasMask(context, sourceFeather, objectWidth, objectHeight, objectWidth / sourceWidth)
         context.restore()
       }
       const { remainder, piece } = splitObjectCanvas(sourceCanvas, target.bounds, selection, gesture.kind)
@@ -5412,6 +5605,7 @@ export function Workspace({
     const table = isShape ? shapes.find((shape) => shape.id === id)?.table : undefined
     const f = isImage ? images.find((x) => x.id === id) : isShape ? shapes.find((x) => x.id === id) : frames.find((x) => x.id === id)
     if (!f) return
+    const textFrame = !isImage && !isShape ? frames.find((frame) => frame.id === id) : undefined
     dragSeq.current += 1
     frameDrag.current = {
       id,
@@ -5421,6 +5615,7 @@ export function Workspace({
       key: `drag:${dragSeq.current}`,
       kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
       ...(table ? { table } : {}),
+      ...(textFrame?.textScale ? { origTextScale: textFrame.textScale } : {}),
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -5658,11 +5853,11 @@ export function Workspace({
     const [rotatedX, rotatedY] = rotateVec(localX, localY, target.rotation ?? 0)
     return { x: target.x + target.w / 2 + rotatedX, y: target.y + target.h / 2 + rotatedY }
   }
-  const withFeather = <T extends { id: string; feather?: GradientFeather }>(item: T, feather: GradientFeather | null): T => {
+  const withFeather = <T extends { id: string; feather?: Feather }>(item: T, feather: Feather | null): T => {
     const { feather: _current, ...rest } = item
     return (feather ? { ...rest, feather } : rest) as T
   }
-  const commitFeather = (target: FeatherTarget, feather: GradientFeather | null) => {
+  const commitFeather = (target: FeatherTarget, feather: Feather | null) => {
     const key = `feather:${target.id}`
     if (target.kind === 'frame') onFramesChange(frames.map((frame) => frame.id === target.id ? withFeather(frame, feather) : frame), key)
     else if (target.kind === 'image') onImagesChange(images.map((image) => image.id === target.id ? withFeather(image, feather) : image), key)
@@ -5677,7 +5872,7 @@ export function Workspace({
         target,
         startClient: { x: e.clientX, y: e.clientY },
         endClient: { x: e.clientX, y: e.clientY },
-        feather: { x0: start.x, y0: start.y, x1: start.x, y1: start.y, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] },
+        feather: { type: 'gradient', x0: start.x, y0: start.y, x1: start.x, y1: start.y, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] },
       }
       featherDragRef.current = gesture
       setFeatherDrag(gesture)
@@ -6109,7 +6304,9 @@ export function Workspace({
         setSpacingShown(sp.marks)
       } else setSpacingShown((cur) => (cur.length ? [] : cur))
       // the lines that hold the object; one along other objects runs across them and the dragged object, to show they are in line
-      const now = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, d.table && e.shiftKey ? d.orig.w / d.orig.h : undefined)
+      const now = d.kind === 'frame' && d.mode !== 'move'
+        ? textFrameResizeBox(d.orig, d.mode, dx, dy, e.shiftKey, e.altKey)
+        : dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, d.table && e.shiftKey ? d.orig.w / d.orig.h : undefined)
       const equalLines: SnapLine[] = []
       const tol = SNAP_PX / live.current.zoom
       const same = (a: number, b: number) => Math.abs(a - b) <= tol
@@ -6149,22 +6346,30 @@ export function Workspace({
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
         return
       }
-      // Alt on a text-frame handle keeps the resize anchored to the opposite edge;
-      // it must not use the symmetric shape/image behavior, so the thread can reflow into this frame.
-      const rawBox = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, undefined, false)
-      const verticalAlt = e.altKey && (d.mode === 'n' || d.mode === 's')
-      const box = verticalAlt ? { ...rawBox, x: d.orig.x, w: d.orig.w } : rawBox
+      // Shift scales text and its frame together; Alt only changes the text's vertical scale.
+      const shiftUniformScale = d.mode !== 'move' && !e.altKey && e.shiftKey
+      const box = d.mode === 'move'
+        ? dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT)
+        : textFrameResizeBox(d.orig, d.mode, dx, dy, e.shiftKey, e.altKey)
       if (d.mode === 'move') learnRepeatOffset(d.id, box)
       const altScale = d.mode !== 'move' && e.altKey
-        ? {
-            x: d.mode.includes('e') || d.mode.includes('w') ? box.w / Math.max(1, d.orig.w) : 1,
-            y: d.mode.includes('n') || d.mode.includes('s') ? box.h / Math.max(1, d.orig.h) : 1,
-          }
-        : undefined
+      const originalScale = d.origTextScale ?? { x: 1, y: 1 }
+      const scaleX = box.w / Math.max(1, d.orig.w)
+      const scaleY = box.h / Math.max(1, d.orig.h)
+      const textScale = shiftUniformScale
+        ? { x: originalScale.x * scaleX, y: originalScale.y * scaleY }
+        : altScale
+          ? {
+              x: originalScale.x,
+              y: originalScale.y * (d.mode.includes('n') || d.mode.includes('s') ? scaleY : 1),
+            }
+          : undefined
       onFramesChange(frames.map((f) => f.id === d.id ? {
         ...f,
         ...box,
-        ...(altScale ? { textFlowBox: { w: d.orig.w, h: d.orig.h }, textScale: altScale } : { textFlowBox: undefined, textScale: undefined }),
+        // a plain resize keeps the scale the text already has (the text then reflows in the frame divided by it, see
+        // textFlowBoxOf); only Shift/Alt change it
+        textScale: textScale ?? d.origTextScale,
       } : f), d.key)
       return
     }
@@ -6762,11 +6967,11 @@ export function Workspace({
   const selectedFeather = selFrame?.feather ?? selImage?.feather ?? selShape?.feather ?? null
   const setSelectedFeatherEnabled = (enabled: boolean) => {
     if (!selectedFeatherTarget) return
-    const next = enabled ? selectedFeather ?? { x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] } : null
+    const next = enabled ? selectedFeather ?? { type: 'gradient' as const, x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] } : null
     commitFeather(selectedFeatherTarget, next)
   }
   const setSelectedFeatherOpacity = (index: number, opacity: number) => {
-    if (!selectedFeatherTarget || !selectedFeather) return
+    if (!selectedFeatherTarget || selectedFeather?.type === 'basic' || selectedFeather?.type === 'directional' || !selectedFeather) return
     const points = selectedFeather.points.map((point, pointIndex) => pointIndex === index ? { ...point, opacity } : point)
     commitFeather(selectedFeatherTarget, { ...selectedFeather, points })
   }
@@ -8130,6 +8335,7 @@ export function Workspace({
         onImageMatchShape={() => { const asset = selImage && assets[selImage.assetId]; if (selImage && asset) updateImage(selImage.id, { h: selImage.w * (asset.height / asset.width) }) }}
         onImageDelete={() => { if (selImage) { onImagesChange(images.filter((image) => image.id !== selImage.id)); setSelectedId(null) } }}
         onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame ? applyCharStyle(selFrame.id, patch) : applyTableFormatting(patch)}
+        onTextScale={(axis, percent) => selFrame && setFrameTextScale(selFrame.id, axis, percent)}
         onAlign={(align) => footnoteSel ? applyFootnoteParagraphStyle({ align }) : selFrame ? applyAlign(selFrame.id, align) : applyTableFormatting({ align })}
         onLeading={(leading) => footnoteSel ? applyFootnoteParagraphStyle({ leading }) : selFrame ? applyParagraphStyle(selFrame.id, { leading }) : applyTableFormatting({ leading })}
         onParagraphStyle={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParagraphStyle(selFrame.id, patch)}
@@ -8170,9 +8376,11 @@ export function Workspace({
           <div className="context-feather-controls" role="group" aria-label="החלקת מעבר צבע">
             <label className="context-feather-toggle"><input type="checkbox" checked={!!selectedFeather} disabled={!selectedFeatherTarget} onChange={(event) => setSelectedFeatherEnabled(event.target.checked)} />החלקה</label>
             {!selectedFeatherTarget ? <span className="context-tool-hint">בחר אובייקט</span> : <>
-              <label className="context-field"><span>התחלה {Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)}%</span><input type="range" aria-label="אטימות התחלה" min={0} max={100} value={Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity(0, Number(event.target.value) / 100)} /></label>
-              <label className="context-field"><span>סוף {Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)}%</span><input type="range" aria-label="אטימות סוף" min={0} max={100} value={Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity((selectedFeather?.points.length ?? 2) - 1, Number(event.target.value) / 100)} /></label>
-              <div className="feather-toolbar-ramp" style={{ '--feather-start-opacity': selectedFeather?.points[0]?.opacity ?? 1, '--feather-end-opacity': selectedFeather?.points.at(-1)?.opacity ?? 0 } as CSSProperties} aria-hidden="true" />
+              {selectedFeather?.type !== 'basic' && selectedFeather?.type !== 'directional' ? <>
+                <label className="context-field"><span>התחלה {Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)}%</span><input type="range" aria-label="אטימות התחלה" min={0} max={100} value={Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity(0, Number(event.target.value) / 100)} /></label>
+                <label className="context-field"><span>סוף {Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)}%</span><input type="range" aria-label="אטימות סוף" min={0} max={100} value={Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity((selectedFeather?.points.length ?? 2) - 1, Number(event.target.value) / 100)} /></label>
+                <div className="feather-toolbar-ramp" style={{ '--feather-start-opacity': selectedFeather?.points[0]?.opacity ?? 1, '--feather-end-opacity': selectedFeather?.points.at(-1)?.opacity ?? 0 } as CSSProperties} aria-hidden="true" />
+              </> : <span className="context-tool-hint">לעריכת סוג זה, השתמש במאפייני האובייקט</span>}
               <button className="context-command danger" disabled={!selectedFeather} onClick={() => selectedFeatherTarget && commitFeather(selectedFeatherTarget, null)}>הסר החלקה</button>
             </>}
           </div>
@@ -8292,10 +8500,28 @@ export function Workspace({
                 <circle cx={tx + featherGuide.end.x * zoom} cy={ty + featherGuide.end.y * zoom} r={4} />
               </svg>}
               <svg width={sheetW} height={sheetH}>
+                {previewMode && (
+                  <defs>
+                    <clipPath id={`preview-page-clip-${previewClipId}`} clipPathUnits="userSpaceOnUse">
+                      {visible.flatMap((spread) => spread.pages.map((page) => {
+                        const rect = rects[page.index]
+                        return rect ? <rect key={page.index} x={tx + rect.x * zoom} y={ty + rect.y * zoom} width={rect.w * zoom} height={rect.h * zoom} /> : null
+                      }))}
+                    </clipPath>
+                  </defs>
+                )}
                 {visible.map((s) => (
                   <SpreadView key={s.y} doc={viewDoc} spread={s} zoom={zoom} tx={tx} ty={ty} showGuides={showGuides && !previewMode} />
                 ))}
               </svg>
+              <div
+                className="preview-artwork"
+                style={{
+                  width: sheetW,
+                  height: sheetH,
+                  clipPath: previewMode ? `url(#preview-page-clip-${previewClipId})` : undefined,
+                }}
+              >
               {parentShadows.images.map((im) => (
                 <div className="parent-shadow" key={im.id}>
                   <ImageFrameView image={im} asset={assets[im.assetId]} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('image', im, event)} onHandleDown={noop} onRotateDown={noop} />
@@ -8564,6 +8790,7 @@ export function Workspace({
                     atParaStart={fl.atParaStart}
                     paragraphPatches={storyHead.paragraphStylePatches}
                     spaceBeforeFirst={fl.spaceBeforeFirst}
+                    firstLineLift={fl.firstLineLift}
                     spaceAfterLast={fl.spaceAfterLast}
                     footnoteMarkers={footnoteMarkers}
                     tocPageMarkers={tocMarkers?.pageNumbers}
@@ -8643,6 +8870,8 @@ export function Workspace({
                     onEdit={(from, to, insert) => handleEdit(f.id, from, to, insert)}
                     onSelect={(a, b) => handleSelect(f.id, a, b)}
                     onCopyText={() => copyText(f.id)}
+                    onCopyFormattedText={(from, to) => copyFormattedText(f.id, from, to)}
+                    onPasteFormattedText={(from, to, clipboard) => handlePasteFormattedText(f.id, from, to, clipboard)}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
                     onBackspaceAtParagraphStart={(offset) => backspaceAtParagraphStart(f.id, offset)}
                     onLineBoundary={(dir, x, toStart) => jumpToLine(f.id, dir, x, toStart)}
@@ -8888,12 +9117,19 @@ export function Workspace({
                   }}
                 />
               )}
+              </div>
             </div>
           </div>
         </div>
         {colorSamplerActive && colorSamplerPreview && createPortal(<ColorSamplerLens ref={colorSamplerLensRef} preview={colorSamplerPreview} />, document.body)}
         <DockingPanels
           enabledPanelIds={enabledDockPanelIds}
+          tabOrder={dockTabOrder}
+          onTabOrderChange={onDockTabOrderChange}
+          floatingPanelId={floatingDockPanelId}
+          onFloatingPanelChange={onFloatingDockPanelChange}
+          floatingPosition={floatingDockPosition}
+          onFloatingPositionChange={onFloatingDockPositionChange}
           openId={dockOpenId}
           onOpenChange={onDockOpenChange}
           panels={[
@@ -8943,7 +9179,14 @@ export function Workspace({
                       shape={selShape}
                       unit={doc.unit}
                       onGeometry={(patch) => updateShape(selShape.id, patch, `geo:${selShape.id}`)}
-                      onChange={(patch) => updateShape(selShape.id, patch, patch.radii || patch.strokeWidth !== undefined ? `shape:${selShape.id}` : undefined)}
+                      onChange={(patch) => updateShape(
+                        selShape.id,
+                        patch,
+                        patch.radii || patch.strokeWidth !== undefined
+                          ? `shape:${selShape.id}`
+                          : Object.prototype.hasOwnProperty.call(patch, 'feather') ? `feather:${selShape.id}` : undefined,
+                      )}
+                      onUseFeatherTool={() => setTool('feather')}
                       onArrange={(op) => arrangeObject(selShape.id, op)}
                       onDelete={() => {
                         onShapesChange(shapes.filter((sh) => sh.id !== selShape.id))
@@ -8977,6 +9220,8 @@ export function Workspace({
                       onWrap={(wrap) => updateImage(selImage.id, { wrap })}
                       onWrapOffset={(wrapOffset) => updateImage(selImage.id, { wrapOffset }, `wrapoff:${selImage.id}`)}
                       onShadowChange={(patch) => updateImage(selImage.id, patch, `shadow:${selImage.id}`)}
+                      onFeatherChange={(feather) => updateImage(selImage.id, { feather }, `feather:${selImage.id}`)}
+                      onUseFeatherTool={() => setTool('feather')}
                       onArrange={(op) => arrangeObject(selImage.id, op)}
                       onMatchShape={() => {
                         const a = assets[selImage.assetId]
@@ -8996,6 +9241,9 @@ export function Workspace({
                       unit={doc.unit}
                       thread={threadInfo}
                       onGeometry={(patch) => selFrame && updateFrame(selFrame.id, patch, `geo:${selFrame.id}`)}
+                      onFeatherChange={(feather) => selFrame && updateFrame(selFrame.id, { feather }, `feather:${selFrame.id}`)}
+                      onUseFeatherTool={() => setTool('feather')}
+                      onTextScale={(axis, percent) => selFrame && setFrameTextScale(selFrame.id, axis, percent)}
                       onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)}
                       sizeMixed={panelSizeMixed}
                       onSizeStep={(delta) => selFrame && stepFontSize(selFrame.id, delta)}
@@ -9044,17 +9292,17 @@ export function Workspace({
             {
               id: 'color',
               label: 'צבע',
-              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'gradient',
               label: 'מעבר צבע',
-              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'swatches',
               label: 'דוגמיות',
-              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'layers',

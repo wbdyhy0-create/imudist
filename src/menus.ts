@@ -25,6 +25,10 @@ export interface MenuContext {
   onDockOpenChange: (id: string | null) => void
   enabledDockPanelIds: string[]
   onDockPanelToggle: (id: string) => void
+  savedWorkspaces: { id: string; name: string }[]
+  activeWorkspaceId: string | null
+  saveWorkspace: () => void
+  selectWorkspace: (id: string) => void
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
   importText: () => void
@@ -51,6 +55,7 @@ export interface MenuContext {
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
   exportPdf: () => void
+  exportPng: () => void
   /** a new book (a set of documents kept together as chapters) */
   newBook: () => void
   openBook: () => void
@@ -115,6 +120,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('ייבוא XML…'),
         sep,
         { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
+        { label: 'ייצוא ל-PNG…', disabled: !c.hasDoc, onClick: c.exportPng },
         sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
         { label: 'הגדרות מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },
@@ -296,6 +302,18 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'חלון',
       items: [
+        { label: 'שמירת סביבת עבודה…', onClick: c.saveWorkspace },
+        {
+          label: 'סביבות עבודה',
+          submenu: c.savedWorkspaces.length
+            ? c.savedWorkspaces.map((workspace) => ({
+                label: workspace.name,
+                checked: workspace.id === c.activeWorkspaceId,
+                onClick: () => c.selectWorkspace(workspace.id),
+              }))
+            : [{ label: 'אין סביבות שמורות', disabled: true }],
+        },
+        { separator: true },
         {
           label: 'כלים',
           submenu: [

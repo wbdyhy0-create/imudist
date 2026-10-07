@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
@@ -21,6 +21,7 @@ import { readEpsFile } from './importEps'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
+import { deliverPng } from './pngExport'
 import { useAutosave } from './useAutosave'
 import { useBook } from './useBook'
 import { BookExportDialog, BookPanel, ChapterPicker, SyncDialog } from './components/BookPanel'
@@ -28,6 +29,8 @@ import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentSha
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
 import type { PagePreset, Unit } from './units'
+import { SaveWorkspaceDialog } from './components/SaveWorkspaceDialog'
+import { defaultDockLayout, loadDockWorkspaceStore, loadLegacyDockTabOrder, saveDockWorkspaceStore, type DockLayout, type DockWorkspaceStore } from './dockWorkspaces'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -117,10 +120,65 @@ export default function App() {
    *  Workspace, because editing a parent remounts Workspace (its `key` changes) - state kept there would be lost
    *  the moment a parent is opened for editing and again the moment it's closed. */
   const [activeParentId, setActiveParentId] = useState<string | null>(null)
-  /** which dock tab (מאפיינים / עמודים / …) is open; kept here for the same reason - entering or leaving
-   *  parent-edit mode shouldn't close whatever panel the user had open */
-  const [dockOpenId, setDockOpenId] = useState<string | null>(null)
-  const [enabledDockPanelIds, setEnabledDockPanelIds] = useState(ALL_DOCK_PANEL_IDS)
+  const [workspaceStore, setWorkspaceStore] = useState(loadDockWorkspaceStore)
+  const [dockLayout, setDockLayout] = useState<DockLayout>(() => {
+    const active = workspaceStore.workspaces.find((workspace) => workspace.id === workspaceStore.activeId)
+    const legacyOrder = loadLegacyDockTabOrder()
+    return active?.layout ?? defaultDockLayout(ALL_DOCK_PANEL_IDS, legacyOrder.length ? legacyOrder : ALL_DOCK_PANEL_IDS)
+  })
+  const [saveWorkspaceDialogOpen, setSaveWorkspaceDialogOpen] = useState(false)
+  const dockOpenId = dockLayout.openPanelId
+  const enabledDockPanelIds = dockLayout.enabledPanelIds
+  const setDockOpenId = (id: string | null) => setDockLayout((current) => ({ ...current, openPanelId: id }))
+  const setDockTabOrder = (tabOrder: string[]) => setDockLayout((current) => ({ ...current, tabOrder }))
+  const setFloatingDockPanelId = (floatingPanelId: string | null) => setDockLayout((current) => ({ ...current, floatingPanelId }))
+  const setFloatingDockPosition = (floatingPosition: { x: number; y: number }) => setDockLayout((current) => ({ ...current, floatingPosition }))
+  const toggleDockPanel = (id: string) => setDockLayout((current) => {
+    const enabled = current.enabledPanelIds.includes(id)
+    return {
+      ...current,
+      enabledPanelIds: enabled ? current.enabledPanelIds.filter((panelId) => panelId !== id) : [...current.enabledPanelIds, id],
+      openPanelId: enabled ? (current.openPanelId === id ? null : current.openPanelId) : id,
+    }
+  })
+  const saveWorkspace = (name: string) => {
+    const matching = workspaceStore.workspaces.find((workspace) => workspace.name.toLocaleLowerCase() === name.toLocaleLowerCase())
+    let id = matching?.id
+    if (!id) {
+      let suffix = workspaceStore.workspaces.length + 1
+      id = `workspace-${suffix}`
+      while (workspaceStore.workspaces.some((workspace) => workspace.id === id)) {
+        suffix += 1
+        id = `workspace-${suffix}`
+      }
+    }
+    const next: DockWorkspaceStore = {
+      activeId: id,
+      workspaces: matching
+        ? workspaceStore.workspaces.map((workspace) => workspace.id === id ? { id, name, layout: dockLayout } : workspace)
+        : [...workspaceStore.workspaces, { id, name, layout: dockLayout }],
+    }
+    try {
+      saveDockWorkspaceStore(next)
+      setWorkspaceStore(next)
+      setSaveWorkspaceDialogOpen(false)
+    } catch (error) {
+      setSaveWorkspaceDialogOpen(false)
+      sessionRef.current.showError('לא ניתן לשמור סביבת עבודה', error)
+    }
+  }
+  const selectWorkspace = useCallback((id: string) => {
+    const selected = workspaceStore.workspaces.find((workspace) => workspace.id === id)
+    if (!selected) return
+    const next = { ...workspaceStore, activeId: id }
+    try {
+      saveDockWorkspaceStore(next)
+    } catch (error) {
+      sessionRef.current.showError('לא ניתן לשמור את סביבת העבודה שנבחרה', error)
+    }
+    setWorkspaceStore(next)
+    setDockLayout(selected.layout)
+  }, [workspaceStore])
   const [showRulers, setShowRulers] = useState(true)
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
@@ -163,6 +221,21 @@ export default function App() {
       shapes: [...shadow.shapes, ...session.shapes],
     }
   }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes, session.parentOverrides])
+
+  const exportCurrentPagePng = useCallback(async () => {
+    const currentDoc = doc
+    const workspace = ws.current
+    if (!currentDoc || !workspace) return
+    try {
+      sessionRef.current.notify('מייצא את העמוד הנוכחי ל־PNG…')
+      const { canvas, pageIndex } = await workspace.captureCurrentPage()
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
+      const saved = await deliverPng(canvas, `${safeName}-page-${pageIndex + 1}`)
+      if (saved) sessionRef.current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
+    } catch (error) {
+      sessionRef.current.showError('ייצוא PNG נכשל', error)
+    }
+  }, [doc, exportContent])
 
   /** pictures read and waiting for a click on the page; whatever could not be read is reported */
   const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
@@ -394,7 +467,11 @@ export default function App() {
         dockOpenId,
         onDockOpenChange: setDockOpenId,
         enabledDockPanelIds,
-        onDockPanelToggle: (id) => setEnabledDockPanelIds((current) => current.includes(id) ? current.filter((panelId) => panelId !== id) : [...current, id]),
+        onDockPanelToggle: toggleDockPanel,
+        savedWorkspaces: workspaceStore.workspaces.map(({ id, name }) => ({ id, name })),
+        activeWorkspaceId: workspaceStore.activeId,
+        saveWorkspace: () => setSaveWorkspaceDialogOpen(true),
+        selectWorkspace,
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
         importParagraphStyles: () => void importParagraphStyles(),
@@ -421,18 +498,19 @@ export default function App() {
         toggleGuides: () => setShowGuides((v) => !v),
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
         exportPdf: () => setDialog('export'),
+        exportPng: () => void exportCurrentPagePng(),
         newBook: () => void bookRef.current.create(),
         openBook: () => void bookRef.current.open(),
         bookPanelOpen: book.panelOpen,
         toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn],
+    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (session.modal) return // a question is open: only the question's own keys
+      if (session.modal || saveWorkspaceDialogOpen) return // a question is open: only the dialog's own keys
       const typing = isTyping(e.target)
       // single-key shortcuts (like W) must not fire while typing in a field
       if (typing && !e.ctrlKey && !e.metaKey && !e.altKey) return
@@ -450,7 +528,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menus, preview, history.redo, session.modal])
+  }, [menus, preview, history.redo, session.modal, saveWorkspaceDialogOpen])
 
   // a different document: nothing is loaded any more
   useEffect(() => {
@@ -461,7 +539,7 @@ export default function App() {
   // Ctrl+V outside a text box loads the clipboard text into the text cursor
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (!doc || session.modal || isTyping(e.target)) return
+      if (!doc || session.modal || saveWorkspaceDialogOpen || isTyping(e.target)) return
       const pictures = Array.from(e.clipboardData?.files ?? []).filter(isImageFile)
       if (pictures.length > 0) {
         e.preventDefault()
@@ -476,7 +554,7 @@ export default function App() {
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [doc, session.modal])
+  }, [doc, session.modal, saveWorkspaceDialogOpen])
 
   // dropping a Word / text file onto the window loads it into the text cursor
   useEffect(() => {
@@ -662,6 +740,12 @@ export default function App() {
               dockOpenId={dockOpenId}
               onDockOpenChange={setDockOpenId}
               enabledDockPanelIds={enabledDockPanelIds}
+              dockTabOrder={dockLayout.tabOrder}
+              onDockTabOrderChange={setDockTabOrder}
+              floatingDockPanelId={dockLayout.floatingPanelId}
+              onFloatingDockPanelChange={setFloatingDockPanelId}
+              floatingDockPosition={dockLayout.floatingPosition}
+              onFloatingDockPositionChange={setFloatingDockPosition}
               shapePrefs={shapePrefs}
               onShapePrefs={setShapePrefs}
               dirty={!preview && session.dirty}
@@ -723,7 +807,7 @@ export default function App() {
           />
         )}
         {dialog === 'export' && doc && exportContent && (
-          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} onClose={closeDialog} />
+          <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} layerOrder={session.layerOrder} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} onClose={closeDialog} />
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
@@ -732,6 +816,7 @@ export default function App() {
       <SyncDialog controller={book} />
       <BookExportDialog controller={book} />
       {session.modal && <Modal spec={session.modal} />}
+      {saveWorkspaceDialogOpen && <SaveWorkspaceDialog onSave={saveWorkspace} onClose={() => setSaveWorkspaceDialogOpen(false)} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes) => void confirmDocxImport(replaceSelected, includeFootnotes)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
     </div>

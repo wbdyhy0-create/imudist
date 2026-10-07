@@ -6,6 +6,7 @@ import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
 import { ContextMenu } from './ContextMenu'
+import { rememberRichTextClipboard, richTextClipboardFor, type RichTextClipboard } from '../richTextClipboard'
 
 let lastCopiedText: string | null = null
 
@@ -62,6 +63,8 @@ interface Props {
   onBackspaceAtParagraphStart?: (offset: number) => boolean
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
   onCopyText: () => string | null
+  onCopyFormattedText?: (a: number, b: number) => RichTextClipboard | null
+  onPasteFormattedText?: (a: number, b: number, clipboard: RichTextClipboard) => void
   onStop: () => void
   /**
    * A text-selection drag (button still down) has carried the pointer above/below this frame's own box - `anchor` is
@@ -227,6 +230,8 @@ export function RichEditor(p: Props) {
       const text = p.onCopyText() ?? p.text.slice(a, b)
       if (!text) return
       lastCopiedText = text
+      const formatted = p.onCopyFormattedText?.(a, b) ?? null
+      rememberRichTextClipboard(formatted)
       e.preventDefault()
       e.clipboardData?.setData('text/plain', text)
       if (cut) p.onEdit(a, b, '')
@@ -241,6 +246,11 @@ export function RichEditor(p: Props) {
       const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
       if (!text) return
       const [a, b] = range()
+      const formatted = richTextClipboardFor(text)
+      if (formatted && live.current.onPasteFormattedText) {
+        live.current.onPasteFormattedText(a, b, formatted)
+        return
+      }
       live.current.onEdit(a, b, text)
     }
 
@@ -287,7 +297,10 @@ export function RichEditor(p: Props) {
     if (!editor) return
     const [a, b] = contextSelection.current
     const copied = live.current.onCopyText() ?? live.current.text.slice(a, b)
-    if (copied) lastCopiedText = copied
+    if (copied) {
+      lastCopiedText = copied
+      rememberRichTextClipboard(live.current.onCopyFormattedText?.(a, b) ?? null)
+    }
     if (!document.execCommand(command)) console.error(`Could not ${command} text from the context menu.`)
   }
   const pasteTextFromClipboard = async () => {
@@ -308,6 +321,11 @@ export function RichEditor(p: Props) {
     const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
     if (!text) return
     const [a, b] = contextSelection.current
+    const formatted = richTextClipboardFor(text)
+    if (formatted && live.current.onPasteFormattedText) {
+      live.current.onPasteFormattedText(a, b, formatted)
+      return
+    }
     live.current.onEdit(a, b, text)
   }
 
@@ -378,6 +396,7 @@ export function RichEditor(p: Props) {
           if (selection && selection[0] !== selection[1]) {
             const [a, b] = selection
             lastCopiedText = live.current.onCopyText() ?? live.current.text.slice(a, b)
+            rememberRichTextClipboard(live.current.onCopyFormattedText?.(a, b) ?? null)
           }
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Home' && live.current.onSelectToStart) {

@@ -1,12 +1,13 @@
 import {
   cssTextAlign,
-  defaultLeading,
+  effectiveLeading,
   DEFAULT_FOOTNOTE_CONFIG,
   frameSpaceAfter,
   frameSpaceBefore,
   LINE_HEIGHT,
   paraGaps as paraGapsOf,
   paraLineHeightOf,
+  textFlowBoxOf,
   wordSpacingPt,
   type ImageFrame,
   type FootnoteLayoutConfig,
@@ -19,6 +20,7 @@ import {
 import { chainOf, insetBox, styleOf } from './frames'
 import { buildParagraphNodes, buildRunNodes, buildWrapFloats, type ParagraphPatch, type RunNodeOpts } from './richtext'
 import { openingRange } from './windowText'
+import { firstLineLift } from './firstLine'
 import { atParaStart, normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 import { footnoteBlockWidth, footnoteDividerHeight, footnoteTextStyle, formatFootnoteNumber, layoutFootnotes, type FootnotePlacement, type FootnoteLayoutItem } from './footnoteLayout'
@@ -48,6 +50,8 @@ export interface FrameFlow {
    *  the same for every frame of the chain — TextFrameView only actually applies whichever one is itself first/last */
   spaceBeforeFirst: number
   spaceAfterLast: number
+  /** how far this frame's first line is moved down so that its letters are inside the frame (a leading tighter than the letters would put them above it); 0 for the frames of a thread */
+  firstLineLift: number
   footnotes: FootnotePlacement[]
   footnoteReferences: { id: string; anchor: number; referenceNumber: number | string }[]
   footnoteHeight: number
@@ -166,7 +170,7 @@ function getMeasurer(): HTMLDivElement {
 function configure(m: HTMLDivElement, style: TextStyle) {
   m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   m.style.fontSize = `${style.fontSize}px`
-  m.style.lineHeight = `${style.leading ?? defaultLeading(style)}px`
+  m.style.lineHeight = `${effectiveLeading(style)}px`
   // must match TextFrameView.tsx's real render exactly: word-spacing changes where lines wrap, not just how they
   // look, so a justified paragraph whose extra spacing this measurer ignored would wrap shorter than it truly can,
   // under-reporting height and letting text quietly overflow the frame it was "measured" to fit
@@ -806,7 +810,7 @@ export function flowFrames(
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
       `${JSON.stringify(head.paraKeepFirstLines)}|${JSON.stringify(head.paraKeepLastLines)}|${JSON.stringify(head.paraKeepWithNext)}|` +
       `${JSON.stringify(head.paragraphStylePatches)}|${JSON.stringify(paragraphStyles)}|${JSON.stringify(footnoteConfig)}|${JSON.stringify([...footnoteReservationOverrides])}|` +
-      chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${JSON.stringify(f.textFlowBox)}:${JSON.stringify(f.textScale)}:${floatsKey(floats[i])}`).join(',')
+      chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${JSON.stringify(f.textScale)}:${floatsKey(floats[i])}`).join(',')
     const sig = `${reuseSig}|${JSON.stringify(head.footnotes)}|${JSON.stringify(footnoteNumbers ? [...footnoteNumbers] : [])}|${JSON.stringify(chain.map((frame) => [frame.id, footnoteContinuations.get(frame.id)]))}`
 
     const hit = cache.get(cacheKey)
@@ -843,6 +847,14 @@ export function flowFrames(
       const gaps = paraGapsOf(style, head, story)
       const spaceBeforeFirst = frameSpaceBefore(style, head)
       const spaceAfterLast = frameSpaceAfter(style, head, story)
+      // a text box of its own has its first line moved down when the leading is tighter than the letters; the frames of a thread are left
+      // as they are (a book is laid out for the way they have always been)
+      const liftAt = (offset: number) => {
+        if (chain.length !== 1 || offset >= story.length) return 0
+        const leading = head.paragraphStylePatches?.[paraIndexAt(story, offset)]?.leading
+        const first = sliceRuns(runs, offset, Math.min(story.length, offset + 90)).map((run) => run.style)
+        return firstLineLift(style, first, leading && leading > 0 ? leading : effectiveLeading(style))
+      }
       const storyFootnoteItems: FootnoteLayoutItem[] = [...(head.footnotes ?? [])]
         .sort((a, b) => a.anchor - b.anchor)
         .map((note: FootnoteItem, index) => ({ id: note.id, anchor: note.anchor, referenceNumber: footnoteNumbers?.get(note.id) ?? footnoteConfig.startAt + index, content: note.content, runs: note.runs, style: note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId) }))
@@ -979,9 +991,9 @@ export function flowFrames(
           const f = chain[i]
           const isFirst = i === 0
           const isLast = i === chain.length - 1
-          const flowFrame = f.textFlowBox ? { ...f, w: f.textFlowBox.w, h: f.textFlowBox.h } : f
+          const flowFrame = f.textScale ? { ...f, ...textFlowBoxOf(f) } : f
           // Keep trailing paragraph spacing below the final line; it must not make that line overflow while resizing.
-          const fullBox = insetBox(flowFrame, style, isFirst ? spaceBeforeFirst : 0, 0)
+          const fullBox = insetBox(flowFrame, style, (isFirst ? spaceBeforeFirst : 0) + liftAt(start), 0)
           const paraOpts = {
             paraGaps: gaps,
             startParaIndex: paraIndexAt(story, start),
@@ -1114,6 +1126,7 @@ export function flowFrames(
           atParaStart: atStart,
           spaceBeforeFirst,
           spaceAfterLast,
+          firstLineLift: liftAt(start),
           footnotes: noteLayouts.get(f.id)?.placements ?? [],
           footnoteReferences: storyFootnoteItems.filter((item) => item.anchor >= start && item.anchor < end).map(({ id, anchor, referenceNumber }) => ({ id, anchor, referenceNumber: formatFootnoteNumber(Number(referenceNumber), footnoteConfig.numberStyle, 'plain') })),
           footnoteHeight: reserved.get(f.id) ?? 0,
