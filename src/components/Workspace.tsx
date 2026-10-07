@@ -8514,7 +8514,7 @@ export function Workspace({
                 <div
                   className={tool === 'heal' ? 'heal-brush' : rasterBrushColor ? 'paint-brush' : 'eraser-brush'}
                   aria-hidden="true"
-                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2, ...(rasterBrushColor ? { borderColor: rasterBrushColor, backgroundColor: `${rasterBrushColor}22` } : {}) }}
+                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2, ...(rasterBrushColor ? { backgroundColor: `${rasterBrushColor}22` } : {}) }}
                 />
               )}
               {angleTip && (

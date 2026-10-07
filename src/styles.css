@@ -575,7 +575,7 @@ svg { display: block; }
 .viewport.erasertool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='m4 14 8-9a2 2 0 0 1 3 0l4 4-8 9H7z' fill='%23f1c27d' stroke='black' stroke-width='1.4'/%3E%3Cpath d='M4 14h7M7 18h10' stroke='black' stroke-width='1.4'/%3E%3C/svg%3E") 4 20, crosshair; }
 .eraser-brush { position: absolute; z-index: 1000002; border: 1px solid #24a6ff; border-radius: 50%; background: rgba(36, 166, 255, 0.08); pointer-events: none; }
 .heal-brush { position: absolute; z-index: 1000002; border: 1px solid #e0ad47; border-radius: 50%; background: rgba(224, 173, 71, 0.12); pointer-events: none; }
-.paint-brush { position: absolute; z-index: 1000002; border: 1px solid; border-radius: 50%; pointer-events: none; }
+.paint-brush { position: absolute; z-index: 1000002; border: 1px solid #ffeb3b; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75); pointer-events: none; }
 .viewport.scissorstool.scissors-target { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Cpath d='M9 2v14M2 9h14' stroke='white' stroke-width='3'/%3E%3Cpath d='M9 2v14M2 9h14' stroke='black' stroke-width='1'/%3E%3C/svg%3E") 9 9, crosshair; }
 .viewport.linetool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 18 18'%3E%3Cpath d='M9 2v14M2 9h14' stroke='white' stroke-width='3'/%3E%3Cpath d='M9 2v14M2 9h14' stroke='black' stroke-width='1'/%3E%3C/svg%3E") 9 9, crosshair; }
 .viewport.linetool .shape-frame.ghost { opacity: 1; pointer-events: none; }
