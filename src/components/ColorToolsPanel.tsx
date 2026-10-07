@@ -21,6 +21,8 @@ interface Props {
   samples: ColorSample[]
   onStartSampler: () => void
   onDeleteSample: (id: string) => void
+  brushColor?: string | null
+  onExitBrush?: () => void
 }
 
 interface Swatch { name: string; color: string | null; kind: 'תהליך' | 'ספוט'; global: boolean }
@@ -41,7 +43,7 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, brushColor, onExitBrush }: Props) {
   const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
   const targetShape = shapeTargets[0] ?? null
   const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
@@ -210,7 +212,14 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
     <aside className="props-panel color-tools-panel" aria-label={title} dir="rtl">
       <h2 className="props-title">{title}</h2>
       <Group title="דגימות שנדגמו">
-        <button className="btn small color-sample-start" onClick={onStartSampler}>דגום צבע</button>
+        <button className="btn small color-sample-start" onClick={onStartSampler}>{brushColor ? 'דגום צבע אחר' : 'דגום צבע'}</button>
+        {brushColor && (
+          <div className="color-brush-active">
+            <span className="color-sample-chip" style={{ background: brushColor }} />
+            <span>מברשת פעילה — גרור על תמונה · [ ] לשינוי גודל · Esc לסיום</span>
+            <button className="btn small" onClick={onExitBrush}>סיום</button>
+          </div>
+        )}
         {samples.length === 0 ? <p className="muted color-samples-empty">אין דגימות במסמך.</p> : (
           <div className="color-samples-list">
             {samples.map((sample) => (

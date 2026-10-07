@@ -3,6 +3,7 @@ import { fontInstalled, useFontCatalog, weightName } from '../fonts'
 import { runPreflight, type PreflightIssue } from '../preflight'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
+import { paintImageStroke } from '../imagePaint'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
 import { createPortal } from 'react-dom'
 import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
@@ -621,6 +622,7 @@ export function Workspace({
     if (tool !== 'eyedropper') setSampledShapeStyle(null)
   }, [tool])
   const [colorSamplerActive, setColorSamplerActive] = useState(false)
+  const [rasterBrushColor, setRasterBrushColor] = useState<string | null>(null)
   const [colorSamplerPreview, setColorSamplerPreview] = useState<ColorSamplerPreview | null>(null)
   const colorSamplerLensRef = useRef<HTMLDivElement>(null)
   const samplerImageCache = useRef(new Map<string, Promise<HTMLCanvasElement>>())
@@ -636,15 +638,21 @@ export function Workspace({
     return () => window.removeEventListener('keydown', onEscape, true)
   }, [])
   useEffect(() => {
-    if (!colorSamplerActive) return
+    if (!colorSamplerActive && !rasterBrushColor) return
     const cancel = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setColorSamplerActive(false)
+      setRasterBrushColor(null)
       setColorSamplerPreview(null)
+      paintStroke.current = null
+      setEraserPoint(null)
     }
     window.addEventListener('keydown', cancel)
     return () => window.removeEventListener('keydown', cancel)
-  }, [colorSamplerActive])
+  }, [colorSamplerActive, rasterBrushColor])
+  useEffect(() => {
+    if (tool !== 'color' && tool !== 'gradient' && tool !== 'swatches') setRasterBrushColor(null)
+  }, [tool])
   const [sampledTextStyle, setSampledTextStyle] = useState<SampledTextDesign | null>(null)
   const [space, setSpace] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
@@ -726,6 +734,7 @@ export function Workspace({
   const eraserDragKey = useRef<string | null>(null)
   const eraserPreviousPoint = useRef<{ x: number; y: number } | null>(null)
   const repairStroke = useRef<{ id: string; assetId: string; points: ImagePixelPoint[]; radius: number } | null>(null)
+  const paintStroke = useRef<{ kind: 'image' | 'shape'; id: string; assetId: string; points: ImagePixelPoint[]; radius: number; color: string } | null>(null)
   const [eraserRadius, setEraserRadius] = useState(12)
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   /** dragging a peg of the text on an outline */
@@ -3829,7 +3838,14 @@ export function Workspace({
 
   const addColorSample = (color: string) => {
     pageOps.commit({ colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: `דגימה ${colorSamples.length + 1}` }] })
+    setRasterBrushColor(color)
     setColorSamplerActive(false)
+    setColorSamplerPreview(null)
+  }
+
+  const startColorSampler = () => {
+    setRasterBrushColor(null)
+    setColorSamplerActive(true)
     setColorSamplerPreview(null)
   }
 
@@ -3894,6 +3910,92 @@ export function Workspace({
       }
     } catch (error) {
       console.warn('Could not repair the image seam.', error)
+    }
+  }
+
+  const beginPaintStroke = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const color = rasterBrushColor
+    if (!color) return
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLElement>('[data-object-id][data-object-kind]')
+      : null
+    const kind = target?.dataset.objectKind
+    const id = target?.dataset.objectId
+    if (!target || target.classList.contains('locked') || layerLocked || !id || (kind !== 'image' && kind !== 'shape') || itemLocks[id]) return
+    const image = kind === 'image' ? images.find((candidate) => candidate.id === id) : undefined
+    const shape = kind === 'shape' ? shapes.find((candidate) => candidate.id === id && !!candidate.image) : undefined
+    const assetId = image?.assetId ?? shape?.image?.assetId
+    const asset = assetId ? assets[assetId] : undefined
+    const object = image ?? shape
+    if (!asset || !assetId || !object) return
+    const pointAt = (point: { x: number; y: number }) => image
+      ? imagePixelAt(image, asset, point)
+      : shape?.image ? shapeImagePixelAt(shape, asset, point) : null
+    const point = pointAt(toWorld(event.clientX, event.clientY))
+    if (!point) return
+    const contentWidth = image
+      ? image.fit === 'stretch'
+        ? image.w
+        : asset.width * (image.fit === 'fit' ? Math.min(image.w / asset.width, image.h / asset.height) : Math.max(image.w / asset.width, image.h / asset.height))
+      : shape?.image ? imageGeometry(shape, asset).w : 0
+    paintStroke.current = {
+      kind: image ? 'image' : 'shape',
+      id,
+      assetId,
+      points: [point],
+      radius: Math.max(1, (eraserRadius * asset.width) / (contentWidth * zoom)),
+      color,
+    }
+    setEraserPoint(toWorld(event.clientX, event.clientY))
+    setSelectedPage(ownerPage(rects, object.x + object.w / 2, object.y + object.h / 2))
+    setSelectedId(id)
+    setEditingId(null)
+    event.preventDefault()
+    event.stopPropagation()
+    vpRef.current?.setPointerCapture(event.pointerId)
+  }
+
+  const finishPaintStroke = async (stroke: NonNullable<typeof paintStroke.current>) => {
+    const image = stroke.kind === 'image' ? images.find((candidate) => candidate.id === stroke.id) : undefined
+    const shape = stroke.kind === 'shape' ? shapes.find((candidate) => candidate.id === stroke.id) : undefined
+    const asset = assetsRef.current[stroke.assetId]
+    if ((!image && !shape) || (image && image.assetId !== stroke.assetId) || (shape && shape.image?.assetId !== stroke.assetId) || !asset || stroke.points.length === 0) return
+    try {
+      const source = await samplerCanvas(asset)
+      const painted = paintImageStroke(source, stroke.points, stroke.radius, stroke.color)
+      const nextAssetId = newFrameId()
+      const nextAsset: Asset = {
+        name: `${asset.name.replace(/\.png$/i, '')} — צביעה.png`,
+        mime: 'image/png',
+        dataUrl: canvasDataUrl(painted),
+        width: painted.width,
+        height: painted.height,
+      }
+      const nextAssets = { ...assetsRef.current, [nextAssetId]: nextAsset }
+      if (editingParentId) {
+        pageOps.commit({
+          assets: nextAssets,
+          parents: parents.map((parent) => parent.id !== editingParentId ? parent : {
+            ...parent,
+            images: image ? parent.images.map((candidate) => candidate.id === image.id ? { ...candidate, assetId: nextAssetId } : candidate) : parent.images,
+            shapes: shape ? parent.shapes.map((candidate) => candidate.id === shape.id && candidate.image ? { ...candidate, image: { ...candidate.image, assetId: nextAssetId } } : candidate) : parent.shapes,
+          }),
+        })
+      } else if (image) {
+        pageOps.commit({
+          assets: nextAssets,
+          images: images.map((candidate) => candidate.id === image.id ? { ...candidate, assetId: nextAssetId } : candidate),
+        })
+      } else if (shape) {
+        pageOps.commit({
+          assets: nextAssets,
+          shapes: shapes.map((candidate) => candidate.id === shape.id && candidate.image
+            ? { ...candidate, image: { ...candidate.image, assetId: nextAssetId } }
+            : candidate),
+        })
+      }
+    } catch (error) {
+      console.error('Could not paint the image.', error)
     }
   }
 
@@ -4678,12 +4780,12 @@ export function Workspace({
   }, [tool])
 
   useEffect(() => {
-    if (tool !== 'eraser' && tool !== 'heal') setEraserPoint(null)
-  }, [tool])
+    if (tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor) setEraserPoint(null)
+  }, [tool, rasterBrushColor])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((tool !== 'eraser' && tool !== 'heal') || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
+      if ((tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor) || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
       if (event.key === '[' || event.key === '{' || event.key === '(' || event.code === 'BracketLeft') {
         event.preventDefault()
         setEraserRadius((value) => Math.max(1, value - 1))
@@ -4694,7 +4796,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tool])
+  }, [tool, rasterBrushColor])
 
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
@@ -5600,6 +5702,12 @@ export function Workspace({
       e.currentTarget.setPointerCapture(e.pointerId)
       return
     }
+    if (rasterBrushColor && e.button === 0) {
+      e.preventDefault()
+      e.stopPropagation()
+      beginPaintStroke(e)
+      return
+    }
     if (!colorSamplerActive || e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -5611,6 +5719,7 @@ export function Workspace({
       moveColorSamplerLens(e.clientX, e.clientY)
       void updateColorSampler(e.clientX, e.clientY)
     }
+    if (rasterBrushColor && !paintStroke.current) setEraserPoint(toWorld(e.clientX, e.clientY))
     const featherGesture = featherDragRef.current
     if (featherGesture) {
       const point = featherPointAt(featherGesture.target, e.clientX, e.clientY)
@@ -5657,8 +5766,24 @@ export function Workspace({
     }
     if (tool === 'scissors') setScissorHover(scissorHit(toWorld(e.clientX, e.clientY)))
     else if (scissorHover) setScissorHover(false)
-    if (tool === 'eraser' || tool === 'heal') setEraserPoint(toWorld(e.clientX, e.clientY))
+    if (tool === 'eraser' || tool === 'heal' || rasterBrushColor) setEraserPoint(toWorld(e.clientX, e.clientY))
     else if (eraserPoint) setEraserPoint(null)
+    if (paintStroke.current && e.buttons !== 0) {
+      const stroke = paintStroke.current
+      const point = toWorld(e.clientX, e.clientY)
+      const target = document.elementsFromPoint(e.clientX, e.clientY)
+        .map((element) => element.closest<HTMLElement>('[data-object-id][data-object-kind]'))
+        .find((element): element is HTMLElement => !!element && element.dataset.objectId === stroke.id)
+      const image = stroke.kind === 'image' ? images.find((candidate) => candidate.id === stroke.id) : undefined
+      const shape = stroke.kind === 'shape' ? shapes.find((candidate) => candidate.id === stroke.id) : undefined
+      const asset = assets[stroke.assetId]
+      const imagePoint = target && asset && image
+        ? imagePixelAt(image, asset, point)
+        : target && asset && shape?.image ? shapeImagePixelAt(shape, asset, point) : null
+      const previous = stroke.points[stroke.points.length - 1]
+      if (imagePoint && Math.hypot(imagePoint.x - previous.x, imagePoint.y - previous.y) >= 1) stroke.points.push(imagePoint)
+      return
+    }
     if (repairStroke.current && tool === 'heal' && e.buttons !== 0) {
       const stroke = repairStroke.current
       const image = images.find((candidate) => candidate.id === stroke.id)
@@ -5992,6 +6117,13 @@ export function Workspace({
       if (distance >= 4) commitFeather(featherGesture.target, nextFeather)
       return
     }
+    const paintingStroke = paintStroke.current
+    if (paintingStroke) {
+      paintStroke.current = null
+      setEraserPoint(null)
+      void finishPaintStroke(paintingStroke)
+      return
+    }
     const healingStroke = repairStroke.current
     if (healingStroke) {
       repairStroke.current = null
@@ -6065,6 +6197,7 @@ export function Workspace({
     featherDragRef.current = null
     setFeatherDrag(null)
     repairStroke.current = null
+    paintStroke.current = null
     marqueeCutRef.current = null
     setMarqueeCut(null)
     eraserDragging.current = false
@@ -6378,6 +6511,7 @@ export function Workspace({
     'viewport' +
     (previewMode ? ' preview' : '') +
     (colorSamplerActive ? ' color-sampler-active' : '') +
+    (rasterBrushColor ? ' raster-brush-active' : '') +
     (tool === 'feather' ? ' feathertool' : '') +
     (!panMode && tool === 'gap' ? ' gaptool' + gapCursorClass : '') +
     (panning
@@ -8213,11 +8347,11 @@ export function Workspace({
                   showEdge
                 />
               )}
-              {(tool === 'eraser' || tool === 'heal') && eraserPoint && (
+              {(tool === 'eraser' || tool === 'heal' || rasterBrushColor) && eraserPoint && (
                 <div
-                  className={tool === 'heal' ? 'heal-brush' : 'eraser-brush'}
+                  className={tool === 'heal' ? 'heal-brush' : rasterBrushColor ? 'paint-brush' : 'eraser-brush'}
                   aria-hidden="true"
-                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2 }}
+                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2, ...(rasterBrushColor ? { borderColor: rasterBrushColor, backgroundColor: `${rasterBrushColor}22` } : {}) }}
                 />
               )}
               {angleTip && (
@@ -8744,17 +8878,17 @@ export function Workspace({
             {
               id: 'color',
               label: 'צבע',
-              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'gradient',
               label: 'מעבר צבע',
-              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'swatches',
               label: 'דוגמיות',
-              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} onStartSampler={() => { setColorSamplerActive(true); setColorSamplerPreview(null) }} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'layers',
