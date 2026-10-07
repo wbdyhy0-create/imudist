@@ -1,9 +1,13 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Run, TextAlign } from '../document'
 import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, normalizeCaretIn, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
+import { ContextMenu } from './ContextMenu'
+
+let lastCopiedText: string | null = null
 
 /** Ask the editor to select characters [a, b) of its text (a caret when a === b). `token` changes on each request. */
 export interface SelRequest {
@@ -109,6 +113,8 @@ function markSelectedMarkers(el: HTMLElement) {
  */
 export function RichEditor(p: Props) {
   const ref = useRef<HTMLDivElement>(null)
+  const [textMenu, setTextMenu] = useState<{ x: number; y: number; a: number; b: number } | null>(null)
+  const contextSelection = useRef<[number, number]>([0, 0])
   const live = useRef(p)
   live.current = p
   /** signature of what the DOM currently shows */
@@ -220,6 +226,7 @@ export function RichEditor(p: Props) {
       const [a, b] = range()
       const text = p.onCopyText() ?? p.text.slice(a, b)
       if (!text) return
+      lastCopiedText = text
       e.preventDefault()
       e.clipboardData?.setData('text/plain', text)
       if (cut) p.onEdit(a, b, '')
@@ -266,7 +273,46 @@ export function RichEditor(p: Props) {
     }
   }, [])
 
+  const restoreContextSelection = () => {
+    const editor = ref.current
+    if (!editor) return null
+    editor.focus({ preventScroll: true })
+    const [a, b] = contextSelection.current
+    setSelectionIn(editor, a, b)
+    live.current.onSelect(a, b)
+    return editor
+  }
+  const runTextClipboardCommand = (command: 'copy' | 'cut') => {
+    const editor = restoreContextSelection()
+    if (!editor) return
+    const [a, b] = contextSelection.current
+    const copied = live.current.onCopyText() ?? live.current.text.slice(a, b)
+    if (copied) lastCopiedText = copied
+    if (!document.execCommand(command)) console.error(`Could not ${command} text from the context menu.`)
+  }
+  const pasteTextFromClipboard = async () => {
+    const editor = restoreContextSelection()
+    if (!editor) return
+    let clipboardText: string
+    try {
+      clipboardText = await navigator.clipboard.readText()
+    } catch (error) {
+      if (lastCopiedText === null) {
+        console.error('Could not paste text from the context menu.', error)
+        return
+      }
+      clipboardText = lastCopiedText
+    }
+    if (!clipboardText && lastCopiedText !== null) clipboardText = lastCopiedText
+    const entry = isClipToken(clipboardText) ? clipForToken(clipboardText) : null
+    const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
+    if (!text) return
+    const [a, b] = contextSelection.current
+    live.current.onEdit(a, b, text)
+  }
+
   return (
+    <>
     <div
       ref={ref}
       className="rich-editor"
@@ -278,6 +324,22 @@ export function RichEditor(p: Props) {
       aria-multiline="true"
       aria-label="תיבת טקסט"
       onBlur={p.onStop}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        const editor = event.currentTarget
+        const current = readSelectionIn(editor)
+        const clicked = current && current[0] !== current[1]
+          ? current
+          : (() => {
+              const offset = caretOffsetAt(event.clientX, event.clientY, editor)
+              return offset === null ? current : [offset, offset] as [number, number]
+            })()
+        contextSelection.current = clicked ?? [live.current.text.length, live.current.text.length]
+        const [a, b] = contextSelection.current
+        if (clicked) setSelectionIn(editor, a, b)
+        live.current.onSelect(a, b)
+        setTextMenu({ x: event.clientX, y: event.clientY, a, b })
+      }}
       onPointerUp={(event) => {
         const editor = event.currentTarget
         requestAnimationFrame(() => {
@@ -311,6 +373,13 @@ export function RichEditor(p: Props) {
         window.addEventListener('pointerup', stop)
       }}
       onKeyDown={(e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'x')) {
+          const selection = readSelectionIn(e.currentTarget)
+          if (selection && selection[0] !== selection[1]) {
+            const [a, b] = selection
+            lastCopiedText = live.current.onCopyText() ?? live.current.text.slice(a, b)
+          }
+        }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Home' && live.current.onSelectToStart) {
           e.preventDefault()
           e.stopPropagation()
@@ -375,5 +444,19 @@ export function RichEditor(p: Props) {
         }
       }}
     />
+    {textMenu && createPortal(
+      <ContextMenu
+        x={textMenu.x}
+        y={textMenu.y}
+        onClose={() => setTextMenu(null)}
+        items={[
+          { label: 'גזור', shortcut: 'Ctrl+X', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('cut') },
+          { label: 'העתק', shortcut: 'Ctrl+C', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('copy') },
+          { label: 'הדבק', shortcut: 'Ctrl+V', onClick: () => void pasteTextFromClipboard() },
+        ]}
+      />,
+      document.body,
+    )}
+    </>
   )
 }

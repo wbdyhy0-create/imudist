@@ -7978,6 +7978,7 @@ export function Workspace({
     setRulerMenu({ x: e.clientX, y: e.clientY })
   }
   const openObjectMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest('.rich-editor')) return
     const ids = selectedObjectIds()
     const hasGroup = ids.some((id) => !!objectGroupId(id))
     const targetShapeId = ids.length === 1 && shapes.some((shape) => shape.id === ids[0]) ? ids[0] : undefined

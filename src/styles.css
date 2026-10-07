@@ -53,6 +53,7 @@ svg { display: block; }
   position: absolute; top: 100%; inset-inline-start: 0; min-width: 300px; padding: 5px 0;
   background: var(--bg-raised); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
 }
+.ctx-menu { position: fixed; z-index: 1000003; }
 .menu-panel.nested { display: none; top: -6px; inset-inline-start: 100%; min-width: 210px; }
 .menu-item:not(.disabled):hover > .menu-panel.nested { display: block; }
 .menu-item { position: relative; display: flex; align-items: center; height: 22px; padding-inline: 8px 14px; color: #e8e8e8; }

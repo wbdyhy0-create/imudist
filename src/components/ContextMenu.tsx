@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export interface ContextItem {
   label?: string
+  shortcut?: string
   checked?: boolean
   disabled?: boolean
   separator?: boolean
@@ -56,7 +57,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   }, [onClose])
 
   return (
-    <div ref={ref} className="menu-panel ctx-menu" role="menu" style={pos}>
+    <div ref={ref} className="menu-panel ctx-menu" role="menu" style={pos} onPointerDown={(event) => event.preventDefault()}>
       {items.map((item, i) =>
         item.separator ? (
           <div key={i} className="menu-sep" />
@@ -74,6 +75,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
           >
             <span className="menu-check">{item.checked ? '✓' : ''}</span>
             <span className="menu-text">{item.label}</span>
+            {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}
           </div>
         ),
       )}
