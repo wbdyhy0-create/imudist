@@ -613,7 +613,6 @@ export function Workspace({
   const [scroll, setScroll] = useState({ x: 0, y: 0 })
   const [view, setView] = useState<View>({ zoom: 1, anchor: null })
   const [tool, setTool] = useState<ToolId>('select')
-  const activateTool = useCallback((nextTool: ToolId) => setTool(nextTool), [])
   const [colorTarget, setColorTarget] = useState<'fill' | 'stroke'>('fill')
     const [textColorTarget, setTextColorTarget] = useState<'fill' | 'outline'>('fill')
   const [colorDialogTarget, setColorDialogTarget] = useState<'fill' | 'stroke' | null>(null)
@@ -738,6 +737,14 @@ export function Workspace({
   const paintStroke = useRef<{ kind: 'image' | 'shape'; id: string; assetId: string; points: ImagePixelPoint[]; radius: number; color: string } | null>(null)
   const [eraserRadius, setEraserRadius] = useState(12)
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
+  const activateTool = useCallback((nextTool: ToolId) => {
+    setTool(nextTool)
+    if (nextTool === 'color' || nextTool === 'gradient' || nextTool === 'swatches') return
+    setColorSamplerActive(false)
+    setRasterBrushColor(null)
+    setColorSamplerPreview(null)
+    setEraserPoint(null)
+  }, [])
   /** dragging a peg of the text on an outline */
   const pegDrag = useRef<{ id: string; peg: PathPeg; key: string } | null>(null)
   const marqueeBase = useRef<{ guides: string[]; objects: string[] } | null>(null)
