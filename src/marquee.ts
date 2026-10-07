@@ -9,6 +9,73 @@ export interface ScreenBox {
   height: number
 }
 
+export interface CaptureItem {
+  element: HTMLElement
+  bounds: ScreenBox
+  z: number
+  imageSource?: string
+}
+
+export async function captureObjects(items: CaptureItem[], bounds: ScreenBox, scale: number): Promise<HTMLCanvasElement> {
+  if (items.length === 0 || bounds.width <= 0 || bounds.height <= 0) throw new Error('cannot capture an empty object selection')
+  const captureScale = Math.min(
+    Math.max(1, scale),
+    12000 / bounds.width,
+    12000 / bounds.height,
+    Math.sqrt(40_000_000 / (bounds.width * bounds.height)),
+  )
+  const wrapper = document.createElement('div')
+  Object.assign(wrapper.style, {
+    position: 'fixed',
+    left: '-100000px',
+    top: '0',
+    width: `${bounds.width}px`,
+    height: `${bounds.height}px`,
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    direction: 'ltr',
+  })
+  for (const item of items) {
+    const clone = item.element.cloneNode(true) as HTMLElement
+    clone.classList.remove('selected', 'edge', 'marked', 'locked')
+    clone.querySelectorAll('.selected, .edge, .marked, .locked, .handle, .rotate-handle, .port, .link-badge, .sel, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle').forEach((control) => {
+      control.classList.remove('selected', 'edge', 'marked', 'locked', 'sel')
+      if (control.matches('.handle, .rotate-handle, .port, .link-badge, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle')) control.remove()
+    })
+    const width = item.element.offsetWidth || item.bounds.width
+    const height = item.element.offsetHeight || item.bounds.height
+    Object.assign(clone.style, {
+      position: 'absolute',
+      left: `${item.bounds.left - bounds.left + (item.bounds.width - width) / 2}px`,
+      top: `${item.bounds.top - bounds.top + (item.bounds.height - height) / 2}px`,
+      zIndex: `${item.z}`,
+      margin: '0',
+      pointerEvents: 'none',
+    })
+    if (item.imageSource) {
+      const image = clone.querySelector('img')
+      if (image) {
+        image.src = item.imageSource
+        image.style.visibility = 'visible'
+      }
+    }
+    wrapper.appendChild(clone)
+  }
+  document.body.appendChild(wrapper)
+  try {
+    await document.fonts?.ready
+    return await html2canvas(wrapper, {
+      backgroundColor: null,
+      scale: captureScale,
+      width: bounds.width,
+      height: bounds.height,
+      logging: false,
+    })
+  } finally {
+    wrapper.remove()
+  }
+}
+
 export async function captureObject(element: HTMLElement, bounds: ScreenBox, zoom: number): Promise<HTMLCanvasElement> {
   const wrapper = document.createElement('div')
   Object.assign(wrapper.style, {

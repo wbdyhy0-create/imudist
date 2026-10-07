@@ -487,6 +487,9 @@ svg { display: block; }
 .color-brush-active { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 11px; }
 .color-brush-active .color-sample-chip { width: 16px; height: 16px; }
 .color-brush-active .btn { margin-inline-start: auto; }
+.color-brush-size { display: grid; grid-template-columns: auto 1fr 28px; align-items: center; gap: 7px; margin-top: 6px; font-size: 11px; }
+.color-brush-size input { width: 100%; min-width: 0; accent-color: var(--accent); }
+.color-brush-size output { text-align: center; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .color-samples-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 .color-sample-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .color-sample-apply { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 30px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; text-align: start; }
@@ -499,7 +502,7 @@ svg { display: block; }
 .color-sample-delete { flex: none; font-size: 16px; line-height: 1; }
 .color-samples-empty { margin-top: 7px; }
 .viewport.color-sampler-active { cursor: crosshair; }
-.viewport.raster-brush-active { cursor: crosshair; }
+.viewport.raster-brush-active, .viewport.raster-brush-active * { cursor: none !important; }
 .viewport.feathertool { cursor: crosshair; }
 .feather-gesture-layer { position: absolute; z-index: 100000; inset: 0; overflow: visible; pointer-events: none; }
 .feather-gesture-layer line { stroke: var(--accent-line); stroke-width: 2; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }

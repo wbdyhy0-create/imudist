@@ -1,7 +1,7 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
 import { fontInstalled, useFontCatalog, weightName } from '../fonts'
 import { runPreflight, type PreflightIssue } from '../preflight'
-import { bridgeTransparentSeams, canvasDataUrl, captureObject, splitObjectCanvas, trimTransparentBounds, type MarqueeKind, type ScreenBox } from '../marquee'
+import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
@@ -3063,6 +3063,138 @@ export function Workspace({
 
   const selectedImagesToMerge = multiSel.length === 2 ? images.filter((image) => multiSel.includes(image.id)) : []
   const canMergeImages = selectedImagesToMerge.length === 2 && selectedImagesToMerge.every((image) => !!assets[image.assetId])
+  type FlattenCandidate =
+    | { id: string; kind: 'image'; layerId?: string; z?: number; image: ImageFrame }
+    | { id: string; kind: 'shape'; layerId?: string; z?: number; shape: ShapeFrame }
+    | { id: string; kind: 'frame'; layerId?: string; z?: number; frame: TextFrame }
+  const flattenCandidates: FlattenCandidate[] = []
+  for (const id of multiSel) {
+    const image = images.find((candidate) => candidate.id === id)
+    if (image) {
+      flattenCandidates.push({ id, kind: 'image', layerId: image.layerId, z: image.z, image })
+      continue
+    }
+    const shape = shapes.find((candidate) => candidate.id === id)
+    if (shape) {
+      flattenCandidates.push({ id, kind: 'shape', layerId: shape.layerId, z: shape.z, shape })
+      continue
+    }
+    const frame = frames.find((candidate) => candidate.id === id)
+    if (frame) flattenCandidates.push({ id, kind: 'frame', layerId: frame.layerId, z: frame.z, frame })
+  }
+  const canCreateImage = !layerLocked &&
+    flattenCandidates.length === multiSel.length &&
+    flattenCandidates.length >= 2 &&
+    flattenCandidates.some((candidate) => candidate.kind === 'image') &&
+    flattenCandidates.some((candidate) => candidate.kind !== 'image') &&
+    flattenCandidates.every((candidate) =>
+      !itemLocks[candidate.id] &&
+      (candidate.kind !== 'image' || !!assets[candidate.image.assetId]) &&
+      (candidate.kind !== 'shape' || !candidate.shape.image || !!assets[candidate.shape.image.assetId]),
+    )
+
+  const createImageFromSelection = async () => {
+    if (!canCreateImage) return
+    const elements = vpRef.current?.querySelectorAll<HTMLElement>('[data-object-id][data-object-kind]')
+    if (!elements) {
+      console.error('Could not create an image from the selection because the canvas is unavailable.')
+      return
+    }
+    const rankById = new Map(flattenCandidates.map((candidate) => [candidate.id, rank.get(candidate.id) ?? 0]))
+    const captureItems: CaptureItem[] = flattenCandidates.flatMap((candidate) => {
+      const element = Array.from(elements).find((item) =>
+        item.dataset.objectId === candidate.id &&
+        item.dataset.objectKind === candidate.kind &&
+        !item.closest('.parent-shadow'),
+      )
+      if (!element) return []
+      const bounds = element.getBoundingClientRect()
+      if (bounds.width <= 0 || bounds.height <= 0) return []
+      const image = candidate.kind === 'image' ? candidate.image : undefined
+      return [{
+        element,
+        bounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+        z: rankById.get(candidate.id) ?? 0,
+        ...(image && assets[image.assetId] ? { imageSource: assets[image.assetId].dataUrl } : {}),
+      }]
+    })
+    if (captureItems.length !== flattenCandidates.length) {
+      console.error('Could not create an image from the selection because one or more selected objects are not visible.')
+      return
+    }
+    const left = Math.min(...captureItems.map((item) => item.bounds.left))
+    const top = Math.min(...captureItems.map((item) => item.bounds.top))
+    const right = Math.max(...captureItems.map((item) => item.bounds.left + item.bounds.width))
+    const bottom = Math.max(...captureItems.map((item) => item.bounds.top + item.bounds.height))
+    const bounds = { left, top, width: right - left, height: bottom - top }
+    const imageDensities = flattenCandidates.flatMap((candidate) => {
+      if (candidate.kind === 'image') {
+        const asset = assets[candidate.image.assetId]
+        return asset ? [asset.width / (candidate.image.w * zoom), asset.height / (candidate.image.h * zoom)] : []
+      }
+      if (candidate.kind === 'shape' && candidate.shape.image) {
+        const asset = assets[candidate.shape.image.assetId]
+        const imageBox = asset ? imageGeometry(candidate.shape, asset) : null
+        return asset && imageBox ? [asset.width / (imageBox.w * zoom), asset.height / (imageBox.h * zoom)] : []
+      }
+      return []
+    })
+    const captureScale = Math.max(Math.min(3, 1 / zoom), ...imageDensities, 1)
+    try {
+      const canvas = await captureObjects(captureItems, bounds, captureScale)
+      if (canvas.width < 1 || canvas.height < 1) throw new Error('image capture returned an empty canvas')
+      const imageAssetId = newFrameId()
+      const imageAsset: Asset = {
+        name: `תמונה מאוחדת — ${flattenCandidates.length} אובייקטים.png`,
+        mime: 'image/png',
+        dataUrl: canvasDataUrl(canvas),
+        width: canvas.width,
+        height: canvas.height,
+      }
+      const topmost = [...flattenCandidates].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)).at(-1)!
+      const worldOrigin = toWorld(bounds.left, bounds.top)
+      const mergedImage: ImageFrame = {
+        id: newFrameId(),
+        label: 'תמונה מאוחדת',
+        layerId: topmost.layerId ?? activeLayerId,
+        x: worldOrigin.x,
+        y: worldOrigin.y,
+        w: bounds.width / zoom,
+        h: bounds.height / zoom,
+        assetId: imageAssetId,
+        fit: 'stretch',
+        z: topmost.z,
+        ...(topmost.kind === 'image' ? { wrap: topmost.image.wrap, wrapOffset: topmost.image.wrapOffset } : {}),
+      }
+      const selected = new Set(multiSel)
+      const nextAssets = { ...assetsRef.current, [imageAssetId]: imageAsset }
+      if (editingParentId) {
+        pageOps.commit({
+          assets: nextAssets,
+          parents: parents.map((parent) => parent.id !== editingParentId ? parent : {
+            ...parent,
+            frames: parent.frames.filter((frame) => !selected.has(frame.id)),
+            images: [...parent.images.filter((image) => !selected.has(image.id)), mergedImage],
+            shapes: parent.shapes.filter((shape) => !selected.has(shape.id)),
+          }),
+        })
+      } else {
+        pageOps.commit({
+          assets: nextAssets,
+          frames: frames.filter((frame) => !selected.has(frame.id)),
+          images: [...images.filter((image) => !selected.has(image.id)), mergedImage],
+          shapes: shapes.filter((shape) => !selected.has(shape.id)),
+        })
+      }
+      setMultiSel([])
+      setGuideSel([])
+      setSelectedIdRaw(mergedImage.id)
+      setSelectedPage(ownerPage(rects, mergedImage.x + mergedImage.w / 2, mergedImage.y + mergedImage.h / 2))
+    } catch (error) {
+      console.error('Could not create an image from the selected objects.', error)
+    }
+  }
+
   const mergeSelectedImages = async () => {
     if (!canMergeImages) return
     const ordered = [...selectedImagesToMerge].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
@@ -8038,6 +8170,7 @@ export function Workspace({
               {hasSelectedGroup && <button className="context-command" onClick={ungroupSelectedObjects}>שחרר גרופ</button>}
               {imageShapeMerge && <button className="context-command" onClick={insertImageIntoShape}>הכנס תמונה לצורה</button>}
               {canMergeImages && <button className="context-command" onClick={() => void mergeSelectedImages()}>מזג תמונות</button>}
+              {canCreateImage && <button className="context-command" onClick={() => void createImageFromSelection()}>צור תמונה אחת מהנבחרים</button>}
               <button className="context-command danger" onClick={() => deleteSelection(multiSel, [])}>מחק</button>
             </div>
           )
@@ -8769,6 +8902,8 @@ export function Workspace({
                       onInsertImage={insertImageIntoShape}
                       canMergeImages={canMergeImages}
                       onMergeImages={() => void mergeSelectedImages()}
+                      canCreateImage={canCreateImage}
+                      onCreateImage={() => void createImageFromSelection()}
                       onDelete={() => deleteSelection(multiSel, [])}
                     />
                   )}
@@ -8878,17 +9013,17 @@ export function Workspace({
             {
               id: 'color',
               label: 'צבע',
-              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'gradient',
               label: 'מעבר צבע',
-              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'swatches',
               label: 'דוגמיות',
-              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} brushColor={rasterBrushColor} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
+              content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'layers',

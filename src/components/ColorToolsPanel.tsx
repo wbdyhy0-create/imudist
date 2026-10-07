@@ -22,6 +22,8 @@ interface Props {
   onStartSampler: () => void
   onDeleteSample: (id: string) => void
   brushColor?: string | null
+  brushRadius?: number
+  onBrushRadiusChange?: (radius: number) => void
   onExitBrush?: () => void
 }
 
@@ -43,7 +45,7 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, brushColor, onExitBrush }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, brushColor, brushRadius = 12, onBrushRadiusChange, onExitBrush }: Props) {
   const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
   const targetShape = shapeTargets[0] ?? null
   const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
@@ -216,9 +218,16 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
         {brushColor && (
           <div className="color-brush-active">
             <span className="color-sample-chip" style={{ background: brushColor }} />
-            <span>מברשת פעילה — גרור על תמונה · [ ] לשינוי גודל · Esc לסיום</span>
+            <span>מברשת פעילה — גרור על תמונה</span>
             <button className="btn small" onClick={onExitBrush}>סיום</button>
           </div>
+        )}
+        {brushColor && onBrushRadiusChange && (
+          <label className="color-brush-size">
+            <span>גודל המברשת</span>
+            <input aria-label="גודל המברשת" type="range" min="1" max="96" value={brushRadius} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
+            <output>{brushRadius}</output>
+          </label>
         )}
         {samples.length === 0 ? <p className="muted color-samples-empty">אין דגימות במסמך.</p> : (
           <div className="color-samples-list">
