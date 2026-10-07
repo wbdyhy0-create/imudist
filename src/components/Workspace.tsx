@@ -3160,8 +3160,6 @@ export function Workspace({
   const canCreateImage = !layerLocked &&
     flattenCandidates.length === multiSel.length &&
     flattenCandidates.length >= 2 &&
-    flattenCandidates.some((candidate) => candidate.kind === 'image') &&
-    flattenCandidates.some((candidate) => candidate.kind !== 'image') &&
     flattenCandidates.every((candidate) =>
       !itemLocks[candidate.id] &&
       (candidate.kind !== 'image' || !!assets[candidate.image.assetId]) &&

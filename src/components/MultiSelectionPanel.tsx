@@ -54,7 +54,7 @@ const OPS: { op: BoolOp; hint: string; icon: ReactNode }[] = [
   },
 ]
 
-/** The properties panel while several objects are selected: combining shapes, putting a picture inside a shape, and deleting. */
+/** The properties panel while several objects are selected: combining shapes, flattening objects, and deleting. */
 export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, canMergeImages, onMergeImages, canCreateImage, onCreateImage, canExportPng, onExportPng, onDelete }: Props) {
   return (
     <aside className="props-panel" aria-label="בחירה מרובה">
