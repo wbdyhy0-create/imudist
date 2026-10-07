@@ -4,6 +4,7 @@ import { runPreflight, type PreflightIssue } from '../preflight'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
+import { deliverPng } from '../pngExport'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
 import { createPortal } from 'react-dom'
 import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
@@ -3067,20 +3068,87 @@ export function Workspace({
     | { id: string; kind: 'image'; layerId?: string; z?: number; image: ImageFrame }
     | { id: string; kind: 'shape'; layerId?: string; z?: number; shape: ShapeFrame }
     | { id: string; kind: 'frame'; layerId?: string; z?: number; frame: TextFrame }
-  const flattenCandidates: FlattenCandidate[] = []
-  for (const id of multiSel) {
-    const image = images.find((candidate) => candidate.id === id)
-    if (image) {
-      flattenCandidates.push({ id, kind: 'image', layerId: image.layerId, z: image.z, image })
-      continue
+  const candidatesForIds = (ids: string[]): FlattenCandidate[] => {
+    const candidates: FlattenCandidate[] = []
+    for (const id of ids) {
+      const image = images.find((candidate) => candidate.id === id)
+      if (image) {
+        candidates.push({ id, kind: 'image', layerId: image.layerId, z: image.z, image })
+        continue
+      }
+      const shape = shapes.find((candidate) => candidate.id === id)
+      if (shape) {
+        candidates.push({ id, kind: 'shape', layerId: shape.layerId, z: shape.z, shape })
+        continue
+      }
+      const frame = frames.find((candidate) => candidate.id === id)
+      if (frame) candidates.push({ id, kind: 'frame', layerId: frame.layerId, z: frame.z, frame })
     }
-    const shape = shapes.find((candidate) => candidate.id === id)
-    if (shape) {
-      flattenCandidates.push({ id, kind: 'shape', layerId: shape.layerId, z: shape.z, shape })
-      continue
+    return candidates
+  }
+  const flattenCandidates = candidatesForIds(multiSel)
+  const exportIds = selectedObjectIds()
+  const exportCandidates = candidatesForIds(exportIds)
+  const hasRequiredAssets = (candidate: FlattenCandidate) =>
+    (candidate.kind !== 'image' || !!assets[candidate.image.assetId]) &&
+    (candidate.kind !== 'shape' || !candidate.shape.image || !!assets[candidate.shape.image.assetId])
+  const canExportPng = exportCandidates.length > 0 &&
+    exportCandidates.length === exportIds.length &&
+    exportCandidates.every(hasRequiredAssets)
+
+  const captureSelection = async (candidates: FlattenCandidate[]) => {
+    const elements = vpRef.current?.querySelectorAll<HTMLElement>('[data-object-id][data-object-kind]')
+    if (!elements) throw new Error('canvas is unavailable')
+    const captureItems: CaptureItem[] = candidates.flatMap((candidate) => {
+      const element = Array.from(elements).find((item) =>
+        item.dataset.objectId === candidate.id &&
+        item.dataset.objectKind === candidate.kind &&
+        !item.closest('.parent-shadow'),
+      )
+      if (!element) return []
+      const bounds = element.getBoundingClientRect()
+      if (bounds.width <= 0 || bounds.height <= 0) return []
+      const image = candidate.kind === 'image' ? candidate.image : undefined
+      return [{
+        element,
+        bounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
+        z: rank.get(candidate.id) ?? 0,
+        ...(image && assets[image.assetId] ? { imageSource: assets[image.assetId].dataUrl } : {}),
+      }]
+    })
+    if (captureItems.length !== candidates.length) throw new Error('one or more selected objects are not visible')
+    const left = Math.min(...captureItems.map((item) => item.bounds.left))
+    const top = Math.min(...captureItems.map((item) => item.bounds.top))
+    const right = Math.max(...captureItems.map((item) => item.bounds.left + item.bounds.width))
+    const bottom = Math.max(...captureItems.map((item) => item.bounds.top + item.bounds.height))
+    const bounds = { left, top, width: right - left, height: bottom - top }
+    const imageDensities = candidates.flatMap((candidate) => {
+      if (candidate.kind === 'image') {
+        const asset = assets[candidate.image.assetId]
+        return asset ? [asset.width / (candidate.image.w * zoom), asset.height / (candidate.image.h * zoom)] : []
+      }
+      if (candidate.kind === 'shape' && candidate.shape.image) {
+        const asset = assets[candidate.shape.image.assetId]
+        const imageBox = asset ? imageGeometry(candidate.shape, asset) : null
+        return asset && imageBox ? [asset.width / (imageBox.w * zoom), asset.height / (imageBox.h * zoom)] : []
+      }
+      return []
+    })
+    const captureScale = Math.max(Math.min(3, 1 / zoom), ...imageDensities, 1)
+    const canvas = await captureObjects(captureItems, bounds, captureScale)
+    if (canvas.width < 1 || canvas.height < 1) throw new Error('image capture returned an empty canvas')
+    return { canvas, bounds }
+  }
+
+  const exportSelectedPng = async () => {
+    if (!canExportPng) return
+    try {
+      const { canvas } = await captureSelection(exportCandidates)
+      const safeName = doc.name.replace(/\.[^.]+$/, '').replace(/[<>:"/\\|?*]/g, '-').trim() || 'Imudist'
+      await deliverPng(canvas, `${safeName}-selection`)
+    } catch (error) {
+      console.error('Could not export the selected objects as PNG.', error)
     }
-    const frame = frames.find((candidate) => candidate.id === id)
-    if (frame) flattenCandidates.push({ id, kind: 'frame', layerId: frame.layerId, z: frame.z, frame })
   }
   const canCreateImage = !layerLocked &&
     flattenCandidates.length === multiSel.length &&
@@ -3095,54 +3163,8 @@ export function Workspace({
 
   const createImageFromSelection = async () => {
     if (!canCreateImage) return
-    const elements = vpRef.current?.querySelectorAll<HTMLElement>('[data-object-id][data-object-kind]')
-    if (!elements) {
-      console.error('Could not create an image from the selection because the canvas is unavailable.')
-      return
-    }
-    const rankById = new Map(flattenCandidates.map((candidate) => [candidate.id, rank.get(candidate.id) ?? 0]))
-    const captureItems: CaptureItem[] = flattenCandidates.flatMap((candidate) => {
-      const element = Array.from(elements).find((item) =>
-        item.dataset.objectId === candidate.id &&
-        item.dataset.objectKind === candidate.kind &&
-        !item.closest('.parent-shadow'),
-      )
-      if (!element) return []
-      const bounds = element.getBoundingClientRect()
-      if (bounds.width <= 0 || bounds.height <= 0) return []
-      const image = candidate.kind === 'image' ? candidate.image : undefined
-      return [{
-        element,
-        bounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
-        z: rankById.get(candidate.id) ?? 0,
-        ...(image && assets[image.assetId] ? { imageSource: assets[image.assetId].dataUrl } : {}),
-      }]
-    })
-    if (captureItems.length !== flattenCandidates.length) {
-      console.error('Could not create an image from the selection because one or more selected objects are not visible.')
-      return
-    }
-    const left = Math.min(...captureItems.map((item) => item.bounds.left))
-    const top = Math.min(...captureItems.map((item) => item.bounds.top))
-    const right = Math.max(...captureItems.map((item) => item.bounds.left + item.bounds.width))
-    const bottom = Math.max(...captureItems.map((item) => item.bounds.top + item.bounds.height))
-    const bounds = { left, top, width: right - left, height: bottom - top }
-    const imageDensities = flattenCandidates.flatMap((candidate) => {
-      if (candidate.kind === 'image') {
-        const asset = assets[candidate.image.assetId]
-        return asset ? [asset.width / (candidate.image.w * zoom), asset.height / (candidate.image.h * zoom)] : []
-      }
-      if (candidate.kind === 'shape' && candidate.shape.image) {
-        const asset = assets[candidate.shape.image.assetId]
-        const imageBox = asset ? imageGeometry(candidate.shape, asset) : null
-        return asset && imageBox ? [asset.width / (imageBox.w * zoom), asset.height / (imageBox.h * zoom)] : []
-      }
-      return []
-    })
-    const captureScale = Math.max(Math.min(3, 1 / zoom), ...imageDensities, 1)
     try {
-      const canvas = await captureObjects(captureItems, bounds, captureScale)
-      if (canvas.width < 1 || canvas.height < 1) throw new Error('image capture returned an empty canvas')
+      const { canvas, bounds } = await captureSelection(flattenCandidates)
       const imageAssetId = newFrameId()
       const imageAsset: Asset = {
         name: `תמונה מאוחדת — ${flattenCandidates.length} אובייקטים.png`,
@@ -7957,7 +7979,7 @@ export function Workspace({
     const clickedElement = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-object-kind="shape"]') : null
     const sourceShapeId = clickedElement?.dataset.objectId
     const canCopySize = !!targetShapeId && !!sourceShapeId && sourceShapeId !== targetShapeId && shapes.some((shape) => shape.id === sourceShapeId)
-    if (ids.length < 2 && !hasGroup && !canCopySize) return
+    if (ids.length < 2 && !hasGroup && !canCopySize && !canExportPng) return
     event.preventDefault()
     event.stopPropagation()
     setObjectMenu({ x: event.clientX, y: event.clientY, ...(canCopySize ? { sourceShapeId, targetShapeId } : {}) })
@@ -8171,6 +8193,7 @@ export function Workspace({
               {imageShapeMerge && <button className="context-command" onClick={insertImageIntoShape}>הכנס תמונה לצורה</button>}
               {canMergeImages && <button className="context-command" onClick={() => void mergeSelectedImages()}>מזג תמונות</button>}
               {canCreateImage && <button className="context-command" onClick={() => void createImageFromSelection()}>צור תמונה אחת מהנבחרים</button>}
+              {canExportPng && <button className="context-command" onClick={() => void exportSelectedPng()}>ייצא בחירה ל־PNG</button>}
               <button className="context-command danger" onClick={() => deleteSelection(multiSel, [])}>מחק</button>
             </div>
           )
@@ -8904,6 +8927,8 @@ export function Workspace({
                       onMergeImages={() => void mergeSelectedImages()}
                       canCreateImage={canCreateImage}
                       onCreateImage={() => void createImageFromSelection()}
+                      canExportPng={canExportPng}
+                      onExportPng={() => void exportSelectedPng()}
                       onDelete={() => deleteSelection(multiSel, [])}
                     />
                   )}
@@ -9167,6 +9192,7 @@ export function Workspace({
             { separator: true },
             { label: 'מזג צורות', disabled: selectedObjectIds().length < 2 || selectedObjectIds().some((id) => !shapes.some((shape) => shape.id === id)), onClick: () => combineSelectedShapes('unite') },
             { label: 'מזג תמונות לשכבה אחת', disabled: !canMergeImages, onClick: () => void mergeSelectedImages() },
+            { label: 'ייצא בחירה ל־PNG', disabled: !canExportPng, onClick: () => void exportSelectedPng() },
           ]}
         />
       )}

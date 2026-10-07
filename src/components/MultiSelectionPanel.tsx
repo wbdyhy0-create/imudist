@@ -16,6 +16,8 @@ interface Props {
   onMergeImages: () => void
   canCreateImage: boolean
   onCreateImage: () => void
+  canExportPng: boolean
+  onExportPng: () => void
   onDelete: () => void
 }
 
@@ -53,7 +55,7 @@ const OPS: { op: BoolOp; hint: string; icon: ReactNode }[] = [
 ]
 
 /** The properties panel while several objects are selected: combining shapes, putting a picture inside a shape, and deleting. */
-export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, canMergeImages, onMergeImages, canCreateImage, onCreateImage, onDelete }: Props) {
+export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, canInsertImage, onInsertImage, canMergeImages, onMergeImages, canCreateImage, onCreateImage, canExportPng, onExportPng, onDelete }: Props) {
   return (
     <aside className="props-panel" aria-label="בחירה מרובה">
       <h2 className="props-title">{count} אובייקטים נבחרו</h2>
@@ -86,6 +88,17 @@ export function MultiSelectionPanel({ count, shapeCount, onShapeOp, onAlign, can
           <div className="props-buttons">
             <button className="btn small" onClick={onCreateImage}>
               צור תמונה אחת מהנבחרים
+            </button>
+          </div>
+        </Group>
+      )}
+
+      {canExportPng && (
+        <Group title="ייצוא PNG">
+          <p className="muted">שמור את מראה האובייקטים הנבחרים כתמונה עם רקע שקוף. האובייקטים במסמך לא ישתנו.</p>
+          <div className="props-buttons">
+            <button className="btn small" onClick={onExportPng}>
+              ייצא בחירה ל־PNG
             </button>
           </div>
         </Group>
