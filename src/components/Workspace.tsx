@@ -750,6 +750,12 @@ export function Workspace({
     }
     return { itemVisibility: visibility, itemLocks: locks }
   }, [frames, images, shapes, layerViewById, layerOrder])
+  // an object that becomes locked or hidden (redo, a layer closed in the panel) can no longer stay selected
+  useEffect(() => {
+    if (selectedId && (itemLocks[selectedId] || itemVisibility[selectedId] === false)) setSelectedIdRaw(null)
+    setMultiSel((current) => (current.some((id) => itemLocks[id] || itemVisibility[id] === false) ? current.filter((id) => !itemLocks[id] && itemVisibility[id] !== false) : current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemLocks, itemVisibility])
   // the thumbnails of the Pages panel draw what is shown, not what is hidden
   const shownFrames = useMemo(() => frames.filter((frame) => itemVisibility[frame.id] !== false), [frames, itemVisibility])
   const shownImages = useMemo(() => images.filter((image) => itemVisibility[image.id] !== false), [images, itemVisibility])
@@ -1783,7 +1789,8 @@ export function Workspace({
     if (!compiled.ok) return { hits: [], error: compiled.error }
     const range = search.scope === 'selection' ? findRange.current : null
     if (search.scope === 'selection' && !range) return { hits: [] }
-    return { hits: collectHits(headFrames(frames), compiled, { footnotes: search.notes, range: range ?? undefined }) }
+    // the text of a locked or hidden frame is neither searched nor replaced
+    return { hits: collectHits(headFrames(frames).filter((head) => selectable(head.id)), compiled, { footnotes: search.notes, range: range ?? undefined }) }
   }
 
   /** the frame of a story that shows `offset` (the last one when it is beyond what the frames hold) */
@@ -2205,7 +2212,7 @@ export function Workspace({
     }
     if (!editingId) {
       // not editing text: select every object of the document
-      const ids = [...frames, ...images, ...shapes].map((o) => o.id)
+      const ids = [...frames, ...images, ...shapes].filter((o) => selectable(o.id)).map((o) => o.id)
       setGuideSel([])
       if (ids.length > 1) {
         setMultiSel(ids)
@@ -2448,7 +2455,7 @@ export function Workspace({
    */
   const cleanSpacingCmd = () => {
     const selection = textSel && textSel.a !== textSel.b ? { headId: textSel.headId, from: Math.min(textSel.a, textSel.b), to: Math.max(textSel.a, textSel.b) } : null
-    const heads = selection ? frames.filter((f) => f.id === selection.headId) : headFrames(frames).filter((head) => !head.tocPageReferences?.length)
+    const heads = selection ? frames.filter((f) => f.id === selection.headId) : headFrames(frames).filter((head) => !head.tocPageReferences?.length && selectable(head.id))
     const edited = new Map<string, TextFrame>()
     for (const head of heads) {
       const { ranges, dropped } = selection ? cleanSpacingPlan(head.text, selection.from, Math.min(selection.to, head.text.length)) : cleanSpacingPlan(head.text)
@@ -2992,10 +2999,12 @@ export function Workspace({
   }
 
   /** the ids of the text frames, pictures and shapes that touch a world rectangle */
+  /** can the object be selected: it is shown, and neither it nor its layer is locked */
+  const selectable = (id: string) => !itemLocks[id] && itemVisibility[id] !== false
   const objectsInRect = (x0: number, y0: number, x1: number, y1: number): string[] => {
     const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)]
     const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)]
-    return [...frames, ...images, ...shapes].filter((o) => o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay).map((o) => o.id)
+    return [...frames, ...images, ...shapes].filter((o) => selectable(o.id) && o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay).map((o) => o.id)
   }
 
   /** the selected objects (several selected: `multiSel`; one: `selectedId`) that still exist */
@@ -3128,7 +3137,8 @@ export function Workspace({
   }
 
   const objectGroupId = (id: string) => frames.find((f) => f.id === id)?.groupId ?? images.find((im) => im.id === id)?.groupId ?? shapes.find((sh) => sh.id === id)?.groupId
-  const objectsInGroup = (groupId: string) => [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId).map((object) => object.id)
+  // the members of a group that can be selected: a locked or hidden one stays out of the selection and does not move with the others
+  const objectsInGroup = (groupId: string) => [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId && selectable(object.id)).map((object) => object.id)
   const enterGroupIsolation = (id: string) => {
     const groupId = objectGroupId(id)
     if (!groupId) return false
@@ -3686,7 +3696,7 @@ export function Workspace({
       setEditingId(null)
       setMultiSel(objectsInGroup(groupId))
       setSelectedIdRaw(null)
-      const groupObjects = [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId)
+      const groupObjects = [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId && selectable(object.id))
       const origins = new Map(groupObjects.map((object) => [object.id, { x: object.x, y: object.y }]))
       dragSeq.current += 1
       groupDrag.current = { origins, start: toWorld(e.clientX, e.clientY), key: `group:${dragSeq.current}` }
@@ -9595,7 +9605,7 @@ export function Workspace({
             {
               id: 'layers',
               label: 'שכבות',
-              content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} layers={layers} onLayersChange={changeLayerSetup} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onItemChange={changeLayerItem} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
+              content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} layers={layers} onLayersChange={changeLayerSetup} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={(id) => { if (selectable(id)) setSelectedId(id) }} onItemChange={changeLayerItem} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
             },
           ]}
         />
