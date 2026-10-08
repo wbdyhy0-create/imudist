@@ -16,12 +16,12 @@ export interface CaptureItem {
   imageSource?: string
 }
 
-const CAPTURE_CONTROLS = '.handle, .rotate-handle, .port, .link-badge, .sel, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle'
+const CAPTURE_CONTROLS = '.handle, .rotate-handle, .port, .link-badge, .corner-handle, .edge-handle, .point-handle, .direction-handle, .content-handle, .direct-move-handle, .curve-handle-lines, .footnote-width-handle, .footnote-resize-handle'
 
 function cleanCaptureClone(clone: HTMLElement) {
   clone.classList.remove('selected', 'edge', 'marked', 'locked')
   clone.querySelectorAll('.selected, .edge, .marked, .locked, ' + CAPTURE_CONTROLS).forEach((control) => {
-    control.classList.remove('selected', 'edge', 'marked', 'locked', 'sel')
+    control.classList.remove('selected', 'edge', 'marked', 'locked')
     if (control.matches(CAPTURE_CONTROLS)) control.remove()
   })
 }
@@ -48,7 +48,7 @@ export async function captureElementRegion(element: HTMLElement, source: ScreenB
   })
   const clone = element.cloneNode(true) as HTMLElement
   cleanCaptureClone(clone)
-  clone.querySelectorAll('.group-selection, .page-frame, .text-frame-draft, .marquee-selection-preview').forEach((control) => control.remove())
+  clone.querySelectorAll('.group-selection, .page-frame, .text-frame-draft, .marquee-selection-preview, .guide, .page-shadow').forEach((control) => control.remove())
   Object.assign(clone.style, {
     position: 'absolute',
     left: `${source.left - region.left}px`,

@@ -98,7 +98,10 @@ describe('nested rules in a file', () => {
   it('survive saving and opening, with bad rules dropped', async () => {
     const { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings } = await import('./document')
     const { parseDocument, serializeDocument } = await import('./fileFormat')
-    const styles = DEFAULT_PARAGRAPH_STYLES.map((style, index) => (index === 0 ? { ...style, nested: [rule({ count: 2 }), rule({ styleId: 'red', unit: 'delimiter', delimiter: ':', inclusive: true })] } : style))
+    const styles: import('./document').ParagraphStyleRecord[] = [
+      { ...DEFAULT_PARAGRAPH_STYLES[0], nested: [rule({ count: 2 }), rule({ styleId: 'red', unit: 'delimiter', delimiter: ':', inclusive: true })] },
+      { id: 'plain', name: 'רגיל', patch: {} },
+    ]
     const content = { doc: defaultDocSettings('x'), frames: [], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: styles, characterStyles: [bold, red], parents: [], pageParents: [], sections: [] } as never
     const back = parseDocument(serializeDocument(content), 'x')
     expect(back.paragraphStyles[0].nested).toEqual(styles[0].nested)

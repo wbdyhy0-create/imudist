@@ -13,6 +13,11 @@ export function textOutlineShadow(style: CharStyle, scale: number): string {
   }).join(', ')
 }
 
+export function textOutlineStroke(style: CharStyle, scale: number): string {
+  const width = (style.outlineWidth ?? 0) * scale
+  return width > 0 ? `${Number(width.toFixed(3))}px ${style.outlineColor ?? '#000000'}` : ''
+}
+
 export function textDropShadow(style: CharStyle, scale: number): string {
   const opacity = Math.max(0, Math.min(1, style.shadowOpacity ?? 0))
   if (opacity === 0) return ''
@@ -28,13 +33,17 @@ export function textShadow(style: CharStyle, scale: number): string {
 }
 
 /** CSS for one run. `scale` is the zoom (1 for measuring); font sizes are stored in points. */
-export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number) {
+export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number, outlineMode: 'shadow' | 'stroke' = 'shadow') {
   el.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   el.style.fontSize = `${style.fontSize * scale}px`
   el.style.fontWeight = String(style.weight)
   el.style.fontStyle = style.italic ? 'italic' : 'normal'
   el.style.color = style.color ?? ''
-  el.style.textShadow = textShadow(style, scale)
+  el.style.textShadow = [
+    outlineMode === 'shadow' ? textOutlineShadow(style, scale) : '',
+    textDropShadow(style, scale),
+  ].filter(Boolean).join(', ')
+  if (outlineMode === 'stroke') el.style.setProperty('-webkit-text-stroke', textOutlineStroke(style, scale))
   // tracking is 1/1000 em (the standard typographic unit)
   el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
   // baseline shift: moved by `top`, not by vertical-align, so the line keeps its height
@@ -76,6 +85,8 @@ export function splitMarks(text: string): MarkPiece[] {
 }
 
 export interface RunNodeOpts {
+  /** how to render character outlines in the generated DOM */
+  outlineMode?: 'shadow' | 'stroke'
   footnoteMarkers?: Record<number, string>
   footnoteReferenceScale?: number
   tocPageMarkers?: Record<number, string>
@@ -166,7 +177,7 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
   if (opts.firstLineIndent && opts.atParaStart) frag.appendChild(paraIndent(opts.firstLineIndent * scale))
   for (const r of runs) {
     const span = document.createElement('span')
-    applyRunStyle(span, r.style, scale)
+    applyRunStyle(span, r.style, scale, opts.outlineMode)
     const runText = text.slice(pos, pos + r.len)
     const appendText = (parent: HTMLElement, value: string, start: number) => {
       if (!opts.footnoteMarkers && !opts.tocPageMarkers && !opts.tocLeaderMarkers) {
@@ -434,7 +445,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       row.className = 'toc-row'
       const title = document.createElement('span')
       title.className = 'toc-title'
-      title.appendChild(buildRunNodes(line.slice(0, leaderMarkerAt).replace(/\t$/, ''), sliceRuns(runs, pos, pos + leaderMarkerAt - (line[leaderMarkerAt - 1] === '\t' ? 1 : 0)), scale, { showMarks: opts.showMarks }))
+      title.appendChild(buildRunNodes(line.slice(0, leaderMarkerAt).replace(/\t$/, ''), sliceRuns(runs, pos, pos + leaderMarkerAt - (line[leaderMarkerAt - 1] === '\t' ? 1 : 0)), scale, { showMarks: opts.showMarks, outlineMode: opts.outlineMode }))
       const leader = document.createElement('span')
       leader.className = 'toc-leader'
       leader.dataset.leader = opts.tocLeaderMarkers?.[pos + leaderMarkerAt] ?? '.'.repeat(128)
@@ -459,7 +470,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
           return index >= pos && index < end ? [[index - pos, label]] : []
         }))
       : undefined
-    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale })
+    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale, outlineMode: opts.outlineMode })
     const lead = nodes.firstChild as HTMLElement | null
     const isOpening = pos > 0 || !!opts.atParaStart
     // the previous paragraph's closing gap, then this paragraph's own first-line indent

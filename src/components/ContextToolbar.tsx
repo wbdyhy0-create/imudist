@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { CharStyle, ImageFrame, ShapeFrame, TextAlign, TextFrame, TextStyle } from '../document'
+import type { CharStyle, ColorSample, ImageFrame, ShapeFrame, TextAlign, TextFrame, TextStyle } from '../document'
 import { FillPicker } from './FillPicker'
 import { ALIGNS } from './PropertiesPanel'
 import { ArrangeButtons } from './ArrangeButtons'
 import type { ToolId } from './Toolbox'
 import type { ArrangeOp } from '../stacking'
+import { useFontCatalog } from '../fonts'
+import { FontPicker } from './FontPicker'
 
 interface Props {
   tool: ToolId
@@ -14,16 +16,17 @@ interface Props {
   /** the look of the text the caret / selection is in (font, size, weight, italic, tracking); the frame's own when missing */
   textStyle?: CharStyle | null
   tableText?: TextStyle | null
+  fontSizeControl?: ReactNode
   /** the paragraph layout (leading, indents, align, spacing) of the caret / selection's own paragraph - a paragraph
    * style, or a change made while some text was selected, can give one paragraph its own; the frame's own when missing */
   paragraphStyle?: TextStyle | null
+  colorSamples: ColorSample[]
+  onSwatchFill: (color: string | null) => void
+  onSwatchStroke: (color: string | null) => void
+  outlineWidth: number
+  onOutlineWidth: (value: number) => void
   strokeWidth: number
   onStrokeWidth: (value: number) => void
-  onFill: (color: string | null) => void
-  colorTarget: 'fill' | 'stroke'
-  onColorTarget: (target: 'fill' | 'stroke') => void
-  textColorTarget: 'fill' | 'outline'
-  onTextColorTarget: (target: 'fill' | 'outline') => void
   onFlip: (axis: 'x' | 'y') => void
   onArrange: (op: ArrangeOp) => void
   onOpacity: (value: number) => void
@@ -33,6 +36,7 @@ interface Props {
   onImageMatchShape?: () => void
   onImageDelete?: () => void
   onCharStyle?: (patch: Partial<CharStyle>) => void
+  onFontPreview?: (family: string | null) => void
   onTextScale?: (axis: 'x' | 'y', percent: number) => void
   onAlign?: (align: TextAlign) => void
   onLeading?: (value: number) => void
@@ -40,8 +44,6 @@ interface Props {
   onParagraphSpacing?: (patch: Partial<Pick<TextFrame, 'spaceBefore' | 'spaceAfter'>>) => void
   children?: ReactNode
 }
-
-const FONT_CHOICES = ['Segoe UI', 'Arial', 'Tahoma', 'David', 'Times New Roman']
 
 const LABELS: Partial<Record<ToolId, string>> = {
   select: 'בחירה',
@@ -51,7 +53,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   pen: 'עט',
   pencil: 'עיפרון',
   line: 'קו',
-  rect: 'מלבן',
+  rect: 'מרובע',
   ellipse: 'אליפסה',
   polygon: 'מצולע',
   scissors: 'מספריים',
@@ -59,22 +61,19 @@ const LABELS: Partial<Record<ToolId, string>> = {
   eraser: 'מחק',
 }
 
-export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, paragraphStyle, strokeWidth, onStrokeWidth, onFill, colorTarget, onColorTarget, textColorTarget, onTextColorTarget, onFlip, onArrange, onOpacity, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageDelete, onCharStyle, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? 'כלי'
   const char = (textStyle ?? tableText ?? frame) as CharStyle
+  const fontCatalog = useFontCatalog()
   // leading / indents / align / spacing: the caret's own paragraph may carry a style (or an override) the frame
   // itself doesn't - same reasoning as `char` above, just for paragraph-level layout instead of character look
   const para = (paragraphStyle ?? tableText ?? frame) as TextStyle
-  const [showSwatches, setShowSwatches] = useState(false)
-  const [showTextColors, setShowTextColors] = useState(false)
-  const [showTextOutline, setShowTextOutline] = useState(false)
+  const [openPalette, setOpenPalette] = useState<'fill' | 'stroke' | null>(null)
+  const [opacityOpen, setOpacityOpen] = useState(false)
   const textColorControlsRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!showTextColors && !showTextOutline) return
-    const close = () => {
-      setShowTextColors(false)
-      setShowTextOutline(false)
-    }
+    if (!openPalette) return
+    const close = () => setOpenPalette(null)
     const onClickOutside = (event: MouseEvent) => {
       if (!textColorControlsRef.current?.contains(event.target as Node)) close()
     }
@@ -87,29 +86,115 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText
       document.removeEventListener('click', onClickOutside)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [showTextColors, showTextOutline])
+  }, [openPalette])
+  const fillValue = shape ? shape.fill : textStyle?.color ?? '#ffffff'
+  const strokeValue = shape ? shape.stroke : (textStyle?.outlineWidth ?? 0) > 0 ? textStyle?.outlineColor ?? '#000000' : null
+  const currentOutlineWidth = shape?.strokeWidth ?? textStyle?.outlineWidth ?? (frame ? 0 : outlineWidth)
+  const stepOutlineWidth = (direction: -1 | 1) => {
+    const next = direction > 0
+      ? currentOutlineWidth === 0 ? 0.25 : (Math.floor(currentOutlineWidth * 4 + 1e-9) + 1) / 4
+      : Math.max(0, (Math.ceil(currentOutlineWidth * 4 - 1e-9) - 1) / 4)
+    onOutlineWidth(Math.min(200, next))
+  }
   return (
     <div className={'context-toolbar' + (tableText ? ' table-format-toolbar' : '')} role="toolbar" aria-label={tableText ? 'עיצוב טבלה' : `אפשרויות ${label}`}>
       <span className="context-tool-name">{label}</span>
       <span className="context-divider" />
-      {shape && <div className="context-swatch-wrap"><button className="context-command" title="פתיחת פלטת מילוי וסטרוק" onClick={() => setShowSwatches((value) => !value)}>דוגמיות</button>{showSwatches && <div className="context-swatch-popover"><div className="context-swatch-row"><FillPicker label="דוגמיות צבע" value={colorTarget === 'fill' ? shape.fill : shape.stroke} onChange={onFill} /><div className="context-swatch-pair"><button className={'context-fill-square' + (colorTarget === 'fill' ? ' active' : '')} style={shape.fill ? { background: shape.fill } : undefined} aria-label="בחר מילוי" title="החל על מילוי" onClick={() => onColorTarget('fill')} /><button className={'context-stroke-square' + (colorTarget === 'stroke' ? ' active' : '')} style={shape.stroke ? { borderColor: shape.stroke } : undefined} aria-label="בחר סטרוק" title="החל על סטרוק" onClick={() => onColorTarget('stroke')} /></div></div></div>}</div>}
+      {(shape || frame) && (
+        <div className="context-object-colors" ref={textColorControlsRef} role="group" aria-label="צבע מילוי וקו מתאר">
+          <div className="context-swatch-wrap">
+            <button
+              type="button"
+              className={'context-color-preview context-fill-preview' + (openPalette === 'fill' ? ' active' : '')}
+              aria-label="צבע מילוי"
+              aria-expanded={openPalette === 'fill'}
+              title="צבע מילוי"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setOpenPalette((current) => current === 'fill' ? null : 'fill')}
+            >
+              {shape
+                ? <span className="context-shape-preview context-shape-fill" style={fillValue ? { backgroundColor: fillValue } : undefined} />
+                : <span style={{ color: fillValue ?? '#ffffff' }}>א</span>}
+            </button>
+            {openPalette === 'fill' && (
+              <div className="context-swatch-popover">
+                <FillPicker label="צבע מילוי" value={fillValue} samples={colorSamples} onChange={(color) => { onSwatchFill(color); setOpenPalette(null) }} />
+              </div>
+            )}
+          </div>
+          <div className="context-swatch-wrap context-outline-wrap">
+            <button
+              type="button"
+              className={'context-color-preview context-outline-preview' + (openPalette === 'stroke' ? ' active' : '')}
+              aria-label="צבע קו מתאר"
+              aria-expanded={openPalette === 'stroke'}
+              title="צבע קו מתאר"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setOpenPalette((current) => current === 'stroke' ? null : 'stroke')}
+            >
+              {shape
+                ? <span className="context-shape-preview context-shape-outline" style={{ borderColor: strokeValue ?? '#ffffff', borderWidth: `${Math.max(1, (currentOutlineWidth || 0.25) * 96 / 72)}px` }} />
+                : <span style={{ color: 'transparent', WebkitTextStroke: `${Math.max(0.5, (currentOutlineWidth || 0.25) * 96 / 72)}px ${strokeValue ?? '#000000'}` }}>א</span>}
+            </button>
+            {openPalette === 'stroke' && (
+              <div className="context-swatch-popover">
+                <FillPicker label="צבע קו מתאר" value={strokeValue} samples={colorSamples} onChange={(color) => { onSwatchStroke(color); setOpenPalette(null) }} />
+              </div>
+            )}
+          </div>
+          <div className="context-outline-stepper" role="group" aria-label="עובי קו מתאר">
+            <span>{Number(currentOutlineWidth.toFixed(2))}</span>
+            <button type="button" aria-label="הגדל עובי קו מתאר" title="הגדל עובי קו מתאר" onMouseDown={(event) => event.preventDefault()} onClick={() => stepOutlineWidth(1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="M1 5 4 2 7 5" /></svg></button>
+            <button type="button" aria-label="הקטן עובי קו מתאר" title="הקטן עובי קו מתאר" onMouseDown={(event) => event.preventDefault()} onClick={() => stepOutlineWidth(-1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="m1 2 3 3 3-3" /></svg></button>
+          </div>
+        </div>
+      )}
       {shape && <div className="context-flip-buttons" role="group" aria-label="היפוך צורה"><button className="context-command" title="היפוך אופקי" onClick={() => onFlip('x')}>⇋</button><button className="context-command" title="היפוך אנכי" onClick={() => onFlip('y')}>⇵</button></div>}
       {(shape || image || frame) && <ArrangeButtons onArrange={onArrange} compact />}
       {shape && <label className="context-field"><span>שקיפות</span><input type="range" min="0" max="100" value={Math.round((shape.opacity ?? 1) * 100)} onChange={(event) => onOpacity(Number(event.target.value) / 100)} /><span>{Math.round((shape.opacity ?? 1) * 100)}%</span></label>}
       {image && <><div className="context-image-fits" role="group" aria-label="מאפייני תמונה"><button title="מילוי המסגרת בתמונה" className={image.fit === 'fill' ? 'on' : ''} onClick={() => onImageFit?.('fill')}>מילוי</button><button title="התאמת התמונה בלי חיתוך" className={image.fit === 'fit' ? 'on' : ''} onClick={() => onImageFit?.('fit')}>התאמה</button><button title="מתיחת התמונה לגודל המסגרת" className={image.fit === 'stretch' ? 'on' : ''} onClick={() => onImageFit?.('stretch')}>מתיחה</button></div><div className="context-image-wrap" role="group" aria-label="עטיפת טקסט"><button title="ללא עטיפת טקסט" className={!image.wrap || image.wrap === 'none' ? 'on' : ''} onClick={() => onImageWrap?.('none')}>ללא</button><button title="טקסט מסביב לתמונה" className={image.wrap === 'around' ? 'on' : ''} onClick={() => onImageWrap?.('around')}>מסביב</button><button title="טקסט מעל ומתחת לתמונה" className={image.wrap === 'jump' ? 'on' : ''} onClick={() => onImageWrap?.('jump')}>קפיצה</button></div><div className="context-flip-buttons" role="group" aria-label="היפוך תמונה"><button className="context-command" title="היפוך אופקי" onClick={() => onImageFlip?.('x')}>⇋</button><button className="context-command" title="היפוך אנכי" onClick={() => onImageFlip?.('y')}>⇵</button></div><button className="context-command" title="התאם את המסגרת ליחס התמונה" onClick={onImageMatchShape}>התאם מסגרת</button><label className="context-field" title="שקיפות התמונה"><span>שקיפות</span><input type="range" min="0" max="100" value={Math.round((image.opacity ?? 1) * 100)} onChange={(event) => onOpacity(Number(event.target.value) / 100)} /><span>{Math.round((image.opacity ?? 1) * 100)}%</span></label><button className="context-command danger" title="מחק את התמונה" onClick={onImageDelete}>מחק תמונה</button></>}
       {frame && <>
         <div className="context-text-controls" aria-label="מאפייני טקסט">
-          <select title="גופן" value={char.fontFamily} onChange={(event) => onCharStyle?.({ fontFamily: event.target.value })}>
-            {(FONT_CHOICES.includes(char.fontFamily) ? FONT_CHOICES : [char.fontFamily, ...FONT_CHOICES]).map((name) => <option key={name}>{name}</option>)}
-          </select>
-          <label className="context-field" title="גודל גופן"><input type="number" min="1" max="999" value={char.fontSize} onChange={(event) => onCharStyle?.({ fontSize: Number(event.target.value) })} />pt</label>
+          <FontPicker
+            className="context-font-picker"
+            value={char.fontFamily}
+            families={fontCatalog.families}
+            onChange={(fontFamily) => onCharStyle?.({ fontFamily })}
+            onPreview={onFontPreview}
+          />
           <button className={'context-command' + (char.weight >= 600 ? ' active' : '')} title="מודגש" onClick={() => onCharStyle?.({ weight: char.weight >= 600 ? 400 : 700 })}>B</button>
           <button className={'context-command' + (char.italic ? ' active' : '')} title="נטוי" onClick={() => onCharStyle?.({ italic: !char.italic })}>I</button>
-          <label className="context-field" title="ריווח בין אותיות"><span>Tracking</span><input type="number" step="1" value={char.tracking} onChange={(event) => onCharStyle?.({ tracking: Number(event.target.value) })} /></label>
+          {fontSizeControl}
           <div className="context-align-buttons" role="group" aria-label="יישור">
             {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
           </div>
-          <label className="context-field" title="מרווח בין שורות"><span>Leading</span><input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? para.leading : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />pt</label>
+          <label className="context-field" title="מרווח אותיות"><span>מרווח אותיות</span><input type="number" step="1" value={char.tracking} onChange={(event) => onCharStyle?.({ tracking: Number(event.target.value) })} /></label>
+          <div className="context-opacity-control">
+            <button
+              type="button"
+              className={'context-command' + (opacityOpen ? ' active' : '')}
+              aria-expanded={opacityOpen}
+              aria-label={`אטימות צבע ${Math.round((frame.opacity ?? 1) * 100)}%`}
+              title="אטימות צבע"
+              onClick={() => setOpacityOpen((open) => !open)}
+            >
+              אטימות צבע
+            </button>
+            {opacityOpen && (
+              <label className="context-field context-opacity-slider" dir="rtl">
+                <span>{Math.round((frame.opacity ?? 1) * 100)}%</span>
+                <input
+                  aria-label="אטימות צבע"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={Math.round((frame.opacity ?? 1) * 100)}
+                  onChange={(event) => onOpacity(Number(event.target.value) / 100)}
+                />
+              </label>
+            )}
+          </div>
+          <label className="context-field" title="מרווח שורות"><span>מרווח שורות</span><input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? para.leading : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />pt</label>
           <label className="context-field" title="קנה מידה אופקי של הטקסט"><span>רוחב</span><input aria-label="קנה מידה אופקי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.x ?? 1) * 100)} onChange={(event) => onTextScale?.('x', Number(event.target.value))} />%</label>
           <label className="context-field" title="קנה מידה אנכי של הטקסט"><span>גובה</span><input aria-label="קנה מידה אנכי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.y ?? 1) * 100)} onChange={(event) => onTextScale?.('y', Number(event.target.value))} />%</label>
         </div>
@@ -122,14 +207,10 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText
           <label title="הזחת שורה שנייה">שנייה<input type="number" value={frame.secondLineIndent ?? 0} onChange={(event) => onParagraphStyle?.({ secondLineIndent: Number(event.target.value) })} /></label>
         </div>
       </>}
-      {frame && <div className="context-character-colors" ref={textColorControlsRef}>
-        <div className="context-swatch-wrap"><button className={'context-command context-text-color' + (textColorTarget === 'fill' ? ' active' : '')} title="צבע טקסט" aria-label="צבע טקסט" aria-expanded={showTextColors} onMouseDown={(event) => event.preventDefault()} onClick={() => { onTextColorTarget('fill'); setShowTextOutline(false); setShowTextColors((open) => !open) }}><b>A</b><span className="context-text-color-mark" style={{ background: char.color ?? '#111111' }} /></button>{showTextColors && <div className="context-swatch-popover"><FillPicker label="צבע טקסט" value={char.color ?? '#111111'} onChange={(color) => { onCharStyle?.({ color: color ?? '#111111' }); setShowTextColors(false) }} /></div>}</div>
-        <div className="context-swatch-wrap"><button className={'context-command' + (textColorTarget === 'outline' ? ' active' : '')} title="קו מתאר" aria-label="קו מתאר" aria-expanded={showTextOutline} onMouseDown={(event) => event.preventDefault()} onClick={() => { onTextColorTarget('outline'); setShowTextColors(false); setShowTextOutline((open) => !open) }}>קו מתאר</button>{showTextOutline && <div className="context-swatch-popover context-outline-popover"><FillPicker label="צבע קו מתאר" value={char.outlineColor ?? '#000000'} onChange={(color) => { onCharStyle?.({ outlineColor: color ?? '#000000' }); setShowTextOutline(false) }} /><label className="context-field"><span>עובי</span><input type="number" min="0" max="100" step="0.25" value={char.outlineWidth ?? 0} onChange={(event) => onCharStyle?.({ outlineWidth: Number(event.target.value) })} /><span>pt</span></label></div>}</div>
-      </div>}
-      {(tool === 'pen' || tool === 'pencil' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'polygon' || !!shape) && (
+      {(tool === 'pen' || tool === 'pencil' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && !shape && (
         <label className="context-field">
           <span>עובי קו</span>
-          <input type="number" min="0" max="200" step="0.25" value={shape?.strokeWidth ?? strokeWidth} onChange={(event) => onStrokeWidth(Number(event.target.value))} />
+          <input type="number" min="0" max="200" step="0.25" value={strokeWidth} onChange={(event) => onStrokeWidth(Number(event.target.value))} />
           <span>pt</span>
         </label>
       )}

@@ -25,7 +25,9 @@ describe('syncText', () => {
   const master = { paragraphStyles: [{ id: 'm', name: 'גוף הטקסט', patch: { fontSize: 22 } }, { id: 'n', name: 'ציטוט', patch: { italic: true } }], characterStyles: [], colorSamples: [{ id: 's', color: '#abcdef', label: 'תכלת' }] }
 
   it('writes the master’s styles into a document file', () => {
-    const { text, report } = syncText(serializeDocument(content()), master, 'פרק')
+    // the chapter has a style of its own that the master does not know: it stays
+    const own = content({ paragraphStyles: [...DEFAULT_PARAGRAPH_STYLES, { id: 'heading', name: 'כותרת', patch: { fontSize: 24 } }] })
+    const { text, report } = syncText(serializeDocument(own), master, 'פרק')
     expect(report).toMatchObject({ addedParagraph: ['ציטוט'], updatedParagraph: ['גוף הטקסט'], addedColors: ['תכלת'] })
     const synced = parseDocument(text!, 'פרק')
     expect(synced.paragraphStyles.find((style) => style.name === 'גוף הטקסט')?.patch.fontSize).toBe(22)

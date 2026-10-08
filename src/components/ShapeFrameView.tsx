@@ -165,7 +165,7 @@ export function ShapeFrameView({
 
   return (
     <div
-      className={'shape-frame' + (tableShape ? ' table-frame' : '') + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
+      className={'shape-frame' + (shape.frame ? ' graphic-frame' : '') + (tableShape ? ' table-frame' : '') + (selected && showEdge ? ' selected' : '') + (marked ? ' marked' : '') + (ghost ? ' ghost' : '') + (locked ? ' locked' : '')}
       data-object-id={shape.id}
       data-object-kind="shape"
       style={{

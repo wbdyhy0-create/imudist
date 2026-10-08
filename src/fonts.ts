@@ -25,13 +25,16 @@ export type FontStatus =
   /** this browser cannot list installed fonts */
   | 'unavailable'
 
+export type FontListFilter = 'hebrew' | 'all'
+
 interface FontState {
   families: FontFamily[]
   status: FontStatus
+  filter: FontListFilter
 }
 
 /** Minimal typing of the Local Font Access API (Chrome / Edge). */
-interface LocalFontData {
+export interface LocalFontData {
   family: string
   fullName: string
   postscriptName: string
@@ -74,6 +77,50 @@ const HEBREW_WEIGHT_NAMES: Record<number, string> = {
 /** Hebrew name of a weight, e.g. 600 → "חצי-מודגש". */
 export const weightName = (w: number) => HEBREW_WEIGHT_NAMES[w] ?? String(w)
 
+const FILTER_STORAGE_KEY = 'imudist.fontListFilter'
+const getSavedFilter = (): FontListFilter => {
+  try {
+    return localStorage.getItem(FILTER_STORAGE_KEY) === 'hebrew' ? 'hebrew' : 'all'
+  } catch {
+    return 'all'
+  }
+}
+
+const hebrewSupport = new Map<string, boolean>()
+export function fontSupportsHebrew(family: string): boolean {
+  const cached = hebrewSupport.get(family)
+  if (cached !== undefined) return cached
+  if (typeof document === 'undefined') return true
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) return true
+  const text = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ'
+  const measure = (name: string) => {
+    context.font = `40px "${name.replace(/["\\]/g, '')}"`
+    return context.measureText(text).width
+  }
+  const fallback = measure('__imudist_missing_font_8f3a1c__')
+  const supported = Math.abs(measure(family) - fallback) > 0.5
+  hebrewSupport.set(family, supported)
+  return supported
+}
+
+export function groupSystemFonts(fonts: LocalFontData[]): FontFamily[] {
+  const byFamily = new Map<string, Map<string, FontFace>>()
+  for (const font of fonts) {
+    const faces = byFamily.get(font.family) ?? new Map<string, FontFace>()
+    const face: FontFace = { style: font.style, weight: weightFromStyle(font.style), italic: isItalicStyle(font.style) }
+    const key = `${face.weight}|${face.italic}`
+    if (!faces.has(key)) faces.set(key, face)
+    byFamily.set(font.family, faces)
+  }
+  return [...byFamily.entries()]
+    .map(([family, faces]) => ({
+      family,
+      faces: [...faces.values()].sort((a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic)),
+    }))
+    .sort((a, b) => a.family.localeCompare(b.family))
+}
+
 const FALLBACK: FontFamily[] = FONT_FAMILIES.map((family) => ({
   family,
   faces: [
@@ -84,37 +131,21 @@ const FALLBACK: FontFamily[] = FONT_FAMILIES.map((family) => ({
   ],
 }))
 
-let state: FontState = { families: FALLBACK, status: 'fallback' }
+let state: FontState = { families: FALLBACK, status: 'fallback', filter: getSavedFilter() }
 const listeners = new Set<() => void>()
 const set = (next: FontState) => {
   state = next
   listeners.forEach((l) => l())
 }
 
-/**
- * Rough but fast check: does this font draw Hebrew with glyphs of its own, or does the browser silently
- * substitute a different font for those characters (i.e. this font has no Hebrew in it at all)? Reading each
- * font's actual glyph table (`FontData.blob()` + parsing) would answer this exactly but is slow across hundreds
- * of fonts; instead this measures the font's rendered width for a Hebrew probe string and compares it against
- * the same string measured with a font name that cannot possibly exist (`NO_SUCH_FONT`), which forces the
- * browser's own default per-character fallback with nothing else to blame it on. If the family's own width
- * matches that "definitely-fell-back" width almost exactly, it (almost certainly) fell back the very same way —
- * different fonts essentially never share the exact same advance width across a whole string of letters.
- */
-const HEBREW_PROBE = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ' // the alphabet plus final forms, for the widest chance of a mismatch
-const NO_SUCH_FONT = 'no-such-font-8f3a1c'
-let probeCtx: CanvasRenderingContext2D | null = null
-let fallbackWidth: number | null = null
-function hasHebrewGlyphs(family: string): boolean {
-  if (!probeCtx) probeCtx = document.createElement('canvas').getContext('2d')
-  const ctx = probeCtx
-  if (!ctx) return true // can't probe (no canvas support) — don't drop fonts we can't actually check
-  const measure = (f: string) => {
-    ctx.font = `40px "${f}"`
-    return ctx.measureText(HEBREW_PROBE).width
+export function setFontListFilter(filter: FontListFilter): void {
+  if (state.filter === filter) return
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, filter)
+  } catch (error) {
+    console.warn('Could not save the font-list filter.', error)
   }
-  fallbackWidth ??= measure(NO_SUCH_FONT)
-  return Math.abs(measure(family) - fallbackWidth) > 0.5
+  set({ ...state, filter })
 }
 
 let loading: Promise<void> | null = null
@@ -131,22 +162,8 @@ export function loadSystemFonts(): Promise<void> {
   loading = query
     .call(window)
     .then((fonts) => {
-      const byFamily = new Map<string, Map<string, FontFace>>()
-      for (const f of fonts) {
-        const faces = byFamily.get(f.family) ?? new Map<string, FontFace>()
-        const face: FontFace = { style: f.style, weight: weightFromStyle(f.style), italic: isItalicStyle(f.style) }
-        const key = `${face.weight}|${face.italic}`
-        if (!faces.has(key)) faces.set(key, face)
-        byFamily.set(f.family, faces)
-      }
-      const families = [...byFamily.entries()]
-        .map(([family, faces]) => ({
-          family,
-          faces: [...faces.values()].sort((a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic)),
-        }))
-        .filter((f) => hasHebrewGlyphs(f.family)) // this app is Hebrew-only: no point offering fonts that can't show it
-        .sort((a, b) => a.family.localeCompare(b.family))
-      set(families.length ? { families, status: 'system' } : { ...state, status: 'denied' })
+      const families = groupSystemFonts(fonts)
+      set(families.length ? { families, status: 'system', filter: state.filter } : { ...state, status: 'denied' })
     })
     .catch(() => set({ ...state, status: 'denied' }))
     .finally(() => {
@@ -168,10 +185,16 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l)
 }
 const getSnapshot = () => state
+const getFilterSnapshot = () => state.filter
 
 /** The font catalog (system fonts once loaded, a built-in Hebrew-friendly list before that). */
 export function useFontCatalog() {
   return useSyncExternalStore(subscribe, getSnapshot)
+}
+
+/** The shared filter chosen in any font picker. */
+export function useFontListFilter() {
+  return useSyncExternalStore(subscribe, getFilterSnapshot)
 }
 
 /**

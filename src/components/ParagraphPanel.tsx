@@ -1,6 +1,6 @@
-import { DEFAULT_SPACE_AFTER, effectiveLeading, MAX_PAGE_PT, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type CharStyle, type ColorSample, type TextFrame, type TextStyle } from '../document'
 import type { Unit } from '../units'
-import { ALIGNS, Group, Labeled } from './PropertiesPanel'
+import { CharControls, Group, Labeled, ParagraphTextControls, TextShadowGroup } from './PropertiesPanel'
 import { NumberField } from './NumberField'
 
 type SpacingPatch = Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>
@@ -11,6 +11,11 @@ interface Props {
   frame: TextFrame | null
   /** indents/etc. read the story's own style; spaceBefore/spaceAfter read the selected paragraph's own (see scope) */
   style: TextStyle | null
+  textStyle: CharStyle | null
+  colorSamples: ColorSample[]
+  onCharStyle: (patch: Partial<CharStyle>) => void
+  sizeMixed?: boolean
+  onSizeStep?: (delta: number) => void
   /** does a spacing change apply to the selected paragraph(s), or to the whole story? (indents are always the story) */
   scope: 'selection' | 'all'
   unit: Unit
@@ -30,7 +35,7 @@ interface Props {
 }
 
 /** Window > פסקה (Ctrl+Alt+L): paragraph layout, spacing, indents and line-break controls. */
-export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingChange, keepFirstLines, keepLastLines, keepFirstMixed, keepLastMixed, onKeepLinesChange, keepWithNext = false, keepWithNextMixed = false, onKeepWithNextChange }: Props) {
+export function ParagraphPanel({ frame, style, textStyle, colorSamples, onCharStyle, sizeMixed, onSizeStep, scope, unit, onChange, onSpacingChange, keepFirstLines, keepLastLines, keepFirstMixed, keepLastMixed, onKeepLinesChange, keepWithNext = false, keepWithNextMixed = false, onKeepWithNextChange }: Props) {
   return (
     <aside className="props-panel" aria-label="פסקה">
       <h2 className="props-title">פסקה</h2>
@@ -38,27 +43,23 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
         <p className="muted">בחר תיבת טקסט כדי לערוך את מרווחי הפסקה שלה.</p>
       ) : (
         <>
-          <Group title="יישור ומרווח שורות">
-            <div className="toggle-group paragraph-align" role="group" aria-label="יישור הפסקה">
-              {ALIGNS.map((align) => (
-                <button key={align.id} type="button" className={style.align === align.id ? 'on' : ''} title={align.label} aria-label={align.label} aria-pressed={style.align === align.id} onClick={() => onChange({ align: align.id as TextAlign })}>
-                  <svg viewBox="0 0 24 24"><path d={align.icon} /></svg>
-                </button>
-              ))}
-            </div>
-            <Labeled label="מרווח שורות">
-              <NumberField value={effectiveLeading(style)} unit="px" unitLabel="pt" min={1} max={MAX_PAGE_PT} onChange={(leading) => onChange({ leading })} />
-            </Labeled>
-            <p className="muted">ריווח מילים חל רק ביישור מלא.</p>
-            <div className="grid2">
-              <Labeled label="ריווח מילים מינימלי (%)">
-                <NumberField value={style.wordSpacingMin ?? 90} min={10} max={100} onChange={(wordSpacingMin) => onChange({ wordSpacingMin })} />
-              </Labeled>
-              <Labeled label="ריווח מילים מרבי (%)">
-                <NumberField value={style.wordSpacingMax ?? 120} min={100} max={500} onChange={(wordSpacingMax) => onChange({ wordSpacingMax })} />
-              </Labeled>
-            </div>
-          </Group>
+          {textStyle && (
+            <Group title="טקסט">
+              <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
+                {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
+              </p>
+              <CharControls
+                style={textStyle}
+                onCharStyle={onCharStyle}
+                sizeMixed={sizeMixed}
+                onSizeStep={onSizeStep}
+                onLeading={(leading) => onChange({ leading })}
+                samples={colorSamples}
+                afterTracking={<ParagraphTextControls style={style} onChange={onChange} />}
+                showShadow={false}
+              />
+            </Group>
+          )}
 
           <Group title="מרווחי פסקאות">
             <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
@@ -78,6 +79,7 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
           </Group>
 
           <Group title="הזחות">
+            <p className="muted">הזחה מימין או משמאל קובעת את מרחק הפסקה מהשוליים המתאימים.</p>
             <div className="grid2">
               <Labeled label="הזחה מימין">
                 <NumberField value={style.indentRight ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ indentRight: v })} />
@@ -121,6 +123,7 @@ export function ParagraphPanel({ frame, style, scope, unit, onChange, onSpacingC
               <p className="muted">חל רק על הפסקאות שבבחירה (או על הפסקה שבה הסמן), בלי לשנות את הסגנון שלהן. אם כמה פסקאות רצופות מסומנות, הן עוברות יחד.</p>
             </Group>
           )}
+          {textStyle && <TextShadowGroup style={textStyle} onChange={onCharStyle} />}
 
         </>
       )}

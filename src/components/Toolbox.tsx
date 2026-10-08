@@ -2,7 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 
 export type ToolId =
   | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
-  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper' | 'heal'
+  | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper' | 'colorSampler' | 'heal'
   | 'hand' | 'zoom'
 
 interface ToolDef {
@@ -23,18 +23,12 @@ interface ToolDef {
 // Groups: 1 navigate & select · 2 content · 3 shapes & lines · 4 edit & transform · 5 helpers
 export const TOOLS: ToolDef[] = [
   { id: 'select', label: 'בחירה', group: 1, key: 'V', code: 'KeyV', enabled: true, icon: <path d="M5 3v16l4.300-3.700L12 21.500l2.700-1.200-2.700-6.100 6-.2z" fill="currentColor" stroke="none" /> },
-  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <rect x="4" y="5" width="16" height="14" strokeDasharray="2 2" /> },
-  { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
   { id: 'direct', label: 'עריכת נקודות', group: 1, key: 'A', code: 'KeyA', enabled: true, icon: <><path d="M4.500 17.500C8 17.500 8 6.500 12 6.500s4 11 7.500 11" /><path d="M3 16h3v3H3zM10.500 5h3v3h-3zM18 16h3v3h-3z" fill="currentColor" stroke="none" /></> },
-  { id: 'hand', label: 'יד', group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
-  { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
-
   { id: 'type', label: 'טקסט', group: 2, key: 'T', code: 'KeyT', enabled: true, icon: <path d="M6 5h12M12 5v14M9 19h6" /> },
   { id: 'pathtype', label: 'טקסט על קו', group: 2, key: 'Shift+T', code: 'KeyT', shift: true, enabled: true, icon: <><path d="M3.500 19C6 8 18 8 20.500 19" /><path d="M9.500 4.500h5M12 4.500v6" /></> },
   { id: 'page', label: 'עמוד', group: 2, key: 'Shift+P', code: 'KeyP', shift: true, enabled: true, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
-  { id: 'collector', label: 'אוסף תוכן', group: 2, key: 'B', enabled: false, icon: <path d="M4 4h10v10H4zM10 10h10v10H10z" /> },
 
-  { id: 'rect', label: 'מלבן', group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="6" width="16" height="12" rx="1.500" /> },
+  { id: 'rect', label: 'מרובע', group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="4" width="16" height="16" rx="1.500" /> },
   { id: 'ellipse', label: 'אליפסה', group: 3, key: 'L', code: 'KeyL', enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
   { id: 'polygon', label: 'מצולע', group: 3, key: 'Y', code: 'KeyY', enabled: true, icon: <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" /> },
   {
@@ -81,6 +75,8 @@ export const TOOLS: ToolDef[] = [
       </>
     ),
   },
+  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <rect x="4" y="5" width="16" height="14" strokeDasharray="2 2" /> },
+  { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
@@ -89,15 +85,35 @@ export const TOOLS: ToolDef[] = [
   { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
   { id: 'heal', label: 'מברשת ריפוי', group: 4, enabled: true, icon: <><path d="m4 12 8-8 8 8-8 8z" /><path d="M12 8v8M8 12h8" /><circle cx="12" cy="12" r="2" fill="currentColor" /></> },
   { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
-  { id: 'gap', label: 'רווח', group: 4, key: 'U', code: 'KeyU', enabled: true, icon: <path d="M4 4v16M20 4v16M9 12h6M11 9.500 8.500 12l2.500 2.500M13 9.500l2.500 2.500-2.500 2.500" /> },
+  {
+    id: 'gap',
+    label: 'רווח',
+    group: 4,
+    key: 'U',
+    code: 'KeyU',
+    enabled: true,
+    icon: (
+      <>
+        <rect x="2" y="7" width="6" height="10" rx="0.75" fill="none" />
+        <rect x="16" y="7" width="6" height="10" rx="0.75" fill="none" />
+        <path d="M4 12h16m-3-3 3 3-3 3M7 9l-3 3 3 3" />
+      </>
+    ),
+  },
   { id: 'color', label: 'צבע', group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
   { id: 'gradient', label: 'מעבר צבע', group: 5, key: 'G', code: 'KeyG', enabled: true, icon: <path d="M4 6h16v12H4zM7 6v12M10 6v12M13 6v12M16 6v12" /> },
   { id: 'swatches', label: 'דוגמיות צבע', group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
   { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', code: 'KeyG', shift: true, enabled: true, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
 
   { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <path d="m15 4 5 5-2.500 2.500-5-5zM12.500 8.500 4 17v3h3l8.500-8.500" /> },
+  { id: 'colorSampler', label: 'דגימת צבע', group: 5, enabled: true, icon: <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></> },
   { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
+  { id: 'hand', label: 'יד', group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
+  { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
 ]
+
+const HIDDEN_TOOLBOX_TOOLS = new Set<ToolId>(['color', 'gradient', 'swatches', 'transform', 'collector'])
+const TOOLBOX_TOOLS = TOOLS.filter((item) => !HIDDEN_TOOLBOX_TOOLS.has(item.id))
 
 /** tools that have a settings window (double click) */
 // ellipse and line have no default-tool settings left (nothing but a click-made default size, which no longer exists)
@@ -115,13 +131,12 @@ const FOLD_GROUPS: ToolId[][] = [
   ['rect', 'ellipse', 'polygon'],
   ['type', 'pathtype'],
   ['framerect', 'frameellipse', 'framepolygon'],
-  ['color', 'gradient', 'swatches'],
 ]
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
 const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   select: 'בחירת אובייקטים, הזזה ושינוי גודל',
-  marqueeRect: 'בחירה מלבנית וחיתוך לאובייקט חדש',
+  marqueeRect: 'בחירת צורה לחיתוך אובייקטים, תמונות וטקסט',
   marqueeEllipse: 'בחירה אליפטית וחיתוך לאובייקט חדש',
   direct: 'עריכת נקודות עוגן וידיות של נתיב',
   hand: 'הזזת תצוגת הקנבס',
@@ -129,7 +144,7 @@ const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   type: 'יצירת ועריכת תיבות טקסט',
   pathtype: 'הוספת טקסט לאורך נתיב',
   page: 'שינוי גודל ושוליים של עמוד',
-  rect: 'ציור מלבן',
+  rect: 'ציור מרובע',
   ellipse: 'ציור אליפסה',
   polygon: 'ציור מצולע',
   framerect: 'יצירת מסגרת תמונה מלבנית',
@@ -147,23 +162,21 @@ const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   swatches: 'בחירה וניהול של דוגמיות צבע',
   feather: 'גרירת נקודת התחלה וסיום יוצרת מסכת אטימות',
   eyedropper: 'דגימת סגנון מטקסט או אובייקט',
+  colorSampler: 'דגימת צבע מהמסמך באמצעות המגדלת',
 }
 
 interface ToolboxProps {
   tool: ToolId
   onSelect: (id: ToolId) => void
+  colorSamplerActive: boolean
+  onToggleColorSampler: () => void
   /** double click on a tool: its settings */
   onSettings?: (id: ToolId) => void
   previewMode: boolean
   onPreviewMode: (on: boolean) => void
-  colorTarget: 'fill' | 'stroke'
-  fillColor?: string | null
-  strokeColor?: string | null
-  onColorTarget: (target: 'fill' | 'stroke') => void
-  onOpenColor: (target: 'fill' | 'stroke') => void
 }
 
-export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode, colorTarget, fillColor, strokeColor, onColorTarget, onOpenColor }: ToolboxProps) {
+export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampler, onSettings, previewMode, onPreviewMode }: ToolboxProps) {
   const toolboxRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null)
   const [floating, setFloating] = useState(false)
@@ -244,7 +257,7 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
         <svg viewBox="0 0 24 12" aria-hidden="true"><circle cx="6" cy="3" r="1" /><circle cx="12" cy="3" r="1" /><circle cx="18" cy="3" r="1" /><circle cx="6" cy="9" r="1" /><circle cx="12" cy="9" r="1" /><circle cx="18" cy="9" r="1" /></svg>
       </button>
       <div className="toolbox-scroll">
-      {TOOLS.map((t, i) => {
+      {TOOLBOX_TOOLS.map((t, i) => {
         const group = foldGroupOf.get(t.id)
         if (group) {
           if (renderedGroups.has(group[0])) return null
@@ -252,21 +265,31 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
         }
         const active = toolDef(group ? (current[group[0]] ?? group[0]) : t.id)
         const hasFlyout = !!group && group.length > 1
-        const tooltipDescription = `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? ' · לחיצה כפולה להצגת כלים נוספים' : ''}`
+        const isActive = active.id === 'colorSampler'
+          ? colorSamplerActive
+          : !colorSamplerActive && tool === active.id
+        const tooltipLabel = active.id === 'marqueeRect' ? 'כלי החיתוך' : active.label
+        const tooltipDescription = active.id === 'marqueeRect'
+          ? `${TOOL_HINTS[active.id]}, לחיצה כפולה להצגת צורות נוספות`
+          : `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? ' · לחיצה כפולה להצגת כלים נוספים' : ''}`
         return (
           <Fragment key={t.id}>
-            {i > 0 && TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
+            {i > 0 && TOOLBOX_TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
             <div className="tool-slot">
               <button
-                className={'tool' + (tool === active.id ? ' active' : '') + (active.enabled ? '' : ' off')}
+                className={'tool' + (isActive ? ' active' : '') + (active.enabled ? '' : ' off')}
                 aria-disabled={!active.enabled}
-                aria-pressed={tool === active.id}
+                aria-pressed={isActive}
                 aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : `${active.label} — עדיין לא זמין`}
-                onMouseEnter={(event) => setHoveredTool({ label: active.label, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                onMouseEnter={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
                 onMouseLeave={() => setHoveredTool(null)}
-                onFocus={(event) => setHoveredTool({ label: active.label, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                onFocus={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
                 onBlur={() => setHoveredTool(null)}
-                onClick={() => active.enabled && onSelect(active.id)}
+                onClick={() => {
+                  if (!active.enabled) return
+                  if (active.id === 'colorSampler') onToggleColorSampler()
+                  else onSelect(active.id)
+                }}
                 onDoubleClick={(event) => {
                   setHoveredTool(null)
                   if (!active.enabled) return
@@ -282,24 +305,6 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
           </Fragment>
         )
       })}
-      <div className="swatches">
-        <button
-          className={'swatch-fill' + (colorTarget === 'fill' ? ' active' : '')}
-          style={fillColor ? { background: fillColor } : undefined}
-          title="מילוי — לחיצה מחליפה יעד, לחיצה כפולה פותחת את כלי הצבע"
-          aria-label="מילוי"
-          onClick={() => onColorTarget('fill')}
-          onDoubleClick={() => onOpenColor('fill')}
-        />
-        <button
-          className={'swatch-stroke' + (colorTarget === 'stroke' ? ' active' : '')}
-          style={strokeColor ? { borderColor: strokeColor, background: 'transparent' } : undefined}
-          title="קו — לחיצה מחליפה יעד, לחיצה כפולה פותחת את כלי הצבע"
-          aria-label="קו"
-          onClick={() => onColorTarget('stroke')}
-          onDoubleClick={() => onOpenColor('stroke')}
-        />
-      </div>
       <div className="screen-modes" role="group" aria-label="מצב מסך">
         <button
           className={'tool' + (!previewMode ? ' active' : '')}
@@ -342,8 +347,8 @@ export function Toolbox({ tool, onSelect, onSettings, previewMode, onPreviewMode
           current={tool}
           onPick={(id) => {
             onSelect(id)
-            setFlyout(null)
           }}
+          onSettings={onSettings}
           onClose={() => setFlyout(null)}
         />
       )}
@@ -362,12 +367,14 @@ interface FlyoutProps {
   anchor: DOMRect
   current: ToolId
   onPick: (id: ToolId) => void
+  onSettings?: (id: ToolId) => void
   onClose: () => void
 }
 
 /** The list of alternative tools for one toolbox slot, opened by its corner mark. Closes on a click elsewhere, Escape, scrolling or resizing. */
-function ToolFlyout({ group, anchor, current, onPick, onClose }: FlyoutProps) {
+function ToolFlyout({ group, anchor, current, onPick, onSettings, onClose }: FlyoutProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pos, setPos] = useState({ left: anchor.left, top: anchor.top })
 
   // open toward the canvas (away from the toolbox, which sits against the window's edge); the other side if there is no room
@@ -393,6 +400,7 @@ function ToolFlyout({ group, anchor, current, onPick, onClose }: FlyoutProps) {
     window.addEventListener('blur', onClose)
     window.addEventListener('wheel', onClose, { passive: true })
     return () => {
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current)
       window.removeEventListener('pointerdown', away, true)
       window.removeEventListener('keydown', key)
       window.removeEventListener('resize', onClose)
@@ -411,7 +419,23 @@ function ToolFlyout({ group, anchor, current, onPick, onClose }: FlyoutProps) {
             role="menuitemradio"
             aria-checked={id === current}
             className={'menu-item tool-flyout-item' + (id === current ? ' on' : '')}
-            onClick={() => t.enabled && onPick(id)}
+            onClick={() => {
+              if (!t.enabled) return
+              onPick(id)
+              if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+              closeTimer.current = setTimeout(() => {
+                closeTimer.current = null
+                onClose()
+              }, 500)
+            }}
+            onDoubleClick={() => {
+              if (!t.enabled) return
+              if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+              closeTimer.current = null
+              onPick(id)
+              if (SETTINGS_TOOLS.includes(id)) onSettings?.(id)
+              onClose()
+            }}
           >
             <svg className="tool-flyout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round">
               {t.icon}

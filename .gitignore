@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# a separate cargo build folder used to verify the exported app
+src-tauri/target-export-verify

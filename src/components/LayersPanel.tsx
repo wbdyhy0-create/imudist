@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ImageFrame, ShapeFrame, TextFrame } from '../document'
 import { ContextMenu } from './ContextMenu'
 
@@ -26,17 +26,31 @@ interface Props {
 
 const LAYER_COLORS = ['#3d8bff', '#ff5c5c', '#00d1b2', '#f5b800', '#a78bfa']
 
+interface LayerDragState {
+  kind: 'layer' | 'item'
+  id: string
+  layerId: string
+  startX: number
+  startY: number
+  moved: boolean
+  overId: string | null
+}
+
 export function LayersPanel({ frames, images, shapes, layerOrder, onLayerOrderChange, onItemOrderChange, onLayerDelete, onItemDelete, selectedId, activeLayerId, onActiveLayer, onSelect, onVisibility, onLock, onItemVisibility, onItemLock, parentItemsAbovePageContent, canChangeParentOrder, onParentItemsAbovePageContentChange }: Props) {
   const [layers, setLayers] = useState(() => (layerOrder.length ? layerOrder : ['layer-1']).map((id, index) => ({ id, name: `שכבה ${index + 1}`, color: LAYER_COLORS[index % LAYER_COLORS.length], visible: true, locked: false, open: true })))
   const [activeId, setActiveId] = useState(activeLayerId)
   const [itemState, setItemState] = useState<Record<string, { visible: boolean; locked: boolean }>>({})
   const [itemNames, setItemNames] = useState<Record<string, string>>({})
-  const [dragLayerId, setDragLayerId] = useState<string | null>(null)
+  const [dragging, setDragging] = useState<LayerDragState | null>(null)
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null)
+  const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ kind: 'layer' | 'item'; id: string } | null>(null)
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState(LAYER_COLORS[0])
+  const dragRef = useRef<LayerDragState | null>(null)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  const suppressClickRef = useRef<string | null>(null)
   const visibleTextFrames = frames
   const allItems = [
     ...images.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 0, label: item.label ?? 'תמונה', type: 'IMG' })),
@@ -80,6 +94,59 @@ export function LayersPanel({ frames, images, shapes, layerOrder, onLayerOrderCh
     next.splice(to, 0, moved)
     onItemOrderChange(layerId, next.reverse())
   }
+  const clearDrag = () => {
+    dragCleanupRef.current?.()
+    dragCleanupRef.current = null
+    dragRef.current = null
+    setDragging(null)
+    setDragOverLayerId(null)
+    setDragOverItemId(null)
+  }
+  const startReorder = (kind: LayerDragState['kind'], id: string, layerId: string, event: ReactPointerEvent) => {
+    if (event.button !== 0) return
+    suppressClickRef.current = null
+    const drag: LayerDragState = { kind, id, layerId, startX: event.clientX, startY: event.clientY, moved: false, overId: null }
+    dragRef.current = drag
+    const move = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== event.pointerId) return
+      const current = dragRef.current
+      if (!current) return
+      if (Math.hypot(pointerEvent.clientX - current.startX, pointerEvent.clientY - current.startY) > 5) {
+        current.moved = true
+        pointerEvent.preventDefault()
+        if (current.kind === 'layer') {
+          current.overId = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest<HTMLElement>('[data-layer-row-id]')?.dataset.layerRowId ?? null
+          setDragOverLayerId(current.overId)
+        } else {
+          const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest<HTMLElement>('[data-layer-item-id]')
+          current.overId = target?.dataset.layerOwnerId === current.layerId ? target.dataset.layerItemId ?? null : null
+          setDragOverItemId(current.overId)
+        }
+        setDragging({ ...current })
+      }
+    }
+    const finish = (pointerEvent: PointerEvent, cancelled = false) => {
+      if (pointerEvent.pointerId !== event.pointerId) return
+      const current = dragRef.current
+      if (current?.moved && !cancelled) {
+        if (current.kind === 'layer' && current.overId) reorderLayer(current.id, current.overId)
+        else if (current.kind === 'item' && current.overId) reorderItem(current.layerId, current.id, current.overId)
+      }
+      if (current?.moved) suppressClickRef.current = `${current.kind}:${current.id}`
+      clearDrag()
+    }
+    const onUp = (pointerEvent: PointerEvent) => finish(pointerEvent)
+    const onCancel = (pointerEvent: PointerEvent) => finish(pointerEvent, true)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    dragCleanupRef.current = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+  }
+  useEffect(() => () => dragCleanupRef.current?.(), [])
   const openEditor = (kind: 'layer' | 'item', id: string, name: string, color = editColor) => { setEditing({ kind, id }); setEditName(name); setEditColor(color) }
   const saveEditor = () => {
     if (!editing) return
@@ -93,9 +160,9 @@ export function LayersPanel({ frames, images, shapes, layerOrder, onLayerOrderCh
       <div className="layers-head">
         <h2 className="props-title">שכבות</h2>
       </div>
-      {layers.map((layer) => <div key={layer.id} className="layer-row-wrap" onDragEnter={(event) => { event.preventDefault(); if (dragLayerId !== layer.id) setDragOverLayerId(layer.id) }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; if (dragLayerId !== layer.id) setDragOverLayerId(layer.id) }} onDrop={(event) => { const from = event.dataTransfer.getData('text/layer'); if (!from) return; event.preventDefault(); event.stopPropagation(); reorderLayer(from, layer.id); setDragLayerId(null); setDragOverLayerId(null) }}>
-        {dragLayerId && dragOverLayerId === layer.id && dragLayerId !== layer.id && <div className="layer-drop-indicator" aria-hidden="true" />}
-        <div className={'layer-row' + (layer.id === active.id ? ' active' : '')} draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/layer', layer.id); setDragLayerId(layer.id) }} onDragEnd={() => { setDragLayerId(null); setDragOverLayerId(null) }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragOverLayerId(layer.id) }} onClick={() => { setActiveId(layer.id); onActiveLayer(layer.id); setLayers((current) => current.map((item) => item.id === layer.id ? { ...item, open: !item.open } : item)) }} onDoubleClick={() => openEditor('layer', layer.id, layer.name, layer.color)}>
+      {layers.map((layer) => <div key={layer.id} className="layer-row-wrap" data-layer-row-id={layer.id}>
+        {dragging?.kind === 'layer' && dragOverLayerId === layer.id && dragging.id !== layer.id && <div className="layer-drop-indicator" aria-hidden="true" />}
+        <div className={'layer-row' + (layer.id === active.id ? ' active' : '') + (dragging?.kind === 'layer' && dragging.id === layer.id ? ' dragging' : '')} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('button')) startReorder('layer', layer.id, layer.id, event) }} onClick={() => { if (suppressClickRef.current === `layer:${layer.id}`) { suppressClickRef.current = null; return } setActiveId(layer.id); onActiveLayer(layer.id); setLayers((current) => current.map((item) => item.id === layer.id ? { ...item, open: !item.open } : item)) }} onDoubleClick={() => openEditor('layer', layer.id, layer.name, layer.color)}>
         <button className="layer-toggle" aria-label={layer.open ? 'סגור שכבה' : 'פתח שכבה'} onClick={(event) => { event.stopPropagation(); setLayers((current) => current.map((item) => item.id === layer.id ? { ...item, open: !item.open } : item)) }}>{layer.open ? '▾' : '▸'}</button>
         <button className="layer-eye" aria-label={layer.visible ? 'הסתר שכבה' : 'הצג שכבה'} onClick={(event) => { event.stopPropagation(); const visible = !layer.visible; setLayers((current) => current.map((item) => item.id === layer.id ? { ...item, visible } : item)); if (layer.id === active.id) onVisibility(visible) }}><span className={'visibility-dot' + (layer.visible ? ' filled' : '')} /></button>
         <button className="layer-lock" aria-label={layer.locked ? 'פתח שכבה' : 'נעל שכבה'} onClick={(event) => { event.stopPropagation(); const locked = !layer.locked; setLayers((current) => current.map((item) => item.id === layer.id ? { ...item, locked } : item)); if (layer.id === active.id) onLock(locked) }}>{layer.locked ? '🔒' : '·'}</button>
@@ -107,7 +174,7 @@ export function LayersPanel({ frames, images, shapes, layerOrder, onLayerOrderCh
         {[...itemsFor(layer.id)].reverse().map((item) => {
           const state = itemState[item.id] ?? { visible: true, locked: false }
           return (
-            <div key={item.id} className={'layer-item' + (selectedId === item.id ? ' selected' : '')} draggable onDragStart={(event) => event.dataTransfer.setData('text/item', item.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); reorderItem(layer.id, event.dataTransfer.getData('text/item'), item.id) }} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: item.id, x: event.clientX, y: event.clientY }) }} onDoubleClick={() => openEditor('item', item.id, item.label)}>
+            <div key={item.id} className={'layer-item' + (selectedId === item.id ? ' selected' : '') + (dragging?.kind === 'item' && dragging.id === item.id ? ' dragging' : '') + (dragOverItemId === item.id && dragging?.id !== item.id ? ' drop-target' : '')} data-layer-item-id={item.id} data-layer-owner-id={layer.id} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('.layer-item-eye, .layer-item-lock')) startReorder('item', item.id, layer.id, event) }} onClickCapture={(event) => { if (suppressClickRef.current === `item:${item.id}`) { suppressClickRef.current = null; event.preventDefault(); event.stopPropagation() } }} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: item.id, x: event.clientX, y: event.clientY }) }} onDoubleClick={() => openEditor('item', item.id, item.label)}>
               <button className="layer-item-eye" aria-label={state.visible ? `הסתר ${item.label}` : `הצג ${item.label}`} onClick={(event) => { event.stopPropagation(); const visible = !state.visible; setItemState((current) => ({ ...current, [item.id]: { ...state, visible } })); onItemVisibility(item.id, visible) }}><span className={'visibility-dot' + (state.visible ? ' filled' : '')} /></button>
               <button className="layer-item-lock" aria-label={state.locked ? `פתח ${item.label}` : `נעל ${item.label}`} onClick={(event) => { event.stopPropagation(); const locked = !state.locked; setItemState((current) => ({ ...current, [item.id]: { ...state, locked } })); onItemLock(item.id, locked) }}>{state.locked ? '🔒' : '·'}</button>
               <button className="layer-item-main" onClick={() => onSelect(item.id)}><span className="layer-item-type">{item.type}</span><span>{item.label}</span></button>

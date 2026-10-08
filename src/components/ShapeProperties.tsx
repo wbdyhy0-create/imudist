@@ -52,7 +52,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
     { corner: 2, label: 'ימין למטה' },
     { corner: 3, label: 'שמאל למטה' },
   ]
-  const title = shape.kind === 'polygon' ? SIDE_NAMES[shape.sides ?? 6] : SHAPE_NAMES[shape.kind]
+  const title = shape.kind === 'rect' ? 'צורות' : shape.kind === 'polygon' ? SIDE_NAMES[shape.sides ?? 6] : SHAPE_NAMES[shape.kind]
 
   return (
     <aside

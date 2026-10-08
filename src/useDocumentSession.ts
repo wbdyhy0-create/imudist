@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultParagraphStyles, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -253,6 +253,7 @@ export function useDocumentSession() {
     const id = nextId.current++
     setDocs((list) => [...list, { id, h: newHistory(content), file: ref, saved: content, rev: 0, last: null, view: null }])
     setActiveId(id)
+    return id
   }
   /** the open documents and the files they live in, as they are now (for a book to tell which of its chapters are open) */
   const openFiles = () => latest.current.docs.map((d) => ({ id: d.id, file: d.file, dirty: d.saved !== d.h.present }))
@@ -441,7 +442,7 @@ export function useDocumentSession() {
   }
 
   /** New documents open in a new tab; the ones already open stay as they are. */
-  const createDocument = (d: DocSettings, onDone?: () => void) => {
+  const createDocument = (d: DocSettings, onDone?: (id: number) => void) => {
     // every new document starts with one parent ("אב A") already applied to all of its pages, the same way
     // professional layout tools start with a default master - so pages already look uniform from the start, instead of needing it set by hand
     const parentA: ParentPage = { id: globalThis.crypto?.randomUUID?.() ?? `parent-${Date.now()}`, prefix: 'A', name: 'אב A', w: d.width, h: d.height, frames: [], images: [], shapes: [] }
@@ -452,14 +453,15 @@ export function useDocumentSession() {
       assets: NO_ASSETS,
       guides: NO_GUIDES,
       shapes: NO_SHAPES,
-      paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
+      paragraphStyles: defaultParagraphStyles(),
       parents: [parentA],
       pageParents: Array<string | null>(d.pages).fill(parentA.id),
       sections: NO_SECTIONS,
     }
     // a new document starts with a text frame on the margins of every page
-    addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
-    onDone?.()
+    const id = addDoc(d.primaryTextFrame ? withPrimaryFrames(blank, 'all') : blank, null)
+    onDone?.(id)
+    return id
   }
 
   /** Close a document (the active one by default), asking about unsaved changes first. */

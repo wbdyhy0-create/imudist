@@ -1,4 +1,6 @@
-/** A row of color swatches for the fill or line of a shape: some ready colors, "none", and a free color picker. */
+import type { ColorSample } from '../document'
+
+/** A row of color swatches for the fill or line of a shape: ready colors, document samples, "none", and a free color picker. */
 
 const COLORS: { color: string; label: string }[] = [
   { color: '#ffffff', label: 'נייר' },
@@ -17,12 +19,13 @@ interface Props {
   value: string | null
   onChange: (color: string | null) => void
   label: string
+  samples?: ColorSample[]
 }
 
 const same = (a: string, b: string | null) => b !== null && a.toLowerCase() === b.toLowerCase()
 
-export function FillPicker({ value, onChange, label }: Props) {
-  const inPalette = value === null || COLORS.some((c) => same(c.color, value))
+export function FillPicker({ value, onChange, label, samples = [] }: Props) {
+  const inPalette = value === null || COLORS.some((c) => same(c.color, value)) || samples.some((sample) => same(sample.color, value))
   return (
     <div className="swatch-row" role="radiogroup" aria-label={label}>
       <button
@@ -43,6 +46,18 @@ export function FillPicker({ value, onChange, label }: Props) {
           title={entry.label}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => onChange(entry.color)}
+        />
+      ))}
+      {samples.map((sample) => (
+        <button
+          key={sample.id}
+          role="radio"
+          aria-checked={same(sample.color, value)}
+          className={'swatch-chip' + (same(sample.color, value) ? ' on' : '')}
+          style={{ background: sample.color }}
+          title={sample.label}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onChange(sample.color)}
         />
       ))}
       <label className={'swatch-chip custom' + (!inPalette ? ' on' : '')} title="צבע אחר…" style={!inPalette && value ? { background: value } : undefined}>

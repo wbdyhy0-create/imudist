@@ -92,6 +92,7 @@ function withMarks(
 
 interface Props {
   frame: TextFrame
+  previewFontFamily?: string
   featherOverride?: Feather
   /** default style + alignment of the whole story (the first frame's) */
   style: TextStyle
@@ -451,12 +452,13 @@ export function TextFrameView(p: Props) {
 
   return (
     <div
-      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '')}
+      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '') + (p.previewFontFamily ? ' font-preview' : '')}
       data-frame-id={frame.id}
       data-object-id={frame.id}
       data-object-kind="frame"
       style={{
         zIndex: p.z,
+        ...(p.previewFontFamily ? { '--font-preview-family': `"${p.previewFontFamily.replace(/["\\]/g, '')}", "Segoe UI", Arial, sans-serif` } as CSSProperties : {}),
         left: p.tx + frame.x * p.zoom,
         top: p.ty + frame.y * p.zoom,
         width: frame.w * p.zoom,
@@ -481,6 +483,7 @@ export function TextFrameView(p: Props) {
           style={{
             width: textFlowBox.w,
             height: textFlowBox.h,
+            opacity: frame.opacity ?? 1,
             ...(maskFeather ? featherMaskStyles(maskFeather, textFlowBox.w, textFlowBox.h) : {}),
             visibility: frame.rasterized ? 'hidden' : undefined,
             fontSize: style.fontSize,

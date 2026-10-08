@@ -1,5 +1,6 @@
 import { PAGE_PRESETS, toPt, type Unit } from './units'
 import type { TableData } from './table'
+import { getLastUsedFontFamily } from './fontPreference'
 
 export type Binding = 'ltr' | 'rtl'
 
@@ -253,13 +254,17 @@ export interface TextStyle extends CharStyle {
 export const DEFAULT_SPACE_AFTER = 7
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
-  fontFamily: 'Segoe UI',
+  fontFamily: getLastUsedFontFamily(),
   fontSize: 14,
   weight: 400,
   italic: false,
   tracking: 0,
   align: 'right',
   spaceAfter: DEFAULT_SPACE_AFTER,
+}
+
+export function defaultTextStyle(): TextStyle {
+  return { ...DEFAULT_TEXT_STYLE, fontFamily: getLastUsedFontFamily() }
 }
 
 /** Fonts with Hebrew glyphs that ship with Windows: used until the real system fonts are loaded. */
@@ -377,6 +382,8 @@ export function textFlowBoxOf(frame: Pick<TextFrame, 'w' | 'h' | 'textScale'>): 
  */
 export interface TextFrame extends TextStyle {
   id: string
+  /** opacity of the text drawn in this frame, 0…1; missing = fully opaque */
+  opacity?: number
   feather?: Feather
   /** the text remains in its thread as an invisible flow carrier after a marquee cut is rasterized */
   rasterized?: boolean
@@ -475,11 +482,18 @@ export interface ParagraphStyleRecord {
   patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
 }
 
-/** Every document starts with these two (and keeps them if the user never adds more); part of `DocContent`, saved with the file. */
+/** The only paragraph style every new document starts with; part of `DocContent`, saved with the file. */
 export const DEFAULT_PARAGRAPH_STYLES: ParagraphStyleRecord[] = [
-  { id: 'body', name: 'גוף הטקסט', patch: { fontFamily: 'Segoe UI', fontSize: 14, leading: 17, align: 'right', tracking: 0 } },
-  { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } },
+  { id: 'body', name: 'גוף הטקסט', patch: { fontFamily: getLastUsedFontFamily(), fontSize: 14, leading: 17, align: 'right', tracking: 0 } },
 ]
+
+export function defaultParagraphStyles(): ParagraphStyleRecord[] {
+  return DEFAULT_PARAGRAPH_STYLES.map((style) =>
+    style.id === 'body'
+      ? { ...style, patch: { ...style.patch, fontFamily: getLastUsedFontFamily() } }
+      : style,
+  )
+}
 
 /** How a picture sits in its frame: fit shows the whole picture; fill/stretch fill the frame (ordinary images cover-crop, graphic frames stretch). */
 export type ImageFit = 'fill' | 'fit' | 'stretch'

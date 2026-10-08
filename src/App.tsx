@@ -22,6 +22,7 @@ import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } fro
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { deliverPng } from './pngExport'
+import { prepareExport, renderPage } from './pdfExport'
 import { useAutosave } from './useAutosave'
 import { useBook } from './useBook'
 import { BookExportDialog, BookPanel, ChapterPicker, SyncDialog } from './components/BookPanel'
@@ -31,6 +32,7 @@ import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
 import type { PagePreset, Unit } from './units'
 import { SaveWorkspaceDialog } from './components/SaveWorkspaceDialog'
 import { defaultDockLayout, loadDockWorkspaceStore, loadLegacyDockTabOrder, saveDockWorkspaceStore, type DockLayout, type DockWorkspaceStore } from './dockWorkspaces'
+import { loadSystemFonts, useFontCatalog } from './fonts'
 
 const APP_NAME = 'Imudist'
 const NO_FRAMES: TextFrame[] = []
@@ -55,6 +57,7 @@ const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === lett
 
 export default function App() {
   const session = useDocumentSession()
+  const fontCatalog = useFontCatalog()
   // menu items are memoized, so they call the session through this ref and never run an outdated action
   const sessionRef = useRef(session)
   sessionRef.current = session
@@ -106,6 +109,7 @@ export default function App() {
     confirmClose: () => sessionRef.current.confirmExit(),
   })
   const [nextName, setNextName] = useState(1)
+  const [initialToolbarDocId, setInitialToolbarDocId] = useState<number | null>(null)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
@@ -225,17 +229,28 @@ export default function App() {
   const exportCurrentPagePng = useCallback(async () => {
     const currentDoc = doc
     const workspace = ws.current
-    if (!currentDoc || !workspace) return
+    if (!currentDoc || !workspace || !exportContent) return
     try {
       sessionRef.current.notify('מייצא את העמוד הנוכחי ל־PNG…')
-      const { canvas, pageIndex } = await workspace.captureCurrentPage()
+      const pageIndex = workspace.currentPageIndex()
+      const prepared = prepareExport({
+        doc: currentDoc,
+        ...exportContent,
+        layerOrder: session.layerOrder,
+        assets: session.assets,
+        paragraphStyles: session.paragraphStyles,
+        sections: session.sections,
+      })
+      const page = prepared.rects[pageIndex]
+      if (!page) throw new Error(`page ${pageIndex + 1} is unavailable for PNG export`)
+      const canvas = await renderPage(prepared.content, prepared.flows, page, 0, 300)
       const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
       const saved = await deliverPng(canvas, `${safeName}-page-${pageIndex + 1}`)
       if (saved) sessionRef.current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
     } catch (error) {
       sessionRef.current.showError('ייצוא PNG נכשל', error)
     }
-  }, [doc, exportContent])
+  }, [doc, exportContent, session.assets, session.layerOrder, session.paragraphStyles, session.sections])
 
   /** pictures read and waiting for a click on the page; whatever could not be read is reported */
   const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
@@ -472,6 +487,9 @@ export default function App() {
         activeWorkspaceId: workspaceStore.activeId,
         saveWorkspace: () => setSaveWorkspaceDialogOpen(true),
         selectWorkspace,
+        loadSystemFonts: () => void loadSystemFonts(),
+        fontStatus: fontCatalog.status,
+        fontCount: fontCatalog.families.length,
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
         importParagraphStyles: () => void importParagraphStyles(),
@@ -505,7 +523,7 @@ export default function App() {
         toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
+    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
 
   useEffect(() => {
@@ -649,7 +667,8 @@ export default function App() {
   }
 
   const create = (d: DocSettings) =>
-    session.createDocument(d, () => {
+    session.createDocument(d, (id) => {
+      setInitialToolbarDocId(id)
       setNextName((n) => n + 1)
       setLastSettings(d)
       closeDialog()
@@ -695,6 +714,8 @@ export default function App() {
               key={editingParentId ? `parent:${editingParentId}` : preview ? 'preview' : session.docId}
               ref={ws}
               doc={shown}
+              initiallySelectPrimaryFrame={!preview && !editingParent && session.activeId === initialToolbarDocId}
+              onInitialSelectionApplied={() => setInitialToolbarDocId((id) => id === session.activeId ? null : id)}
               fitKey={fitKey}
               showRulers={showRulers}
               showGuides={showGuides}
@@ -739,6 +760,7 @@ export default function App() {
               onSelectParent={setActiveParentId}
               dockOpenId={dockOpenId}
               onDockOpenChange={setDockOpenId}
+              onDockPanelToggle={toggleDockPanel}
               enabledDockPanelIds={enabledDockPanelIds}
               dockTabOrder={dockLayout.tabOrder}
               onDockTabOrderChange={setDockTabOrder}

@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, type PageRect } from './pages'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
@@ -197,9 +197,26 @@ async function drawTextDom(
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : '',
         transformOrigin: 'center center',
       })
+      // a text scale draws the text bigger or smaller than it was laid out: as on screen, the text sits in a box of the layout's
+      // size (the frame divided by the scale) that is scaled up to the frame
+      const flowBox = textFlowBoxOf(frame)
+      let host = outer
+      if (frame.textScale) {
+        host = document.createElement('div')
+        Object.assign(host.style, {
+          position: 'absolute',
+          left: '0',
+          top: '0',
+          width: `${flowBox.w}px`,
+          height: `${flowBox.h}px`,
+          transform: `scale(${frame.textScale.x > 0 ? frame.textScale.x : 1}, ${frame.textScale.y > 0 ? frame.textScale.y : 1})`,
+          transformOrigin: '0 0',
+        })
+        outer.appendChild(host)
+      }
       const inner = document.createElement('div')
       Object.assign(inner.style, {
-        width: `${frame.w}px`,
+        width: `${flowBox.w}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
         fontFamily: `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`,
@@ -210,7 +227,7 @@ async function drawTextDom(
         ...cssTextAlign(style.align),
         wordSpacing: wordSpacingPt(style) ? `${wordSpacingPt(style)}px` : '',
         paddingTop: (!hasPrev ? flow.spaceBeforeFirst : 0) + flow.firstLineLift ? `${(!hasPrev ? flow.spaceBeforeFirst : 0) + flow.firstLineLift}px` : '',
-        height: `${frame.h - flow.footnoteHeight + (!hasNext ? flow.spaceAfterLast : 0)}px`,
+        height: `${flowBox.h - flow.footnoteHeight + (!hasNext ? flow.spaceAfterLast : 0)}px`,
         paddingBottom: !hasNext && flow.spaceAfterLast ? `${flow.spaceAfterLast}px` : '',
         paddingLeft: style.indentLeft ? `${style.indentLeft}px` : '',
         paddingRight: style.indentRight ? `${style.indentRight}px` : '',
@@ -233,13 +250,14 @@ async function drawTextDom(
             footnoteReferenceScale: footnoteConfig.referenceScale,
             tocPageMarkers: tocMarkers?.pageNumbers,
             tocLeaderMarkers: tocMarkers?.leaders,
+            outlineMode: 'shadow',
           },
           storyFrames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
           style.align,
           continuesAtEnd,
         ),
       )
-      outer.appendChild(inner)
+      host.appendChild(inner)
       if (flow.footnotes.length) {
         const footnotes = document.createElement('div')
         footnotes.className = 'footnotes-area'
@@ -248,7 +266,7 @@ async function drawTextDom(
           left: `${flow.footnoteAreaX ?? 0}px`,
           right: flow.footnoteAreaX === undefined ? '0' : 'auto',
           bottom: '0',
-          width: `${flow.footnoteAreaWidth ?? frame.w}px`,
+          width: `${flow.footnoteAreaWidth ?? flowBox.w}px`,
           height: `${flow.footnoteHeight}px`,
           direction: 'rtl',
           whiteSpace: 'pre-wrap',
@@ -328,7 +346,7 @@ async function drawTextDom(
             display: 'flex',
             alignItems: 'flex-start',
             gap: `${footnoteConfig.numberTextGap}px`,
-            left: `${(flow.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`,
+            left: `${(flow.footnoteAreaWidth ?? flowBox.w) - note.x - note.width}px`,
             top: `${note.y}px`,
             width: `${note.width}px`,
             height: `${note.height}px`,
@@ -357,12 +375,12 @@ async function drawTextDom(
           text.className = 'footnote-content'
           Object.assign(text.style, { flex: '1', minWidth: '0' })
           Object.assign(item.style, { fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: String(noteStyle.weight), fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : '', paddingLeft: noteStyle.indentLeft ? `${noteStyle.indentLeft}px` : '', paddingRight: noteStyle.indentRight ? `${noteStyle.indentRight}px` : '', ...cssTextAlign(noteStyle.align), color: noteStyle.color ?? '#111' })
-          text.appendChild(buildParagraphNodes(note.content, normalizeRuns(note.content, note.runs ?? [], noteStyle), 1))
+          text.appendChild(buildParagraphNodes(note.content, normalizeRuns(note.content, note.runs ?? [], noteStyle), 1, { outlineMode: 'shadow' }))
           if (!note.continued) item.appendChild(number)
           item.appendChild(text)
           footnotes.appendChild(item)
         }
-        outer.appendChild(footnotes)
+        host.appendChild(footnotes)
       }
       root.appendChild(outer)
     }

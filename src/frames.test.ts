@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { dragBoxUniform, type Box, type HandleId } from './frames'
+import { dragBoxUniform, styleOf, type Box, type HandleId } from './frames'
+import type { TextFrame } from './document'
+
+describe('text frame style', () => {
+  it('preserves character colors and effects in the story style', () => {
+    const frame: TextFrame = {
+      id: 'frame',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 50,
+      text: 'א',
+      runs: [],
+      next: null,
+      fontFamily: 'Arial',
+      fontSize: 14,
+      weight: 400,
+      italic: false,
+      tracking: 0,
+      align: 'right',
+      color: '#112233',
+      outlineColor: '#0066ff',
+      outlineWidth: 1.25,
+    }
+
+    expect(styleOf(frame)).toMatchObject({
+      color: '#112233',
+      outlineColor: '#0066ff',
+      outlineWidth: 1.25,
+    })
+  })
+})
 
 describe('uniform text-frame resize', () => {
   const orig: Box = { x: 10, y: 20, w: 100, h: 50 }

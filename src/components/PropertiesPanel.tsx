@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { DEFAULT_SHADOW_OFFSET, effectiveLeading, MAX_PAGE_PT, type CharStyle, type Feather, type TextAlign, type TextFrame, type TextStyle } from '../document'
-import { loadSystemFonts, useFontCatalog, weightName } from '../fonts'
+import { DEFAULT_SHADOW_OFFSET, effectiveLeading, MAX_PAGE_PT, type CharStyle, type ColorSample, type Feather, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
 import type { Unit } from '../units'
@@ -15,8 +15,8 @@ interface Props {
   frame: TextFrame | null
   /** what the text controls show: the selected text's style, or the story's default */
   style: TextStyle | null
-  /** does a change apply to the selected text only, or to the whole story? */
   scope: 'selection' | 'all'
+  colorSamples: ColorSample[]
   unit: Unit
   /** position of the frame inside its story, and whether text is left over */
   thread: { index: number; count: number; overflow: boolean } | null
@@ -25,12 +25,9 @@ interface Props {
   onUseFeatherTool: () => void
   onTextScale: (axis: 'x' | 'y', percent: number) => void
   onCharStyle: (patch: Partial<CharStyle>) => void
-  /** the text in scope has more than one size: the size field is blank, and its arrows move every size by the same amount */
   sizeMixed?: boolean
   onSizeStep?: (delta: number) => void
-  onAlign: (align: TextAlign) => void
-  /** leading / word-spacing bounds: belong to the whole story, not to a piece of text */
-  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
+  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
   onArrange: (op: ArrangeOp) => void
   onLink: () => void
   onUnlink: () => void
@@ -46,9 +43,51 @@ export const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'justifyCenter', label: 'יישור מלא לשני הצדדים, שורה אחרונה ממורכזת', icon: 'M4 6h16M4 10h16M4 14h16M7 18h10' },
 ]
 
+export function ParagraphTextControls({
+  style,
+  onChange,
+}: {
+  style: TextStyle
+  onChange: (patch: Partial<Pick<TextStyle, 'align' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
+}) {
+  return (
+    <>
+      <Labeled label="יישור">
+        <div className="toggle-group">
+          {ALIGNS.map((align) => (
+            <button
+              key={align.id}
+              className={style.align === align.id ? 'on' : ''}
+              title={align.label}
+              aria-label={align.label}
+              aria-pressed={style.align === align.id}
+              onClick={() => onChange({ align: align.id })}
+            >
+              <svg viewBox="0 0 24 24"><path d={align.icon} /></svg>
+            </button>
+          ))}
+        </div>
+      </Labeled>
+      {(style.align === 'justify' || style.align === 'justifyCenter') && (
+        <>
+          <p className="muted">ריווח מילים חל רק ביישור מלא.</p>
+          <div className="grid2">
+            <Labeled label="ריווח מילים מינימלי (%)">
+              <NumberField value={style.wordSpacingMin ?? 90} min={10} max={100} onChange={(wordSpacingMin) => onChange({ wordSpacingMin })} />
+            </Labeled>
+            <Labeled label="ריווח מילים מרבי (%)">
+              <NumberField value={style.wordSpacingMax ?? 120} min={100} max={500} onChange={(wordSpacingMax) => onChange({ wordSpacingMax })} />
+            </Labeled>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
 
 /** Font, weight, size and bold / italic of a piece of text: the same controls for text frames and text on a path. */
-export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { style: CharStyle; onCharStyle: (patch: Partial<CharStyle>) => void; sizeMixed?: boolean; onSizeStep?: (delta: number) => void }) {
+export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep, onLeading, samples, afterTracking, showShadow = true }: { style: CharStyle; onCharStyle: (patch: Partial<CharStyle>) => void; sizeMixed?: boolean; onSizeStep?: (delta: number) => void; onLeading?: (leading: number) => void; samples?: ColorSample[]; afterTracking?: ReactNode; showShadow?: boolean }) {
   const catalog = useFontCatalog()
   const family = catalog.families.find((f) => f.family === style.fontFamily)
   const faceKey = `${style.weight}|${style.italic ? 1 : 0}`
@@ -109,39 +148,62 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep }: { st
               </Labeled>
             </div>
 
+            {onLeading && (
+              <Labeled label="מרווח בין שורות (Leading)">
+                <NumberField
+                  value={effectiveLeading(style)}
+                  unit="px"
+                  unitLabel="pt"
+                  min={0}
+                  max={MAX_PAGE_PT}
+                  onChange={(v) => onLeading(Math.round(v))}
+                />
+              </Labeled>
+            )}
             <Labeled label="ריווח בין אותיות (Tracking)">
               <NumberField value={style.tracking} step={5} min={-500} max={500} onChange={(v) => onCharStyle({ tracking: v })} />
             </Labeled>
+            {afterTracking}
+            {samples && (
+              <Labeled label="דוגמיות צבע">
+                <FillPicker label="צבע הטקסט" value={style.color ?? '#111111'} samples={samples} onChange={(color) => onCharStyle({ color: color ?? '#111111' })} />
+              </Labeled>
+            )}
+            <Labeled label="קו מתאר לאותיות">
+              <div className="outline-controls">
+                <FillPicker label="צבע קו מתאר" value={style.outlineColor ?? '#000000'} samples={samples} onChange={(color) => onCharStyle({ outlineColor: color ?? '#000000' })} />
+                <NumberField ariaLabel="עובי קו מתאר" value={style.outlineWidth ?? 0} unit="px" unitLabel="pt" step={0.25} min={0} max={100} onChange={(outlineWidth) => onCharStyle({ outlineWidth })} />
+              </div>
+            </Labeled>
             <p className="muted">0 לטקסט רגיל; ערך שלילי (בערך 5- עד 15-) מקרב את האותיות ונותן מראה צפוף לכותרות.</p>
+            {onLeading && <p className="muted">ברירת המחדל היא כ־125% מגודל הגופן. השינוי חל על הפסקאות שבבחירה, או על הפסקה שבה נמצא הסמן.</p>}
             <Labeled label="הסטת קו בסיס (נקודות)">
               <NumberField value={style.baselineShift ?? 0} step={0.5} min={-99} max={99} onChange={(v) => onCharStyle({ baselineShift: v === 0 ? undefined : v })} />
             </Labeled>
             <p className="muted">ערך חיובי מגביה את הטקסט מעל השורה, ושלילי מנמיך אותו, בלי לשנות את גובה השורה. מתאים לאותיות זעירות ותלויות.</p>
-            <Labeled label="קו מתאר לאותיות">
-              <div className="outline-controls">
-                <FillPicker label="צבע קו מתאר" value={style.outlineColor ?? '#000000'} onChange={(color) => onCharStyle({ outlineColor: color ?? '#000000' })} />
-                <NumberField ariaLabel="עובי קו מתאר" value={style.outlineWidth ?? 0} unit="px" unitLabel="pt" step={0.25} min={0} max={100} onChange={(outlineWidth) => onCharStyle({ outlineWidth })} />
-              </div>
-            </Labeled>
-            <Group title="הצללה">
-              <ShadowControls
-                offsetX={style.shadowOffsetX ?? 0}
-                offsetY={style.shadowOffsetY ?? style.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
-                opacity={style.shadowOpacity ?? 0}
-                color={style.shadowColor ?? '#000000'}
-                onOffsetXChange={(shadowOffsetX) => onCharStyle({ shadowOffsetX })}
-                onOffsetYChange={(shadowOffsetY) => onCharStyle({ shadowOffsetY })}
-                onOpacityChange={(shadowOpacity) => onCharStyle({ shadowOpacity })}
-                onColorChange={(shadowColor) => onCharStyle({ shadowColor })}
-              />
-            </Group>
+            {showShadow && <TextShadowGroup style={style} onChange={onCharStyle} />}
     </>
   )
 }
 
-export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry, onFeatherChange, onUseFeatherTool, onTextScale, onCharStyle, sizeMixed, onSizeStep, onAlign, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
-  const catalog = useFontCatalog()
+export function TextShadowGroup({ style, onChange }: { style: CharStyle; onChange: (patch: Partial<CharStyle>) => void }) {
+  return (
+    <Group title="הצללה">
+      <ShadowControls
+        offsetX={style.shadowOffsetX ?? 0}
+        offsetY={style.shadowOffsetY ?? style.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
+        opacity={style.shadowOpacity ?? 0}
+        color={style.shadowColor ?? '#000000'}
+        onOffsetXChange={(shadowOffsetX) => onChange({ shadowOffsetX })}
+        onOffsetYChange={(shadowOffsetY) => onChange({ shadowOffsetY })}
+        onOpacityChange={(shadowOpacity) => onChange({ shadowOpacity })}
+        onColorChange={(shadowColor) => onChange({ shadowColor })}
+      />
+    </Group>
+  )
+}
 
+export function PropertiesPanel({ frame, style, scope, colorSamples, unit, thread, onGeometry, onFeatherChange, onUseFeatherTool, onTextScale, onCharStyle, sizeMixed, onSizeStep, onParagraphStyle, onArrange, onLink, onUnlink }: Props) {
   // The panel's buttons must not take the focus away from the text being edited.
   const keepFocus = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) e.preventDefault()
@@ -154,6 +216,22 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
         <p className="muted">בחר תיבת טקסט כדי לערוך את המאפיינים שלה.</p>
       ) : (
         <>
+          <Group title="טקסט">
+            <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
+              {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
+            </p>
+            <CharControls
+              style={style}
+              onCharStyle={onCharStyle}
+              sizeMixed={sizeMixed}
+              onSizeStep={onSizeStep}
+              onLeading={(leading) => onParagraphStyle({ leading })}
+              samples={colorSamples}
+              afterTracking={<ParagraphTextControls style={style} onChange={onParagraphStyle} />}
+              showShadow={false}
+            />
+          </Group>
+
           <Group title="מיקום וגודל">
             <div className="grid2">
               <Labeled label="מיקום X">
@@ -191,55 +269,6 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             <FeatherControls feather={frame.feather} onChange={onFeatherChange} onUseGradientTool={onUseFeatherTool} />
           </Group>
 
-          <Group title="טקסט">
-            <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
-              {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
-            </p>
-
-            <CharControls style={style} onCharStyle={onCharStyle} sizeMixed={sizeMixed} onSizeStep={onSizeStep} />
-
-            <Labeled label="יישור">
-              <div className="toggle-group">
-                {ALIGNS.map((a) => (
-                  <button key={a.id} className={style.align === a.id ? 'on' : ''} title={a.label} aria-label={a.label} aria-pressed={style.align === a.id} onClick={() => onAlign(a.id)}>
-                    <svg viewBox="0 0 24 24">
-                      <path d={a.icon} />
-                    </svg>
-                  </button>
-                ))}
-              </div>
-            </Labeled>
-
-            <Labeled label="מרווח בין שורות (Leading)">
-              {/* leading, like font size, is always in points — not the document's ruler unit; whole points only */}
-              <NumberField
-                value={effectiveLeading(style)}
-                unit="px"
-                unitLabel="pt"
-                min={0}
-                max={MAX_PAGE_PT}
-                onChange={(v) => onParagraphStyle({ leading: Math.round(v) })}
-              />
-            </Labeled>
-            <p className="muted">שייך לכל התיבה. ברירת המחדל היא כ־125% מגודל הגופן.</p>
-
-            {(style.align === 'justify' || style.align === 'justifyCenter') && (
-              <>
-                <div className="grid2">
-                  <Labeled label="ריווח מילים — מינימום">
-                    <NumberField value={style.wordSpacingMin ?? 90} step={5} min={10} max={100} onChange={(v) => onParagraphStyle({ wordSpacingMin: v })} />
-                  </Labeled>
-                  <Labeled label="ריווח מילים — מקסימום">
-                    <NumberField value={style.wordSpacingMax ?? 120} step={5} min={100} max={500} onChange={(v) => onParagraphStyle({ wordSpacingMax: v })} />
-                  </Labeled>
-                </div>
-                <p className="muted">אחוז מרוחב הרווח הרגיל; חל רק ביישור דו-צדדי. 100% הוא הרוחב הרגיל.</p>
-              </>
-            )}
-
-            <FontSource status={catalog.status} count={catalog.families.length} />
-          </Group>
-
           <Group title="שרשור טקסט">
             {thread && thread.count > 1 && (
               <p className="muted">
@@ -261,24 +290,10 @@ export function PropertiesPanel({ frame, style, scope, unit, thread, onGeometry,
             </div>
             {frame.next === null && <p className="muted">לחץ על הכפתור ואז על תיבה אחרת, או על הריבוע בפינת התיבה.</p>}
           </Group>
+          <TextShadowGroup style={style} onChange={onCharStyle} />
         </>
       )}
     </aside>
-  )
-}
-
-/** Where the font list comes from, and a button to load the fonts installed on this computer. */
-function FontSource({ status, count }: { status: string; count: number }) {
-  if (status === 'system') return <p className="muted">{count} משפחות גופנים מהמחשב</p>
-  if (status === 'loading') return <p className="muted">טוען גופנים מהמחשב…</p>
-  if (status === 'unavailable') return <p className="muted">הדפדפן הזה לא מאפשר לקרוא את הגופנים המותקנים (נדרש Chrome או Edge). מוצגת רשימה בסיסית.</p>
-  return (
-    <>
-      {status === 'denied' && <p className="muted">לא ניתנה הרשאה לגופנים. מוצגת רשימה בסיסית.</p>}
-      <button className="btn small" onClick={() => void loadSystemFonts()}>
-        טען את הגופנים מהמחשב
-      </button>
-    </>
   )
 }
 

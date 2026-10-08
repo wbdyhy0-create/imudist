@@ -1,12 +1,8 @@
 import type { TextFrame, TextStyle } from './document'
-import { mergeRuns, normalizeRuns } from './story'
+import { charStyleOf, mergeRuns, normalizeRuns } from './story'
 
 export const styleOf = (f: TextFrame): TextStyle => ({
-  fontFamily: f.fontFamily,
-  fontSize: f.fontSize,
-  weight: f.weight,
-  italic: f.italic,
-  tracking: f.tracking,
+  ...charStyleOf(f),
   align: f.align,
   leading: f.leading,
   wordSpacingMin: f.wordSpacingMin,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { textOutlineStroke } from './richtext'
 import { atParaEnd, mergeRuns, normalizeRuns, styleRange } from './story'
 
 const base = { fontFamily: 'Arial', fontSize: 14, weight: 400, italic: false, tracking: 0 }
@@ -15,6 +16,11 @@ describe('paragraph end positions', () => {
 })
 
 describe('character outlines', () => {
+  it('converts outline width and color into a scaled text stroke', () => {
+    expect(textOutlineStroke({ ...base, outlineColor: '#0066ff', outlineWidth: 1.25 }, 300 / 72)).toBe('5.208px #0066ff')
+    expect(textOutlineStroke({ ...base, outlineWidth: 0 }, 300 / 72)).toBe('')
+  })
+
   it('preserves outline formatting on a selected run', () => {
     const runs = normalizeRuns('text', undefined, base)
     const outlined = styleRange(runs, 1, 3, { outlineColor: '#ff0000', outlineWidth: 1.5 })

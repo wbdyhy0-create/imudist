@@ -1,8 +1,58 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clipCanvasToBoxes } from './marquee'
+import html2canvas from 'html2canvas'
+import { captureElementRegion, clipCanvasToBoxes } from './marquee'
+
+vi.mock('html2canvas', () => ({ default: vi.fn() }))
 
 describe('clipCanvasToBoxes', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('keeps highlighted text while removing capture controls', async () => {
+    const matchesSelector = (className: string, selector: string) =>
+      selector.split(',').some((part) => className.split(' ').includes(part.trim().slice(1)))
+    const highlightedText = {
+      className: 'sel',
+      classList: { remove: vi.fn() },
+      matches: (selector: string) => matchesSelector('sel', selector),
+      remove: vi.fn(),
+    }
+    const handle = {
+      className: 'handle',
+      classList: { remove: vi.fn() },
+      matches: (selector: string) => matchesSelector('handle', selector),
+      remove: vi.fn(),
+    }
+    const guide = { className: 'guide', matches: (selector: string) => matchesSelector('guide', selector), remove: vi.fn() }
+    const pageShadow = { className: 'page-shadow', matches: (selector: string) => matchesSelector('page-shadow', selector), remove: vi.fn() }
+    const descendants = [highlightedText, handle, guide, pageShadow]
+    const clone = {
+      classList: { remove: vi.fn() },
+      style: {},
+      querySelectorAll: vi.fn((selector: string) => descendants.filter((element) => matchesSelector(element.className, selector))),
+    }
+    const wrapper = { style: {}, appendChild: vi.fn(), remove: vi.fn() }
+    const element = { cloneNode: vi.fn(() => clone) } as unknown as HTMLElement
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => wrapper),
+      body: { appendChild: vi.fn() },
+      fonts: { ready: Promise.resolve() },
+    })
+    vi.mocked(html2canvas).mockResolvedValue({ width: 1, height: 1 } as HTMLCanvasElement)
+
+    await captureElementRegion(
+      element,
+      { left: 0, top: 0, width: 100, height: 100 },
+      { left: 0, top: 0, width: 100, height: 100 },
+      1,
+    )
+
+    expect(highlightedText.remove).not.toHaveBeenCalled()
+    expect(highlightedText.classList.remove).not.toHaveBeenCalled()
+    expect(handle.remove).toHaveBeenCalledOnce()
+    expect(guide.remove).toHaveBeenCalledOnce()
+    expect(pageShadow.remove).toHaveBeenCalledOnce()
+    expect(wrapper.remove).toHaveBeenCalledOnce()
+  })
 
   it('crops the canvas to the part intersecting a page', () => {
     const context = {

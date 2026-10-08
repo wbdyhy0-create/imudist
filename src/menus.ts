@@ -2,6 +2,7 @@ import type { RefObject } from 'react'
 import type { MenuDef, MenuItem } from './components/MenuBar'
 import type { WorkspaceHandle } from './components/Workspace'
 import type { RecentEntry } from './recent'
+import type { FontStatus } from './fonts'
 
 export interface MenuContext {
   hasDoc: boolean
@@ -29,6 +30,9 @@ export interface MenuContext {
   activeWorkspaceId: string | null
   saveWorkspace: () => void
   selectWorkspace: (id: string) => void
+  loadSystemFonts: () => void
+  fontStatus: FontStatus
+  fontCount: number
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
   importText: () => void
@@ -313,6 +317,16 @@ export function buildMenus(c: MenuContext): MenuDef[] {
               }))
             : [{ label: 'אין סביבות שמורות', disabled: true }],
         },
+        { label: 'טען גופנים מהמחשב', disabled: c.fontStatus === 'loading' || c.fontStatus === 'unavailable', onClick: c.loadSystemFonts },
+        ...(c.fontStatus === 'loading'
+          ? [{ label: 'טוען גופנים מהמחשב…', disabled: true }]
+          : c.fontStatus === 'system'
+            ? [{ label: `${c.fontCount} משפחות גופנים מהמחשב`, disabled: true }]
+            : c.fontStatus === 'denied'
+              ? [{ label: 'לא ניתנה הרשאה לגופנים. מוצגת רשימה בסיסית.', disabled: true }]
+              : c.fontStatus === 'unavailable'
+                ? [{ label: 'הדפדפן אינו מאפשר לקרוא גופנים מותקנים (נדרש Chrome או Edge).', disabled: true }]
+                : []),
         { separator: true },
         {
           label: 'כלים',

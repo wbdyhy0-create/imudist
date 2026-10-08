@@ -31,6 +31,8 @@ interface DragState {
   y: number
   floating: boolean
   canFloat: boolean
+  moved: boolean
+  overId: string | null
 }
 
 export function DockingPanels({
@@ -54,6 +56,7 @@ export function DockingPanels({
   const [dockOverId, setDockOverId] = useState<string | null>(null)
   const dockRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
+  const suppressClickRef = useRef<string | null>(null)
   const fullTabOrder = [...tabOrder, ...available.map((panel) => panel.id).filter((id) => !tabOrder.includes(id))]
   const ordered = [...available].sort((a, b) => fullTabOrder.indexOf(a.id) - fullTabOrder.indexOf(b.id))
 
@@ -75,14 +78,16 @@ export function DockingPanels({
   const finishDrag = () => {
     const drag = dragRef.current
     if (!drag) return
-    if (!drag.floating && dockOverId && dockOverId !== drag.id) moveTab(drag.id, dockOverId)
+    if (!drag.floating && drag.moved && drag.overId && drag.overId !== drag.id) moveTab(drag.id, drag.overId)
     const dock = dockRef.current?.getBoundingClientRect()
     const inDock = !!dock && drag.x >= dock.left && drag.x <= dock.right && drag.y >= dock.top && drag.y <= dock.bottom
     if (drag.floating && inDock) {
       onFloatingPanelChange(null)
       openPanel(drag.id)
     }
+    if (drag.moved) suppressClickRef.current = drag.id
     dragRef.current = null
+    setDragLayerId(null)
     setDockOverId(null)
     window.removeEventListener('pointermove', moveDrag)
     window.removeEventListener('pointerup', finishDrag)
@@ -94,18 +99,26 @@ export function DockingPanels({
     if (!drag) return
     drag.x = event.clientX
     drag.y = event.clientY
-    if (!drag.floating && drag.canFloat && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 8) {
-      drag.floating = true
-      onFloatingPanelChange(drag.id)
-      openPanel(drag.id)
+    if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 8) {
+      drag.moved = true
+      if (!drag.floating && drag.canFloat) {
+        drag.floating = true
+        onFloatingPanelChange(drag.id)
+        openPanel(drag.id)
+      } else if (!drag.floating) {
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-dock-panel-id]')?.dataset.dockPanelId ?? null
+        drag.overId = target === drag.id ? null : target
+        setDragLayerId(drag.id)
+        setDockOverId(drag.overId)
+      }
     }
     if (drag.floating) onFloatingPositionChange({ x: Math.max(8, event.clientX - 120), y: Math.max(36, event.clientY - 18) })
   }
 
   const startDrag = (id: string, event: ReactPointerEvent<HTMLButtonElement>, canFloat = floatingPanelId === id) => {
     if (event.button !== 0) return
-    event.preventDefault()
-    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingPanelId === id, canFloat }
+    suppressClickRef.current = null
+    dragRef.current = { id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, floating: floatingPanelId === id, canFloat, moved: false, overId: null }
     window.addEventListener('pointermove', moveDrag)
     window.addEventListener('pointerup', finishDrag)
     window.addEventListener('pointercancel', finishDrag)
@@ -130,20 +143,21 @@ export function DockingPanels({
     <>
       <aside ref={dockRef} className={'docking-shell' + (open || floating ? ' has-open' : '')} aria-label="חלוניות">
         <div className="dock-strip">
-          {dragLayerId && ordered[0] && <div className={'dock-drop-top' + (dockOverId === ordered[0].id ? ' active' : '')} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDockOverId(ordered[0].id) }} onDrop={(event) => { event.preventDefault(); const from = event.dataTransfer.getData('text/layer') || dragLayerId; if (from && from !== ordered[0].id) moveTab(from, ordered[0].id); setDragLayerId(null); setDockOverId(null) }}>+</div>}
           {ordered.map((panel) => (
             <button
               key={panel.id}
               className={'dock-tab' + (open?.id === panel.id || floating?.id === panel.id ? ' open' : '') + (dockOverId === panel.id && dragLayerId !== panel.id ? ' drop-target' : '')}
-              draggable={!panel.floating}
               aria-expanded={open?.id === panel.id || floating?.id === panel.id}
               title={panel.label}
-              onPointerDown={panel.floating ? (event) => startDrag(panel.id, event, true) : undefined}
-              onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/layer', panel.id); setDragLayerId(panel.id); dragRef.current = null }}
-              onDragEnd={() => { setDragLayerId(null); setDockOverId(null) }}
-              onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const from = event.dataTransfer.getData('text/layer'); if (from && from !== panel.id) setDockOverId(panel.id) }}
-              onDrop={(event) => { event.preventDefault(); const from = event.dataTransfer.getData('text/layer') || dragLayerId; if (from && from !== panel.id) moveTab(from, panel.id); setDragLayerId(null); setDockOverId(null) }}
-              onClick={() => toggle(panel.id)}
+              data-dock-panel-id={panel.id}
+              onPointerDown={(event) => startDrag(panel.id, event, !!panel.floating)}
+              onClick={() => {
+                if (suppressClickRef.current === panel.id) {
+                  suppressClickRef.current = null
+                  return
+                }
+                toggle(panel.id)
+              }}
             >
               <span>{panel.label}</span>
             </button>
@@ -158,7 +172,14 @@ export function DockingPanels({
           ))}
         {floating && (
           <section className="dock-floating" style={{ left: floatingPosition.x, top: floatingPosition.y }}>
-            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => { onFloatingPanelChange(null); onOpenChange(null) }}>
+            <button className="dock-floating-head" onPointerDown={(event) => startDrag(floating.id, event)} onClick={() => {
+              if (suppressClickRef.current === floating.id) {
+                suppressClickRef.current = null
+                return
+              }
+              onFloatingPanelChange(null)
+              onOpenChange(null)
+            }}>
               <span>{floating.label}</span>
               <span aria-hidden="true">×</span>
             </button>

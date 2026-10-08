@@ -1,4 +1,4 @@
-import { DEFAULT_TEXT_STYLE, MAX_PAGES, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
+import { defaultTextStyle, MAX_PAGES, type DocSettings, type ImageFrame, type ShapeFrame, type TextFrame } from './document'
 import { chainOf, styleOf, type Box } from './frames'
 import type { PlacedText } from './importText'
 import { computeLayout, pageMargins, type PageSide } from './layout'
@@ -85,7 +85,7 @@ export function primaryFrames(doc: DocSettings, pageIndices: number[]): TextFram
   return pageIndices.flatMap((i) =>
     rects[i]
       ? columnBoxes(doc, rects[i], sides[i], i).map(
-          (b): TextFrame => ({ ...DEFAULT_TEXT_STYLE, id: newId(), x: b.x, y: b.y, w: b.w, h: b.h, text: '', runs: [], next: null }),
+          (b): TextFrame => ({ ...defaultTextStyle(), id: newId(), x: b.x, y: b.y, w: b.w, h: b.h, text: '', runs: [], next: null }),
         )
       : [],
   )

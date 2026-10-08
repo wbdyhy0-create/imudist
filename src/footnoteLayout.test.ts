@@ -11,11 +11,15 @@ const items: FootnoteLayoutItem[] = [
   { id: 'first', anchor: 0, referenceNumber: 1, content: 'first note' },
   { id: 'second', anchor: 1, referenceNumber: 2, content: 'second note' },
 ]
+const paragraphStylesWithHeading = [
+  ...DEFAULT_PARAGRAPH_STYLES,
+  { id: 'heading', name: 'כותרת', basedOnId: 'body', patch: { fontSize: 24, weight: 700, leading: 30, spaceAfter: 10 } },
+]
 
 describe('footnote divider settings', () => {
   it('reserves the heading paragraph leading instead of line thickness when heading mode is active', () => {
     expect(footnoteDividerHeight({ ...DEFAULT_FOOTNOTE_CONFIG, dividerMode: 'line', dividerThickness: 2.5 }, DEFAULT_PARAGRAPH_STYLES)).toBe(2.5)
-    expect(footnoteDividerHeight({ ...DEFAULT_FOOTNOTE_CONFIG, dividerMode: 'heading', dividerHeadingStyleId: 'heading' }, DEFAULT_PARAGRAPH_STYLES)).toBe(30)
+    expect(footnoteDividerHeight({ ...DEFAULT_FOOTNOTE_CONFIG, dividerMode: 'heading', dividerHeadingStyleId: 'heading' }, paragraphStylesWithHeading)).toBe(30)
   })
 
   it('preserves divider width, thickness, and alignment when saving and reopening a document', () => {
@@ -24,7 +28,7 @@ describe('footnote divider settings', () => {
     const frame = { ...DEFAULT_TEXT_STYLE, id: 'story', x: 0, y: 0, w: 100, h: 100, text: '\uE006', runs: [{ len: 1, style: DEFAULT_TEXT_STYLE }], next: null, footnotes: [note] }
     const content = {
       doc: { ...defaultDocSettings('footnotes'), footnotes: divider },
-      frames: [frame], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
+      frames: [frame], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: paragraphStylesWithHeading,
       parents: [], pageParents: [], sections: [],
     }
 
@@ -250,4 +254,3 @@ describe('shared page footnotes', () => {
     expect(merged.get('left')?.footnoteHeight).toBe(merged.get('right')?.footnoteHeight)
   })
 })
-
