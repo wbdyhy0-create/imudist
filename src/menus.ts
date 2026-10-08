@@ -225,6 +225,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           ],
         },
         sep,
+        doc('הסר רקע מהתמונה הנבחרת', '', (ws) => ws.removeBackgroundFromSelection()),
+        sep,
         off('שינוי צורה'),
         {
           label: 'סדר',
@@ -356,7 +358,17 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           : []),
       ],
     },
-    { label: 'עזרה', items: [off('אודות')] },
+    {
+      label: 'עזרה',
+      items: [
+        {
+          label: 'רישיונות',
+          onClick: () => window.open('/THIRD-PARTY-NOTICES.txt', '_blank', 'noopener,noreferrer'),
+        },
+        { separator: true },
+        off('אודות'),
+      ],
+    },
   ]
 }
 

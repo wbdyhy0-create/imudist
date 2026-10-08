@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, defaultParagraphStyles, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultParagraphStyles, type Asset, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -262,6 +262,36 @@ export function useDocumentSession() {
   /** change one open document (by id) as one undo step, whether or not it is the one shown */
   const changeDoc = (id: number, next: (prev: DocContent) => DocContent) =>
     update(id, (d) => ({ ...d, h: changeHistory(d.h, (prev) => next(prev) ?? prev, false), last: null }))
+  const replaceImageAsset = (id: number, parentId: string | null, imageId: string, expectedAssetId: string, assetId: string, asset: Asset) => {
+    const hasTargetImage = (content: DocContent) => {
+      const targetImages = parentId
+        ? content.parents.find((parent) => parent.id === parentId)?.images
+        : content.images
+      return targetImages?.some((image) => image.id === imageId && image.assetId === expectedAssetId) ?? false
+    }
+    const entry = docs.find((document) => document.id === id)
+    if (!entry || !hasTargetImage(entry.h.present)) return false
+
+    update(id, (d) => {
+      const content = d.h.present
+      if (!hasTargetImage(content)) return d
+      const next: DocContent = {
+        ...content,
+        assets: { ...content.assets, [assetId]: asset },
+        ...(parentId
+          ? {
+              parents: content.parents.map((parent) => parent.id === parentId
+                ? { ...parent, images: parent.images.map((image) => image.id === imageId && image.assetId === expectedAssetId ? { ...image, assetId } : image) }
+                : parent),
+            }
+          : {
+              images: content.images.map((image) => image.id === imageId && image.assetId === expectedAssetId ? { ...image, assetId } : image),
+            }),
+      }
+      return { ...d, h: changeHistory(d.h, () => next, false), last: null }
+    })
+    return true
+  }
   const switchTo = (id: number) => {
     if (latest.current.docs.some((d) => d.id === id)) setActiveId(id)
   }
@@ -640,6 +670,7 @@ export function useDocumentSession() {
     openFiles,
     contentOf,
     changeDoc,
+    replaceImageAsset,
     save,
     saveAs,
     autosave,

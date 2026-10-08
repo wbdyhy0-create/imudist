@@ -4,6 +4,7 @@ import { runPreflight, type PreflightIssue } from '../preflight'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, clipCanvasToBoxes, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
+import { removeImageBackground } from '../backgroundRemoval'
 import { deliverPng } from '../pngExport'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
 import { createPortal } from 'react-dom'
@@ -96,7 +97,7 @@ import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, t
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, columnBoxes, pourText, primaryTextFrameOrder, primaryTextFramePageGroups, type FlowMode } from '../placeText'
-import { ownerPage, pageRects, parentShadowContent, type ParentOverride, type ParentShadowRef } from '../pages'
+import { detachedParentContent, ownerPage, pageRects, parentShadowContent, type ParentOverride, type ParentShadowRef } from '../pages'
 import { plainTocHeading, sliceTocDisplayMarkers, tocDisplayMarkers } from '../toc'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
@@ -118,6 +119,7 @@ import { floatsFor } from '../wrap'
 import type { RichTextClipboard } from '../richTextClipboard'
 import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
+import { GuidedToolTour } from './GuidedToolTour'
 import { ColorToolsPanel } from './ColorToolsPanel'
 import { ColorSamplerLens, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
@@ -280,6 +282,8 @@ export interface WorkspaceHandle {
   deletePage: () => void
   /** move the selected object in the stacking order */
   arrange: (op: ArrangeOp) => void
+  /** remove the background from the selected image */
+  removeBackgroundFromSelection: () => void
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
   shapeOp: (op: BoolOp) => void
   group: () => void
@@ -328,6 +332,8 @@ interface Props {
   doc: DocSettings
   initiallySelectPrimaryFrame?: boolean
   onInitialSelectionApplied?: () => void
+  startInitialTour?: boolean
+  onInitialTourComplete?: () => void
   /** the view re-fits to the first spread whenever this changes */
   fitKey: string
   showRulers: boolean
@@ -347,10 +353,14 @@ interface Props {
   /** text waiting to be placed (the loaded text cursor), or null */
   placing: PlacedText | null
   onPlacingChange: (placed: PlacedText | null) => void
+  documentSessionId: number | null
   images: ImageFrame[]
   assets: Assets
   colorSamples: ColorSample[]
   onImagesChange: (images: ImageFrame[], coalesceKey?: string) => void
+  onReplaceImageAsset: (docId: number, parentId: string | null, imageId: string, expectedAssetId: string, assetId: string, asset: Asset) => boolean
+  onNotify: (message: string) => void
+  onShowError: (title: string, error: unknown) => void
   /** pictures waiting to be placed (the loaded image cursor); the first is placed by the next click */
   placingImages: PlacedImage[]
   onPlacingImagesChange: (images: PlacedImage[]) => void
@@ -476,6 +486,8 @@ export function Workspace({
   doc,
   initiallySelectPrimaryFrame = false,
   onInitialSelectionApplied,
+  startInitialTour = false,
+  onInitialTourComplete,
   fitKey,
   showRulers,
   showGuides,
@@ -490,10 +502,14 @@ export function Workspace({
   pageOps,
   placing,
   onPlacingChange,
+  documentSessionId,
   images,
   assets,
   colorSamples,
   onImagesChange,
+  onReplaceImageAsset,
+  onNotify,
+  onShowError,
   placingImages,
   onPlacingImagesChange,
   guides,
@@ -538,6 +554,7 @@ export function Workspace({
   ref,
 }: Props) {
   const fontCatalog = useFontCatalog()
+  const [removingBackgroundId, setRemovingBackgroundId] = useState<string | null>(null)
   const previewClipId = useId().replace(/:/g, '')
   const [fontPreview, setFontPreview] = useState<{ frameId: string; family: string } | null>(null)
   const documentRects = useMemo(() => pageRects(doc), [doc])
@@ -3745,6 +3762,41 @@ export function Workspace({
     )[0].index
   }
 
+  const removeBackgroundFromSelection = () => {
+    const image = selectedId ? images.find((candidate) => candidate.id === selectedId) : undefined
+    if (!image) {
+      onNotify('בחרו תמונה בעמוד כדי להסיר את הרקע שלה.')
+      return
+    }
+    const sourceAsset = assets[image.assetId]
+    if (!sourceAsset) {
+      onShowError('הסרת הרקע נכשלה', new Error('קובץ התמונה אינו זמין במסמך.'))
+      return
+    }
+    if (documentSessionId === null) {
+      onNotify('אי אפשר להסיר רקע במצב תצוגה מקדימה.')
+      return
+    }
+    if (removingBackgroundId !== null) {
+      onNotify('הסרת הרקע כבר מתבצעת.')
+      return
+    }
+    const { id: imageId, assetId: expectedAssetId } = image
+    const docId = documentSessionId
+    const parentId = editingParentId
+    setRemovingBackgroundId(imageId)
+    onNotify('מסיר את הרקע במחשב…')
+    void removeImageBackground(sourceAsset)
+      .then(({ assetId, asset }) => {
+        if (!onReplaceImageAsset(docId, parentId, imageId, expectedAssetId, assetId, asset)) {
+          throw new Error('התמונה השתנתה או הוסרה לפני סיום העיבוד, ולכן התוצאה לא הוחלה.')
+        }
+        onNotify('הרקע הוסר. אפשר לבטל כדי לחזור לתמונה המקורית.')
+      })
+      .catch((error: unknown) => onShowError('הסרת הרקע נכשלה', error))
+      .finally(() => setRemovingBackgroundId(null))
+  }
+
   useImperativeHandle(ref, () => ({
     goToIssue,
     selectTool: activateTool,
@@ -3763,6 +3815,7 @@ export function Workspace({
     addPage: () => insertPages(1, 'after'),
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
+    removeBackgroundFromSelection,
     shapeOp: (op) => combineSelectedShapes(op),
     group: groupSelectedObjects,
     ungroup: ungroupSelectedObjects,
@@ -8136,26 +8189,14 @@ export function Workspace({
     onPageParentsChange(next)
   }
   /**
-   * "Detach": copies every given page's parent's objects onto the page itself, as ordinary editable objects at
-   * fresh ids, then clears that page's own parent - so every page keeps looking the same but stops following its
+   * "Detach": copies what every given page shows of its parent onto the page itself, as ordinary editable objects
+   * at fresh ids (the matching half of a facing parent, each auto page number written out as that page's own
+   * number), then clears that page's own parent - so every page keeps looking the same but stops following its
    * parent from then on. Every page is folded into the same three new arrays in one pass (not one onFramesChange
    * call per page), so detaching several pages at once doesn't have each call's stale `frames` overwrite the last.
    */
   const detachPagesFromParent = (pageIndices: number[]) => {
-    const newFrames: TextFrame[] = []
-    const newImages: ImageFrame[] = []
-    const newShapes: ShapeFrame[] = []
-    for (const pageIndex of pageIndices) {
-      const parentId = pageParents[pageIndex]
-      const parent = parentId ? parents.find((p) => p.id === parentId) : undefined
-      const rect = rects[pageIndex]
-      if (!parent || !rect) continue
-      const dx = rect.x
-      const dy = rect.y
-      newFrames.push(...parent.frames.map((f) => ({ ...f, id: newFrameId(), x: f.x + dx, y: f.y + dy, next: null })))
-      newImages.push(...parent.images.map((im) => ({ ...im, id: newFrameId(), x: im.x + dx, y: im.y + dy })))
-      newShapes.push(...parent.shapes.map((sh) => ({ ...sh, id: newFrameId(), x: sh.x + dx, y: sh.y + dy })))
-    }
+    const { frames: newFrames, images: newImages, shapes: newShapes } = detachedParentContent(doc, parents, pageParents, pageIndices, sections, frames, images, shapes, parentOverrides, newFrameId, runningHeaderForPage)
     if (newFrames.length) onFramesChange([...frames, ...newFrames])
     if (newImages.length) onImagesChange([...images, ...newImages])
     if (newShapes.length) onShapesChange([...shapes, ...newShapes])
@@ -9415,6 +9456,8 @@ export function Workspace({
                         const a = assets[selImage.assetId]
                         if (a) updateImage(selImage.id, { h: selImage.w * (a.height / a.width) })
                       }}
+                      onRemoveBackground={removeBackgroundFromSelection}
+                      removingBackground={removingBackgroundId !== null}
                       onDelete={() => {
                         onImagesChange(images.filter((im) => im.id !== selImage.id))
                         setSelectedId(null)
@@ -9719,6 +9762,7 @@ export function Workspace({
         issues={preflightIssues}
         onGoToIssue={goToIssue}
       />
+      <GuidedToolTour enabled={startInitialTour} onComplete={onInitialTourComplete ?? noop} />
     </div>
   )
 }

@@ -232,6 +232,32 @@ export function parentShadowContent(
   return out
 }
 
+/**
+ * What the given pages show of their parent (master) pages, as ordinary objects with fresh ids - the same content
+ * `parentShadowContent` draws on screen (the half of a facing parent that matches the page's side, each auto page
+ * number or running header written out as that page's own text), so that detaching a page from its parent leaves
+ * it looking exactly as it did instead of copying the whole parent over as it is.
+ */
+export function detachedParentContent(
+  doc: DocSettings,
+  parents: ParentPage[],
+  pageParents: (string | null)[],
+  pageIndices: number[],
+  sections: PageSection[],
+  documentFrames: TextFrame[],
+  documentImages: ImageFrame[],
+  documentShapes: ShapeFrame[],
+  parentOverrides: ParentOverride[],
+  newId: () => string,
+  runningHeader?: (pageIndex: number, styleId: string, strategy: 'first' | 'last') => string,
+): { frames: TextFrame[]; images: ImageFrame[]; shapes: ShapeFrame[] } {
+  const chosen = new Set(pageIndices)
+  const onlyChosen = pageParents.map((parentId, pageIndex) => (chosen.has(pageIndex) ? parentId : null))
+  const shown = parentShadowContent(doc, parents, onlyChosen, sections, documentFrames, runningHeader, parentOverrides, documentImages, documentShapes)
+  const own = <T extends { parentShadowRef: ParentShadowRef }>(items: T[]) => items.map(({ parentShadowRef: _ref, ...item }) => ({ ...item, id: newId() }))
+  return { frames: own(shown.frames), images: own(shown.images), shapes: own(shown.shapes) }
+}
+
 function runningHeaderForPage(doc: DocSettings, frames: TextFrame[], pageIndex: number, styleId: string, strategy: 'first' | 'last'): string {
   const rects = pageRects(doc)
   const candidates: { page: number; y: number; x: number; text: string }[] = []

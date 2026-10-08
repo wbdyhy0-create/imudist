@@ -74,7 +74,6 @@ export function ColorLibrary({ onColor, onGradient, mode = 'all' }: Props) {
           {gradients.length === 0 && <p className="muted color-library-empty">לא נמצאו מעברים.</p>}
         </div>
       )}
-      <a className="color-library-credit" href="https://github.com/ghosh/uiGradients" target="_blank" rel="noreferrer">גרדיאטים מ־uiGradients · MIT</a>
     </section>
   )
 }

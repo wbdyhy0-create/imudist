@@ -114,6 +114,7 @@ export const TOOLS: ToolDef[] = [
 
 const HIDDEN_TOOLBOX_TOOLS = new Set<ToolId>(['color', 'gradient', 'swatches', 'transform', 'collector'])
 const TOOLBOX_TOOLS = TOOLS.filter((item) => !HIDDEN_TOOLBOX_TOOLS.has(item.id))
+export const TOOL_TOUR_IDS = TOOLBOX_TOOLS.filter((item) => item.enabled).map((item) => item.id)
 
 /** tools that have a settings window (double click) */
 // ellipse and line have no default-tool settings left (nothing but a click-made default size, which no longer exists)
@@ -134,7 +135,7 @@ const FOLD_GROUPS: ToolId[][] = [
 ]
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
-const TOOL_HINTS: Partial<Record<ToolId, string>> = {
+export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   select: 'בחירת אובייקטים, הזזה ושינוי גודל',
   marqueeRect: 'בחירת צורה לחיתוך אובייקטים, תמונות וטקסט',
   marqueeEllipse: 'בחירה אליפטית וחיתוך לאובייקט חדש',
@@ -155,7 +156,7 @@ const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   pencil: 'ציור קו חופשי מוחלק',
   scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
   eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
-  heal: 'גרירה על תפר בתמונה ממלאת אותו בפיקסלים מהאזור שמסביב; סוגריים מרובעים משנים את גודל המברשת',
+  heal: 'גררו על אזור בתמונה כדי למלא אותו בפיקסלים מהסביבה. להקטנת המברשת החזיקו Shift ולחצו על (, ולהגדלתה החזיקו Shift ולחצו על ).',
   gap: 'גרור בין אובייקטים מיושרים כדי להרחיב צד אחד ולכווץ את השני; Shift מגביל לזוג הקרוב בלבד',
   color: 'בחירת צבע מילוי או קו',
   gradient: 'יצירת מעבר צבע',
@@ -197,6 +198,24 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
   const [flyout, setFlyout] = useState<{ group: ToolId[]; rect: DOMRect } | null>(null)
   const [hoveredTool, setHoveredTool] = useState<{ label: string; description: string; key?: string; rect: DOMRect } | null>(null)
   const renderedGroups = new Set<ToolId>()
+
+  useEffect(() => {
+    const syncTourTarget = (event: Event) => {
+      const targetId = (event as CustomEvent<string>).detail
+      const requestedTool = targetId?.startsWith('tool:') ? targetId.slice(5) as ToolId : null
+      const group = requestedTool ? foldGroupOf.get(requestedTool) : undefined
+      if (!group) {
+        setFlyout(null)
+        return
+      }
+      const slot = toolboxRef.current?.querySelector<HTMLButtonElement>(`[data-tour-slot="${group[0]}"]`)
+      if (!slot) return
+      slot.scrollIntoView({ block: 'nearest' })
+      setFlyout({ group, rect: slot.getBoundingClientRect() })
+    }
+    window.addEventListener('imudist:tool-tour-target', syncTourTarget)
+    return () => window.removeEventListener('imudist:tool-tour-target', syncTourTarget)
+  }, [])
 
   return (
     <div
@@ -278,6 +297,8 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
             <div className="tool-slot">
               <button
                 className={'tool' + (isActive ? ' active' : '') + (active.enabled ? '' : ' off')}
+                data-tour-id={`tool:${active.id}`}
+                data-tour-slot={group?.[0] ?? active.id}
                 aria-disabled={!active.enabled}
                 aria-pressed={isActive}
                 aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : `${active.label} — עדיין לא זמין`}
@@ -308,6 +329,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
       <div className="screen-modes" role="group" aria-label="מצב מסך">
         <button
           className={'tool' + (!previewMode ? ' active' : '')}
+          data-tour-id="view:normal"
           title="מצב רגיל (W)"
           aria-pressed={!previewMode}
           onClick={() => onPreviewMode(false)}
@@ -321,6 +343,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
         </button>
         <button
           className={'tool' + (previewMode ? ' active' : '')}
+          data-tour-id="view:preview"
           title="מצב תצוגה מקדימה (W)"
           aria-pressed={previewMode}
           onClick={() => onPreviewMode(true)}
@@ -416,6 +439,7 @@ function ToolFlyout({ group, anchor, current, onPick, onSettings, onClose }: Fly
         return (
           <div
             key={id}
+            data-tour-id={`tool:${id}`}
             role="menuitemradio"
             aria-checked={id === current}
             className={'menu-item tool-flyout-item' + (id === current ? ' on' : '')}

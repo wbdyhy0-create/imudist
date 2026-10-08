@@ -31,6 +31,7 @@ import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
 import type { PagePreset, Unit } from './units'
 import { SaveWorkspaceDialog } from './components/SaveWorkspaceDialog'
+import { TOOL_TOUR_COMPLETE_KEY } from './components/GuidedToolTour'
 import { defaultDockLayout, loadDockWorkspaceStore, loadLegacyDockTabOrder, saveDockWorkspaceStore, type DockLayout, type DockWorkspaceStore } from './dockWorkspaces'
 import { loadSystemFonts, useFontCatalog } from './fonts'
 
@@ -110,6 +111,16 @@ export default function App() {
   })
   const [nextName, setNextName] = useState(1)
   const [initialToolbarDocId, setInitialToolbarDocId] = useState<number | null>(null)
+  const [firstRunTourPending, setFirstRunTourPending] = useState(() => {
+    try {
+      return localStorage.getItem(TOOL_TOUR_COMPLETE_KEY) !== 'true'
+    } catch (error) {
+      console.warn('Could not read the first-run tool tour preference.', error)
+      return true
+    }
+  })
+  const [firstRunTourDocId, setFirstRunTourDocId] = useState<number | null>(null)
+  const firstRunDocumentStarted = useRef(false)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
@@ -653,12 +664,12 @@ export default function App() {
     document.title = doc ? `${session.dirty ? '• ' : ''}${doc.name} — ${APP_NAME}` : APP_NAME
   }, [doc, session.dirty])
 
-  const closeDialog = () => {
+  const closeDialog = useCallback(() => {
     setDialog(null)
     setPreview(null)
     setNewPreset(null)
     setNewPresetUnit(null)
-  }
+  }, [setDialog, setPreview, setNewPreset, setNewPresetUnit])
 
   const openNewDocument = (preset?: PagePreset, unit?: Unit) => {
     setNewPreset(preset ?? null)
@@ -666,13 +677,29 @@ export default function App() {
     setDialog('new')
   }
 
-  const create = (d: DocSettings) =>
-    session.createDocument(d, (id) => {
+  const create = useCallback((d: DocSettings) =>
+    sessionRef.current.createDocument(d, (id) => {
       setInitialToolbarDocId(id)
       setNextName((n) => n + 1)
       setLastSettings(d)
       closeDialog()
-    })
+    }), [closeDialog, setInitialToolbarDocId, setNextName, setLastSettings])
+
+  useEffect(() => {
+    if (!firstRunTourPending || session.activeId !== null || firstRunDocumentStarted.current) return
+    firstRunDocumentStarted.current = true
+    setFirstRunTourDocId(create(defaultDocSettings(`ללא שם-${nextName}`)))
+  }, [create, firstRunTourPending, nextName, session.activeId])
+
+  const completeFirstRunTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOOL_TOUR_COMPLETE_KEY, 'true')
+    } catch (error) {
+      console.warn('Could not save the first-run tool tour preference.', error)
+    }
+    setFirstRunTourPending(false)
+    setFirstRunTourDocId(null)
+  }, [setFirstRunTourPending, setFirstRunTourDocId])
 
   // the empty frames made automatically on the margins, counted only while the settings window is open
   const emptyFrames = useMemo(() => (dialog === 'setup' && doc ? emptyPrimaryFrameIds(doc, session.frames).length : 0), [dialog, doc, session.frames])
@@ -716,6 +743,8 @@ export default function App() {
               doc={shown}
               initiallySelectPrimaryFrame={!preview && !editingParent && session.activeId === initialToolbarDocId}
               onInitialSelectionApplied={() => setInitialToolbarDocId((id) => id === session.activeId ? null : id)}
+              startInitialTour={!preview && !editingParent && firstRunTourPending && session.activeId === firstRunTourDocId}
+              onInitialTourComplete={completeFirstRunTour}
               fitKey={fitKey}
               showRulers={showRulers}
               showGuides={showGuides}
@@ -730,10 +759,15 @@ export default function App() {
               pageOps={editingParent ? NO_PAGE_OPS : preview ? NO_PAGE_OPS : session.pages}
               placing={preview ? null : placing}
               onPlacingChange={preview ? noop : setPlacing}
+              documentSessionId={session.activeId}
               images={editingParent ? editingParent.images : preview ? NO_IMAGES : session.images}
               assets={session.assets}
               colorSamples={preview ? [] : session.colorSamples}
               onImagesChange={editingParent ? (next, key) => updateParent({ images: next }, key) : preview ? noop : session.changeImages}
+              onReplaceImageAsset={(docId, parentId, imageId, expectedAssetId, assetId, asset) =>
+                sessionRef.current.replaceImageAsset(docId, parentId, imageId, expectedAssetId, assetId, asset)}
+              onNotify={(message) => sessionRef.current.notify(message)}
+              onShowError={(title, error) => sessionRef.current.showError(title, error)}
               placingImages={preview ? NO_PLACED : placingImages}
               onPlacingImagesChange={preview ? noop : setPlacingImages}
               guides={editingParent ? editingParent.guides ?? NO_GUIDES : preview ? NO_GUIDES : session.guides}

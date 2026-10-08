@@ -147,6 +147,7 @@ export function DockingPanels({
             <button
               key={panel.id}
               className={'dock-tab' + (open?.id === panel.id || floating?.id === panel.id ? ' open' : '') + (dockOverId === panel.id && dragLayerId !== panel.id ? ' drop-target' : '')}
+              data-tour-id={`panel:${panel.id}`}
               aria-expanded={open?.id === panel.id || floating?.id === panel.id}
               title={panel.label}
               data-dock-panel-id={panel.id}

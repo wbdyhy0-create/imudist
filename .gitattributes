@@ -1,0 +1,1 @@
+src/assets/birefnet-lite-512.onnx filter=lfs diff=lfs merge=lfs -text

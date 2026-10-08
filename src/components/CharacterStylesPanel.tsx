@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { canBeBasedOn, resolveCharacterPatch } from '../characterStyleTree'
 import type { CharacterStyleRecord, CharacterStyleSettings } from '../document'
 import { useFontCatalog, weightName } from '../fonts'
+import { ContextMenu } from './ContextMenu'
 import { FontPicker } from './FontPicker'
 
 interface Props {
@@ -54,6 +55,7 @@ export function CharacterStylesPanel({ styles, activeId, modified, canApply, onA
   // the style the search buttons are about: the one last clicked, else the one the selected text has
   const [focusId, setFocusId] = useState<string | null>(null)
   const [found, setFound] = useState<{ id: string; count: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ styleId: string; x: number; y: number } | null>(null)
   const target = focusId && styles.some((style) => style.id === focusId) ? focusId : activeId ?? null
   const targetStyle = target ? styles.find((style) => style.id === target) : undefined
   const newName = () => {
@@ -71,7 +73,28 @@ export function CharacterStylesPanel({ styles, activeId, modified, canApply, onA
     <section className="paragraph-styles-panel props-panel character-styles-panel" aria-label="סגנונות תו">
       <div className="styles-panel-head">
         <h2 className="props-title">סגנונות תו</h2>
-        <button className="icon-button" aria-label="סגנון תו חדש" title="סגנון תו חדש" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: null, name: newName(), patch: {} })}>+</button>
+        <div className="character-style-head-actions">
+          <span title="סגנון חדש מהבחירה&#10;סמנו טקסט ולחצו כאן כדי ליצור סגנון לפי העיצוב של תחילת הבחירה ולהחיל אותו עליה.">
+            <button className="icon-button" aria-label="סגנון חדש מהבחירה" aria-description="סמנו טקסט כדי ליצור סגנון מהעיצוב שלו ולהחיל את הסגנון על הבחירה." onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: null, name: newName(), patch: onSelectionLook() })} disabled={!canApply}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 3.75h9l4 4V12M14 4v4h4M8 12.5h5M8 16h4" />
+                <path d="M18 14.5v7M14.5 18h7" />
+              </svg>
+            </button>
+          </span>
+          <span title="הגדר מחדש לפי הבחירה&#10;בחרו סגנון וסמנו טקסט המעוצב כרצונכם. הסגנון וכל הטקסט שמשתמש בו יעודכנו לפי הבחירה.">
+            <button className="icon-button" aria-label="הגדר מחדש לפי הבחירה" aria-description="עדכנו את הסגנון הנבחר לפי מראה הטקסט המסומן; כל המופעים שלו יתעדכנו." onMouseDown={(event) => event.preventDefault()} onClick={() => activeId && onRedefine(activeId)} disabled={!canApply || !activeId}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 7v5h-5M4.6 9a7.5 7.5 0 0 1 13-2L20 9M4 17v-5h5M19.4 15a7.5 7.5 0 0 1-13 2L4 15" />
+              </svg>
+            </button>
+          </span>
+          <span title="סגנון תו חדש&#10;יוצר סגנון ריק. בחלון שנפתח אפשר לתת לו שם ולבחור אילו מאפייני עיצוב לשמור.">
+            <button className="icon-button" aria-label="סגנון תו חדש" aria-description="יוצר סגנון ריק שאפשר לתת לו שם ולהגדיר את מאפייני העיצוב שלו." onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: null, name: newName(), patch: {} })}>
+              +
+            </button>
+          </span>
+        </div>
       </div>
       <p className="muted">{canApply ? 'בחר טקסט ולחץ על סגנון. בלי בחירה, הסגנון חל על כל הטקסט שבתיבה.' : 'בחר תיבת טקסט או סמן טקסט כדי להחיל סגנון.'}</p>
       <div className="paragraph-style-list">
@@ -84,7 +107,16 @@ export function CharacterStylesPanel({ styles, activeId, modified, canApply, onA
           <span className="style-sample">[ללא]</span>
         </button>
         {styles.map((style) => (
-          <div key={style.id} className="character-style-row">
+          <div
+            key={style.id}
+            className="character-style-row"
+            onContextMenu={(event) => {
+              event.preventDefault()
+              setFocusId(style.id)
+              setFound(null)
+              setContextMenu({ styleId: style.id, x: event.clientX, y: event.clientY })
+            }}
+          >
             <button
               className={'paragraph-style-row' + (style.id === activeId ? ' active' : '') + (style.id === target ? ' focused' : '')}
               onMouseDown={(event) => event.preventDefault()}
@@ -105,18 +137,14 @@ export function CharacterStylesPanel({ styles, activeId, modified, canApply, onA
           </div>
         ))}
       </div>
-      <div className="paragraph-style-actions character-style-actions">
-        <button className="btn" disabled={!canApply} onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: null, name: newName(), patch: onSelectionLook() })}>סגנון חדש מהבחירה</button>
-        <button
-          className="btn"
-          disabled={!canApply || !activeId}
-          title="הסגנון של הטקסט הנבחר מקבל את העיצוב שיש לטקסט הזה עכשיו, וכל הטקסט שיש לו את הסגנון מתעדכן"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => activeId && onRedefine(activeId)}
-        >
-          הגדר מחדש לפי הבחירה
-        </button>
-      </div>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          items={[{ label: 'מחק את סגנון התו הנבחר', onClick: () => onDelete(contextMenu.styleId) }]}
+        />
+      )}
       <div className="character-style-find" aria-label="חיפוש מופעים של הסגנון">
         <span className="muted">{targetStyle ? `מופעים של "${targetStyle.name}"` : 'בחר סגנון כדי לחפש את מופעיו'}</span>
         <div className="character-style-find-buttons">

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppLogo } from './AppLogo'
+import { HelpAssistant } from './HelpAssistant'
 
 export interface MenuItem {
   label?: string
@@ -53,6 +54,7 @@ export function MenuBar({ menus }: { menus: MenuDef[] }) {
           {open === i && <MenuPanel items={menu.items} onDone={() => setOpen(null)} />}
         </div>
       ))}
+      <HelpAssistant />
     </div>
   )
 }
