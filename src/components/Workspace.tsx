@@ -88,6 +88,7 @@ import {
   type TocConfig,
   type TocPageReference,
 } from '../document'
+import { editRangeInStory, reportIsViewOf } from '../oversetCaret'
 import { isTyping } from '../dom'
 import { HANDLES, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
@@ -811,6 +812,12 @@ export function Workspace({
   /** where the editor should put its selection (and in which frame) */
   const [request, setRequest] = useState<(SelRequest & { frameId: string }) | null>(null)
   const requestToken = useRef(0)
+  /**
+   * The caret is in text that does not fit in any frame (typing on after the last line a frame holds). The editor can only show
+   * a caret in what the frame shows, so it is put at the end of that, and what the editor then says about the caret is not the
+   * caret's place: the real one stays in `textSel` until the user moves it (clicks, or a key takes the caret off the end).
+   */
+  const oversetCaret = useRef(false)
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
   const [footnoteSel, setFootnoteSel] = useState<FootnoteSel | null>(null)
@@ -1144,6 +1151,7 @@ export function Workspace({
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
     const tf = nf.get(target.id)!
     const pos = Math.max(0, Math.min(abs - tf.start, tf.slice.length))
+    oversetCaret.current = abs > tf.end
     askSelection(target.id, pos, pos)
     setTextSel({ headId, a: abs, b: abs })
     setEditingId(target.id)
@@ -1400,25 +1408,15 @@ export function Workspace({
   const handleEdit = (frameId: string, from: number, to: number, insert: string) => {
     const fl = flow.get(frameId)
     if (!fl) return
-    let a = fl.start + from
-    let b = fl.start + to
-    // Ctrl+A across a thread: the edit replaces the selected text of the whole story
-    if (textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
-      a = textSel.a
-      b = textSel.b
-    }
+    // a selection across a thread (Ctrl+A) is what the edit replaces; a caret in text no frame shows is where it is made
+    const { a, b } = editRangeInStory(fl, from, to, textSel?.headId === fl.headId ? textSel : null, oversetCaret.current)
     applyEdit(fl.headId, a, b, insert)
   }
 
   const handlePasteFormattedText = (frameId: string, from: number, to: number, clipboard: RichTextClipboard) => {
     const fl = flow.get(frameId)
     if (!fl) return
-    let a = fl.start + from
-    let b = fl.start + to
-    if (textSel && textSel.headId === fl.headId && (textSel.a < fl.start || textSel.b > fl.end)) {
-      a = textSel.a
-      b = textSel.b
-    }
+    const { a, b } = editRangeInStory(fl, from, to, textSel?.headId === fl.headId ? textSel : null, oversetCaret.current)
     applyEdit(fl.headId, a, b, clipboard.text, undefined, clipboard)
   }
 
@@ -2074,15 +2072,14 @@ export function Workspace({
     const fl = flow.get(frameId)
     if (!fl) return
     setFootnoteSel(null)
+    const shownEnd = fl.end - fl.start
+    if (!(a === shownEnd && b === shownEnd)) oversetCaret.current = false
     // keep a selection that runs across several frames (Ctrl+A, or a drag from one frame into another) while the
     // browser reports only this frame's part of it: the editing frame's own selection change would otherwise overwrite
-    // the whole range with just its own piece, so a drag from page 2 up into page 1 ended up selecting page 1 alone
+    // the whole range with just its own piece, so a drag from page 2 up into page 1 ended up selecting page 1 alone.
+    // The same for a caret in text that fits in no frame: the editor shows it at the end of what the frame shows
     setTextSel((prev) => {
-      if (prev && prev.headId === fl.headId && (prev.a < fl.start || prev.b > fl.end)) {
-        const ownA = Math.max(prev.a, fl.start) - fl.start
-        const ownB = Math.min(prev.b, fl.end) - fl.start
-        if (a === ownA && b === ownB) return prev
-      }
+      if (prev && prev.headId === fl.headId && reportIsViewOf(prev, fl, a, b, oversetCaret.current)) return prev
       return prev && prev.headId === fl.headId && prev.a === fl.start + a && prev.b === fl.start + b
         ? prev
         : { headId: fl.headId, a: fl.start + a, b: fl.start + b }
@@ -6736,6 +6733,7 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode) return // let the pan handler see it
+    oversetCaret.current = false
     setFootnoteSel(null)
     if (layerLocked || itemLocks[id]) return
     if (layerLocked) return
