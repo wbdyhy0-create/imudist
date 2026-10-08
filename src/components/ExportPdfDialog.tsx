@@ -22,6 +22,11 @@ const DPI_OPTIONS = [
   { dpi: 300, label: 'איכות גבוהה להדפסה (300 DPI)' },
   { dpi: 150, label: 'איכות מסך / שליחה דיגיטלית (150 DPI)' },
 ]
+const COLOR_MODES = [
+  { mode: 'rgb' as const, label: 'RGB — למסך ולשליחה דיגיטלית' },
+  { mode: 'cmyk' as const, label: 'CMYK — להדפסה בדפוס' },
+]
+const CMYK_NOTE = 'הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.'
 const DEFAULT_BLEED_MM = 3
 
 /** File > ייצוא ל-PDF…: every page rendered as a sharp image (see pdfExport.ts for why — this is a deliberate
@@ -35,6 +40,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
   const [bleedPt, setBleedPt] = useState(doc.bleed.top > 0 ? doc.bleed.top : toPt(DEFAULT_BLEED_MM, 'mm'))
   const [cropMarks, setCropMarks] = useState(false)
   const [dpi, setDpi] = useState(300)
+  const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const unit: Unit = doc.unit
@@ -69,6 +75,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
           bleedPt,
           cropMarks: bleedOn && cropMarks,
           dpi,
+          colorMode,
         },
         doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם',
         (done, total) => setBusy({ done, total }),
@@ -144,6 +151,18 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
             ))}
           </div>
         </div>
+
+        <div className="field">
+          <div className="field-label">מצב צבע</div>
+          <div className="seg small" role="radiogroup" aria-label="מצב צבע">
+            {COLOR_MODES.map((o) => (
+              <button key={o.mode} role="radio" aria-checked={colorMode === o.mode} className={colorMode === o.mode ? 'on' : ''} onClick={() => setColorMode(o.mode)} disabled={!!busy}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {colorMode === 'cmyk' && <p className="muted">{CMYK_NOTE}</p>}
 
         <p className="muted">
           כל עמוד נשמר כתמונה חדה ברזולוציה שנבחרה, בדיוק כפי שהוא נראה במסמך — כך שאין תלות בגופנים בזמן ההדפסה, והטקסט העברי לעולם לא יתעוות אצל בית הדפוס.

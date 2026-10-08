@@ -15,6 +15,7 @@ import { hexToRgb, linearGradientLine } from './colorModels'
 import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
+import { addCmykPicture } from './cmykPage'
 import { stackOrder } from './stacking'
 
 export interface PdfExportOptions {
@@ -26,6 +27,8 @@ export interface PdfExportOptions {
   cropMarks: boolean
   /** pixels per inch for placed pictures */
   dpi: number
+  /** the colours the PDF is written in: RGB as the screen has them (the default), or CMYK for a printing press */
+  colorMode?: 'rgb' | 'cmyk'
 }
 
 const PT_PER_INCH = 72
@@ -600,7 +603,7 @@ export interface PreparedExport {
 }
 
 /** The look of the pages of a PDF: bleed around them, crop marks outside it, the resolution of what is drawn. */
-export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi'>
+export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi' | 'colorMode'>
 
 /**
  * Lays a document out for export: the footnotes are numbered and placed, the endnote pages are added. Nothing is drawn
@@ -660,14 +663,19 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     if (!target) target = new jsPDF({ unit: 'pt', format: [sheet.w, sheet.h], orientation: sheet.w > sheet.h ? 'landscape' : 'portrait' })
     else target.addPage([sheet.w, sheet.h])
     const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
-    const picture = canvas.toDataURL('image/png')
-    // jsPDF takes a PNG apart into raw pixels and, unless it is told to compress them, writes those: a 300 DPI A4 page is 26 MB of them.
-    // Compressed again (lossless, as the PNG was) it takes about what the PNG did
-    target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
-    written += picture.length * 0.75
+    const cmyk = options.colorMode === 'cmyk'
+    if (cmyk) {
+      written += await addCmykPicture(target, canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
+    } else {
+      const picture = canvas.toDataURL('image/png')
+      // jsPDF takes a PNG apart into raw pixels and, unless it is told to compress them, writes those: a 300 DPI A4 page is 26 MB of them.
+      // Compressed again (lossless, as the PNG was) it takes about what the PNG did
+      target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
+      written += picture.length * 0.75
+    }
     // a PDF is built as one string, and a string cannot be longer than about 512 MB: say so before drawing the rest of the pages
     if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
-    if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt)
+    if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, cmyk)
     onPage?.(i - first + 1, total)
   }
   return target
@@ -736,14 +744,16 @@ export async function exportPdf(
 }
 
 /** Crop marks around a page whose trim box sits at (originX + bleedPt, originY + bleedPt) on the sheet. */
-function drawCropMarks(pdf: jsPDF, page: PageRect, originX: number, originY: number, bleedPt: number) {
+function drawCropMarks(pdf: jsPDF, page: PageRect, originX: number, originY: number, bleedPt: number, cmyk = false) {
   const len = 12
   const gap = 2
   const left = originX + bleedPt
   const top = originY + bleedPt
   const right = left + page.w
   const bottom = top + page.h
-  pdf.setDrawColor(0, 0, 0)
+  // in CMYK the marks are "registration" (every ink at full), so that they show on every plate a shop makes
+  if (cmyk) pdf.setDrawColor(1, 1, 1, 1)
+  else pdf.setDrawColor(0, 0, 0)
   pdf.setLineWidth(0.3)
   const h = (x0: number, y: number, x1: number) => pdf.line(x0, y, x1, y)
   const v = (x: number, y0: number, y1: number) => pdf.line(x, y0, x, y1)

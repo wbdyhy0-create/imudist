@@ -329,6 +329,11 @@ const DPI_CHOICES = [
   { dpi: 150, label: 'איכות מסך / שליחה דיגיטלית (150 DPI)' },
 ]
 
+const COLOR_CHOICES = [
+  { mode: 'rgb' as const, label: 'RGB — למסך ולשליחה דיגיטלית' },
+  { mode: 'cmyk' as const, label: 'CMYK — להדפסה בדפוס' },
+]
+
 /** The book as one PDF: the same choices as a single document's export, for every page of every chapter. */
 export function BookExportDialog({ controller }: { controller: BookController }) {
   const { book, numbering, exportOpen, exportProgress, busy } = controller
@@ -336,6 +341,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
   const [bleedPt, setBleedPt] = useState(toPt(3, 'mm'))
   const [cropMarks, setCropMarks] = useState(false)
   const [dpi, setDpi] = useState(300)
+  const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
   if (!exportOpen || !book || !numbering) return null
   const run = () => {
     // opened synchronously, still inside the click, so showing the result in it is not stopped as a popup
@@ -346,7 +352,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
       view.document.body.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc;font:14px sans-serif'
       view.document.body.textContent = 'מייצא PDF, נא להמתין…'
     }
-    void controller.runExport({ bleed: bleedOn, bleedPt, cropMarks: bleedOn && cropMarks, dpi }, view)
+    void controller.runExport({ bleed: bleedOn, bleedPt, cropMarks: bleedOn && cropMarks, dpi, colorMode }, view)
   }
   return (
     <div className="modal-backdrop">
@@ -381,6 +387,17 @@ export function BookExportDialog({ controller }: { controller: BookController })
             ))}
           </div>
         </div>
+        <div className="field">
+          <div className="field-label">מצב צבע</div>
+          <div className="seg small" role="radiogroup" aria-label="מצב צבע">
+            {COLOR_CHOICES.map((choice) => (
+              <button key={choice.mode} role="radio" aria-checked={colorMode === choice.mode} className={colorMode === choice.mode ? 'on' : ''} onClick={() => setColorMode(choice.mode)} disabled={busy}>
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {colorMode === 'cmyk' && <p className="muted">הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.</p>}
         <p className="muted">כל עמוד נשמר כתמונה חדה, וספר גדול ב-300 DPI הוא קובץ גדול והייצוא לוקח זמן. לבדיקה אפשר לבחור 150 DPI.</p>
         {exportProgress && (
           <p role="status">
