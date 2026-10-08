@@ -1,0 +1,9 @@
+{
+  "name": "imudist-webkit-viewer",
+  "private": true,
+  "type": "module",
+  "description": "Opens the app in WebKit, the engine of Safari and of the Mac version, in a window of its own",
+  "dependencies": {
+    "playwright": "^1.64.0"
+  }
+}
