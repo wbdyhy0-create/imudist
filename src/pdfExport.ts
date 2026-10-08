@@ -16,6 +16,8 @@ import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
 import { addCmykPicture } from './cmykPage'
+import { extractGlyphs, type VectorGlyph } from './vectorText'
+import { registerFont } from './fontFiles'
 import { stackOrder } from './stacking'
 
 export interface PdfExportOptions {
@@ -29,6 +31,8 @@ export interface PdfExportOptions {
   dpi: number
   /** the colours the PDF is written in: RGB as the screen has them (the default), or CMYK for a printing press */
   colorMode?: 'rgb' | 'cmyk'
+  /** plain text written as real text (in its font, which is put in the PDF) instead of as a part of the page picture; RGB only for now */
+  vectorText?: boolean
 }
 
 const PT_PER_INCH = 72
@@ -124,7 +128,10 @@ async function drawTextDom(
   page: PageRect,
   scale: number,
   skipFeather = false,
-) {
+  /** when given, frames of plain text are not drawn but handed over (as glyphs) to be written to the PDF as real text */
+  vectorSink?: VectorGlyph[],
+): Promise<number> {
+  let drawn = 0
   if (!skipFeather && content.frames.some((frame) => frame.feather)) {
     let index = 0
     while (index < content.frames.length) {
@@ -134,7 +141,7 @@ async function drawTextDom(
         layer.width = Math.max(1, Math.ceil(page.w * scale))
         layer.height = Math.max(1, Math.ceil(page.h * scale))
         const layerContext = layer.getContext('2d')!
-        await drawTextDom(layerContext, { ...content, frames: [frame], storyFrames: content.storyFrames ?? content.frames }, flows, page, scale, true)
+        drawn += await drawTextDom(layerContext, { ...content, frames: [frame], storyFrames: content.storyFrames ?? content.frames }, flows, page, scale, true)
         layerContext.save()
         layerContext.globalCompositeOperation = 'destination-in'
         const width = frame.w * scale
@@ -148,10 +155,10 @@ async function drawTextDom(
       } else {
         const start = index
         while (index < content.frames.length && !content.frames[index].feather) index++
-        await drawTextDom(ctx, { ...content, frames: content.frames.slice(start, index) }, flows, page, scale, true)
+        drawn += await drawTextDom(ctx, { ...content, frames: content.frames.slice(start, index) }, flows, page, scale, true, vectorSink)
       }
     }
-    return
+    return drawn
   }
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
   const root = document.createElement('div')
@@ -167,6 +174,7 @@ async function drawTextDom(
     background: 'transparent',
   })
   document.body.appendChild(root)
+  const plainFrames: HTMLElement[] = []
   try {
     for (const frame of content.frames) {
       if (frame.x >= page.x + page.w || frame.x + frame.w <= page.x || frame.y >= page.y + page.h || frame.y + frame.h <= page.y) continue
@@ -386,8 +394,20 @@ async function drawTextDom(
         host.appendChild(footnotes)
       }
       root.appendChild(outer)
+      if (vectorSink && vectorEligible(frame, flow)) plainFrames.push(outer)
     }
     await document.fonts?.ready
+    if (vectorSink) {
+      // a frame of plain text goes to the PDF as text; one that has more than that stays here and is drawn as a picture
+      const origin = root.getBoundingClientRect()
+      for (const outer of plainFrames) {
+        const glyphs = await extractGlyphs(outer, origin)
+        if (!glyphs) continue
+        vectorSink.push(...glyphs)
+        outer.remove()
+      }
+    }
+    if (root.childElementCount === 0) return drawn
     const raster = await html2canvas(root, {
       backgroundColor: null,
       scale,
@@ -396,9 +416,15 @@ async function drawTextDom(
       logging: false,
     })
     ctx.drawImage(raster, 0, 0)
+    return drawn + root.childElementCount
   } finally {
     root.remove()
   }
+}
+
+/** Whether a frame may be written as real text: it has to be only plain text, in a box that is not turned, scaled, faded or feathered. */
+function vectorEligible(frame: TextFrame, flow: FrameFlow): boolean {
+  return !frame.rotation && !frame.textScale && !frame.feather && !frame.rasterized && (frame.opacity ?? 1) >= 1 && flow.footnotes.length === 0
 }
 
 /** a table is drawn from the same layout the screen uses, rasterized from a DOM copy of it (its text is set by the browser, like a frame's) */
@@ -497,6 +523,11 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
   ctx.restore()
 }
 
+/** One part of a page, bottom to top: a picture (the page's own pixels; the first one is the paper), or text to be written as text. */
+export type PageLayer =
+  | { kind: 'picture'; canvas: HTMLCanvasElement }
+  | { kind: 'text'; glyphs: VectorGlyph[] }
+
 /** One page, rendered to a canvas at the chosen DPI. `page` is the TRIM box; `bleedPt` extends the canvas (and what
  *  gets drawn) beyond it on every side, so pictures/shapes that bleed off the page still print all the way to the
  *  cut line. */
@@ -507,16 +538,51 @@ export async function renderPage(
   bleedPt: number,
   dpi: number,
 ): Promise<HTMLCanvasElement> {
+  const [layer] = await renderPageLayers(content, flows, page, bleedPt, dpi, false)
+  return (layer as { kind: 'picture'; canvas: HTMLCanvasElement }).canvas
+}
+
+/**
+ * The same page in layers. With `vector` off it is one picture. With it on, the frames of plain text are not drawn but come as
+ * text layers, and what lies above them is a picture of its own with a see-through background: picture, text, picture...
+ */
+export async function renderPageLayers(
+  content: ExportContent,
+  flows: Map<string, FrameFlow>,
+  page: PageRect,
+  bleedPt: number,
+  dpi: number,
+  vector: boolean,
+): Promise<PageLayer[]> {
   const scale = pxPerPt(dpi)
   const w = (page.w + 2 * bleedPt) * scale
   const h = (page.h + 2 * bleedPt) * scale
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.round(w)
-  canvas.height = Math.round(h)
-  const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.translate(bleedPt * scale, bleedPt * scale)
+  const layers: PageLayer[] = []
+  let current: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; dirty: boolean } | null = null
+  /** the picture being drawn on; the first one of a page starts as white paper, the ones above it as nothing */
+  const surface = () => {
+    if (!current) {
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(w)
+      canvas.height = Math.round(h)
+      const context = canvas.getContext('2d')!
+      if (layers.length === 0) {
+        context.fillStyle = '#fff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+      }
+      context.translate(bleedPt * scale, bleedPt * scale)
+      current = { canvas, ctx: context, dirty: false }
+    }
+    return current
+  }
+  /** the picture is finished: it is kept when it has something on it (or is the paper), and what comes next starts a new one */
+  const closePicture = () => {
+    if (current && (current.dirty || layers.length === 0)) {
+      current.ctx.setTransform(1, 0, 0, 1, 0, 0)
+      layers.push({ kind: 'picture', canvas: current.canvas })
+    }
+    current = null
+  }
   const area = { x: page.x - bleedPt, y: page.y - bleedPt, w: page.w + 2 * bleedPt, h: page.h + 2 * bleedPt }
   const overlaps = (ox: number, oy: number, ow: number, oh: number) => ox < area.x + area.w && ox + ow > area.x && oy < area.y + area.h && oy + oh > area.y
   const isParentShadow = (item: { id: string }) => item.id.startsWith('parent-shadow:')
@@ -530,14 +596,21 @@ export async function renderPage(
     let pendingFrames: TextFrame[] = []
     const flushFrames = async () => {
       if (pendingFrames.length === 0) return
-      await drawTextDom(ctx, {
+      const sink: VectorGlyph[] | undefined = vector ? [] : undefined
+      const target = surface()
+      const drawn = await drawTextDom(target.ctx, {
         doc: content.doc,
         frames: pendingFrames,
         images: content.images,
         paragraphStyles: content.paragraphStyles,
         sections: content.sections,
         storyFrames: content.frames,
-      }, flows, page, scale)
+      }, flows, page, scale, false, sink)
+      if (drawn > 0) target.dirty = true
+      if (sink && sink.length > 0) {
+        closePicture()
+        layers.push({ kind: 'text', glyphs: sink })
+      }
       pendingFrames = []
     }
     for (const item of ordered) {
@@ -550,13 +623,19 @@ export async function renderPage(
       if (item.kind === 'shape') {
         const shape = shapeById.get(item.id)
         if (shape && overlaps(shape.x, shape.y, shape.w, shape.h)) {
-          await drawShape(ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
+          const target = surface()
+          target.dirty = true
+          await drawShape(target.ctx, shape, page, scale, shape.image ? content.assets[shape.image.assetId] : undefined)
         }
       } else {
         const image = imageById.get(item.id)
         if (!image || !overlaps(image.x, image.y, image.w, image.h)) continue
         const asset = content.assets[image.assetId]
-        if (asset) await drawImage(ctx, image, asset, page, scale)
+        if (asset) {
+          const target = surface()
+          target.dirty = true
+          await drawImage(target.ctx, image, asset, page, scale)
+        }
       }
     }
     await flushFrames()
@@ -575,8 +654,9 @@ export async function renderPage(
     await drawObjects(parentFrames, parentImages, parentShapes)
     await drawObjects(pageFrames, pageImages, pageShapes)
   }
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  return canvas
+  if (!current && layers.length === 0) surface()
+  closePicture()
+  return layers
 }
 
 /** Renders the chosen page range to a PDF (one raster image per page, at the chosen DPI — the browser's own text
@@ -603,7 +683,7 @@ export interface PreparedExport {
 }
 
 /** The look of the pages of a PDF: bleed around them, crop marks outside it, the resolution of what is drawn. */
-export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi' | 'colorMode'>
+export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi' | 'colorMode' | 'vectorText'>
 
 /**
  * Lays a document out for export: the footnotes are numbered and placed, the endnote pages are added. Nothing is drawn
@@ -662,8 +742,24 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     const sheet = sheetSizeOf(page, options)
     if (!target) target = new jsPDF({ unit: 'pt', format: [sheet.w, sheet.h], orientation: sheet.w > sheet.h ? 'landscape' : 'portrait' })
     else target.addPage([sheet.w, sheet.h])
-    const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
     const cmyk = options.colorMode === 'cmyk'
+    if (options.vectorText && !cmyk) {
+      const layers = await renderPageLayers(prepared.content, prepared.flows, page, bleedPt, options.dpi, true)
+      for (const layer of layers) {
+        if (layer.kind === 'text') {
+          writeGlyphs(target, layer.glyphs, marksMargin + bleedPt, marksMargin + bleedPt)
+          continue
+        }
+        const picture = layer.canvas.toDataURL('image/png')
+        target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
+        written += picture.length * 0.75
+      }
+      if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
+      if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, false)
+      onPage?.(i - first + 1, total)
+      continue
+    }
+    const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
     if (cmyk) {
       written += await addCmykPicture(target, canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
     } else {
@@ -679,6 +775,29 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     onPage?.(i - first + 1, total)
   }
   return target
+}
+
+/** Writes letters to the current page as text, each at the place the browser put it. `x`/`y` is where the page's own top-left corner is on the sheet. */
+function writeGlyphs(pdf: jsPDF, glyphs: VectorGlyph[], x: number, y: number) {
+  let font: unknown = null
+  let size = -1
+  let color = ''
+  for (const glyph of glyphs) {
+    if (glyph.font !== font) {
+      pdf.setFont(registerFont(pdf, glyph.font), 'normal')
+      font = glyph.font
+    }
+    if (glyph.size !== size) {
+      pdf.setFontSize(glyph.size)
+      size = glyph.size
+    }
+    const rgb = glyph.color.join(',')
+    if (rgb !== color) {
+      pdf.setTextColor(glyph.color[0], glyph.color[1], glyph.color[2])
+      color = rgb
+    }
+    pdf.text(glyph.text, x + glyph.x, y + glyph.baseline)
+  }
 }
 
 /** the PDF as a string overflows ("Invalid string length") when it is too big: say what to do instead */

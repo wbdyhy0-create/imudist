@@ -41,6 +41,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
   const [cropMarks, setCropMarks] = useState(false)
   const [dpi, setDpi] = useState(300)
   const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
+  const [vectorText, setVectorText] = useState(false)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const unit: Unit = doc.unit
@@ -76,6 +77,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
           cropMarks: bleedOn && cropMarks,
           dpi,
           colorMode,
+          vectorText: vectorText && colorMode === 'rgb',
         },
         doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם',
         (done, total) => setBusy({ done, total }),
@@ -163,6 +165,14 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
           </div>
         </div>
         {colorMode === 'cmyk' && <p className="muted">{CMYK_NOTE}</p>}
+
+        <label className="page-bar-check">
+          <input type="checkbox" checked={vectorText && colorMode === 'rgb'} onChange={(e) => setVectorText(e.target.checked)} disabled={!!busy || colorMode === 'cmyk'} />
+          טקסט וקטורי (ניסיוני, ב-RGB בלבד)
+        </label>
+        <p className="muted">
+          טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ. תיבה שיש בה משהו נוסף (ניקוד, קו תחתון, צל, מסגרת לאות, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב נשארת כתמונה, כמו קודם.
+        </p>
 
         <p className="muted">
           כל עמוד נשמר כתמונה חדה ברזולוציה שנבחרה, בדיוק כפי שהוא נראה במסמך — כך שאין תלות בגופנים בזמן ההדפסה, והטקסט העברי לעולם לא יתעוות אצל בית הדפוס.
