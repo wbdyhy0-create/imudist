@@ -413,7 +413,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
         {dpi === 600 && <p className="muted">ב-600 DPI כל עמוד גדול פי ארבעה מ-300 DPI, וספר שלם בגודל כזה הוא קובץ ענק והייצוא איטי מאוד. כדאי לייצא כך רק פרק בודד או טווח קטן.</p>}
         <label className="page-bar-check">
           <input type="checkbox" checked={vectorText} onChange={(event) => setVectorText(event.target.checked)} disabled={busy} />
-          ייצוא וקטורי: טקסט, צורות ותמונות (ניסיוני)
+          ייצוא וקטורי: טקסט, צורות ותמונות
         </label>
         <p className="muted">טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות. תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה.</p>
         <p className="muted">כל עמוד נשמר כתמונה חדה, וספר גדול ב-300 DPI הוא קובץ גדול והייצוא לוקח זמן. לבדיקה אפשר לבחור 150 DPI.</p>

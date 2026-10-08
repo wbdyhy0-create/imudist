@@ -181,7 +181,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
 
         <label className="page-bar-check">
           <input type="checkbox" checked={vectorText} onChange={(e) => setVectorText(e.target.checked)} disabled={!!busy} />
-          ייצוא וקטורי: טקסט, צורות ותמונות (ניסיוני)
+          ייצוא וקטורי: טקסט, צורות ותמונות
         </label>
         <p className="muted">
           טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות (ב-CMYK גם הצבעים האלה נכתבים ב-CMYK, ושחור בדיו שחור בלבד). תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, מסגרת לאות, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה, כמו קודם.
