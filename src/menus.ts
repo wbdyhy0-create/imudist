@@ -185,9 +185,6 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           submenu: [tool('טקסט', 'type', 'T'), tool('טקסט על קו', 'pathtype', 'Shift+T'), tool('דוגם סגנון', 'eyedropper', 'I')],
         },
         sep,
-        { label: 'גופן', disabled: !c.showProps, onClick: c.toggleProps },
-        { label: 'גודל', disabled: !c.showProps, onClick: c.toggleProps },
-        sep,
         off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
@@ -196,6 +193,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         inParent('הוספת כותרת משתנה…', (ws) => ws.insertRunningHeader()),
         doc('הוספת הערת שוליים', 'Ctrl+Alt+Shift+F', (ws) => ws.insertFootnote()),
         doc('אפשרויות הערות שוליים…', '', (ws) => ws.openFootnoteOptions()),
+        doc('ממיר הערות שוליים…', '', (ws) => ws.openFootnoteConverter()),
         sep,
         {
           label: 'הוספת מספר עמוד אוטומטי',

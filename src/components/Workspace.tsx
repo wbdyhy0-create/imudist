@@ -164,6 +164,8 @@ import { PropertiesPanel } from './PropertiesPanel'
 import type { SelRequest } from './RichEditor'
 import { Ruler } from './Ruler'
 import { RunningHeaderDialog } from './RunningHeaderDialog'
+import { FootnoteConverterPanel, type FootnoteConvertControl, type FootnoteConvertRequest } from './FootnoteConverterPanel'
+import { convertedText, footnotesToInlineNotes, inlineNotesToFootnotes, NOTE_BRACKETS, type NoteRange } from '../footnoteConvert'
 import { FirstWordStylerDialog, type FirstWordTarget } from './FirstWordStylerDialog'
 import { WindowTextDialog, type WindowTextResult } from './WindowTextDialog'
 import { FindReplacePanel, type FindSearch, type FindSummary } from './FindReplacePanel'
@@ -305,6 +307,8 @@ export interface WorkspaceHandle {
   /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
   cleanSpacing: () => void
   insertRunningHeader: () => void
+  /** open the palette that turns notes in brackets into footnotes and back */
+  openFootnoteConverter: () => void
   insertTableOfContents: () => void
   firstWordStyler: () => void
   windowText: () => void
@@ -968,6 +972,7 @@ export function Workspace({
   /** the settings window of a shape tool (double click on the tool) */
   const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
   const [runningHeaderDialog, setRunningHeaderDialog] = useState(false)
+  const [footnoteConverterOpen, setFootnoteConverterOpen] = useState(false)
   const [tocDialogOpen, setTocDialogOpen] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [windowTextDialog, setWindowTextDialog] = useState(false)
@@ -2467,6 +2472,59 @@ export function Workspace({
     onFramesChange(frames.map((f) => edited.get(f.id) ?? f), 'clean-spacing')
   }
 
+  /**
+   * "ממיר הערות שוליים": notes written in brackets in the text become footnotes, or footnotes become notes in brackets - in the whole
+   * document, or in the selection (a stretch of text, or the stories of the selected frames). One step of the history, however many
+   * notes change; pressing stop keeps what was done until then.
+   */
+  const convertFootnotes = async (request: FootnoteConvertRequest, control: FootnoteConvertControl): Promise<{ converted: number; message?: string }> => {
+    const bracket = NOTE_BRACKETS[request.bracket] ?? NOTE_BRACKETS[0]
+    // a moment first, so that the panel shows that it works before the story is read
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const targets: { head: TextFrame; range: NoteRange }[] = []
+    if (request.scope === 'document') {
+      for (const head of headFrames(frames)) if (!head.tocPageReferences?.length && selectable(head.id)) targets.push({ head, range: null })
+      if (targets.length === 0) return { converted: 0, message: 'אין טקסט במסמך.' }
+    } else if (textSel && textSel.a !== textSel.b) {
+      const head = frames.find((frame) => frame.id === textSel.headId)
+      if (head && selectable(head.id)) targets.push({ head, range: { from: Math.min(textSel.a, textSel.b), to: Math.max(textSel.a, textSel.b) } })
+    } else {
+      // no stretch of text selected: the stories of the frames that are selected
+      const heads = new Map<string, TextFrame>()
+      for (const id of selectedId ? [selectedId] : multiSel) {
+        const head = headFrames(frames).find((candidate) => chainOf(frames, candidate.id).some((frame) => frame.id === id))
+        if (head && !head.tocPageReferences?.length && selectable(head.id)) heads.set(head.id, head)
+      }
+      for (const head of heads.values()) targets.push({ head, range: null })
+    }
+    if (targets.length === 0) return { converted: 0, message: 'אין בחירה. סמנו טקסט או תיבת טקסט, או בחרו „כל המסמך”.' }
+    const edited = new Map<string, TextFrame>()
+    let converted = 0
+    let stopped = false
+    for (const [index, target] of targets.entries()) {
+      if (control.shouldStop()) {
+        stopped = true
+        break
+      }
+      const result = request.direction === 'toFootnotes'
+        ? inlineNotesToFootnotes(target.head, bracket, { paragraphStyleId: request.styleId || undefined, range: target.range, newId: newFrameId, onlyInStyleId: request.searchStyleId || undefined, styles: paragraphStyles })
+        : footnotesToInlineNotes(target.head, bracket, { range: target.range, onlyStyleId: request.searchStyleId || undefined, defaultStyleId: footnoteConfig.paragraphStyleId })
+      if (result.count > 0) {
+        edited.set(target.head.id, result.frame)
+        converted += result.count
+      }
+      control.onProgress(index + 1, targets.length)
+      // a moment for the panel to draw its progress and hear the stop button
+      if (index % 4 === 3) await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    if (edited.size > 0) {
+      dirtyOffsetRef.current = undefined
+      onFramesChange(frames.map((frame) => edited.get(frame.id) ?? frame), 'footnote-convert')
+    }
+    if (stopped) return { converted, message: `הפעולה נעצרה. ${convertedText(converted)}.` }
+    return { converted, ...(converted === 0 ? { message: (request.direction === 'toFootnotes' ? `לא נמצאו הערות בסוגריים ${bracket.label}` : 'לא נמצאו הערות שוליים להמרה') + (request.searchStyleId ? ` בסגנון „${paragraphStyles.find((style) => style.id === request.searchStyleId)?.name ?? ''}”.` : '.') } : {}) }
+  }
+
   const completeLink = (toId: string) => {
     if (linkFrom) {
       const linked = linkFrames(frames, linkFrom, toId)
@@ -3869,6 +3927,7 @@ export function Workspace({
     },
     cleanSpacing: cleanSpacingCmd,
     insertRunningHeader,
+    openFootnoteConverter: () => setFootnoteConverterOpen(true),
     insertTableOfContents: () => setTocDialogOpen(true),
     firstWordStyler: () => setFirstWordDialog(true),
     windowText: () => setWindowTextDialog(true),
@@ -9652,6 +9711,9 @@ export function Workspace({
       )}
       {runningHeaderDialog && (
         <RunningHeaderDialog styles={paragraphStyles} onApply={applyRunningHeader} onClose={() => setRunningHeaderDialog(false)} />
+      )}
+      {footnoteConverterOpen && (
+        <FootnoteConverterPanel styles={paragraphStyles} defaultStyleId={footnoteConfig.paragraphStyleId} onConvert={convertFootnotes} onClose={() => setFootnoteConverterOpen(false)} />
       )}
       {tocDialogOpen && (
         <TocDialog styles={paragraphStyles} initial={doc.toc} onConfirm={createTableOfContents} onClose={() => setTocDialogOpen(false)} />

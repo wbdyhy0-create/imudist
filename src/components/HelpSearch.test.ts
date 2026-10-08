@@ -26,6 +26,11 @@ describe('help topic search', () => {
     expect(categoryFor('gradient-panel')).toBe('מעבר צבע')
     expect(categoryFor('swatches-panel')).toBe('דוגמיות')
     expect(categoryFor('layers-panel')).toBe('לשונית שכבות')
+    expect(categoryFor('guides-create')).toBe('קווי עזר')
+    expect(categoryFor('typography-menu')).toBe('טיפוגרפיה')
+    expect(categoryFor('path-text-create')).toBe('טיפוגרפיה')
+    expect(categoryFor('style-sampler-use')).toBe('טיפוגרפיה')
+    expect(categoryFor('shape-tools')).toBe('כלי צורה')
     expect(categoryFor('file-export')).toBe('תפריט קובץ')
     expect(categoryFor('export-pdf')).toBe('קובץ · PDF')
     expect(categoryFor('pdf-page-range')).toBe('קובץ · PDF')
@@ -120,6 +125,12 @@ describe('help topic search', () => {
       ['Delete למחוק עמוד', 'pages-delete-shortcut'],
       ['להוסיף כמה עמודים', 'pages-add-methods'],
       ['שינוי סדר עמודים תוכן', 'pages-reorder-preservation'],
+      ['איך יוצרים קווי עזר בעמוד', 'guides-create'],
+      ['חלוקה שווה או מרווח קבוע בקווי עזר', 'guides-layout'],
+      ['קווי עזר בכל העמודים במסמך', 'guides-pages'],
+      ['למחוק קווי עזר בעמוד הנוכחי', 'guides-clear'],
+      ['להסתיר קווי עזר והאם הם יוצאים ל-PDF', 'guides-visibility'],
+      ['להזיז וליישר קו עזר בעמודים', 'guides-move-delete'],
       ['רק עמוד אחד בגודל אחר', 'page-size-single'],
       ['לשנות גודל כל העמודים', 'page-size-all'],
       ['שוליים בעמוד מסוים', 'page-margins-single'],
@@ -174,7 +185,7 @@ describe('help topic search', () => {
       for (const related of topic.related) expect(topicIds.has(related), `${topic.id} -> ${related}`).toBe(true)
     }
 
-    const runningHeader = HELP_TOPICS.find((topic) => topic.id === 'page-running-header')?.answer[0] ?? ''
+    const runningHeader = HELP_TOPICS.find((topic) => topic.id === 'page-running-header')?.answer.join(' ') ?? ''
     for (const step of ['סגנון פסקה', '„חלון” > „לוח עמודים”', '„הוספת כותרת משתנה…”', '„הוסף כותרת”', '„חזרה למסמך”']) {
       expect(runningHeader).toContain(step)
     }
@@ -276,6 +287,98 @@ describe('help topic search', () => {
     expect(answerFor('table-cell-options')).toContain('ערך שלא הוגדר לתא חוזר לעקוב')
     expect(answerFor('table-limits')).toContain('גם כאשר מופעל ייצוא וקטורי')
     expect(answerFor('table-limits')).toContain('אין כרגע ייבוא טבלה מ-Word או מ-Excel')
+  })
+
+  it('makes Find and Replace guidance discoverable and documents its actual behavior', () => {
+    const searchableTopics: [string, string][] = [
+      ['Ctrl+H חיפוש והחלפה', 'find-replace-open'],
+      ['Enter חיפוש הבא', 'find-replace-navigation'],
+      ['תווים מיוחדים חיפוש', 'find-replace-special-meaning'],
+      ['חיפוש בבחירה בלבד כולל הערות שוליים', 'find-replace-scope'],
+      ['החלפת כל המופעים במסמך', 'find-replace-actions'],
+      ['$1 ביטוי רגולרי החלפה', 'find-replace-regex'],
+      ['מה זה התאם רישיות', 'find-replace-case'],
+      ['מה זה מילה שלמה בלבד', 'find-replace-whole-word'],
+      ['מה זה ביטוי רגולרי', 'find-replace-regex-meaning'],
+      ['מה לכתוב בחפש ובהחלף בביטוי רגולרי', 'find-replace-regex-examples'],
+      ['GREP אינדיזיין', 'find-replace-regex-meaning'],
+      ['גרעפ', 'find-replace-regex-meaning'],
+      ['מה זה תווים מיוחדים', 'find-replace-special-meaning'],
+    ]
+    for (const [query, id] of searchableTopics) {
+      expect(search(query)[0]?.id, query).toBe(id)
+    }
+
+    const answerFor = (id: string) => HELP_TOPICS.find((topic) => topic.id === id)?.answer[0] ?? ''
+    expect(answerFor('find-replace-open')).toContain('„עריכה” > „חיפוש והחלפה…”')
+    expect(answerFor('find-replace-navigation')).toContain('ולאחר המופע האחרון הוא חוזר לראשון')
+    expect(answerFor('find-replace-scope')).toContain('הטקסט שבתוך טבלאות אינו חלק מחיפוש זה')
+    expect(answerFor('find-replace-actions')).toContain('התאמה שנמצאה בהערת שוליים אינה מוחלפת בכפתור זה')
+    expect(answerFor('find-replace-regex')).toContain('$<שם>')
+    expect(answerFor('find-replace-case')).toContain('בעברית אין אותיות גדולות וקטנות')
+    expect(answerFor('find-replace-whole-word')).toContain('חיפוש „בית” ימצא „בית גדול”, אך לא „ביתי”')
+    expect(answerFor('find-replace-regex-meaning')).toContain('התבנית ‎[א-ת]+')
+    expect(answerFor('find-replace-regex-meaning')).toContain('באינדיזיין תכונת החיפוש וההחלפה לפי תבניות נקראת GREP')
+    expect(answerFor('find-replace-regex-examples')).toContain('„חפש” ‎([א-תךםןףץ]+) ([א-תךםןףץ]+), „החלף ב” ‎$2 $1')
+    expect(answerFor('find-replace-special-meaning')).toContain('‎\\n מייצג ירידת פסקה')
+  })
+
+  it('makes typography, text-on-path, shape, and style-sampler help discoverable', () => {
+    const searchableTopics: [string, string][] = [
+      ['מה יש בתפריט טיפוגרפיה', 'typography-menu'],
+      ['יצירת תיבת טקסט והקלדה', 'text-tool-create'],
+      ['Shift+T לכתוב על משושה', 'path-text-create'],
+      ['להזיז טקסט בתוך עיגול', 'path-text-position'],
+      ['ציור עיגול אליפסה ומלבן', 'shape-tools'],
+      ['לצייר משולש או משושה', 'shape-polygon'],
+      ['להעתיק עיצוב עם דוגם סגנון', 'style-sampler-use'],
+      ['עיצוב אוטומטי של מילה ראשונה', 'typography-first-word'],
+      ['יצירת חלון בטקסט', 'typography-window-text'],
+      ['מניעת יתומים אלמנות וכיווץ שורה', 'typography-smart-layout'],
+      ['ניקוי רווחים כפולים ופסקאות ריקות', 'typography-clean-spacing'],
+      ['הוספת הערת שוליים Ctrl+Alt+Shift+F', 'footnote-insert'],
+      ['אפשרויות הערות שוליים להעביר לסוף המסמך', 'footnote-options'],
+    ]
+    for (const [query, id] of searchableTopics) {
+      expect(search(query).some((topic) => topic.id === id), query).toBe(true)
+    }
+
+    const topicIds = new Set(HELP_TOPICS.map((topic) => topic.id))
+    for (const [, id] of searchableTopics) {
+      const topic = HELP_TOPICS.find((item) => item.id === id)
+      expect(topic?.answer[0], id).toContain('„')
+      for (const related of topic?.related ?? []) expect(topicIds.has(related), `${id} -> ${related}`).toBe(true)
+      expect(getHelpTopicCategory(topic!)).toBe(id.startsWith('shape-') ? 'כלי צורה' : id.startsWith('footnote-') ? 'הערות שוליים' : 'טיפוגרפיה')
+    }
+    expect(search('לכתוב מסביב לעיגול')[0]?.id).toBe('path-text-create')
+    expect(search('דוגם סגנון')[0]?.id).toBe('style-sampler-use')
+    expect(search('משושה')[0]?.id).toBe('shape-polygon')
+    const typographyMenu = HELP_TOPICS.find((topic) => topic.id === 'typography-menu')?.answer.join(' ') ?? ''
+    expect(typographyMenu).not.toContain('גופן וגודל')
+    expect(typographyMenu).toContain('גופן, גודל ושאר מאפייני הטקסט משנים בסרגל העיצוב')
+  })
+
+  it('explains every text command shown in the Typography menu screenshots', () => {
+    const topic = (id: string) => {
+      const found = HELP_TOPICS.find((item) => item.id === id)
+      if (!found) throw new Error(`Missing help topic: ${id}`)
+      return found.answer.join('\n')
+    }
+
+    expect(topic('typography-clean-spacing')).toContain('רווח אחד במקום רצף של רווחים')
+    expect(topic('typography-first-word')).toContain('סגנון התו')
+    expect(topic('typography-window-text')).toContain('השורה השנייה והשורות שאחריה')
+    expect(topic('page-running-header')).toContain('אם הפקודה אפורה')
+    expect(topic('footnote-insert')).toContain('הסימן יחליף את הטקסט המסומן')
+    expect(topic('footnote-options')).toContain('בסוף המסמך')
+    expect(topic('footnote-converter')).toContain('סוגריים עגולים')
+    expect(topic('page-number-types')).toContain('כרגע אין הבדל במספר או באות')
+    expect(topic('typography-smart-layout')).toContain('ריווח האותיות')
+    expect(topic('paragraph-style-import')).toContain('אינו מעתיק את הטקסט, העמודים או האובייקטים')
+
+    expect(search('כותרת משתנה אפורה')[0]?.id).toBe('page-running-header')
+    expect(search('ייבוא סגנונות פסקה ותו')[0]?.id).toBe('paragraph-style-import')
+    expect(getHelpTopicCategory(HELP_TOPICS.find((item) => item.id === 'footnote-options')!)).toBe('הערות שוליים')
   })
 
   it('makes linked-image guidance discoverable across the Links panel actions', () => {
@@ -464,5 +567,12 @@ describe('help topic search', () => {
     expect(search('מחיקת סגנון פיסקה')[0]?.id).toBe('paragraph-style-delete')
     expect(search('למחוק סגנון פיסקה')[0]?.id).toBe('paragraph-style-delete')
     expect(search('מחיקת סגנון תו שנבחר')[0]?.id).toBe('character-style-delete')
+  })
+
+  it('finds the footnote converter by what it does', () => {
+    expect(search('המרת הערות בסוגריים להערות שוליים')[0]?.id).toBe('footnote-converter')
+    expect(search('ממיר הערות שוליים')[0]?.id).toBe('footnote-converter')
+    const answer = HELP_TOPICS.find((topic) => topic.id === 'footnote-converter')?.answer.join(' ') ?? ''
+    for (const phrase of ['„טיפוגרפיה”', '„ממיר הערות שוליים…”', '„המר הערות להערות שוליים”', '„המר הערות שוליים להערות פנימיות”', '„עצור פעולה”']) expect(answer).toContain(phrase)
   })
 })

@@ -1,5 +1,6 @@
-import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, type CharacterStyleSettings, type CharStyle, type Run, type TextAlign, type TextStyle, type TocFootnoteReference, type TocPageReference } from './document'
+import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, LINE_HEIGHT, type CharacterStyleSettings, type CharStyle, type Run, type TextAlign, type TextStyle, type TocFootnoteReference, type TocPageReference } from './document'
 import { mergeRuns } from './story'
+import { legacyHebrewPieces, looksLikeLegacyHebrew, mirrorBracket } from './legacyHebrew'
 import { unzipEntry } from './zip'
 
 /** a Word character style that text in the document uses: it comes in as a character style of the document */
@@ -164,9 +165,56 @@ function readRPr(rPr: Element | null, theme?: ThemeFonts): RProps {
   return props
 }
 
-function readJc(pPr: Element | null): TextAlign | undefined {
+/**
+ * The alignment a paragraph asks for. In a right-to-left paragraph (`inheritedBidi`: its style says so) Word's "left" and
+ * "right" mean the start and the end of the line - the right and the left side of the page - and so do LibreOffice's.
+ */
+function readJc(pPr: Element | null, inheritedBidi = false): TextAlign | undefined {
   const value = attr(child(pPr, 'jc'), 'val')
-  return value === 'right' || value === 'end' ? 'right' : value === 'left' || value === 'start' ? 'left' : value === 'center' ? 'center' : value === 'both' || value === 'distribute' ? 'justify' : undefined
+  const bidi = !!child(pPr, 'bidi') || inheritedBidi
+  if (value === 'left' || value === 'start') return bidi ? 'right' : 'left'
+  if (value === 'right' || value === 'end') return bidi ? 'left' : 'right'
+  if (value === 'center') return 'center'
+  if (value === 'both' || value === 'distribute') return 'justify'
+  return undefined
+}
+
+/** twentieths of a point (the unit of Word's indents and spacing) as points */
+const twips = (value: string | null | undefined) => {
+  const n = Number(value)
+  return value != null && value !== '' && Number.isFinite(n) ? n / 20 : undefined
+}
+
+type ParagraphPatch = NonNullable<PlacedText['paragraphStylePatches']>[number]
+
+/**
+ * What a paragraph sets for itself, beyond its style: where it is aligned, how far it is set in from each side, the space
+ * around it and its line height. The sides are the page's: in a right-to-left paragraph Word's "left" indent is at the right.
+ */
+function readParagraphPatch(pPr: Element | null, bidi: boolean, align: TextAlign, fontSize: number): ParagraphPatch {
+  const patch: ParagraphPatch = { align }
+  const ind = child(pPr, 'ind')
+  const start = twips(attr(ind, 'start') ?? attr(ind, 'left'))
+  const end = twips(attr(ind, 'end') ?? attr(ind, 'right'))
+  const left = bidi ? end : start
+  const right = bidi ? start : end
+  if (left && left > 0) patch.indentLeft = left
+  if (right && right > 0) patch.indentRight = right
+  const firstLine = twips(attr(ind, 'firstLine'))
+  if (firstLine && firstLine > 0) patch.firstLineIndent = firstLine
+  const spacing = child(pPr, 'spacing')
+  const before = twips(attr(spacing, 'before'))
+  const after = twips(attr(spacing, 'after'))
+  if (before && before > 0) patch.spaceBefore = before
+  if (after && after > 0) patch.spaceAfter = after
+  const line = Number(attr(spacing, 'line'))
+  if (line > 0) {
+    const rule = attr(spacing, 'lineRule') ?? 'auto'
+    if (rule === 'auto') {
+      if (Math.abs(line - 240) > 1) patch.leading = Math.round(fontSize * LINE_HEIGHT * (line / 240) * 100) / 100
+    } else patch.leading = line / 20
+  }
+  return patch
 }
 
 const overlay = (a: RProps, b: RProps): RProps => {
@@ -215,7 +263,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   }
 
   // styles: paragraph / character styles with inheritance, plus the document's defaults
-  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string; isDefault: boolean }>()
+  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string; isDefault: boolean; bidi: boolean }>()
   let defaults: RProps = {}
   let defaultParagraphStyle: string | null = null
   if (stylesXml) {
@@ -224,13 +272,17 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     for (const s of elements(sdoc, 'style')) {
       const id = attr(s, 'styleId')
       if (!id) continue
-      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '', isDefault: attr(s, 'default') === '1' })
+      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '', isDefault: attr(s, 'default') === '1', bidi: !!child(child(s, 'pPr'), 'bidi') })
       if (attr(s, 'type') === 'paragraph' && attr(s, 'default') === '1') defaultParagraphStyle = id
     }
   }
   const resolve = (id: string | null, depth = 0): RProps & { align?: TextAlign } => {
     const s = id && depth < 12 ? styles.get(id) : undefined
     return s ? { ...overlay(resolve(s.basedOn, depth + 1), s.props), ...(s.align ? { align: s.align } : {}) } : {}
+  }
+  const styleBidi = (id: string | null, depth = 0): boolean => {
+    const style = id && depth < 12 ? styles.get(id) : undefined
+    return !!style && (style.bidi || styleBidi(style.basedOn, depth + 1))
   }
   const baseSize = defaults.size ?? 12
   // Word character styles that runs use (not the default one): they come in as character styles, and the runs stay tied to them
@@ -348,12 +400,22 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     })
   const paragraphStyleIds: string[] = []
   const paragraphStyleNames: string[] = []
+  // what each paragraph sets for itself (alignment, indents, spacing), one entry for every entry of paragraphStyleIds
+  const paragraphPatches: ParagraphPatch[] = []
   const inferredStyles = new Map<string, ImportedParagraphStyle>()
   const unresolvedStyles = new Map<string, ImportedParagraphStyle>()
   let firstParagraphAlign: TextAlign | undefined
   paragraphs.forEach((p, pi) => {
-    const pStyle = attr(child(child(p, 'pPr'), 'pStyle'), 'val') ?? defaultParagraphStyle
-    const paragraphAlign = readJc(child(p, 'pPr')) ?? resolve(pStyle).align
+    const pPr = child(p, 'pPr')
+    const pStyle = attr(child(pPr, 'pStyle'), 'val') ?? defaultParagraphStyle
+    // a paragraph reads right to left when it says so or its style does
+    const bidi = !!child(pPr, 'bidi') || styleBidi(pStyle)
+    const paragraphAlign = readJc(pPr, bidi) ?? resolve(pStyle).align
+    const runElements = Array.from(p.getElementsByTagName('*')).filter((el) => el.localName === 'r' && isWordElement(el))
+    // Hebrew that an old program wrote as Windows-1255 letters in visual order is read as Hebrew (a paragraph with a footnote is left alone)
+    const writtenText = runElements.map((r) => Array.from(r.children).filter(isWordElement).map((c) => (c.localName === 't' ? c.textContent ?? '' : c.localName === 'tab' ? '\t' : '')).join('')).join('')
+    const legacyHebrew = !runElements.some((r) => Array.from(r.children).some((c) => c.localName === 'footnoteReference')) && looksLikeLegacyHebrew(writtenText)
+    const paragraphPieces: { text: string; style: CharStyle }[] = []
     if (firstParagraphAlign === undefined) firstParagraphAlign = paragraphAlign
     const paragraphProps = overlay(defaults, resolve(pStyle))
     let last: CharStyle = { fontFamily: baseFont, fontSize: baseSize, weight: paragraphProps.bold ? 700 : 400, italic: !!paragraphProps.italic, tracking: 0 }
@@ -361,7 +423,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     // a line break inside a paragraph is a paragraph break here, so it needs an entry in the per-paragraph lists too
     let breaks = 0
 
-    for (const r of Array.from(p.getElementsByTagName('*')).filter((el) => el.localName === 'r' && isWordElement(el))) {
+    for (const r of runElements) {
       let text = ''
       const runReferences: { wordId: string; offset: number }[] = []
       for (const c of Array.from(r.children)) {
@@ -383,8 +445,11 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
       const rPr = child(r, 'rPr')
       const props = overlay(overlay(paragraphProps, resolve(attr(child(rPr, 'rStyle'), 'val'))), readRPr(rPr, themeFonts))
       if (props.hidden) continue
+      // Word shows a run that is not marked right-to-left as left-to-right text: brackets in it are not mirrored. Ours always are in a
+      // right-to-left paragraph, so a run of nothing but brackets and punctuation (what converters from PDF write) gets its brackets swapped.
+      if (bidi && !legacyHebrew && !child(rPr, 'rtl') && /^[\s.,:;!?"'()[\]{}<>\-–—·]*[()[\]{}<>][\s.,:;!?"'()[\]{}<>\-–—·]*$/.test(text)) text = text.replace(/[()[\]{}<>]/g, mirrorBracket)
       for (const reference of runReferences) referenceAnchors.push({ wordId: reference.wordId, anchor: importedLength + reference.offset })
-      const rtl = HEBREW_OR_ARABIC.test(text)
+      const rtl = legacyHebrew || HEBREW_OR_ARABIC.test(text)
       // a run that holds nothing but footnote reference marks has no Hebrew letters to pick the complex-script font by,
       // so it fell back to the document's Latin font (Arial) while the text it hangs on uses the Hebrew one: the
       // superscript numbers looked like another typeface. It takes the font and size of the text right before it instead.
@@ -403,9 +468,11 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
         ...(link ? { charStyleId: link } : {}),
       }
       if (!firstRun) firstRun = last
-      pieces.push({ text, style: last })
+      paragraphPieces.push({ text, style: last })
       importedLength += text.length
     }
+    pieces.push(...(legacyHebrew ? legacyHebrewPieces(paragraphPieces) : paragraphPieces))
+    const patch = readParagraphPatch(pPr, bidi, paragraphAlign ?? (bidi ? 'right' : alignFor(writtenText)), firstRun?.fontSize ?? baseSize)
     const directFormatting = firstRun && (firstRun.fontSize !== baseSize || firstRun.fontFamily !== baseFont || firstRun.weight >= 600 || firstRun.italic || !!firstRun.color)
     const inferredId = directFormatting && (!pStyle || pStyle === defaultParagraphStyle) ? `inferred-${firstRun!.fontFamily}-${firstRun!.fontSize}-${firstRun!.weight}-${firstRun!.italic}-${firstRun!.color ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-') : null
     if (inferredId && firstRun) {
@@ -413,12 +480,14 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
       for (let copy = 0; copy <= breaks; copy++) {
         paragraphStyleIds.push(inferredId)
         paragraphStyleNames.push(inferredStyles.get(inferredId)!.name)
+        paragraphPatches.push(patch)
       }
     } else {
       if (pStyle && !styles.has(pStyle) && firstRun && !unresolvedStyles.has(pStyle)) unresolvedStyles.set(pStyle, { wordId: pStyle, name: pStyle, patch: { fontFamily: firstRun.fontFamily, fontSize: firstRun.fontSize, weight: firstRun.weight, italic: firstRun.italic, ...(firstRun.color ? { color: firstRun.color } : {}), ...(paragraphAlign ? { align: paragraphAlign } : {}) } })
       for (let copy = 0; copy <= breaks; copy++) {
         paragraphStyleIds.push(pStyle ?? '')
         paragraphStyleNames.push(paragraphStyles.find((style) => style.wordId === pStyle)?.name ?? pStyle ?? '')
+        paragraphPatches.push(patch)
       }
     }
     if (pi < paragraphs.length - 1) {
@@ -463,7 +532,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     const source = wordFootnotes.get(wordId)
     return source && anchor < text.length ? [{ anchor, ...source }] : []
   })
-  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(footnotes.length ? { footnotes } : {}), ...(usedCharStyles.size ? { characterStyles: [...usedCharStyles.values()] } : {}) }
+  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(paragraphPatches.length === paragraphStyleIds.length ? { paragraphStylePatches: paragraphPatches } : {}), ...(footnotes.length ? { footnotes } : {}), ...(usedCharStyles.size ? { characterStyles: [...usedCharStyles.values()] } : {}) }
 }
 
 /** Read a file the user picked (or dropped): .docx or plain text. */

@@ -68,6 +68,12 @@ describe('findMatches', () => {
     expect(matchesOf('א\nב\nג', { find: '^.', mode: 'regex' }).map((x) => x.start)).toEqual([0, 2, 4])
   })
 
+  it('supports the regex examples documented for users', () => {
+    expect(matchesOf('דוד כהן', { find: '([א-תךםןףץ]+) ([א-תךםןףץ]+)', mode: 'regex', replace: '$2 $1' }).map((match) => match.replacement)).toEqual(['כהן דוד'])
+    expect(matchesOf('מספר 123 ו-45', { find: '[0-9]+', mode: 'regex', replace: '$&' }).map((match) => match.replacement)).toEqual(['123', '45'])
+    expect(matchesOf('מילה   נוספת', { find: ' {2,}', mode: 'regex', replace: ' ' }).map((match) => match.replacement)).toEqual([' '])
+  })
+
   it('skips an empty match, and anything touching a marker of the program', () => {
     expect(matchesOf('אב', { find: 'x*', mode: 'regex' })).toHaveLength(0)
     expect(matchesOf(`א${FOOTNOTE_MARKER}ב`, { find: '.', mode: 'regex' }).map((m) => m.start)).toEqual([0, 2])

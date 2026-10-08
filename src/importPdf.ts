@@ -153,16 +153,19 @@ async function pageAsset(source: PdfImportSource, pageNumber: number, pool: Enco
     const width = Math.ceil(viewport.width)
     const height = Math.ceil(viewport.height)
     let encoded: Encoded
+    // always drawn on a canvas of the page: on an OffscreenCanvas pdf.js does not find the fonts it loaded for the page, and the
+    // text comes out in another font with the spacing of the original (letters far apart) - only the encoding is done in a worker
+    canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    await page.render({ canvas, viewport }).promise
     if (pool) {
-      // drawn on an OffscreenCanvas, whose picture goes to a worker without being copied
-      const offscreen = new OffscreenCanvas(width, height)
-      await page.render({ canvas: offscreen as unknown as HTMLCanvasElement, viewport }).promise
-      encoded = await pool.encode(offscreen.transferToImageBitmap())
+      const bitmap = await createImageBitmap(canvas)
+      // the canvas is not needed any more: let it go while the worker encodes the copy
+      canvas.width = 0
+      canvas.height = 0
+      encoded = await pool.encode(bitmap)
     } else {
-      canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      await page.render({ canvas, viewport }).promise
       encoded = await encodeHere(canvas)
     }
     const asset: Asset = { name: `${source.file.name} - ${pageNumber}.png`, mime: 'image/png', dataUrl: encoded.dataUrl, width: encoded.width, height: encoded.height }

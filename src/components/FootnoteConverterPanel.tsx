@@ -1,0 +1,211 @@
+import { useRef, useState, type KeyboardEvent } from 'react'
+import { convertedText, NOTE_BRACKETS } from '../footnoteConvert'
+import '../footnoteConverter.css'
+
+/** what the converter is asked to do */
+export interface FootnoteConvertRequest {
+  /** 'toFootnotes': notes in brackets become footnotes; 'toText': footnotes become notes in brackets */
+  direction: 'toFootnotes' | 'toText'
+  /** which of NOTE_BRACKETS */
+  bracket: number
+  /** the paragraph style the new footnotes get */
+  styleId: string
+  /** only the notes in paragraphs of this style (when turning notes into footnotes) or the footnotes in this style (the other way); empty: every style */
+  searchStyleId: string
+  scope: 'document' | 'selection'
+}
+
+export interface FootnoteConvertControl {
+  /** how many of the stories are done */
+  onProgress: (done: number, total: number) => void
+  /** the stop button was pressed */
+  shouldStop: () => boolean
+}
+
+interface Props {
+  styles: { id: string; name: string }[]
+  /** the style the footnotes have in this document, offered first */
+  defaultStyleId?: string
+  onConvert: (request: FootnoteConvertRequest, control: FootnoteConvertControl) => Promise<{ converted: number; message?: string }>
+  onClose: () => void
+}
+
+/** what the search field says when no style is asked for */
+const ALL_STYLES = 'כל הסגנונות'
+
+/**
+ * "ממיר הערות שוליים": the converter between notes written in brackets inside the text and real footnotes, in both directions.
+ * It stays open while the document is worked on (it is a palette, not a dialog), so that a selection can be made and the
+ * converter pressed again and again.
+ */
+export function FootnoteConverterPanel({ styles, defaultStyleId, onConvert, onClose }: Props) {
+  const nameOf = (id: string) => styles.find((style) => style.id === id)?.name ?? ''
+  // "חפש סגנון": which notes to convert - the ones in paragraphs of this style, or every style
+  const [searchId, setSearchId] = useState('')
+  const [query, setQuery] = useState(ALL_STYLES)
+  const [popupOpen, setPopupOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  // "בחר סגנון": the style the new footnotes get
+  const [footnoteStyleId, setFootnoteStyleId] = useState(defaultStyleId && styles.some((style) => style.id === defaultStyleId) ? defaultStyleId : styles[0]?.id ?? '')
+  const [bracket, setBracket] = useState(0)
+  const [scope, setScope] = useState<'document' | 'selection'>('document')
+  const [status, setStatus] = useState('מוכן לפעולה')
+  const [progress, setProgress] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const stopped = useRef(false)
+  // the highlighted style was reached with the arrow keys (not with the mouse): the list scrolls to it
+  const keyMoved = useRef(false)
+
+  // the style asked for (it may be gone from the document since: then every style)
+  const searchStyle = styles.some((style) => style.id === searchId) ? searchId : ''
+  const searchLabel = searchStyle ? nameOf(searchStyle) : ALL_STYLES
+  // while the field holds what it says, every style is listed; once the user types, the ones that match
+  const typing = query !== searchLabel
+  const choices = [{ id: '', name: ALL_STYLES }, ...styles]
+  const options = choices.filter((option) => !typing || query === '' || option.name.toLowerCase().includes(query.toLowerCase()))
+  const footnoteStyle = styles.some((style) => style.id === footnoteStyleId) ? footnoteStyleId : styles[0]?.id ?? ''
+
+  const pickSearch = (id: string) => {
+    setSearchId(id)
+    setQuery(id ? nameOf(id) : ALL_STYLES)
+    setPopupOpen(false)
+  }
+  /** leaving the field: a name typed in full is taken as the style; anything else goes back to the style that was asked for */
+  const settleSearch = () => {
+    setPopupOpen(false)
+    if (!typing) return
+    const exact = choices.find((option) => option.name.toLowerCase() === query.trim().toLowerCase())
+    if (exact) pickSearch(exact.id)
+    else setQuery(searchLabel)
+  }
+  const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      setPopupOpen(true)
+      keyMoved.current = true
+      setHighlight((current) => Math.max(0, Math.min(options.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1))))
+    } else if (event.key === 'Enter' && popupOpen && options[highlight]) {
+      event.preventDefault()
+      pickSearch(options[highlight].id)
+    } else if (event.key === 'Escape') {
+      setPopupOpen(false)
+      setQuery(searchLabel)
+    }
+  }
+
+  const run = async (direction: FootnoteConvertRequest['direction']) => {
+    if (busy) return
+    if (direction === 'toFootnotes' && !footnoteStyle) {
+      setStatus('אנא בחר סגנון.')
+      return
+    }
+    stopped.current = false
+    setBusy(true)
+    setProgress(0)
+    setStatus('מבצע המרה…')
+    try {
+      const result = await onConvert({ direction, bracket, styleId: footnoteStyle, searchStyleId: searchStyle, scope }, {
+        onProgress: (done, total) => setProgress(total > 0 ? (done / total) * 100 : 0),
+        shouldStop: () => stopped.current,
+      })
+      setStatus(result.message ?? `הסתיים! ${convertedText(result.converted)}`)
+    } catch (error) {
+      setStatus(`ההמרה נכשלה: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+      setProgress(0)
+    }
+  }
+
+  return (
+    <aside className="footnote-converter" aria-label="ממיר הערות שוליים" dir="rtl">
+      <header className="fc-head">
+        <b>ממיר הערות שוליים</b>
+        <button className="fc-close" aria-label="סגור" onClick={onClose}>×</button>
+      </header>
+
+      <section className="fc-group" aria-label="הגדרות המרה">
+        <h3>הגדרות המרה</h3>
+        <div className="fc-row">
+          <span>חפש סגנון:</span>
+          {/* a field and its list in one: a click on it (or on the arrow) shows every paragraph style, typing narrows them. Only what is in paragraphs of the style found is converted */}
+          <div className="fc-combo">
+            <input
+              className="text-input"
+              type="text"
+              role="combobox"
+              aria-expanded={popupOpen}
+              aria-controls="fc-style-list"
+              aria-label="חפש סגנון: המר רק הערות בפסקאות בסגנון הזה"
+              value={query}
+              autoComplete="off"
+              spellCheck={false}
+              onFocus={(event) => {
+                event.target.select()
+                setHighlight(Math.max(0, options.findIndex((option) => option.id === searchStyle)))
+                setPopupOpen(true)
+              }}
+              onBlur={settleSearch}
+              // the field keeps the focus after a style is picked: a click on it shows the list again
+              onClick={() => setPopupOpen(true)}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setHighlight(0)
+                setPopupOpen(true)
+              }}
+              onKeyDown={onSearchKey}
+            />
+            <button className="fc-arrow" tabIndex={-1} aria-label="הצג את הסגנונות" onMouseDown={(event) => { event.preventDefault(); setPopupOpen((open) => !open) }}>▾</button>
+            {popupOpen && options.length > 0 && (
+              <ul className="fc-popup" id="fc-style-list" role="listbox" onMouseDown={(event) => event.preventDefault()}>
+                {options.map((option, index) => (
+                  <li
+                    key={option.id || 'all'}
+                    role="option"
+                    aria-selected={option.id === searchStyle}
+                    className={(index === highlight ? 'hot ' : '') + (option.id === searchStyle ? 'on' : '')}
+                    ref={(element) => {
+                      // the arrow keys move through a list that scrolls
+                      if (element && keyMoved.current && index === highlight) element.scrollIntoView({ block: 'nearest' })
+                    }}
+                    onMouseEnter={() => { keyMoved.current = false; setHighlight(index) }}
+                    onClick={() => pickSearch(option.id)}
+                  >
+                    {option.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        <div className="fc-row">
+          <span>בחר סגנון:</span>
+          <select className="select" value={footnoteStyle} aria-label="סגנון הפסקה של הערות השוליים החדשות" onChange={(event) => setFootnoteStyleId(event.target.value)}>
+            {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+          </select>
+          <button className="btn small" title="החזר את החיפוש ל„כל הסגנונות”" aria-label="רענן" onClick={() => pickSearch('')}>↻</button>
+        </div>
+        <label className="fc-row">
+          <span>סוג סוגריים:</span>
+          <select className="select" value={bracket} onChange={(event) => setBracket(Number(event.target.value))}>
+            {NOTE_BRACKETS.map((item, index) => <option key={item.label} value={index}>{item.label}</option>)}
+          </select>
+        </label>
+        <div className="fc-row" role="radiogroup" aria-label="טווח פעולה">
+          <span>טווח פעולה:</span>
+          <label><input type="radio" name="fc-scope" checked={scope === 'document'} onChange={() => setScope('document')} /> כל המסמך</label>
+          <label><input type="radio" name="fc-scope" checked={scope === 'selection'} onChange={() => setScope('selection')} /> בחירה בלבד</label>
+        </div>
+      </section>
+
+      <div className="fc-actions">
+        <button className="btn primary" disabled={busy} onClick={() => void run('toFootnotes')}>המר הערות להערות שוליים</button>
+        <button className="btn" disabled={busy} onClick={() => void run('toText')}>המר הערות שוליים להערות פנימיות</button>
+      </div>
+
+      <progress className="fc-progress" max={100} value={progress} />
+      <p className="fc-status" role="status">{status}</p>
+      <button className="btn small fc-stop" disabled={!busy} onClick={() => { stopped.current = true }}>עצור פעולה</button>
+    </aside>
+  )
+}

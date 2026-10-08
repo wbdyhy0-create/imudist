@@ -35,7 +35,7 @@ export const paragraphBoxOf = (look: ParagraphStyleRecord['patch']): ParagraphBo
 })
 
 /** the style a paragraph is in: its listed id, else the one its name says, else the frame's, else the document's base style */
-function styleIdOf(styles: ParagraphStyleRecord[], frame: TextFrame, index: number): string | undefined {
+export function styleIdOf(styles: ParagraphStyleRecord[], frame: TextFrame, index: number): string | undefined {
   const listed = frame.paragraphStyleIds?.[index]
   const named = frame.paragraphStyleNames?.[index]
   return styles.find((style) => style.id === listed)?.id ?? styles.find((style) => !!named && style.name === named)?.id ?? styles.find((style) => style.id === frame.paragraphStyleId)?.id ?? styles[0]?.id
