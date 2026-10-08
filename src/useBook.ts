@@ -533,13 +533,13 @@ export function useBook(options: Options) {
   }
 
   /** the whole book as one PDF (`viewWindow`: a window opened from the click that asked for it) */
-  const runExport = async (options: PageDrawOptions, viewWindow: Window | null) => {
+  const runExport = async (options: PageDrawOptions, viewWindow: Window | null): Promise<boolean> => {
     const { book: current } = latest.current
-    if (!current || !numbering) return
+    if (!current || !numbering) return false
     if (!numbering.complete) {
       viewWindow?.close()
       notify('אי אפשר לייצא: הקובץ של אחד הפרקים חסר או לא נקרא')
-      return
+      return false
     }
     setBusy(true)
     try {
@@ -556,12 +556,15 @@ export function useBook(options: Options) {
       }))
       const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ספר', (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow)
       if (done) {
-        setExportOpen(false)
+        // when the text was to be written as text, the dialog stays to say what became of each frame (it closes itself then)
+        if (!options.vectorReport) setExportOpen(false)
         notify('הספר יוצא ל-PDF')
       } else viewWindow?.close()
+      return done
     } catch (e) {
       viewWindow?.close()
       showError('הייצוא נכשל', e)
+      return false
     } finally {
       setBusy(false)
       setExportProgress(null)

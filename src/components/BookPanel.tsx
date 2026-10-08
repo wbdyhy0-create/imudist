@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { isTauri } from '../fileio'
 import { toPt } from '../units'
 import { NumberField } from './NumberField'
+import { VectorSummary } from './ExportPdfDialog'
+import { emptyReport, type VectorReport } from '../vectorText'
 import { basenameOf, type ChapterStart } from '../book'
 import { canKeepBooks } from '../bookStorage'
 import { countBookCheck, countChapter, type BookCheck } from '../bookPreflight'
@@ -327,6 +329,7 @@ export function SyncDialog({ controller }: { controller: BookController }) {
 const DPI_CHOICES = [
   { dpi: 300, label: 'איכות גבוהה להדפסה (300 DPI)' },
   { dpi: 150, label: 'איכות מסך / שליחה דיגיטלית (150 DPI)' },
+  { dpi: 600, label: 'איכות גבוהה במיוחד (600 DPI, קובץ גדול)' },
 ]
 
 const COLOR_CHOICES = [
@@ -342,8 +345,15 @@ export function BookExportDialog({ controller }: { controller: BookController })
   const [cropMarks, setCropMarks] = useState(false)
   const [dpi, setDpi] = useState(300)
   const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
+  const [vectorText, setVectorText] = useState(false)
+  /** what the export did with the frames of text (only when the text was to be written as text), shown when it is done */
+  const [result, setResult] = useState<VectorReport | null>(null)
   if (!exportOpen || !book || !numbering) return null
-  const run = () => {
+  const close = () => {
+    setResult(null)
+    controller.setExportOpen(false)
+  }
+  const run = async () => {
     // opened synchronously, still inside the click, so showing the result in it is not stopped as a popup
     const view = isTauri ? null : window.open('', '_blank')
     if (view) {
@@ -352,7 +362,9 @@ export function BookExportDialog({ controller }: { controller: BookController })
       view.document.body.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc;font:14px sans-serif'
       view.document.body.textContent = 'מייצא PDF, נא להמתין…'
     }
-    void controller.runExport({ bleed: bleedOn, bleedPt, cropMarks: bleedOn && cropMarks, dpi, colorMode }, view)
+    const vectorReport = vectorText ? emptyReport() : undefined
+    const done = await controller.runExport({ bleed: bleedOn, bleedPt, cropMarks: bleedOn && cropMarks, dpi, colorMode, vectorText, vectorReport }, view)
+    if (done && vectorReport) setResult(vectorReport)
   }
   return (
     <div className="modal-backdrop">
@@ -398,15 +410,28 @@ export function BookExportDialog({ controller }: { controller: BookController })
           </div>
         </div>
         {colorMode === 'cmyk' && <p className="muted">הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.</p>}
+        {dpi === 600 && <p className="muted">ב-600 DPI כל עמוד גדול פי ארבעה מ-300 DPI, וספר שלם בגודל כזה הוא קובץ ענק והייצוא איטי מאוד. כדאי לייצא כך רק פרק בודד או טווח קטן.</p>}
+        <label className="page-bar-check">
+          <input type="checkbox" checked={vectorText} onChange={(event) => setVectorText(event.target.checked)} disabled={busy} />
+          ייצוא וקטורי: טקסט, צורות ותמונות (ניסיוני)
+        </label>
+        <p className="muted">טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות. תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה.</p>
         <p className="muted">כל עמוד נשמר כתמונה חדה, וספר גדול ב-300 DPI הוא קובץ גדול והייצוא לוקח זמן. לבדיקה אפשר לבחור 150 DPI.</p>
         {exportProgress && (
           <p role="status">
             פרק {exportProgress.chapter} מתוך {exportProgress.chapters} ({exportProgress.title}): עמוד {exportProgress.page} מתוך {exportProgress.pages}
           </p>
         )}
+        {result && <VectorSummary report={result} />}
         <div className="modal-buttons">
-          <button className="btn primary" onClick={run} disabled={busy}>{busy ? 'מייצא…' : 'ייצוא'}</button>
-          <button className="btn" onClick={() => controller.setExportOpen(false)} disabled={busy}>ביטול</button>
+          {result ? (
+            <button className="btn primary" onClick={close}>סגור</button>
+          ) : (
+            <>
+              <button className="btn primary" onClick={() => void run()} disabled={busy}>{busy ? 'מייצא…' : 'ייצוא'}</button>
+              <button className="btn" onClick={close} disabled={busy}>ביטול</button>
+            </>
+          )}
         </div>
       </div>
     </div>
