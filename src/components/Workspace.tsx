@@ -69,6 +69,7 @@ import {
   type Sides,
   type ImageFit,
   type ImageFrame,
+  type LayerInfo,
   type PageSection,
   type Run,
   type CharacterStyleRecord,
@@ -97,17 +98,19 @@ import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, t
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
 import { computeLayout, pageMargins, pageSidesOf } from '../layout'
 import { boxAtClick, columnBoxes, pourText, primaryTextFrameOrder, primaryTextFramePageGroups, type FlowMode } from '../placeText'
-import { detachedParentContent, ownerPage, pageRects, parentShadowContent, type ParentOverride, type ParentShadowRef } from '../pages'
+import { creationLayerOf, layerIdOf, layerViewsOf, isHiddenItem, isLockedItem } from '../layers'
+import { detachedParentContent, ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type ParentOverride, type ParentShadowRef } from '../pages'
 import { plainTocHeading, sliceTocDisplayMarkers, tocDisplayMarkers } from '../toc'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
 import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, splitPathVerticesAt, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
-import { spacing, type SpacingMark } from '../spacing'
+import { spacing, spacingMarksForSelection, type SpacingMark } from '../spacing'
 import { expandGapObject, findGaps, moveGap, type GapMember, type GapObject, type GapRegion } from '../gapTool'
 import { paragraphOverrides } from '../styleOverrides'
 import { fitPath } from '../curveFit'
 import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
+import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
@@ -370,7 +373,10 @@ interface Props {
   /** `silent`: a follow-up the program makes by itself (a measurement kept up to date): it joins the undo step it follows */
   onShapesChange: (shapes: ShapeFrame[], coalesceKey?: string, silent?: boolean) => void
   layerOrder: string[]
-  onLayerStackChange: (layerOrder: string[]) => void
+  /** names, colours, hidden and locked of the layers, by id */
+  layers: Record<string, LayerInfo>
+  /** the layers in their new order and with their new names, colours, hidden and locked: one step of the history */
+  onLayersChange: (layerOrder: string[], layers: Record<string, LayerInfo>, coalesceKey?: string) => void
   paragraphStyles: ParagraphStyleRecord[]
   /** the document's named character styles */
   characterStyles: CharacterStyleRecord[]
@@ -517,7 +523,8 @@ export function Workspace({
   shapes,
   onShapesChange,
   layerOrder,
-  onLayerStackChange,
+  layers,
+  onLayersChange,
   paragraphStyles,
   characterStyles,
   onParagraphStylesChange,
@@ -730,11 +737,25 @@ export function Workspace({
     if (initiallySelectPrimaryFrame) onInitialSelectionApplied?.()
   }, [initiallySelectPrimaryFrame, onInitialSelectionApplied])
   const [isolatedGroupId, setIsolatedGroupId] = useState<string | null>(null)
-  const [layerVisible, setLayerVisible] = useState(true)
-  const [layerLocked, setLayerLocked] = useState(false)
   const [activeLayerId, setActiveLayerId] = useState('layer-1')
-  const [itemVisibility, setItemVisibility] = useState<Record<string, boolean>>({})
-  const [itemLocks, setItemLocks] = useState<Record<string, boolean>>({})
+  const layerViews = useMemo(() => layerViewsOf(layerOrder, layers), [layerOrder, layers])
+  const layerViewById = useMemo(() => new Map(layerViews.map((view) => [view.id, view])), [layerViews])
+  // an object is shown unless it, or its layer, is hidden; it can be selected and changed unless it, or its layer, is locked
+  const { itemVisibility, itemLocks } = useMemo(() => {
+    const visibility: Record<string, boolean> = {}
+    const locks: Record<string, boolean> = {}
+    for (const item of [...frames, ...images, ...shapes]) {
+      if (isHiddenItem(item, layerViewById, layerOrder)) visibility[item.id] = false
+      if (isLockedItem(item, layerViewById, layerOrder)) locks[item.id] = true
+    }
+    return { itemVisibility: visibility, itemLocks: locks }
+  }, [frames, images, shapes, layerViewById, layerOrder])
+  // the thumbnails of the Pages panel draw what is shown, not what is hidden
+  const shownFrames = useMemo(() => frames.filter((frame) => itemVisibility[frame.id] !== false), [frames, itemVisibility])
+  const shownImages = useMemo(() => images.filter((image) => itemVisibility[image.id] !== false), [images, itemVisibility])
+  const shownShapes = useMemo(() => shapes.filter((shape) => itemVisibility[shape.id] !== false), [shapes, itemVisibility])
+  // new objects go on the active layer, or on the first open one when it is hidden or locked (what is made there could not be used)
+  const creationLayerId = creationLayerOf(activeLayerId, layerViews)
   const [guideSel, setGuideSel] = useState<string[]>([])
   /** several selected text frames / pictures / shapes (then `selectedId` is null) */
   const [multiSel, setMultiSel] = useState<string[]>([])
@@ -2535,7 +2556,7 @@ export function Workspace({
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
     const prepared = preparePlacedText(placing)
     const result = pourText(doc, frames, images, prepared.placed, target, mode, shapes)
-    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => activeLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     onPlacingChange(result.remaining)
@@ -2546,7 +2567,7 @@ export function Workspace({
     if (!selected) return false
     const prepared = preparePlacedText(placed)
     const result = pourText(doc, frames, images, prepared.placed, { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, 'single', shapes)
-    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? activeLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     return true
@@ -2593,7 +2614,7 @@ export function Workspace({
       x = Math.min(Math.max(at.x, page.x), page.x + page.w - w)
       y = Math.min(Math.max(at.y, page.y), page.y + page.h - h)
     }
-    const frame: ImageFrame = { id: newFrameId(), layerId: activeLayerId, x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images, shapes) }
+    const frame: ImageFrame = { id: newFrameId(), layerId: creationLayerId, x, y, w: Math.max(MIN_FRAME_PT, w), h: Math.max(MIN_FRAME_PT, h), assetId, fit: 'fill', z: nextZ(frames, images, shapes) }
     pageOps.commit({ images: [...images, frame], assets: assets[assetId] ? assets : { ...assets, [assetId]: asset } })
     setSelectedId(frame.id)
     setEditingId(null)
@@ -2603,8 +2624,7 @@ export function Workspace({
   /** clicking a picture: the Selection tool selects it and starts moving it (other tools pass the click on) */
   const onImagePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'transform' && tool !== 'direct' && tool !== 'heal')) return
-    if (layerLocked || itemLocks[id]) return
-    if (layerLocked) return
+    if (itemLocks[id]) return
     const im = images.find((x) => x.id === id)
     if (!im) return
     if (tool === 'heal') {
@@ -2659,7 +2679,7 @@ export function Workspace({
     const area = rects[pageIndex] ?? rects[selectedPage]
     const x = area ? area.x + (area.w - width) / 2 : 0
     const y = area ? Math.max(area.y + 20, Math.min(center ? center.y - height / 2 : area.y + 60, area.y + area.h - height - 20)) : 0
-    const shape: ShapeFrame = { id: newFrameId(), kind: 'table', x, y, w: width, h: height, table, fill: null, stroke: null, strokeWidth: 0, layerId: activeLayerId, z: nextZ(frames, images, shapes) }
+    const shape: ShapeFrame = { id: newFrameId(), kind: 'table', x, y, w: width, h: height, table, fill: null, stroke: null, strokeWidth: 0, layerId: creationLayerId, z: nextZ(frames, images, shapes) }
     onShapesChange([...shapes, shape], 'table:insert')
     setTool('select')
     setSelectedId(shape.id)
@@ -3091,7 +3111,7 @@ export function Workspace({
   }
   const insertSelectedImageIntoShape = () => {
     const pair = selectedImageShapePair()
-    if (!pair || layerLocked || itemLocks[pair.image.id] || itemLocks[pair.shape.id]) return
+    if (!pair || itemLocks[pair.image.id] || itemLocks[pair.shape.id]) return
     const nextImages = images.filter((image) => image.id !== pair.image.id)
     const nextShapes = shapes.map((shape) => shape.id === pair.shape.id
       ? { ...shape, image: { assetId: pair.image.assetId, fit: pair.image.fit } }
@@ -3166,7 +3186,7 @@ export function Workspace({
       .filter((f) => set.has(f.id))
       .map((f): TextFrame => {
         const fl = flow.get(f.id)
-        return fl ? { ...f, ...fl.style, text: fl.slice, runs: fl.runs, next: null } : { ...f, next: null }
+        return fl ? frameAsOwnStory(f, fl) : { ...f, next: null }
       })
     const ni = images.filter((im) => set.has(im.id))
     const ns = shapes.filter((sh) => set.has(sh.id))
@@ -3184,7 +3204,16 @@ export function Workspace({
     const order = new Map(stackOrder(data.frames, data.images, data.shapes, layerOrder).map((o, i) => [o.id, i]))
     const base = nextZ(frames, images, shapes)
     const layer = (id: string) => base + (order.get(id) ?? 0)
-    const moved = <T extends { id: string; x: number; y: number; z?: number }>(o: T): T => ({ ...o, id: newFrameId(), x: o.x + by.x, y: o.y + by.y, z: layer(o.id) })
+    // objects that were grouped together are grouped together again, as a group of their own (not with the objects they are copies of)
+    const groupSizes = new Map<string, number>()
+    for (const o of [...data.frames, ...data.images, ...data.shapes]) if (o.groupId) groupSizes.set(o.groupId, (groupSizes.get(o.groupId) ?? 0) + 1)
+    const newGroups = new Map<string, string>()
+    const groupOf = (groupId: string | undefined) => {
+      if (!groupId || (groupSizes.get(groupId) ?? 0) < 2) return undefined
+      if (!newGroups.has(groupId)) newGroups.set(groupId, newFrameId())
+      return newGroups.get(groupId)
+    }
+    const moved = <T extends { id: string; x: number; y: number; z?: number; groupId?: string }>(o: T): T => ({ ...o, id: newFrameId(), groupId: groupOf(o.groupId), x: o.x + by.x, y: o.y + by.y, z: layer(o.id) })
     const nf = data.frames.map(moved)
     const ni = data.images.map(moved)
     const ns = data.shapes.map(moved)
@@ -3459,7 +3488,7 @@ export function Workspace({
       console.error('Could not export the selected objects as PNG.', error)
     }
   }
-  const canCreateImage = !layerLocked &&
+  const canCreateImage =
     flattenCandidates.length === multiSel.length &&
     flattenCandidates.length >= 2 &&
     flattenCandidates.every((candidate) =>
@@ -3485,7 +3514,7 @@ export function Workspace({
       const mergedImage: ImageFrame = {
         id: newFrameId(),
         label: 'תמונה מאוחדת',
-        layerId: topmost.layerId ?? activeLayerId,
+        layerId: topmost.layerId ?? creationLayerId,
         x: worldOrigin.x,
         y: worldOrigin.y,
         w: bounds.width / zoom,
@@ -3594,7 +3623,7 @@ export function Workspace({
     const mergedFrame: ImageFrame = {
       id: newFrameId(),
       label: 'מיזוג תמונות',
-      layerId: topmost.layerId ?? activeLayerId,
+      layerId: topmost.layerId ?? creationLayerId,
       x: left + trimmed.left / scale,
       y: top + trimmed.top / scale,
       w: trimmed.canvas.width / scale,
@@ -3727,7 +3756,7 @@ export function Workspace({
     const z = nextZ(frames, images, shapes)
     const placed = imported.map((shape, index): ShapeFrame => ({
       ...shape,
-      layerId: activeLayerId,
+      layerId: creationLayerId,
       x: center.x + (shape.x - (minX + maxX) / 2) * scale,
       y: center.y + (shape.y - (minY + maxY) / 2) * scale,
       w: shape.w * scale,
@@ -3954,7 +3983,7 @@ export function Workspace({
     if (!selectedId && !linkFrom && !guidesSelected && multiSel.length === 0) return
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
-      if ((layerLocked || (selectedId && itemLocks[selectedId])) && e.key !== 'Escape') return
+      if (((selectedId && itemLocks[selectedId]) || multiSel.some((id) => itemLocks[id])) && e.key !== 'Escape') return
       if (e.key === 'Escape') {
         if (linkFrom) setLinkFrom(null)
         else {
@@ -4024,7 +4053,7 @@ export function Workspace({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, layerLocked, itemLocks, onFramesChange, onImagesChange, onShapesChange, onGuidesChange, tool, pointSel])
+  }, [selectedId, multiSel, guideSel, guidesVisible, linkFrom, frames, images, shapes, guides, itemLocks, onFramesChange, onImagesChange, onShapesChange, onGuidesChange, tool, pointSel])
 
 
   // while a shape is being drawn, Shift / Alt / Ctrl / Enter change it at once, even if the mouse does not move
@@ -4442,7 +4471,7 @@ export function Workspace({
       : null
     const kind = target?.dataset.objectKind
     const id = target?.dataset.objectId
-    if (!target || target.classList.contains('locked') || layerLocked || !id || (kind !== 'image' && kind !== 'shape') || itemLocks[id]) return
+    if (!target || target.classList.contains('locked') || !id || (kind !== 'image' && kind !== 'shape') || itemLocks[id]) return
     const image = kind === 'image' ? images.find((candidate) => candidate.id === id) : undefined
     const shape = kind === 'shape' ? shapes.find((candidate) => candidate.id === id && !!candidate.image) : undefined
     const assetId = image?.assetId ?? shape?.image?.assetId
@@ -4625,7 +4654,7 @@ export function Workspace({
         return {
           id: newFrameId(),
           label: name,
-          layerId: target.layerId ?? activeLayerId,
+          layerId: target.layerId ?? creationLayerId,
           x: 0,
           y: 0,
           w: 1,
@@ -4921,7 +4950,7 @@ export function Workspace({
     const r = kind === 'rect' ? shapePrefs.rect.radius : 0
     return {
       id: newFrameId(),
-      layerId: activeLayerId,
+      layerId: creationLayerId,
       kind,
       ...box,
       ...(kind === 'polygon' ? { sides: shapePrefs.polygon.sides } : {}),
@@ -4997,7 +5026,7 @@ export function Workspace({
     return {
       id: newFrameId(),
       kind: 'path',
-      layerId: activeLayerId,
+      layerId: creationLayerId,
       x,
       y,
       w,
@@ -5327,8 +5356,7 @@ export function Workspace({
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
     if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0) return
-    if (layerLocked || itemLocks[id]) return
-    if (layerLocked) return
+    if (itemLocks[id]) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
     if (tool === 'eyedropper') {
@@ -6040,7 +6068,7 @@ export function Workspace({
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (tool === 'feather' && e.button === 0) {
       const target = featherTargetAt(e.clientX, e.clientY)
-      if (!target || layerLocked || itemLocks[target.id]) return
+      if (!target || itemLocks[target.id]) return
       const start = featherPointAt(target, e.clientX, e.clientY)
       const gesture: FeatherDrag = {
         target,
@@ -6069,7 +6097,6 @@ export function Workspace({
       }
       return // scrollbars
     }
-    if (layerLocked && !panMode && tool !== 'zoom') return
     if (linkFrom && !panMode) {
       setLinkFrom(null) // clicked away from any frame
       return
@@ -6197,7 +6224,6 @@ export function Workspace({
       e.preventDefault()
       e.stopPropagation()
       const start = toWorld(e.clientX, e.clientY)
-      if (layerLocked) return
       const originals = gapObjectsForPoint(start)
       const nearestOnly = e.shiftKey
       const gaps = findGaps(start, originals, nearestOnly)
@@ -6398,7 +6424,24 @@ export function Workspace({
     if (groupDrag.current) {
       const d = groupDrag.current
       const p = toWorld(e.clientX, e.clientY)
-      offsetObjects(d.origins, p.x - d.start.x, p.y - d.start.y, d.key)
+      const dx = p.x - d.start.x
+      const dy = p.y - d.start.y
+      const movedIds = new Set(d.origins.keys())
+      const objects = [...frames, ...images, ...shapes]
+      const unselected = objects.filter((object) => !movedIds.has(object.id))
+      const moved = objects.flatMap((object) => {
+        const origin = d.origins.get(object.id)
+        return origin ? [{ ...object, x: origin.x + dx, y: origin.y + dy }] : []
+      })
+      const marks = moved.flatMap((object) => {
+        const page = ownerPage(rects, object.x + object.w / 2, object.y + object.h / 2)
+        const spread = spreads.find((candidate) => candidate.pages.some((item) => item.index === page))
+        const spreadPages = new Set(spread?.pages.map((item) => item.index) ?? [page])
+        const near = unselected.filter((other) => spreadPages.has(ownerPage(rects, other.x + other.w / 2, other.y + other.h / 2)))
+        return spacingMarksForSelection([object], near)
+      })
+      setSpacingShown(marks)
+      offsetObjects(d.origins, dx, dy, d.key)
       return
     }
     if (cornerMarquee.current && marquee) {
@@ -6616,7 +6659,7 @@ export function Workspace({
         const frame: TextFrame = {
           ...defaultTextStyle(),
           id: newFrameId(),
-          layerId: activeLayerId,
+          layerId: creationLayerId,
           x: Math.min(draft.x0, draft.x1),
           y: Math.min(draft.y0, draft.y1),
           w,
@@ -6788,8 +6831,7 @@ export function Workspace({
     if (e.button !== 0 || panMode) return // let the pan handler see it
     oversetCaret.current = false
     setFootnoteSel(null)
-    if (layerLocked || itemLocks[id]) return
-    if (layerLocked) return
+    if (itemLocks[id]) return
     if (placingImages.length > 0) return // the click places a picture on the page, even over a text frame
     const clicked = frames.find((f) => f.id === id)
     if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
@@ -6879,22 +6921,21 @@ export function Workspace({
   // linked-from — an import of a 100-page Word file otherwise creates 100+ live components that all re-render on
   // every keystroke, even though at most a couple of pages are ever on screen at once
   const alwaysMounted = useMemo(() => new Set([selectedId, editingId, linkFrom, pathEdit, ...multiSel].filter((id): id is string => !!id)), [selectedId, editingId, linkFrom, pathEdit, multiSel])
-  const visibleFrames = useMemo(() => layerVisible ? frames.filter((frame) => {
+  const visibleFrames = useMemo(() => frames.filter((frame) => {
     const top = ty + frame.y * zoom
     return itemVisibility[frame.id] !== false && (alwaysMounted.has(frame.id) || (top + frame.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
-  }) : [], [layerVisible, frames, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
-  const visibleImages = useMemo(() => layerVisible ? images.filter((image) => {
+  }), [frames, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const visibleImages = useMemo(() => images.filter((image) => {
     const top = ty + image.y * zoom
     return itemVisibility[image.id] !== false && (alwaysMounted.has(image.id) || (top + image.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
-  }) : [], [layerVisible, images, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
-  const visibleShapes = useMemo(() => layerVisible ? shapes.filter((shape) => {
+  }), [images, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const visibleShapes = useMemo(() => shapes.filter((shape) => {
     const top = ty + shape.y * zoom
     return itemVisibility[shape.id] !== false && (alwaysMounted.has(shape.id) || (top + shape.h * zoom >= scroll.y - 300 && top <= scroll.y + vp.h + 300))
-  }) : [], [layerVisible, shapes, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
-  const gapCandidateSignature = [frames, images, shapes, itemLocks, itemVisibility, layerVisible, layerLocked, isolatedGroupId, spreads]
+  }), [shapes, itemVisibility, alwaysMounted, ty, zoom, scroll.y, vp.h])
+  const gapCandidateSignature = [frames, images, shapes, itemLocks, itemVisibility, isolatedGroupId, spreads]
   const buildGapCandidatesBySpread = () => {
     const candidates = new Map<number, GapObject[]>()
-    if (!layerVisible || layerLocked) return candidates
     type Source = GapMember & { groupId?: string; eligible: boolean }
     const sources: Source[] = [
       ...frames.map((frame) => ({ id: frame.id, x: frame.x, y: frame.y, w: frame.w, h: frame.h, groupId: frame.groupId, eligible: !frame.rasterized && !frame.rotation && !itemLocks[frame.id] && itemVisibility[frame.id] !== false })),
@@ -6936,7 +6977,6 @@ export function Workspace({
     return candidates
   }
   const gapObjectsForPoint = (point: { x: number; y: number }): GapObject[] => {
-    if (layerLocked) return []
     const cached = gapCandidatesCache.current
     if (!cached || cached.signature.length !== gapCandidateSignature.length || cached.signature.some((value, index) => value !== gapCandidateSignature[index])) {
       gapCandidatesCache.current = { signature: gapCandidateSignature, bySpread: buildGapCandidatesBySpread() }
@@ -6962,32 +7002,9 @@ export function Workspace({
     gapHoverPointer.current = null
   }
 
-  const runningHeaderForPage = (pageIndex: number, styleId: string, strategy: 'first' | 'last') => {
-    const candidates: { page: number; index: number; text: string }[] = []
-    const rectList = pageRects(doc)
-    for (const head of headFrames(frames)) {
-      if (!head.text.trim() || !head.paragraphStyleIds) continue
-      const story = head.text
-      const chain = chainOf(frames, head.id)
-      for (const frame of chain) {
-        const part = flow.get(frame.id)
-        const framePage = ownerPage(rectList, frame.x + frame.w / 2, frame.y + frame.h / 2)
-        if (!part || framePage > pageIndex) continue
-        story.split('\n').forEach((text, index) => {
-          const start = story.slice(0, story.split('\n').slice(0, index).join('\n').length + (index ? 1 : 0)).length
-          const end = start + text.length + (index < story.split('\n').length - 1 ? 1 : 0)
-          if (head.paragraphStyleIds?.[index] === styleId && start < part.end && end > part.start && text.trim()) candidates.push({ page: framePage, index, text: text.trim() })
-        })
-      }
-    }
-    candidates.sort((a, b) => a.page - b.page || a.index - b.index)
-    if (!candidates.length) return ''
-    if (strategy === 'first') {
-      const onPage = candidates.filter((candidate) => candidate.page === pageIndex)
-      return (onPage[0] ?? candidates[candidates.length - 1]).text
-    }
-    return candidates[candidates.length - 1].text
-  }
+  // which paragraph of a style a running header shows on each page: worked out from where the text really lies, by the same
+  // function the PDF export uses, so a page shows the same header on screen and in the file
+  const runningHeaderForPage = useMemo(() => runningHeaderLookup(doc, frames, flow), [doc, frames, flow])
 
   /**
    * Every parent (master) page's objects, translated onto every document page that uses it - behind that page's own
@@ -7002,7 +7019,7 @@ export function Workspace({
       return rect && inViewY(rect.y, rect.h) ? parentId : null
     })
     return parentShadowContent(doc, parents, inView, sections, frames, runningHeaderForPage, parentOverrides, images, shapes)
-  }, [doc, parents, pageParents, sections, frames, images, shapes, parentOverrides, flow, rects, editingParentId, scroll.y, vp.h])
+  }, [doc, parents, pageParents, sections, frames, images, shapes, parentOverrides, flow, runningHeaderForPage, rects, editingParentId, scroll.y, vp.h])
 
   const overrideParentItem = (kind: ParentOverride['kind'], source: TextFrame | ImageFrame | ShapeFrame, event: ReactPointerEvent<Element>) => {
     const parentShadowRef = (source as typeof source & { parentShadowRef?: ParentShadowRef }).parentShadowRef
@@ -7015,14 +7032,14 @@ export function Workspace({
     const { parentShadowRef: _shadowRef, ...base } = sourceWithRef
     const z = nextZ(frames, images, shapes)
     if (kind === 'frame') {
-      const frame: TextFrame = { ...base, id: localId, next: null, layerId: activeLayerId, z } as TextFrame
+      const frame: TextFrame = { ...base, id: localId, next: null, layerId: creationLayerId, z } as TextFrame
       pageOps.commit({ frames: [...frames, frame], parentOverrides: [...parentOverrides, record] })
       if (tool === 'type') setEditingId(localId)
     } else if (kind === 'image') {
-      const image: ImageFrame = { ...base, id: localId, layerId: activeLayerId, z } as ImageFrame
+      const image: ImageFrame = { ...base, id: localId, layerId: creationLayerId, z } as ImageFrame
       pageOps.commit({ images: [...images, image], parentOverrides: [...parentOverrides, record] })
     } else {
-      const shape: ShapeFrame = { ...base, id: localId, layerId: activeLayerId, z } as ShapeFrame
+      const shape: ShapeFrame = { ...base, id: localId, layerId: creationLayerId, z } as ShapeFrame
       pageOps.commit({ shapes: [...shapes, shape], parentOverrides: [...parentOverrides, record] })
     }
     setSelectedPage(parentShadowRef.pageIndex)
@@ -7117,6 +7134,45 @@ export function Workspace({
     const selected = new Set(selectedPaintShapes.map((shape) => shape.id))
     onShapesChange(shapes.map((shape) => selected.has(shape.id) ? { ...shape, ...patch } : shape), `${key}:${[...selected].join(',')}`)
   }
+  /** the layers changed in the panel (order, names, colours, hidden, locked): what just became hidden or locked can no longer stay selected */
+  const changeLayerSetup = (order: string[], next: Record<string, LayerInfo>, coalesceKey?: string) => {
+    onLayersChange(order, next, coalesceKey)
+    const views = new Map(layerViewsOf(order, next).map((view) => [view.id, view]))
+    const closed = new Set([...frames, ...images, ...shapes].filter((item) => {
+      const view = views.get(layerIdOf(item, order))
+      return view?.hidden || view?.locked
+    }).map((item) => item.id))
+    if (selectedId && closed.has(selectedId)) setSelectedId(null)
+    setMultiSel((current) => (current.some((id) => closed.has(id)) ? current.filter((id) => !closed.has(id)) : current))
+  }
+  /** an object hidden, locked or renamed in the panel: kept on the object itself, so that it is saved, undone and exported with it */
+  const changeLayerItem = (id: string, patch: { hidden?: boolean; locked?: boolean; label?: string }, coalesceKey?: string) => {
+    const apply = <T extends { id: string; hidden?: true; locked?: true; label?: string }>(item: T): T => {
+      if (item.id !== id) return item
+      const next = { ...item }
+      if (patch.hidden !== undefined) {
+        if (patch.hidden) next.hidden = true
+        else delete next.hidden
+      }
+      if (patch.locked !== undefined) {
+        if (patch.locked) next.locked = true
+        else delete next.locked
+      }
+      if (patch.label !== undefined) {
+        const label = patch.label.trim()
+        if (label) next.label = label
+        else delete next.label
+      }
+      return next
+    }
+    if (frames.some((frame) => frame.id === id)) onFramesChange(frames.map(apply), coalesceKey)
+    else if (images.some((image) => image.id === id)) onImagesChange(images.map(apply), coalesceKey)
+    else onShapesChange(shapes.map(apply), coalesceKey)
+    if (patch.hidden || patch.locked) {
+      if (selectedId === id) setSelectedId(null)
+      setMultiSel((current) => current.filter((candidate) => candidate !== id))
+    }
+  }
   const reorderLayerItems = (layerId: string, orderedIds: string[]) => {
     const order = new Map(orderedIds.map((id, index) => [id, index]))
     const selected = new Set(orderedIds)
@@ -7137,11 +7193,12 @@ export function Workspace({
     const nextImages = images.filter((image) => !removed.has(image.id))
     const nextShapes = shapes.filter((shape) => !removed.has(shape.id))
     const nextLayerOrder = layerOrder.filter((id) => id !== layerId)
+    const { [layerId]: _removedLayer, ...nextLayers } = layers
     if (editingParentId) {
       onFramesChange(nextFrames, 'delete:layer-objects')
       onImagesChange(nextImages, 'delete:layer-objects')
       onShapesChange(nextShapes, 'delete:layer-objects')
-    } else pageOps.commit({ frames: nextFrames, images: nextImages, shapes: nextShapes, layerOrder: nextLayerOrder })
+    } else pageOps.commit({ frames: nextFrames, images: nextImages, shapes: nextShapes, layerOrder: nextLayerOrder, layers: nextLayers })
     setMultiSel((current) => current.filter((id) => !removed.has(id)))
     if (selectedId && removed.has(selectedId)) setSelectedIdRaw(null)
   }
@@ -8834,7 +8891,7 @@ export function Workspace({
                   ty={ty}
                   z={rank.get(im.id) ?? 0}
                   selected={im.id === selectedId}
-                  locked={layerLocked || !!itemLocks[im.id]}
+                  locked={!!itemLocks[im.id]}
                   marked={!previewMode && multiSel.includes(im.id)}
                   showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                   onPointerDown={onImagePointerDown(im.id)}
@@ -8853,7 +8910,7 @@ export function Workspace({
                   ty={ty}
                   z={rank.get(sh.id) ?? 0}
                   selected={sh.id === selectedId && tool !== 'pencil'}
-                  locked={layerLocked || !!itemLocks[sh.id]}
+                  locked={!!itemLocks[sh.id]}
                   marked={!previewMode && multiSel.includes(sh.id)}
                   showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
@@ -9075,7 +9132,7 @@ export function Workspace({
                     tx={tx}
                     ty={ty}
                     selected={f.id === selectedId}
-                    locked={layerLocked || !!itemLocks[f.id]}
+                    locked={!!itemLocks[f.id]}
                     marked={!previewMode && multiSel.includes(f.id)}
                     editing={f.id === editingId}
                     armed={f.id === linkFrom}
@@ -9513,7 +9570,7 @@ export function Workspace({
               id: 'pages',
               label: 'עמודים',
               visible: true,
-              content: <PagesPanel doc={doc} frames={frames} images={images} shapes={shapes} spreads={documentSpreads} currentSpread={Math.min(cur, documentSpreads.length - 1)} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onApplyParentToPage={applyParentToPage} onDetachParent={detachSelectedPagesFromParent} sections={sections} onSectionsChange={onSectionsChange} canEditPages={!editingParentId} />,
+              content: <PagesPanel doc={doc} frames={shownFrames} images={shownImages} shapes={shownShapes} spreads={documentSpreads} currentSpread={Math.min(cur, documentSpreads.length - 1)} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onApplyParentToPage={applyParentToPage} onDetachParent={detachSelectedPagesFromParent} sections={sections} onSectionsChange={onSectionsChange} canEditPages={!editingParentId} />,
             },
             {
               id: 'links',
@@ -9538,7 +9595,7 @@ export function Workspace({
             {
               id: 'layers',
               label: 'שכבות',
-              content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} onLayerOrderChange={onLayerStackChange} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onVisibility={setLayerVisible} onLock={(locked) => { setLayerLocked(locked); if (locked) { setSelectedId(null); setMultiSel([]); setGuideSel([]) } }} onItemVisibility={(id, visible) => { setItemVisibility((current) => ({ ...current, [id]: visible })); if (!visible && selectedId === id) setSelectedId(null) }} onItemLock={(id, locked) => { setItemLocks((current) => ({ ...current, [id]: locked })); if (locked && selectedId === id) setSelectedId(null) }} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
+              content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} layers={layers} onLayersChange={changeLayerSetup} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={setSelectedId} onItemChange={changeLayerItem} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
             },
           ]}
         />
@@ -9665,7 +9722,7 @@ export function Workspace({
               return [
                 ...(frame.next === null ? [{
                   label: 'שרשר לתיבה הבאה',
-                  disabled: layerLocked || !!itemLocks[frame.id],
+                  disabled: !!itemLocks[frame.id],
                   onClick: () => {
                     setSelectedId(frame.id)
                     setEditingId(null)
@@ -9675,7 +9732,7 @@ export function Workspace({
                 }] : []),
                 ...(hasPrevious ? [{
                   label: 'בטל שרשור',
-                  disabled: layerLocked || !!itemLocks[frame.id],
+                  disabled: !!itemLocks[frame.id],
                   onClick: () => {
                     onFramesChange(unlinkBefore(frames, frame.id))
                     setSelectedId(frame.id)
@@ -9688,7 +9745,7 @@ export function Workspace({
             ...(objectMenu.sourceShapeId ? [{ separator: true }] : []),
             ...(() => {
               const pair = selectedImageShapePair()
-              return pair ? [{ label: 'הכנס תמונה לתוך צורה', disabled: layerLocked || !!itemLocks[pair.image.id] || !!itemLocks[pair.shape.id], onClick: insertSelectedImageIntoShape }] : []
+              return pair ? [{ label: 'הכנס תמונה לתוך צורה', disabled: !!itemLocks[pair.image.id] || !!itemLocks[pair.shape.id], onClick: insertSelectedImageIntoShape }] : []
             })(),
             { label: 'צור גרופ', disabled: selectedObjectIds().length < 2, onClick: groupSelectedObjects },
             { label: 'שחרר גרופ', disabled: !selectedObjectIds().some((id) => !!objectGroupId(id)), onClick: ungroupSelectedObjects },

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ModalSpec } from './components/Modal'
-import { DEFAULT_PARAGRAPH_STYLES, defaultParagraphStyles, type Asset, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultParagraphStyles, type Asset, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { FileFormatError, parseDocument, serializeDocument } from './fileFormat'
 import {
   baseName,
@@ -34,6 +34,8 @@ const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
 const NO_PARENT_OVERRIDES: ParentOverride[] = []
 const NO_COLOR_SAMPLES: ColorSample[] = []
+const NO_LAYERS: Record<string, LayerInfo> = {}
+const NO_LAYER_ORDER = ['layer-1']
 
 const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
 
@@ -120,7 +122,8 @@ export function useDocumentSession() {
   const parents = state?.parents ?? NO_PARENTS
   const pageParents = state?.pageParents ?? NO_PAGE_PARENTS
   const sections = state?.sections ?? NO_SECTIONS
-  const layerOrder = state?.layerOrder ?? ['layer-1']
+  const layerOrder = state?.layerOrder ?? NO_LAYER_ORDER
+  const layers = state?.layers ?? NO_LAYERS
   const parentOverrides = state?.parentOverrides ?? NO_PARENT_OVERRIDES
   const colorSamples = state?.colorSamples ?? NO_COLOR_SAMPLES
   const file = active?.file ?? null
@@ -218,10 +221,13 @@ export function useDocumentSession() {
   const changeParents = (next: ParentPage[], key?: string) => change((s) => (next !== s.parents ? { ...s, parents: next } : s), key)
   const changePageParents = (next: (string | null)[], key?: string) => change((s) => (next !== s.pageParents ? { ...s, pageParents: next } : s), key)
   const changeSections = (next: PageSection[], key?: string) => change((s) => (next !== s.sections ? { ...s, sections: next } : s), key)
-  const changeLayerOrder = (next: string[]) => change((s) => {
+  /** the layers in their new order, with their names, colours, hidden and locked: one step of the history, however many of them changed */
+  const changeLayers = (order: string[], next: Record<string, LayerInfo>, key?: string) => change((s) => {
     const current = s.layerOrder ?? ['layer-1']
-    return current.length === next.length && current.every((id, index) => id === next[index]) ? s : { ...s, layerOrder: next }
-  }, 'layers:order')
+    const sameOrder = current.length === order.length && current.every((id, index) => id === order[index])
+    const sameLayers = s.layers === next || (!s.layers && Object.keys(next).length === 0)
+    return sameOrder && sameLayers ? s : { ...s, layerOrder: order, layers: next }
+  }, key)
 
   const pages: PageOps = {
     insert: (at, count, beside, parentId) =>
@@ -636,6 +642,7 @@ export function useDocumentSession() {
     pageParents,
     sections,
     layerOrder,
+    layers,
     parentOverrides,
     colorSamples,
     history,
@@ -647,7 +654,7 @@ export function useDocumentSession() {
     changeParents,
     changePageParents,
     changeSections,
-    changeLayerOrder,
+    changeLayers,
     pages,
     file,
     dirty,

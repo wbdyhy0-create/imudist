@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { expandGapObject, findGaps, moveGap, type GapObject, type GapRegion } from './gapTool'
-import { spacing } from './spacing'
+import { spacing, spacingMarksForSelection } from './spacing'
 
 const row: GapObject[] = [
   { id: 'left', x: 0, y: 0, w: 20, h: 20 },
@@ -118,5 +118,46 @@ describe('spacing axis convention', () => {
   it('uses h for the horizontal measurement line between side-by-side objects', () => {
     const result = spacing({ x: 0, y: 0, w: 20, h: 20 }, [{ x: 30, y: 0, w: 20, h: 20 }], 0, { x: false, y: false })
     expect(result.marks.some((mark) => mark.axis === 'h' && mark.value === 10)).toBe(true)
+  })
+
+  it('shows the neighbouring gaps for every object moved together', () => {
+    const selected = [0, 1, 2, 3].map((column) => ({ x: column * 100, y: 100, w: 50, h: 50 }))
+    const neighbours = [0, 1, 2, 3].flatMap((column) => [
+      { x: column * 100, y: 0, w: 50, h: 50 },
+      { x: column * 100, y: 220, w: 50, h: 50 },
+    ])
+
+    const marks = spacingMarksForSelection(selected, neighbours)
+
+    expect(marks).toHaveLength(2)
+    expect(marks.map((mark) => mark.value)).toEqual([50, 70])
+    expect(marks.every((mark) => mark.axis === 'v' && !mark.equal)).toBe(true)
+  })
+
+  it('condenses repeated group measurements and marks matching opposite gaps green', () => {
+    const selected = [0, 1, 2, 3].map((column) => ({ x: column * 100, y: 100, w: 50, h: 50 }))
+    const neighbours = [0, 1, 2, 3].flatMap((column) => [
+      { x: column * 100, y: 0, w: 50, h: 50 },
+      { x: column * 100, y: 200, w: 50, h: 50 },
+    ])
+
+    const marks = spacingMarksForSelection(selected, neighbours)
+
+    expect(marks).toHaveLength(2)
+    expect(marks.every((mark) => mark.equal && mark.value === 50)).toBe(true)
+    expect(marks.map((mark) => mark.at)).toEqual([175, 175])
+  })
+
+  it('keeps unequal group gaps blue', () => {
+    const selected = [0, 1, 2, 3].map((column) => ({ x: column * 100, y: 100, w: 50, h: 50 }))
+    const neighbours = [0, 1, 2, 3].flatMap((column) => [
+      { x: column * 100, y: 0, w: 50, h: 50 },
+      { x: column * 100, y: 220, w: 50, h: 50 },
+    ])
+
+    const marks = spacingMarksForSelection(selected, neighbours)
+
+    expect(marks).toHaveLength(2)
+    expect(marks.map((mark) => mark.equal)).toEqual([false, false])
   })
 })

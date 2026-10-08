@@ -405,6 +405,12 @@ export interface TextFrame extends TextStyle {
   paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
+  /** hidden in the Layers panel: not drawn, and not exported (its text still takes its place in the story) */
+  hidden?: true
+  /** locked in the Layers panel: cannot be selected or changed */
+  locked?: true
+  /** the name the Layers panel shows instead of the first words of the text */
+  label?: string
   x: number
   y: number
   w: number
@@ -553,6 +559,8 @@ export interface ImageFrame {
   groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
+  hidden?: true
+  locked?: true
   x: number
   y: number
   w: number
@@ -666,6 +674,9 @@ export interface ShapeFrame {
   groupId?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
+  hidden?: true
+  locked?: true
+  label?: string
   kind: ShapeKind
   x: number
   y: number
@@ -725,6 +736,18 @@ export interface ShapeFrame {
  * shows every one of these objects automatically, translated onto its own position, behind its own objects and not
  * selectable - editing the parent page itself is what everyone using it then shows.
  */
+/**
+ * What the Layers panel shows of a layer besides its place in the stack (`layerOrder`): its name and colour, and whether it is
+ * hidden (not drawn, not exported) or locked (its objects cannot be selected or changed). A layer with no entry is shown with
+ * the defaults of `layerViewsOf` (layers.ts).
+ */
+export interface LayerInfo {
+  name?: string
+  color?: string
+  hidden?: true
+  locked?: true
+}
+
 export interface ParentPage {
   id: string
   /** up to ~4 characters, shown next to a document page that uses it */

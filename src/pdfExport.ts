@@ -1,7 +1,8 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
-import { ownerPage, pageRects, type PageRect } from './pages'
+import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
+import { markHiddenByLayer } from './layers'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
 import { layoutEndnotes } from './endnotes'
@@ -717,11 +718,12 @@ export async function renderPageLayers(
     await flushFrames()
   }
 
-  const pageFrames = content.frames.filter((frame) => !isParentShadow(frame))
+  // what is hidden in the Layers panel (itself or its layer) is not drawn; its text still has its place in the story
+  const pageFrames = content.frames.filter((frame) => !isParentShadow(frame) && !frame.hidden)
   const parentFrames = content.frames.filter(isParentShadow)
-  const pageImages = content.images.filter((image) => !isParentShadow(image))
+  const pageImages = content.images.filter((image) => !isParentShadow(image) && !image.hidden)
   const parentImages = content.images.filter(isParentShadow)
-  const pageShapes = content.shapes.filter((shape) => !isParentShadow(shape))
+  const pageShapes = content.shapes.filter((shape) => !isParentShadow(shape) && !shape.hidden)
   const parentShapes = content.shapes.filter(isParentShadow)
   if (parentContentAbove) {
     await drawObjects(pageFrames, pageImages, pageShapes)
@@ -791,6 +793,40 @@ export function prepareExport(content: ExportContent): PreparedExport {
     ? { ...content, doc: endnotePages.doc, frames: [...content.frames, ...endnotePages.frames] }
     : content
   return { content: renderContent, flows: new Map([...bodyFlows, ...endnotePages.flows]), rects: pageRects(renderContent.doc) }
+}
+
+/** What a document is made of, as `exportContentOf` takes it: its own content and its parent (master) pages. */
+export type ExportSource = Pick<DocContent, 'doc' | 'frames' | 'images' | 'shapes' | 'assets' | 'paragraphStyles' | 'sections' | 'layerOrder' | 'layers' | 'parents' | 'pageParents' | 'parentOverrides'>
+
+/**
+ * A document as the export draws it: its own objects, with what every page shows of its parent (master) pages mixed in
+ * behind them - the page numbers written out per page, each running header worked out from where the text really lies
+ * (the story is laid out here to know that, only when some parent has a running header). Used for the PDF of one
+ * document, the PNG of a page and every chapter of a book, so that they all show the same as the screen.
+ */
+export function exportContentOf(source: ExportSource): ExportContent {
+  const order = source.layerOrder ?? ['layer-1']
+  const marked = <T extends { id: string; layerId?: string; hidden?: true; locked?: true }>(items: T[]): T[] => markHiddenByLayer(items, order, source.layers)
+  const own: ExportContent = {
+    doc: source.doc,
+    frames: marked(source.frames),
+    images: marked(source.images),
+    shapes: marked(source.shapes),
+    layerOrder: source.layerOrder,
+    assets: source.assets,
+    paragraphStyles: source.paragraphStyles,
+    sections: source.sections,
+  }
+  if (!source.pageParents.some(Boolean)) return own
+  const hasRunningHeader = source.parents.some((parent) => parent.frames.some((frame) => frame.runningHeaderStyleId))
+  const runningHeader = hasRunningHeader ? runningHeaderLookup(source.doc, own.frames, prepareExport(own).flows) : undefined
+  const shadow = parentShadowContent(source.doc, source.parents, source.pageParents, source.sections, own.frames, runningHeader, source.parentOverrides ?? [], own.images, own.shapes)
+  return {
+    ...own,
+    frames: [...shadow.frames, ...own.frames],
+    images: [...shadow.images, ...own.images],
+    shapes: [...shadow.shapes, ...own.shapes],
+  }
 }
 
 /** The size of the sheet a page is drawn on: the page, the bleed around it and room for the crop marks outside that. */

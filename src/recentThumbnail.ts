@@ -2,6 +2,7 @@ import type { Asset, ImageFrame, ShapeFrame, TextFrame } from './document'
 import { isTauri } from './fileio'
 import type { RecentEntry } from './recent'
 import { parseDocument } from './fileFormat'
+import { isHiddenItem, layerViewsOf } from './layers'
 import { pageRects, parentShadowContent, type DocContent } from './pages'
 
 const MAX_WIDTH = 280
@@ -178,9 +179,13 @@ function allOnFirstPage(content: DocContent, page: { x: number; y: number; w: nu
     content.images,
     content.shapes,
   )
-  const frames = [...parent.frames, ...content.frames].filter((frame) => intersectsPage(frame, page))
-  const images = [...parent.images, ...content.images].filter((image) => intersectsPage(image, page))
-  const shapes = [...parent.shapes, ...content.shapes].filter((shape) => intersectsPage(shape, page))
+  // what the Layers panel hides (an object, or a whole layer) is not drawn
+  const order = content.layerOrder ?? ['layer-1']
+  const views = new Map(layerViewsOf(order, content.layers).map((view) => [view.id, view]))
+  const shown = <T extends { id: string; layerId?: string; hidden?: true; locked?: true }>(items: T[]) => items.filter((item) => !isHiddenItem(item, views, order))
+  const frames = [...parent.frames, ...shown(content.frames)].filter((frame) => intersectsPage(frame, page))
+  const images = [...parent.images, ...shown(content.images)].filter((image) => intersectsPage(image, page))
+  const shapes = [...parent.shapes, ...shown(content.shapes)].filter((shape) => intersectsPage(shape, page))
   return { frames, images, shapes }
 }
 

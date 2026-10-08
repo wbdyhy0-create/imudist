@@ -48,6 +48,14 @@ describe('help topic search', () => {
     expect(topic?.answer[0]).toContain('טקסט פשוט מתאים נכתב כטקסט אמיתי')
   })
 
+  it('finds instructions for duplicating a shape with Ctrl+D', () => {
+    const topic = search('שכפול צורה על ידי קוטרול D')[0]
+    expect(topic?.id).toBe('duplicate-shape-repeat')
+    expect(topic?.answer[0]).toContain('העותק הראשון ייווצר בדיוק מעל המקור')
+    expect(topic?.answer[0]).toContain('גררו את העותק למיקום הרצוי')
+    expect(topic?.answer[0]).toContain('Ctrl+F')
+  })
+
   it('matches Hebrew spellings of PDF to PDF topics', () => {
     expect(normalizeHelpQuery('פידיאף')).toBe('pdf')
     expect(normalizeHelpQuery('פי די אף')).toBe('pdf')
@@ -379,12 +387,21 @@ describe('help topic search', () => {
     expect(panel).toContain('אינה קבוצת פקודות „לחזית” או „לרקע”')
 
     const layerControls = HELP_TOPICS.find((topic) => topic.id === 'layers-visibility-lock')?.answer[0] ?? ''
-    expect(layerControls).toContain('בקנבס כולו')
-    expect(layerControls).toContain('רק את הסמל בלוח')
+    // the eye and the lock of a layer row work for every layer, are saved and keep the layer out of the export
+    expect(layerControls).toContain('מסתירה את כל אובייקטי השכבה')
+    expect(layerControls).toContain('אינם נכללים בייצוא')
+    expect(layerControls).toContain('נשמרות בקובץ המסמך')
+    expect(layerControls).toContain('וגררו לאורך אותו סוג סמל בשורות שכבות אחרות')
+    expect(layerControls).toContain('פריטים בתוך שכבה')
+
+    const itemControls = HELP_TOPICS.find((topic) => topic.id === 'layers-item-visibility-lock')?.answer[0] ?? ''
+    expect(search('לנעול כמה אובייקטים בשכבה')[0]?.id).toBe('layers-item-visibility-lock')
+    expect(itemControls).toContain('וגררו לאורך אותה עמודה ברשימה')
+    expect(itemControls).toContain('מנעול פתוח מוצג באפור ומנעול סגור בכתום')
 
     const rename = HELP_TOPICS.find((topic) => topic.id === 'layers-item-name')?.answer[0] ?? ''
     expect(rename).toContain('„אפשרויות שכבה”')
-    expect(rename).toContain('אינם נשמרים בקובץ המסמך')
+    expect(rename).toContain('נשמרים בקובץ המסמך')
   })
 
   it('uses matching words even when other query words are not in a topic', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { defaultDocSettings, EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, type DocSettings, type ParentPage, type TextFrame } from './document'
-import { detachedParentContent, pageRects } from './pages'
+import { defaultDocSettings, EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type DocSettings, type ParentPage, type TextFrame } from './document'
+import { applySettings, deletePages, detachedParentContent, insertPages, movePage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent } from './pages'
 
 const textFrame = (id: string, x: number, text: string): TextFrame => ({
   id,
@@ -58,5 +58,81 @@ describe('detaching pages from their parent page', () => {
     const second = detachedParentContent(doc, [parent], ['master', 'master', 'master'], [1], [], [], [], [], [], newId)
     expect(second.frames.map((f) => f.text)).toEqual(['ימין'])
     expect(second.frames[0].x).toBe(rects[1].x + 10)
+  })
+})
+
+describe('running headers', () => {
+  // one story over three pages: 'H1' on page 1, 'body' 'A' 'B' on page 2, 'body' on page 3
+  const doc = { ...defaultDocSettings('t'), pages: 3 }
+  const rects = pageRects(doc)
+  const story = 'H1\nbody\nA\nB\nbody'
+  // every frame sits on its own page (the pages are stacked, so a frame's page is told by its y)
+  const onPage = (page: number, frame: TextFrame): TextFrame => ({ ...frame, x: rects[page].x + 10, y: rects[page].y + 20 })
+  const head = { ...onPage(0, textFrame('a', 0, story)), paragraphStyleIds: ['s1', 'x', 's1', 's1', 's2'], next: 'b' }
+  const second = { ...onPage(1, textFrame('b', 0, '')), next: 'c' }
+  const third = onPage(2, textFrame('c', 0, ''))
+  const frames = [head, second, third]
+  const flows = new Map([
+    ['a', { start: 0, end: 3 }],
+    ['b', { start: 3, end: 12 }],
+    ['c', { start: 12, end: 16 }],
+  ])
+  const lookup = runningHeaderLookup(doc, frames, flows)
+
+  it('shows the last paragraph of the style up to the page, or the first one on it', () => {
+    expect([0, 1, 2].map((page) => lookup(page, 's1', 'last'))).toEqual(['H1', 'B', 'B'])
+    expect([0, 1, 2].map((page) => lookup(page, 's1', 'first'))).toEqual(['H1', 'A', 'B'])
+  })
+
+  it('is empty before the first paragraph of the style, and for a style nothing has', () => {
+    expect([0, 1, 2].map((page) => lookup(page, 's2', 'last'))).toEqual(['', '', 'body'])
+    expect(lookup(1, 'none', 'last')).toBe('')
+  })
+
+  it('puts the right text on each page of a parent that has a running header', () => {
+    const header = { ...textFrame('h', 10, RUNNING_HEADER_MARKER), runningHeaderStyleId: 's1', runningHeaderStrategy: 'first' as const }
+    const parent = parentOf(doc, [header])
+    const shown = parentShadowContent(doc, [parent], ['master', 'master', 'master'], [], frames, lookup)
+    expect(shown.frames.map((f) => f.text)).toEqual(['H1', 'A', 'B'])
+  })
+
+  it('leaves the header empty when it is not told where the text lies', () => {
+    const header = { ...textFrame('h', 10, RUNNING_HEADER_MARKER), runningHeaderStyleId: 's1' }
+    const shown = parentShadowContent(doc, [parentOf(doc, [header])], ['master', 'master', 'master'], [], frames)
+    expect(shown.frames.map((f) => f.text)).toEqual(['', '', ''])
+  })
+})
+
+describe('page operations', () => {
+  it('keep what is not tied to a page: layer order, character styles, colour samples', () => {
+    const doc = { ...defaultDocSettings('t'), pages: 3 }
+    const content: DocContent = {
+      doc,
+      layerOrder: ['layer-2', 'layer-1'],
+      frames: [],
+      images: [],
+      assets: {},
+      guides: [],
+      shapes: [],
+      paragraphStyles: [],
+      characterStyles: [{ id: 'cs', name: 'x', patch: {} } as never],
+      parents: [],
+      pageParents: [],
+      sections: [],
+      parentOverrides: [],
+      colorSamples: [{ id: 'c', color: '#ffffff' } as never],
+    }
+    const results = {
+      insert: insertPages(content, 1, 1),
+      remove: deletePages(content, [1]),
+      move: movePage(content, 0, 2),
+      setup: applySettings(content, { ...doc, pages: 4 }),
+    }
+    for (const [name, result] of Object.entries(results)) {
+      expect(result, name).not.toBeNull()
+      expect(result!.layerOrder, name).toEqual(['layer-2', 'layer-1'])
+      expect(result!.characterStyles, name).toEqual(content.characterStyles)
+      expect(result!.colorSamples, name).toEqual(content.colorSamples)
+    }
   })
 })

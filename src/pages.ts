@@ -1,5 +1,5 @@
-import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
-import { removeFrame } from './frames'
+import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type RunningHeaderStrategy, type ShapeFrame, type TextFrame } from './document'
+import { chainOf, headFrames, removeFrame } from './frames'
 import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
 import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
 import { normalizeRuns } from './story'
@@ -29,6 +29,8 @@ export interface DocContent {
   doc: DocSettings
   /** front-to-back layer order; absent in older documents */
   layerOrder?: string[]
+  /** names, colours, hidden and locked of the layers, by id */
+  layers?: Record<string, LayerInfo>
   frames: TextFrame[]
   images: ImageFrame[]
   /** picture data, by id (kept even when no frame uses it, so undo can bring the picture back) */
@@ -121,19 +123,18 @@ export function remapContent(c: DocContent, newDoc: DocSettings, map: (oldIndex:
     const pageIndex = map(override.pageIndex)
     return pageIndex === null || pageIndex >= newDoc.pages ? [] : [{ ...override, pageIndex }]
   })
+  // everything not tied to a page (layer order, character styles, colour samples, whatever is added later) is kept as it is:
+  // this result replaces the whole document, so a field left out here would be lost from it
   return {
+    ...c,
     doc: newDoc,
     frames,
     images,
-    assets: c.assets,
     guides,
     shapes,
-    paragraphStyles: c.paragraphStyles,
-    parents: c.parents,
     pageParents: remapList(c.pageParents, newDoc.pages, map),
     sections,
     parentOverrides,
-    colorSamples: c.colorSamples,
   }
 }
 
@@ -215,8 +216,8 @@ export function parentShadowContent(
     const inHalf = (x: number, w: number) => x + w / 2 >= srcX && x + w / 2 < srcX + parent.w
     const label = pageNumberLabel(sections, pageIndex, doc.startPage)
     for (const f of parent.frames) {
-      if (!inHalf(f.x, f.w) || isOverridden(pageIndex, parent.id, 'frame', f.id)) continue
-      const pageHeader = f.runningHeaderStyleId ? (runningHeader?.(pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last') ?? runningHeaderForPage(doc, documentFrames, pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last')) : ''
+      if (f.hidden || !inHalf(f.x, f.w) || isOverridden(pageIndex, parent.id, 'frame', f.id)) continue
+      const pageHeader = f.runningHeaderStyleId ? (runningHeader?.(pageIndex, f.runningHeaderStyleId, f.runningHeaderStrategy ?? 'last') ?? '') : ''
         const sourceRuns = normalizeRuns(f.text, f.runs, f)
         const numbered = substituteMarker(f.text, sourceRuns, PAGE_NUMBER_MARKER, label)
       const internal = substituteMarker(numbered.text, numbered.runs, INTERNAL_PAGE_NUMBER_MARKER, String(pageIndex + 1))
@@ -226,8 +227,8 @@ export function parentShadowContent(
       const sub = substituteMarker(internalLetters.text, internalLetters.runs, RUNNING_HEADER_MARKER, pageHeader)
       out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: f.id } })
     }
-    for (const im of parent.images) if (inHalf(im.x, im.w) && !isOverridden(pageIndex, parent.id, 'image', im.id)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: im.id } })
-    for (const sh of parent.shapes) if (inHalf(sh.x, sh.w) && !isOverridden(pageIndex, parent.id, 'shape', sh.id)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: sh.id } })
+    for (const im of parent.images) if (!im.hidden && inHalf(im.x, im.w) && !isOverridden(pageIndex, parent.id, 'image', im.id)) out.images.push({ ...im, id: `parent-shadow:${pageIndex}:${im.id}`, x: im.x + dx, y: im.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: im.id } })
+    for (const sh of parent.shapes) if (!sh.hidden && inHalf(sh.x, sh.w) && !isOverridden(pageIndex, parent.id, 'shape', sh.id)) out.shapes.push({ ...sh, id: `parent-shadow:${pageIndex}:${sh.id}`, x: sh.x + dx, y: sh.y + dy, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: sh.id } })
   })
   return out
 }
@@ -258,26 +259,71 @@ export function detachedParentContent(
   return { frames: own(shown.frames), images: own(shown.images), shapes: own(shown.shapes) }
 }
 
-function runningHeaderForPage(doc: DocSettings, frames: TextFrame[], pageIndex: number, styleId: string, strategy: 'first' | 'last'): string {
-  const rects = pageRects(doc)
-  const candidates: { page: number; y: number; x: number; text: string }[] = []
-  for (const frame of frames) {
-    const framePage = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
-    if (framePage > pageIndex) continue
-    if (!frame.text.trim()) continue
-    const paragraphs = frame.text.split('\n')
-    paragraphs.forEach((text, index) => {
-      const matches = frame.paragraphStyleIds?.[index] === styleId || (index === 0 && frame.paragraphStyleId === styleId)
-      if (matches && text.trim()) candidates.push({ page: framePage, y: frame.y + index, x: frame.x, text: text.trim() })
-    })
+/**
+ * The text a running header (a parent page's "first / last paragraph of this style on the page") shows on each page,
+ * worked out from where the text really lies: `flows` says which part of a story each frame holds, and the frame says
+ * which page it is on. The paragraphs of a style are collected once, on the first question, so asking for every page of
+ * a book stays cheap. A page with no paragraph of the style of its own shows the last one before it (and none at all
+ * before the first).
+ */
+export function runningHeaderLookup(
+  doc: DocSettings,
+  frames: TextFrame[],
+  flows: ReadonlyMap<string, { start: number; end: number }>,
+): (pageIndex: number, styleId: string, strategy: RunningHeaderStrategy) => string {
+  interface Candidate {
+    page: number
+    index: number
+    text: string
   }
-  candidates.sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x)
-  if (!candidates.length) return ''
-  if (strategy === 'first') {
-    const onPage = candidates.filter((candidate) => candidate.page === pageIndex)
-    return (onPage[0] ?? candidates[candidates.length - 1]).text
+  const byStyle = new Map<string, Candidate[]>()
+  let collected = false
+  const collect = () => {
+    collected = true
+    const rects = pageRects(doc)
+    for (const head of headFrames(frames)) {
+      const styles = head.paragraphStyleIds
+      if (!styles || !head.text.trim()) continue
+      const paragraphs = head.text.split('\n')
+      const starts: number[] = []
+      let at = 0
+      for (const paragraph of paragraphs) {
+        starts.push(at)
+        at += paragraph.length + 1
+      }
+      for (const frame of chainOf(frames, head.id)) {
+        const part = flows.get(frame.id)
+        if (!part) continue
+        const page = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+        for (let index = 0; index < paragraphs.length; index++) {
+          const styleId = styles[index]
+          const text = paragraphs[index].trim()
+          if (!styleId || !text) continue
+          const from = starts[index]
+          const to = from + paragraphs[index].length + (index < paragraphs.length - 1 ? 1 : 0)
+          // the paragraph shows (at least in part) in this frame
+          if (from >= part.end || to <= part.start) continue
+          const list = byStyle.get(styleId)
+          if (list) list.push({ page, index, text })
+          else byStyle.set(styleId, [{ page, index, text }])
+        }
+      }
+    }
+    for (const list of byStyle.values()) list.sort((a, b) => a.page - b.page || a.index - b.index)
   }
-  return candidates[candidates.length - 1].text
+  return (pageIndex, styleId, strategy) => {
+    if (!collected) collect()
+    const list = byStyle.get(styleId)
+    if (!list) return ''
+    let last = -1
+    let firstOnPage = -1
+    for (let i = 0; i < list.length && list[i].page <= pageIndex; i++) {
+      last = i
+      if (firstOnPage < 0 && list[i].page === pageIndex) firstOnPage = i
+    }
+    if (last < 0) return ''
+    return list[strategy === 'first' && firstOnPage >= 0 ? firstOnPage : last].text
+  }
 }
 
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */

@@ -34,6 +34,7 @@ import {
   type FootnoteLayoutConfig,
   type GradientFill,
   type Guide,
+  type LayerInfo,
   type ImageFit,
   type ImageFrame,
   type NumberFormat,
@@ -80,6 +81,8 @@ export interface DocumentFile {
   savedAt: string
   settings: DocSettings
   layerOrder?: string[]
+  /** names, colours, hidden and locked of the layers, by id (absent in files from before they were saved) */
+  layers?: Record<string, LayerInfo>
   frames: TextFrame[]
   /** version 2+: pictures on the pages, and the data of the pictures they use */
   images: ImageFrame[]
@@ -120,6 +123,7 @@ export function serializeDocument(c: DocContent): string {
     savedAt: new Date().toISOString(),
     settings: c.doc,
     layerOrder: c.layerOrder ?? ['layer-1'],
+    layers: c.layers ?? {},
     frames: c.frames,
     images: c.images,
     assets,
@@ -296,6 +300,31 @@ const groupOf = (raw: Record<string, unknown>): { groupId?: string } => typeof r
 const layerIdOf = (raw: Record<string, unknown>): { layerId?: string } => typeof raw.layerId === 'string' && raw.layerId.length > 0 && raw.layerId.length <= 64 ? { layerId: raw.layerId } : {}
 /** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
 type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
+/** hidden or locked in the Layers panel, and the name given there: the same for every kind of object */
+const itemFlagsOf = (raw: Record<string, unknown>): { hidden?: true; locked?: true } => ({
+  ...(raw.hidden === true ? { hidden: true as const } : {}),
+  ...(raw.locked === true ? { locked: true as const } : {}),
+})
+const itemLabelOf = (raw: Record<string, unknown>): { label?: string } => (typeof raw.label === 'string' && raw.label.trim() ? { label: raw.label.trim().slice(0, 120) } : {})
+
+/** the layers' names, colours, hidden and locked: only for layers that exist, and only what is valid */
+function parseLayers(v: unknown, layerOrder: string[]): Record<string, LayerInfo> {
+  if (!isObj(v)) return {}
+  const out: Record<string, LayerInfo> = {}
+  for (const id of layerOrder) {
+    const raw = v[id]
+    if (!isObj(raw)) continue
+    const info: LayerInfo = {
+      ...(typeof raw.name === 'string' && raw.name.trim() ? { name: raw.name.trim().slice(0, 120) } : {}),
+      ...(typeof raw.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(raw.color) ? { color: raw.color } : {}),
+      ...(raw.hidden === true ? { hidden: true as const } : {}),
+      ...(raw.locked === true ? { locked: true as const } : {}),
+    }
+    if (Object.keys(info).length) out[id] = info
+  }
+  return out
+}
+
 const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields> => ({
   ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 0, MAX_PAGE_PT) } : {}),
   ...(typeof raw.wordSpacingMin === 'number' && Number.isFinite(raw.wordSpacingMin) ? { wordSpacingMin: num(raw.wordSpacingMin, 90, 10, 100) } : {}),
@@ -504,6 +533,8 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       ...base,
       ...groupOf(raw),
       ...layerIdOf(raw),
+      ...itemFlagsOf(raw),
+      ...itemLabelOf(raw),
       ...(raw.rasterized === true ? { rasterized: true } : {}),
       ...opacityOf(raw),
       ...(isObj(raw.textScale) && typeof raw.textScale.x === 'number' && typeof raw.textScale.y === 'number' ? { textScale: { x: raw.textScale.x, y: raw.textScale.y } } : {}),
@@ -600,6 +631,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       id,
       ...groupOf(raw),
       ...layerIdOf(raw),
+      ...itemFlagsOf(raw),
       ...(typeof raw.label === 'string' && raw.label ? { label: raw.label.slice(0, 120) } : {}),
       assetId,
       x: num(raw.x, 0, -1e6, 1e6),
@@ -797,6 +829,8 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       id,
       ...groupOf(raw),
       ...layerIdOf(raw),
+      ...itemFlagsOf(raw),
+      ...itemLabelOf(raw),
       kind,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -979,6 +1013,7 @@ export function parseDocument(text: string, name: string): DocContent {
   return {
     doc,
     layerOrder,
+    layers: parseLayers(data.layers, layerOrder),
     frames,
     images,
     assets,

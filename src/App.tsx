@@ -7,7 +7,7 @@ import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
@@ -22,11 +22,11 @@ import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } fro
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { deliverPng } from './pngExport'
-import { prepareExport, renderPage } from './pdfExport'
+import { exportContentOf, prepareExport, renderPage } from './pdfExport'
 import { useAutosave } from './useAutosave'
 import { useBook } from './useBook'
 import { BookExportDialog, BookPanel, ChapterPicker, SyncDialog } from './components/BookPanel'
-import { insertPages as insertDocumentPages, pageRects, parentEditDoc, parentShadowContent, type DocContent } from './pages'
+import { insertPages as insertDocumentPages, pageRects, parentEditDoc, type DocContent } from './pages'
 import type { PdfImportSource } from './importPdf'
 import { ImportPdfOptionsDialog } from './components/ImportPdfOptionsDialog'
 import type { PagePreset, Unit } from './units'
@@ -47,6 +47,8 @@ const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
+const NO_LAYER_INFO: Record<string, LayerInfo> = {}
+const NO_LAYER_ORDER = ['layer-1']
 const noop = () => {}
 const NO_PAGE_OPS: PageOps = { insert: noop, remove: noop, move: noop, setup: noop, commit: noop }
 const newImportedImageId = () => globalThis.crypto?.randomUUID?.() ?? `pdf-image-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -226,42 +228,49 @@ export default function App() {
 
   const shown = editingParent ? parentDoc : (preview ?? doc)
 
-  /** the document's content for PDF export: every page's assigned parent content mixed in, behind its own objects */
+  /** the document as the export draws it: its parent pages mixed in, behind its own objects (see `exportContentOf`) */
+  const exportSourceOf = (current: typeof session) => ({
+    doc: current.doc!,
+    frames: current.frames,
+    images: current.images,
+    shapes: current.shapes,
+    layerOrder: current.layerOrder,
+    layers: current.layers,
+    assets: current.assets,
+    paragraphStyles: current.paragraphStyles,
+    sections: current.sections,
+    parents: current.parents,
+    pageParents: current.pageParents,
+    parentOverrides: current.parentOverrides,
+  })
+  // made while the export dialog is open (and nothing else is edited), not on every change: laying the text out to find
+  // the running headers of each page is not cheap
   const exportContent = useMemo(() => {
-    if (!doc) return null
-    const shadow = parentShadowContent(doc, session.parents, session.pageParents, session.sections, session.frames, undefined, session.parentOverrides, session.images, session.shapes)
-    return {
-      frames: [...shadow.frames, ...session.frames],
-      images: [...shadow.images, ...session.images],
-      shapes: [...shadow.shapes, ...session.shapes],
-    }
-  }, [doc, session.parents, session.pageParents, session.sections, session.frames, session.images, session.shapes, session.parentOverrides])
+    if (dialog !== 'export' || !doc) return null
+    return exportContentOf(exportSourceOf(session))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialog, doc, session.frames, session.images, session.shapes, session.layerOrder, session.layers, session.assets, session.paragraphStyles, session.sections, session.parents, session.pageParents, session.parentOverrides])
 
   const exportCurrentPagePng = useCallback(async () => {
-    const currentDoc = doc
+    const current = sessionRef.current
+    const currentDoc = current.doc
     const workspace = ws.current
-    if (!currentDoc || !workspace || !exportContent) return
+    if (!currentDoc || !workspace) return
     try {
-      sessionRef.current.notify('מייצא את העמוד הנוכחי ל־PNG…')
+      current.notify('מייצא את העמוד הנוכחי ל־PNG…')
       const pageIndex = workspace.currentPageIndex()
-      const prepared = prepareExport({
-        doc: currentDoc,
-        ...exportContent,
-        layerOrder: session.layerOrder,
-        assets: session.assets,
-        paragraphStyles: session.paragraphStyles,
-        sections: session.sections,
-      })
+      const prepared = prepareExport(exportContentOf(exportSourceOf(current)))
       const page = prepared.rects[pageIndex]
       if (!page) throw new Error(`page ${pageIndex + 1} is unavailable for PNG export`)
       const canvas = await renderPage(prepared.content, prepared.flows, page, 0, 300)
       const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
       const saved = await deliverPng(canvas, `${safeName}-page-${pageIndex + 1}`)
-      if (saved) sessionRef.current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
+      if (saved) current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
     } catch (error) {
-      sessionRef.current.showError('ייצוא PNG נכשל', error)
+      current.showError('ייצוא PNG נכשל', error)
     }
-  }, [doc, exportContent, session.assets, session.layerOrder, session.paragraphStyles, session.sections])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** pictures read and waiting for a click on the page; whatever could not be read is reported */
   const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
@@ -478,6 +487,7 @@ export default function App() {
     () =>
       buildMenus({
         hasDoc: !!shown,
+        editingParent: !!editingParentId,
         ws,
         showRulers,
         showGuides,
@@ -534,7 +544,7 @@ export default function App() {
         toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [book.panelOpen, shown, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
+    [book.panelOpen, shown, editingParentId, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
 
   useEffect(() => {
@@ -775,8 +785,9 @@ export default function App() {
               onShowGuides={() => setShowGuides(true)}
               shapes={editingParent ? editingParent.shapes : preview ? NO_SHAPES : session.shapes}
               onShapesChange={editingParent ? (next, key) => updateParent({ shapes: next }, key) : preview ? noop : session.changeShapes}
-              layerOrder={editingParent ? ['layer-1'] : session.layerOrder}
-              onLayerStackChange={editingParent ? noop : preview ? noop : session.changeLayerOrder}
+              layerOrder={editingParent ? NO_LAYER_ORDER : session.layerOrder}
+              layers={editingParent ? NO_LAYER_INFO : session.layers}
+              onLayersChange={editingParent ? noop : preview ? noop : session.changeLayers}
               paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
               characterStyles={preview ? NO_CHARACTER_STYLES : session.characterStyles}
               onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}

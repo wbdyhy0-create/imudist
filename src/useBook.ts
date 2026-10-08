@@ -8,7 +8,7 @@ import { createBookFile, openBookFile, type BookStorage, type ChapterRef } from 
 import { baseName } from './fileio'
 import { fontInstalled, useFontCatalog } from './fonts'
 import { resolveLinkedAssets } from './imageLinks'
-import { prepareExport, type PageDrawOptions } from './pdfExport'
+import { exportContentOf, prepareExport, type PageDrawOptions } from './pdfExport'
 import { runPreflight, type PreflightIssue } from './preflight'
 import { parseDocument } from './fileFormat'
 import type { DocContent } from './pages'
@@ -551,7 +551,8 @@ export function useBook(options: Options) {
           const { content, open } = await contentOfChapter(chapter)
           // a chapter read from its file gets its linked pictures from theirs
           if (!open) await resolveLinkedAssets(content.assets)
-          return content
+          // with its parent (master) pages mixed in - page numbers and running headers - and the first page number the book gives it
+          return exportContentOf({ ...content, doc: { ...content.doc, startPage: numbering.chapters[index].startPage! } })
         },
       }))
       const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ספר', (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow)

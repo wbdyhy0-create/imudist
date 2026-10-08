@@ -133,3 +133,33 @@ export function spacing(m: Rect, others: Rect[], tol: number, snap: { x: boolean
   }
   return { dx, dy, marks: [...marksFor(r, others, 'v'), ...marksFor(r, others, 'h')] }
 }
+
+/** The measured gaps around each moved object in a selection, without changing their relative positions. */
+export function spacingMarksForSelection(moved: Rect[], others: Rect[]): SpacingMark[] {
+  const marks = moved.flatMap((rect) => spacing(rect, others, 0, { x: false, y: false }).marks)
+  const groups: SpacingMark[][] = []
+  for (const mark of marks) {
+    const group = groups.find((items) => {
+      const first = items[0]
+      return first.axis === mark.axis &&
+        Math.abs(first.from - mark.from) < EPS &&
+        Math.abs(first.to - mark.to) < EPS &&
+        Math.abs(first.value - mark.value) < EPS
+    })
+    if (group) group.push(mark)
+    else groups.push([mark])
+  }
+  return groups.map((group, index) => {
+    const first = group[0]
+    const sameSize = groups.some((other, otherIndex) =>
+      otherIndex !== index &&
+      other[0].axis === first.axis &&
+      Math.abs(other[0].value - first.value) < EPS,
+    )
+    return {
+      ...first,
+      at: group.reduce((sum, mark) => sum + mark.at, 0) / group.length,
+      equal: group.some((mark) => mark.equal) || sameSize,
+    }
+  })
+}

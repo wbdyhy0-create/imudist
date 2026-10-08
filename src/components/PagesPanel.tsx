@@ -267,7 +267,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                     key={p.index}
                     className={'thumb' + (selectedPages.includes(p.index) ? ' sel' : '')}
                     draggable
-                    title={`עמוד ${p.number} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה`}
+                    title={`עמוד ${pageNumberLabel(sections, p.index, doc.startPage)} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה`}
                     aria-pressed={selectedPages.includes(p.index)}
                     onClick={(e) => onSelect(p.index, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                     onContextMenu={(e) => {
@@ -338,7 +338,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                         />
                       ))}
                     </svg>
-                    <span className="thumb-num">{p.number}</span>
+                    <span className="thumb-num">{pageNumberLabel(sections, p.index, doc.startPage)}</span>
                     {pageParents[p.index] && <span className="thumb-parent" title={parents.find((par) => par.id === pageParents[p.index])?.name}>{parents.find((par) => par.id === pageParents[p.index])?.prefix}</span>}
                   </button>
                 )

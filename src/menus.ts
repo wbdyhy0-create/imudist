@@ -6,6 +6,8 @@ import type { FontStatus } from './fonts'
 
 export interface MenuContext {
   hasDoc: boolean
+  /** a parent (master) page is open for editing: the only place where an automatic page number or a running header makes sense */
+  editingParent: boolean
   ws: RefObject<WorkspaceHandle | null>
   showRulers: boolean
   showGuides: boolean
@@ -80,6 +82,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       if (ws) run(ws)
     },
   })
+  /** an item that works only while a parent page is being edited (page numbers and running headers are written on parent pages) */
+  const inParent = (label: string, run: (ws: WorkspaceHandle) => void): MenuItem => ({ ...doc(label, '', run), disabled: !c.hasDoc || !c.editingParent })
   const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = '') => doc(label, shortcut, (ws) => ws.selectTool(id))
   const dock = (id: string, label: string, shortcut = ''): MenuItem => ({
     label,
@@ -189,18 +193,18 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
         doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
         doc('יצירת חלון בטקסט…', '', (ws) => ws.windowText()),
-        doc('הוספת כותרת משתנה…', '', (ws) => ws.insertRunningHeader()),
+        inParent('הוספת כותרת משתנה…', (ws) => ws.insertRunningHeader()),
         doc('הוספת הערת שוליים', 'Ctrl+Alt+Shift+F', (ws) => ws.insertFootnote()),
         doc('אפשרויות הערות שוליים…', '', (ws) => ws.openFootnoteOptions()),
         sep,
         {
           label: 'הוספת מספר עמוד אוטומטי',
           submenu: [
-            doc('מספר מסמך', '', (ws) => ws.insertPageNumberMarker('document')),
-            doc('מספר פנימי: 1, 2, 3', '', (ws) => ws.insertPageNumberMarker('internal-number')),
-            doc('מספר חיצוני: 1, 2, 3', '', (ws) => ws.insertPageNumberMarker('external-number')),
-            doc('אות פנימית: א, ב, ג', '', (ws) => ws.insertPageNumberMarker('internal-letter')),
-            doc('אות חיצונית: א, ב, ג', '', (ws) => ws.insertPageNumberMarker('external-letter')),
+            inParent('מספר מסמך', (ws) => ws.insertPageNumberMarker('document')),
+            inParent('מספר פנימי: 1, 2, 3', (ws) => ws.insertPageNumberMarker('internal-number')),
+            inParent('מספר חיצוני: 1, 2, 3', (ws) => ws.insertPageNumberMarker('external-number')),
+            inParent('אות פנימית: א, ב, ג', (ws) => ws.insertPageNumberMarker('internal-letter')),
+            inParent('אות חיצונית: א, ב, ג', (ws) => ws.insertPageNumberMarker('external-letter')),
           ],
         },
         sep,
