@@ -37,6 +37,7 @@ describe('help topic search', () => {
     expect(categoryFor('export-png')).toBe('קובץ · PNG')
     expect(categoryFor('png-current-page')).toBe('קובץ · PNG')
     expect(categoryFor('png-selection')).toBe('PNG · בחירת אובייקטים')
+    expect(categoryFor('magnetic-lasso')).toBe('תמונות')
   })
 
   it('finds vector-related topics from a single Hebrew word', () => {
@@ -234,6 +235,15 @@ describe('help topic search', () => {
     expect(background?.answer[0]).toContain('„חלון” > „מאפיינים”')
   })
 
+  it('explains how to use the magnetic lasso and its raster editing actions', () => {
+    const topic = search('לאסו מגנטי').find((result) => result.id === 'magnetic-lasso')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„כלי החיתוך”', 'נקודת עוגן', 'לסגור את הצורה', 'הרחבה (+)', 'צמצום (−)', 'הסמן העגול', 'דוחף את הגבול החוצה', 'מילוי', 'מחק אזור', 'מסיכה', 'Ctrl+Z', 'תמונת PNG', 'GIF']) {
+      expect(answer).toContain(detail)
+    }
+  })
+
   it('provides exact Properties-panel navigation for each object-control topic', () => {
     const topics = HELP_TOPICS.filter((topic) => topic.id.startsWith('properties-'))
     expect(topics.length).toBeGreaterThan(20)
@@ -371,6 +381,8 @@ describe('help topic search', () => {
     expect(topic('page-running-header')).toContain('אם הפקודה אפורה')
     expect(topic('footnote-insert')).toContain('הסימן יחליף את הטקסט המסומן')
     expect(topic('footnote-options')).toContain('בסוף המסמך')
+    expect(topic('footnote-options')).toContain('מרווח אפס מצמיד אותו למילה')
+    expect(topic('footnote-options')).toContain('ערך חיובי מעלה את המספר ושלילי מוריד אותו')
     expect(topic('footnote-converter')).toContain('סוגריים עגולים')
     expect(topic('page-number-types')).toContain('כרגע אין הבדל במספר או באות')
     expect(topic('typography-smart-layout')).toContain('ריווח האותיות')
@@ -378,6 +390,8 @@ describe('help topic search', () => {
 
     expect(search('כותרת משתנה אפורה')[0]?.id).toBe('page-running-header')
     expect(search('ייבוא סגנונות פסקה ותו')[0]?.id).toBe('paragraph-style-import')
+    expect(search('מרווח בין מספר הפניה למילה')[0]?.id).toBe('footnote-options')
+    expect(search('להוריד מספר הפניה של הערת שוליים')[0]?.id).toBe('footnote-options')
     expect(getHelpTopicCategory(HELP_TOPICS.find((item) => item.id === 'footnote-options')!)).toBe('הערות שוליים')
   })
 
@@ -572,7 +586,10 @@ describe('help topic search', () => {
   it('finds the footnote converter by what it does', () => {
     expect(search('המרת הערות בסוגריים להערות שוליים')[0]?.id).toBe('footnote-converter')
     expect(search('ממיר הערות שוליים')[0]?.id).toBe('footnote-converter')
+    expect(search('הערות שבטקסט להערות שוליים ולהפך')[0]?.id).toBe('footnote-converter')
+    expect(search('הערות שוליים להערות סיום')[0]?.id).toBe('footnote-converter')
     const answer = HELP_TOPICS.find((topic) => topic.id === 'footnote-converter')?.answer.join(' ') ?? ''
-    for (const phrase of ['„טיפוגרפיה”', '„ממיר הערות שוליים…”', '„המר הערות להערות שוליים”', '„המר הערות שוליים להערות פנימיות”', '„עצור פעולה”']) expect(answer).toContain(phrase)
+    for (const phrase of ['„טיפוגרפיה”', '„ממיר הערות שבטקסט להערות שוליים ולהפך…”', '„ממיר הערות שוליים להערות סיום ולהפך…”', 'ממיר נפרד „ממיר הערות שוליים להערות סיום ולהפך”', '„המר הערות שוליים להערות סיום”', '„המר הערות סיום להערות שוליים”', 'מיקום הצגת', '„המר הערות להערות שוליים”', '„המר הערות שוליים להערות פנימיות”', '„עצור פעולה”']) expect(answer).toContain(phrase)
+    expect(answer).not.toContain('בלוחית הממיר אפשר לבחור גם „מיקום ההערות”')
   })
 })

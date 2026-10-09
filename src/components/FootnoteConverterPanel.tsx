@@ -1,4 +1,5 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import type { FootnotePlacementMode } from '../document'
 import { convertedText, NOTE_BRACKETS } from '../footnoteConvert'
 import '../footnoteConverter.css'
 
@@ -26,9 +27,15 @@ interface Props {
   styles: { id: string; name: string }[]
   /** the style the footnotes have in this document, offered first */
   defaultStyleId?: string
+  footnotePlacement: FootnotePlacementMode
+  focusTarget: 'inline' | 'placement'
+  focusRequestId: number
+  onFootnotePlacementChange: (placement: FootnotePlacementMode) => void
   onConvert: (request: FootnoteConvertRequest, control: FootnoteConvertControl) => Promise<{ converted: number; message?: string }>
   onClose: () => void
 }
+
+type ConverterAction = 'inlineToFootnotes' | 'footnotesToInline' | 'footnotesToEndnotes' | 'endnotesToFootnotes'
 
 /** what the search field says when no style is asked for */
 const ALL_STYLES = 'כל הסגנונות'
@@ -38,7 +45,9 @@ const ALL_STYLES = 'כל הסגנונות'
  * It stays open while the document is worked on (it is a palette, not a dialog), so that a selection can be made and the
  * converter pressed again and again.
  */
-export function FootnoteConverterPanel({ styles, defaultStyleId, onConvert, onClose }: Props) {
+export function FootnoteConverterPanel({ styles, defaultStyleId, footnotePlacement, focusTarget, focusRequestId, onFootnotePlacementChange, onConvert, onClose }: Props) {
+  const inlineConverterRef = useRef<HTMLElement>(null)
+  const placementConverterRef = useRef<HTMLElement>(null)
   const nameOf = (id: string) => styles.find((style) => style.id === id)?.name ?? ''
   // "חפש סגנון": which notes to convert - the ones in paragraphs of this style, or every style
   const [searchId, setSearchId] = useState('')
@@ -50,11 +59,25 @@ export function FootnoteConverterPanel({ styles, defaultStyleId, onConvert, onCl
   const [bracket, setBracket] = useState(0)
   const [scope, setScope] = useState<'document' | 'selection'>('document')
   const [status, setStatus] = useState('מוכן לפעולה')
+  const [actionSelection, setActionSelection] = useState<{ requestId: number; action: ConverterAction }>(() => ({
+    requestId: focusRequestId,
+    action: focusTarget === 'placement' ? 'footnotesToEndnotes' : 'inlineToFootnotes',
+  }))
   const [progress, setProgress] = useState(0)
   const [busy, setBusy] = useState(false)
   const stopped = useRef(false)
   // the highlighted style was reached with the arrow keys (not with the mouse): the list scrolls to it
   const keyMoved = useRef(false)
+
+  useEffect(() => {
+    const target = focusTarget === 'placement' ? placementConverterRef.current : inlineConverterRef.current
+    target?.scrollIntoView({ block: 'nearest' })
+  }, [focusRequestId, focusTarget])
+
+  const activeAction = actionSelection.requestId === focusRequestId
+    ? actionSelection.action
+    : focusTarget === 'placement' ? 'footnotesToEndnotes' : 'inlineToFootnotes'
+  const selectAction = (action: ConverterAction) => setActionSelection({ requestId: focusRequestId, action })
 
   // the style asked for (it may be gone from the document since: then every style)
   const searchStyle = styles.some((style) => style.id === searchId) ? searchId : ''
@@ -117,14 +140,18 @@ export function FootnoteConverterPanel({ styles, defaultStyleId, onConvert, onCl
     }
   }
 
+  const convertPlacement = (placement: FootnotePlacementMode) => {
+    if (footnotePlacement !== placement) onFootnotePlacementChange(placement)
+  }
+
   return (
-    <aside className="footnote-converter" aria-label="ממיר הערות שוליים" dir="rtl">
+    <aside className="footnote-converter" aria-label="ממיר הערות" dir="rtl">
       <header className="fc-head">
-        <b>ממיר הערות שוליים</b>
+        <b>ממיר הערות שבטקסט להערות שוליים ולהפך</b>
         <button className="fc-close" aria-label="סגור" onClick={onClose}>×</button>
       </header>
 
-      <section className="fc-group" aria-label="הגדרות המרה">
+      <section ref={inlineConverterRef} className="fc-group" aria-label="הגדרות המרה">
         <h3>הגדרות המרה</h3>
         <div className="fc-row">
           <span>חפש סגנון:</span>
@@ -199,13 +226,26 @@ export function FootnoteConverterPanel({ styles, defaultStyleId, onConvert, onCl
       </section>
 
       <div className="fc-actions">
-        <button className="btn primary" disabled={busy} onClick={() => void run('toFootnotes')}>המר הערות להערות שוליים</button>
-        <button className="btn" disabled={busy} onClick={() => void run('toText')}>המר הערות שוליים להערות פנימיות</button>
+        <button className={`btn${activeAction === 'inlineToFootnotes' ? ' primary' : ''}`} aria-pressed={activeAction === 'inlineToFootnotes'} disabled={busy} onClick={() => { selectAction('inlineToFootnotes'); void run('toFootnotes') }}>המר הערות להערות שוליים</button>
+        <button className={`btn${activeAction === 'footnotesToInline' ? ' primary' : ''}`} aria-pressed={activeAction === 'footnotesToInline'} disabled={busy} onClick={() => { selectAction('footnotesToInline'); void run('toText') }}>המר הערות שוליים להערות פנימיות</button>
       </div>
 
       <progress className="fc-progress" max={100} value={progress} />
       <p className="fc-status" role="status">{status}</p>
       <button className="btn small fc-stop" disabled={!busy} onClick={() => { stopped.current = true }}>עצור פעולה</button>
+
+      <section ref={placementConverterRef} className="fc-group" aria-label="ממיר הערות שוליים להערות סיום ולהפך">
+        <h3>ממיר הערות שוליים להערות סיום ולהפך</h3>
+        <div className="fc-actions fc-placement-actions">
+          <button className={`btn${activeAction === 'footnotesToEndnotes' ? ' primary' : ''}`} aria-pressed={activeAction === 'footnotesToEndnotes'} disabled={busy} onClick={() => { selectAction('footnotesToEndnotes'); convertPlacement('endnotes') }}>
+            המר הערות שוליים להערות סיום
+          </button>
+          <button className={`btn${activeAction === 'endnotesToFootnotes' ? ' primary' : ''}`} aria-pressed={activeAction === 'endnotesToFootnotes'} disabled={busy} onClick={() => { selectAction('endnotesToFootnotes'); convertPlacement('footnotes') }}>
+            המר הערות סיום להערות שוליים
+          </button>
+        </div>
+        <p className="fc-status fc-placement-status" role="status">{footnotePlacement === 'endnotes' ? 'ההערות מוצגות כעת בסוף המסמך.' : 'ההערות מוצגות כעת בתחתית כל עמוד.'}</p>
+      </section>
     </aside>
   )
 }

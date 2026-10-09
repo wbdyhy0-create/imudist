@@ -193,7 +193,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         inParent('הוספת כותרת משתנה…', (ws) => ws.insertRunningHeader()),
         doc('הוספת הערת שוליים', 'Ctrl+Alt+Shift+F', (ws) => ws.insertFootnote()),
         doc('אפשרויות הערות שוליים…', '', (ws) => ws.openFootnoteOptions()),
-        doc('ממיר הערות שוליים…', '', (ws) => ws.openFootnoteConverter()),
+        doc('ממיר הערות שבטקסט להערות שוליים ולהפך…', '', (ws) => ws.openFootnoteConverter()),
+        doc('ממיר הערות שוליים להערות סיום ולהפך…', '', (ws) => ws.openFootnoteEndnoteConverter()),
         sep,
         {
           label: 'הוספת מספר עמוד אוטומטי',

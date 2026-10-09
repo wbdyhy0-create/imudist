@@ -242,6 +242,8 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
     mode: oneOf(raw.mode, ['vertical', 'horizontal'], DEFAULT_FOOTNOTE_CONFIG.mode),
     columns: raw.columns === 2 ? 2 : 1,
     referenceScale: num(raw.referenceScale, DEFAULT_FOOTNOTE_CONFIG.referenceScale, 0.25, 1),
+    referenceGap: num(raw.referenceGap, DEFAULT_FOOTNOTE_CONFIG.referenceGap, 0, 72),
+    referenceVerticalOffset: num(raw.referenceVerticalOffset, DEFAULT_FOOTNOTE_CONFIG.referenceVerticalOffset, -20, 20),
     numberTextGap: num(raw.numberTextGap, DEFAULT_FOOTNOTE_CONFIG.numberTextGap, 0, 100),
     columnGap: num(raw.columnGap, DEFAULT_FOOTNOTE_CONFIG.columnGap, 0, 100),
     widthScale: num(raw.widthScale, DEFAULT_FOOTNOTE_CONFIG.widthScale, 0.2, 1),

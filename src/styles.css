@@ -631,8 +631,17 @@ svg { display: block; }
 
 .viewport { direction: rtl; position: relative; overflow: auto; background: var(--pasteboard); min-width: 0; min-height: 0; }
 .viewport.marqueetool { cursor: crosshair; }
+.viewport.magneticlassotool, .viewport.magneticlassotool * { cursor: default; }
+.viewport.magnetic-tracing, .viewport.magnetic-tracing * { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='22' viewBox='0 0 16 22'%3E%3Cpath d='M1.500 1.500v14l3.800-3.400 2.800 6.500 2.600-1.100-2.800-6.400h5.200z' fill='black' stroke='white' stroke-width='1' stroke-linejoin='round'/%3E%3C/svg%3E") 1 1, default; }
 .marquee-selection-preview { position: absolute; z-index: 1000003; box-sizing: border-box; border: 1px dashed #fff; outline: 1px solid #111; background: rgba(61, 139, 255, 0.16); pointer-events: none; }
 .marquee-selection-preview.ellipse { border-radius: 50%; }
+.magnetic-selection-layer { z-index: 1000004; overflow: visible; pointer-events: none; }
+.magnetic-selection-outline-under { fill: none; stroke: #111; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.magnetic-selection-outline { fill: rgba(61, 139, 255, 0.08); stroke: #fff; stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; animation: magnetic-selection-dash 0.7s linear infinite; }
+.magnetic-selection-anchor { fill: #fff; stroke: #111; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.magnetic-adjust-active { background: var(--accent); color: #fff; }
+.magnetic-brush-cursor { position: fixed; z-index: 10000010; width: 48px; height: 48px; box-sizing: border-box; transform: translate(-50%, -50%); display: grid; place-items: center; border: 1.5px solid #111; border-radius: 50%; outline: 1px solid rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.32); color: #111; font: 700 24px/1 Arial, sans-serif; pointer-events: none; }
+@keyframes magnetic-selection-dash { to { stroke-dashoffset: -18; } }
 .viewport.preview { background: #0d0909; }
 .viewport.texttool, .viewport.linking { cursor: crosshair; }
 .viewport.pentool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M6 22 9 14 20 3l5 5-11 11z' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cpath d='m6 22 5-2' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 5 22, crosshair; }
@@ -693,8 +702,8 @@ svg { display: block; }
    Positioned at the outer .text-frame's own origin, out of flow, so it never affects that box's own layout. */
 .text-frame-clip { position: absolute; inset: 0; overflow: hidden; }
 .text-frame-scale { position: absolute; left: 0; top: 0; box-sizing: border-box; overflow: hidden; }
-.footnote-reference { font-size: 0; vertical-align: super; }
-.footnote-reference::after { content: attr(data-reference); font-size: var(--footnote-marker-size, 9px); line-height: 1; direction: inherit; unicode-bidi: isolate; }
+.footnote-reference { position: relative; top: calc(-1 * var(--footnote-reference-offset, 0px)); margin-right: var(--footnote-reference-gap, 0px); font-size: 0; vertical-align: super; }
+.footnote-reference::after { content: attr(data-reference); font-size: var(--footnote-marker-size, 9px); line-height: 1; direction: var(--footnote-marker-direction, inherit); unicode-bidi: isolate; }
 .toc-row { position: relative; display: grid; grid-template-columns: minmax(0, max-content) minmax(8px, 1fr) auto; align-items: baseline; column-gap: 4px; width: 100%; min-width: 0; box-sizing: border-box; white-space: nowrap; }
 .toc-title { grid-column: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toc-tab, .toc-line-break { position: absolute; inset-inline-start: 0; width: 0; height: 0; overflow: hidden; font-size: 0; line-height: 0; }
@@ -733,7 +742,7 @@ svg { display: block; }
 .footnote-item { pointer-events: auto; cursor: text; }
 .footnote-item.footnote-frame-visible { outline: 0.25px solid rgba(61, 139, 255, 0.45); outline-offset: 0; }
 .footnote-item.footnote-all-selected .footnote-number { background: #b3d4ff; }
-.footnote-number { display: inline-flex; flex: none; align-items: baseline; gap: 1px; white-space: nowrap; unicode-bidi: isolate; }
+.footnote-number { display: inline-flex; flex: none; align-items: baseline; gap: 0; white-space: nowrap; unicode-bidi: isolate; }
 .footnote-content { display: block; flex: 1; min-width: 0; }
 .footnote-item > .rich-editor { flex: 1; width: 0; min-width: 0; height: 100%; }
 .footnote-content.selected { background: #b3d4ff; }
@@ -1076,6 +1085,15 @@ svg { display: block; }
 .place-modes.arrange { flex-wrap: wrap; }
 .place-modes button.on { background: var(--accent); border-color: var(--accent-line); color: #fff; }
 .place-hint { flex: 1 1 100%; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+.magnetic-lasso-banner {
+  position: absolute; z-index: 61; top: 40px; inset-inline-start: 50%; transform: translateX(50%); width: min(760px, calc(100% - 320px));
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; background: var(--bg-raised);
+  border: 1px solid var(--accent-line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.magnetic-lasso-title { flex: 1 1 100%; font-size: 13px; }
+.magnetic-lasso-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.magnetic-lasso-color { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 11px; }
+.magnetic-lasso-color input { width: 30px; height: 26px; padding: 2px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-field); }
 /* ── pictures ────────────────────────────────────────────── */
 .image-frame { position: absolute; box-sizing: border-box; background: transparent; user-select: none; }
 .image-frame img { display: block; width: 100%; height: 100%; pointer-events: none; }

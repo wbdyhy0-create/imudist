@@ -89,6 +89,8 @@ export interface RunNodeOpts {
   outlineMode?: 'shadow' | 'stroke'
   footnoteMarkers?: Record<number, string>
   footnoteReferenceScale?: number
+  footnoteReferenceGap?: number
+  footnoteReferenceVerticalOffset?: number
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
   /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
@@ -203,6 +205,9 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
           marker.style.fontWeight = String(referenceStyle.weight)
           marker.style.fontStyle = referenceStyle.italic ? 'italic' : 'normal'
           marker.style.setProperty('--footnote-marker-size', `${referenceStyle.fontSize * scale * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)}px`)
+          marker.style.setProperty('--footnote-marker-direction', /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr')
+          marker.style.setProperty('--footnote-reference-gap', `${(opts.footnoteReferenceGap ?? 0) * scale}px`)
+          marker.style.setProperty('--footnote-reference-offset', `${(opts.footnoteReferenceVerticalOffset ?? 0) * scale}px`)
         } else if (pageNumber !== undefined) {
           marker.className = 'toc-page-reference'
           marker.dataset.reference = pageNumber
@@ -470,7 +475,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
           return index >= pos && index < end ? [[index - pos, label]] : []
         }))
       : undefined
-    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale, outlineMode: opts.outlineMode })
+    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale, footnoteReferenceGap: opts.footnoteReferenceGap, footnoteReferenceVerticalOffset: opts.footnoteReferenceVerticalOffset, outlineMode: opts.outlineMode })
     const lead = nodes.firstChild as HTMLElement | null
     const isOpening = pos > 0 || !!opts.atParaStart
     // the previous paragraph's closing gap, then this paragraph's own first-line indent

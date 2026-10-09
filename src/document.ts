@@ -30,6 +30,10 @@ export interface FootnoteLayoutConfig {
   columns: 1 | 2
   /** main-story reference size relative to its current run font size, 0.25–1 */
   referenceScale: number
+  /** gap between a main-story footnote reference and the preceding word, in points */
+  referenceGap: number
+  /** vertical adjustment from the default superscript position, in points; positive moves down */
+  referenceVerticalOffset: number
   /** gap between a footnote's number and its text, in points */
   numberTextGap: number
   /** gap between columns in vertical footnote mode, points */
@@ -102,6 +106,8 @@ export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
   mode: 'vertical',
   columns: 1,
   referenceScale: FOOTNOTE_REFERENCE_SCALE,
+  referenceGap: 0,
+  referenceVerticalOffset: 0,
   numberTextGap: 5,
   columnGap: 10,
   widthScale: 1,

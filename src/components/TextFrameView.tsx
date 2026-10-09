@@ -8,7 +8,7 @@ import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
 import { RichEditor, type SelRequest } from './RichEditor'
-import { footnoteBlockWidth, type FootnotePlacement } from '../footnoteLayout'
+import { footnoteBlockWidth, footnoteLabelParts, type FootnotePlacement } from '../footnoteLayout'
 import { featherMaskStyles } from '../feather'
 import type { RichTextClipboard } from '../richTextClipboard'
 
@@ -34,6 +34,8 @@ function withMarks(
   tocPageMarkers?: Record<number, string>,
   tocLeaderMarkers?: Record<number, string>,
   referenceFontSize = 9,
+  referenceGap = 0,
+  referenceVerticalOffset = 0,
   textOffset = 0,
   referenceStyle?: CharStyle,
 ): { nodes: ReactNode[]; trailing: ReactNode[] } {
@@ -65,7 +67,7 @@ function withMarks(
         if (!(character === FOOTNOTE_MARKER && reference !== undefined) && tocPage === undefined && tocLeader === undefined) continue
         if (index > plainStart) nodes.push(piece.text.slice(plainStart, index))
         const key = `marker-${absolute}`
-        if (reference !== undefined) nodes.push(<span key={key} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px`, ...(referenceStyle ? { fontFamily: `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`, fontWeight: referenceStyle.weight, fontStyle: referenceStyle.italic ? 'italic' : 'normal' } : {}) } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
+        if (reference !== undefined) nodes.push(<span key={key} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px`, '--footnote-marker-direction': /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr', '--footnote-reference-gap': `${referenceGap * scale}px`, '--footnote-reference-offset': `${referenceVerticalOffset * scale}px`, ...(referenceStyle ? { fontFamily: `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`, fontWeight: referenceStyle.weight, fontStyle: referenceStyle.italic ? 'italic' : 'normal' } : {}) } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
         else if (tocPage !== undefined) nodes.push(<span key={key} className="toc-page-reference" data-reference={tocPage} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_PAGE_MARKER}</span>)
         else nodes.push(<span key={key} className="toc-leader" data-leader={tocLeader} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_LEADER_MARKER}</span>)
         plainStart = index + 1
@@ -142,6 +144,8 @@ interface Props {
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale?: number
+  footnoteReferenceGap?: number
+  footnoteReferenceVerticalOffset?: number
   footnoteAlignment?: 'right' | 'center'
   footnotes?: FootnotePlacement[]
   footnoteHeight: number
@@ -214,6 +218,8 @@ function RichText({
   tocPageMarkers,
   tocLeaderMarkers,
   footnoteReferenceScale,
+  footnoteReferenceGap,
+  footnoteReferenceVerticalOffset,
 }: {
   text: string
   runs: Run[]
@@ -234,6 +240,8 @@ function RichText({
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale: number
+  footnoteReferenceGap: number
+  footnoteReferenceVerticalOffset: number
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -258,7 +266,7 @@ function RichText({
       if (segmentStart >= segmentEnd) return []
       const segment = part.text.slice(segmentStart - partStart, segmentEnd - partStart)
       const referenceStyle = styleAtChar(runs, Math.max(0, segmentStart - 1), part.run.style)
-      const { nodes } = withMarks(segment, showMarks, paraGaps, paraIndex, true, true, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, segmentStart, referenceStyle)
+      const { nodes } = withMarks(segment, showMarks, paraGaps, paraIndex, true, true, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, segmentStart, referenceStyle)
       return [<span key={`toc-title-run-${segmentStart}`} className={part.hl ? 'sel' : 'toc-title-run'} style={{ fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`, color: part.run.style.color ?? '#111', fontSize: part.run.style.fontSize * scale, fontWeight: part.run.style.weight, fontStyle: part.run.style.italic ? 'italic' : 'normal', letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined, textShadow: textShadow(part.run.style, scale) || undefined }}>{nodes}</span>]
     })
     const rows: ReactNode[] = []
@@ -311,7 +319,7 @@ function RichText({
   let carry: ReactNode[] = []
   for (const [i, part] of parts.entries()) {
     const referenceStyle = styleAtChar(runs, Math.max(0, Number(part.key) - 1), part.run.style)
-    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, Number(part.key), referenceStyle)
+    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, Number(part.key), referenceStyle)
     let group = paragraphNodes[paragraphNodes.length - 1]
     let opening: ReactNode[] = []
     if (!group || group.index !== renderParaIndex) {
@@ -526,6 +534,8 @@ export function TextFrameView(p: Props) {
           tocPageMarkers={p.tocPageMarkers}
           tocLeaderMarkers={p.tocLeaderMarkers}
           footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
+          footnoteReferenceGap={p.footnoteReferenceGap ?? 0}
+          footnoteReferenceVerticalOffset={p.footnoteReferenceVerticalOffset ?? 0}
           onSelectAll={p.onSelectAllText}
           onSelectToStart={(offset) => p.onSelectToStartText?.(frame.id, offset)}
           hasPrev={p.hasPrev}
@@ -558,6 +568,8 @@ export function TextFrameView(p: Props) {
             tocPageMarkers={p.tocPageMarkers}
             tocLeaderMarkers={p.tocLeaderMarkers}
             footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
+            footnoteReferenceGap={p.footnoteReferenceGap ?? 0}
+            footnoteReferenceVerticalOffset={p.footnoteReferenceVerticalOffset ?? 0}
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
             baseFontSize={style.fontSize}
@@ -631,9 +643,6 @@ export function TextFrameView(p: Props) {
               const showFootnoteFrame = !!p.editingFootnoteId && p.editingFootnoteFrameId === frame.id && showEdge
               const selectedFootnoteText = !!p.footnoteSelection?.allNotes || (p.footnoteSelection?.noteId === note.id && p.footnoteSelection.all)
               const referenceLabel = String(note.referenceNumber)
-              const dotAfterNumber = referenceLabel.endsWith('.')
-              const numberLabel = dotAfterNumber ? referenceLabel.slice(0, -1) : referenceLabel
-              const numberDirection = /[\u0590-\u05ff]/.test(numberLabel) ? 'rtl' : 'ltr'
               let offset = 0
               const content = note.runs?.length
                 ? note.runs.map((run, index) => {
@@ -697,7 +706,7 @@ export function TextFrameView(p: Props) {
                 >
                   {!note.continued && (
                     <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>
-                      <span dir={numberDirection}>{numberLabel}</span>{dotAfterNumber && <span dir="rtl">.</span>}
+                      {footnoteLabelParts(referenceLabel).map((part, index) => <span key={index} dir={part.direction}>{part.text}</span>)}
                     </span>
                   )}
                   {isEditingFootnote ? (

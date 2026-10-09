@@ -3,7 +3,7 @@ import html2canvas from 'html2canvas'
 import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
-import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
+import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
 import { layoutEndnotes } from './endnotes'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
@@ -264,6 +264,8 @@ async function drawTextDom(
               ...tocMarkers?.footnotes,
             },
             footnoteReferenceScale: footnoteConfig.referenceScale,
+            footnoteReferenceGap: footnoteConfig.referenceGap,
+            footnoteReferenceVerticalOffset: footnoteConfig.referenceVerticalOffset,
             tocPageMarkers: tocMarkers?.pageNumbers,
             tocLeaderMarkers: tocMarkers?.leaders,
             outlineMode: 'shadow',
@@ -375,17 +377,11 @@ async function drawTextDom(
           number.dir = 'rtl'
           number.style.fontSize = `${noteStyle.fontSize}px`
           const referenceLabel = note.continued ? '' : String(note.referenceNumber)
-          const dotAfterNumber = referenceLabel.endsWith('.')
-          const numberLabel = dotAfterNumber ? referenceLabel.slice(0, -1) : referenceLabel
-          const numberText = document.createElement('span')
-          numberText.dir = /[\u0590-\u05ff]/.test(numberLabel) ? 'rtl' : 'ltr'
-          numberText.textContent = numberLabel
-          number.appendChild(numberText)
-          if (dotAfterNumber) {
-            const dot = document.createElement('span')
-            dot.dir = 'rtl'
-            dot.textContent = '.'
-            number.appendChild(dot)
+          for (const part of footnoteLabelParts(referenceLabel)) {
+            const labelPart = document.createElement('span')
+            labelPart.dir = part.direction
+            labelPart.textContent = part.text
+            number.appendChild(labelPart)
           }
           const text = document.createElement('span')
           text.className = 'footnote-content'

@@ -9,6 +9,35 @@ export interface ScreenBox {
   height: number
 }
 
+export interface MarqueeDragPosition {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  clientX0: number
+  clientY0: number
+  clientX1: number
+  clientY1: number
+}
+
+export function translateMarqueeDrag<T extends MarqueeDragPosition>(
+  gesture: T,
+  worldDelta: { x: number; y: number },
+  clientDelta: { x: number; y: number },
+): T {
+  return {
+    ...gesture,
+    x0: gesture.x0 + worldDelta.x,
+    y0: gesture.y0 + worldDelta.y,
+    x1: gesture.x1 + worldDelta.x,
+    y1: gesture.y1 + worldDelta.y,
+    clientX0: gesture.clientX0 + clientDelta.x,
+    clientY0: gesture.clientY0 + clientDelta.y,
+    clientX1: gesture.clientX1 + clientDelta.x,
+    clientY1: gesture.clientY1 + clientDelta.y,
+  }
+}
+
 export interface CaptureItem {
   element: HTMLElement
   bounds: ScreenBox

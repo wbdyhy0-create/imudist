@@ -1,6 +1,7 @@
 /* the footnote converter: a small palette that floats over the work area */
 .footnote-converter {
   position: fixed; top: 84px; left: 58px; z-index: 80; width: 330px; display: flex; flex-direction: column; gap: 10px; padding: 0 0 12px;
+  max-height: calc(100vh - 100px); overflow-y: auto;
   background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55); color: var(--text);
 }
 .fc-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); }
@@ -21,6 +22,8 @@
 .fc-popup li.on { color: var(--accent-line); }
 .fc-popup li.hot { background: var(--hover, #3a3a3a); color: var(--text); }
 .fc-actions { display: flex; flex-direction: column; gap: 6px; padding: 0 12px; }
+.fc-placement-actions { padding: 0; }
 .fc-progress { margin: 0 12px; width: calc(100% - 24px); height: 12px; }
 .fc-status { margin: 0 12px; min-height: 18px; font-size: 13px; color: var(--text-dim); }
+.fc-placement-status { margin: 0; }
 .fc-stop { align-self: center; }

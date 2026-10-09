@@ -88,7 +88,20 @@ function romanNumeral(value: number): string {
 export function formatFootnoteNumber(value: number, style: FootnoteNumberStyle, format: FootnoteMarkerFormat, prefix = '', suffix = ''): string {
   const number = style === 'hebrew' ? hebrewNumeral(value) : style === 'roman' ? romanNumeral(value) : String(value)
   const wrapped = format === 'dot' ? `${number}.` : format === 'dotBefore' ? `.${number}` : format === 'rightParen' ? `${number})` : format === 'doubleRightParen' ? `${number}))` : format === 'leftParen' ? `(${number}` : format === 'doubleLeftParen' ? `((${number}` : format === 'round' ? `(${number})` : format === 'square' ? `[${number}]` : number
-  return `${prefix}${wrapped}${suffix && !wrapped.endsWith(suffix) ? suffix : ''}`
+  const markedNumber = `${prefix}${number}${suffix && !wrapped.endsWith(suffix) ? suffix : ''}`
+  const formatted = format === 'dot' ? `${markedNumber}.` : format === 'dotBefore' ? `.${markedNumber}` : format === 'rightParen' ? `${markedNumber})` : format === 'doubleRightParen' ? `${markedNumber}))` : format === 'leftParen' ? `(${markedNumber}` : format === 'doubleLeftParen' ? `((${markedNumber}` : format === 'round' ? `(${markedNumber})` : format === 'square' ? `[${markedNumber}]` : markedNumber
+  return formatted
+}
+
+export function footnoteLabelParts(label: string): { text: string; direction: 'rtl' | 'ltr' }[] {
+  const parts: { text: string; direction: 'rtl' | 'ltr' }[] = []
+  for (const character of label) {
+    const direction = /[0-9A-Za-z]/.test(character) ? 'ltr' : 'rtl'
+    const previous = parts.at(-1)
+    if (direction === 'ltr' && previous?.direction === direction) previous.text += character
+    else parts.push({ text: character, direction })
+  }
+  return parts
 }
 
 export interface FootnoteLayoutItem {

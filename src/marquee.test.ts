@@ -1,8 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import html2canvas from 'html2canvas'
-import { captureElementRegion, clipCanvasToBoxes } from './marquee'
+import { captureElementRegion, clipCanvasToBoxes, translateMarqueeDrag } from './marquee'
 
 vi.mock('html2canvas', () => ({ default: vi.fn() }))
+
+describe('translateMarqueeDrag', () => {
+  it('moves both selection corners without changing its size', () => {
+    const gesture = {
+      kind: 'ellipse' as const,
+      x0: 10,
+      y0: 20,
+      x1: 40,
+      y1: 60,
+      clientX0: 100,
+      clientY0: 200,
+      clientX1: 160,
+      clientY1: 280,
+    }
+
+    expect(translateMarqueeDrag(gesture, { x: 5, y: -3 }, { x: 10, y: -6 })).toEqual({
+      kind: 'ellipse',
+      x0: 15,
+      y0: 17,
+      x1: 45,
+      y1: 57,
+      clientX0: 110,
+      clientY0: 194,
+      clientX1: 170,
+      clientY1: 274,
+    })
+  })
+})
 
 describe('clipCanvasToBoxes', () => {
   afterEach(() => vi.unstubAllGlobals())

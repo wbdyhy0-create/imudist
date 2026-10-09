@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 export type ToolId =
-  | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
+  | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'magneticLasso' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
   | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper' | 'colorSampler' | 'heal'
   | 'hand' | 'zoom'
 
@@ -77,6 +77,7 @@ export const TOOLS: ToolDef[] = [
   },
   { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <rect x="4" y="5" width="16" height="14" strokeDasharray="2 2" /> },
   { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
+  { id: 'magneticLasso', label: 'לאסו מגנטי', group: 1, enabled: true, icon: <><path d="M5 18.500 6.200 9.200a5.800 5.800 0 0 1 11.600 0L19 18.500a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z" /><path d="m6.500 16.500 2-1.500 2 1 2-2 2 1 2-2" strokeDasharray="1.5 1.5" /></> },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
@@ -128,7 +129,7 @@ export const FRAME_TOOL_KIND: Partial<Record<ToolId, 'rect' | 'ellipse' | 'polyg
  * one was picked last, and a small mark in its corner opens a flyout to pick a different one.
  */
 const FOLD_GROUPS: ToolId[][] = [
-  ['marqueeRect', 'marqueeEllipse', 'heal'],
+  ['marqueeRect', 'marqueeEllipse', 'magneticLasso', 'heal'],
   ['rect', 'ellipse', 'polygon'],
   ['type', 'pathtype'],
   ['framerect', 'frameellipse', 'framepolygon'],
@@ -139,6 +140,7 @@ export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   select: 'בחירת אובייקטים, הזזה ושינוי גודל',
   marqueeRect: 'בחירת צורה לחיתוך אובייקטים, תמונות וטקסט',
   marqueeEllipse: 'בחירה אליפטית וחיתוך לאובייקט חדש',
+  magneticLasso: 'לחצו על קצה בתמונה והזיזו את העכבר לאורכו: הקו נצמד אליו. לחיצה כפולה סוגרת את האזור. אפשר למלא, למחוק או להשאיר רק את האזור הנבחר.',
   direct: 'עריכת נקודות עוגן וידיות של נתיב',
   hand: 'הזזת תצוגת הקנבס',
   zoom: 'הגדלה והקטנה של תצוגת המסמך',

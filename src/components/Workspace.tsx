@@ -1,9 +1,10 @@
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
 import { fontInstalled, useFontCatalog, weightName } from '../fonts'
 import { runPreflight, type PreflightIssue } from '../preflight'
-import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, clipCanvasToBoxes, splitObjectCanvas, trimTransparentBounds, type CaptureItem, type MarqueeKind, type ScreenBox } from '../marquee'
+import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, clipCanvasToBoxes, splitObjectCanvas, translateMarqueeDrag, trimTransparentBounds, type CaptureItem, type MarqueeDragPosition, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
+import { adjustMagneticPath, advanceMagneticTrace as advanceWire, anchorMagneticTrace as anchorWire, cleanMagneticPath, closeMagneticTrace, magneticSelectionCanvas, mapToSource, prepareMagneticEdgeMap, removeLastMagneticAnchor, sourceToMap, startMagneticTrace, type MagneticAdjustMode, type MagneticEdgeMap, type MagneticOperation, type MagneticPoint } from '../magneticLasso'
 import { removeImageBackground } from '../backgroundRemoval'
 import { deliverPng } from '../pngExport'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
@@ -37,6 +38,7 @@ import {
   frameSpaceAfter,
   frameSpaceBefore,
   isFacing,
+  MAX_IMAGE_BYTES,
   MAX_GUIDES,
   MAX_PAGE_PT,
   MIN_FRAME_PT,
@@ -208,16 +210,8 @@ interface MarqueeTarget {
   name: string
 }
 
-interface MarqueeGesture {
+interface MarqueeGesture extends MarqueeDragPosition {
   kind: MarqueeKind
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-  clientX0: number
-  clientY0: number
-  clientX1: number
-  clientY1: number
 }
 
 interface FeatherTarget {
@@ -237,6 +231,44 @@ interface FeatherDrag {
   startClient: { x: number; y: number }
   endClient: { x: number; y: number }
   feather: GradientFeather
+}
+
+interface MagneticLassoPreview {
+  imageId: string
+  assetId: string
+  points: MagneticPoint[]
+  anchors: MagneticPoint[]
+  mapWidth: number
+  mapHeight: number
+  loading: boolean
+  pointerDown: boolean
+}
+
+interface MagneticLassoTrace extends MagneticLassoPreview {
+  edgeMap: MagneticEdgeMap | null
+  startPoint: MagneticPoint
+  latestPoint: MagneticPoint
+  anchorIndices: number[]
+  /** the live wire from the last anchor to the pointer: not fixed yet */
+  tail: MagneticPoint[]
+  /** how far from the pointer an edge is looked for, in pixels of the edge map */
+  snapRadius: number
+  /** pixels of the edge map under one pixel of the screen */
+  mapPerScreen: number
+  /** where the button went down (to tell a click from a drag along the edge), and the press before it (a double click closes) */
+  downClient: { x: number; y: number } | null
+  lastDown: { x: number; y: number; time: number } | null
+}
+
+interface MagneticLassoSelection extends MagneticLassoPreview {
+  edgeMap: MagneticEdgeMap
+}
+
+interface MagneticBrushGesture {
+  imageId: string
+  lastClient: { x: number; y: number }
+  /** the pixels the line has been put on during this drag */
+  settled: Set<number>
 }
 
 interface GapDrag {
@@ -309,6 +341,8 @@ export interface WorkspaceHandle {
   insertRunningHeader: () => void
   /** open the palette that turns notes in brackets into footnotes and back */
   openFootnoteConverter: () => void
+  /** open the footnote palette at the footnote/endnote placement converter */
+  openFootnoteEndnoteConverter: () => void
   insertTableOfContents: () => void
   firstWordStyler: () => void
   windowText: () => void
@@ -793,8 +827,75 @@ export function Workspace({
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [marqueeCut, setMarqueeCut] = useState<MarqueeGesture | null>(null)
   const marqueeCutRef = useRef<MarqueeGesture | null>(null)
+  const [magneticTracePreview, setMagneticTracePreview] = useState<MagneticLassoPreview | null>(null)
+  const magneticTraceRef = useRef<MagneticLassoTrace | null>(null)
+  const [magneticSelection, setMagneticSelection] = useState<MagneticLassoSelection | null>(null)
+  const magneticSelectionRef = useRef<MagneticLassoSelection | null>(null)
+  const [magneticAdjustMode, setMagneticAdjustMode] = useState<MagneticAdjustMode | null>(null)
+  const [magneticBrushRadius, setMagneticBrushRadius] = useState(24)
+  /** how far from the pointer the lasso looks for an edge, in screen pixels ([ and ] change it) */
+  const [magneticWidth, setMagneticWidth] = useState(8)
+  const magneticWidthRef = useRef(8)
+  magneticWidthRef.current = magneticWidth
+  const magneticKeys = useRef({ back: () => {}, close: () => {} })
+  const [magneticBrushCursor, setMagneticBrushCursor] = useState<{ x: number; y: number } | null>(null)
+  const magneticBrushGestureRef = useRef<MagneticBrushGesture | null>(null)
+  const [magneticFillColor, setMagneticFillColor] = useState('#000000')
+  const [magneticBusy, setMagneticBusy] = useState(false)
   const [featherDrag, setFeatherDrag] = useState<FeatherDrag | null>(null)
   const featherDragRef = useRef<FeatherDrag | null>(null)
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || (!magneticTraceRef.current && !magneticSelectionRef.current && !magneticAdjustMode)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      magneticTraceRef.current = null
+      magneticSelectionRef.current = null
+      magneticBrushGestureRef.current = null
+      setMagneticTracePreview(null)
+      setMagneticSelection(null)
+      setMagneticAdjustMode(null)
+      setMagneticBrushCursor(null)
+    }
+    window.addEventListener('keydown', onEscape, true)
+    return () => window.removeEventListener('keydown', onEscape, true)
+  }, [magneticAdjustMode])
+  // while a line is traced: Backspace takes the last anchor back, Enter closes the line, [ and ] change how far the lasso looks for an edge
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!magneticTraceRef.current || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.target instanceof HTMLElement &&
+          (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return
+      if (event.key === 'Backspace' || event.key === 'Delete') magneticKeys.current.back()
+      else if (event.key === 'Enter') magneticKeys.current.close()
+      else if (event.key === '[' || event.code === 'BracketLeft') setMagneticWidth((width) => Math.max(2, width - 2))
+      else if (event.key === ']' || event.code === 'BracketRight') setMagneticWidth((width) => Math.min(40, width + 2))
+      else return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+  useEffect(() => {
+    const trace = magneticTraceRef.current
+    if (trace?.edgeMap) trace.snapRadius = Math.max(2, Math.min(64, magneticWidth * trace.mapPerScreen))
+  }, [magneticWidth])
+  useEffect(() => {
+    if (!magneticAdjustMode) return
+    const resizeBrush = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement &&
+          (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return
+      const smaller = event.key === '[' || event.code === 'BracketLeft'
+      const larger = event.key === ']' || event.code === 'BracketRight'
+      if (!smaller && !larger) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      setMagneticBrushRadius((radius) => Math.max(8, Math.min(120, radius + (larger ? 8 : -8))))
+    }
+    window.addEventListener('keydown', resizeBrush, true)
+    return () => window.removeEventListener('keydown', resizeBrush, true)
+  }, [magneticAdjustMode])
   /** the snapping lines of the document, and the ones an object is held on right now (drawn while dragging) */
   const snapLines = useMemo(() => snapLinesOf(doc, guides), [doc, guides])
   const snapLinesRef = useRef(snapLines)
@@ -835,6 +936,15 @@ export function Workspace({
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   const activateTool = useCallback((nextTool: ToolId) => {
     setTool(nextTool)
+    if (nextTool !== 'magneticLasso') {
+      magneticTraceRef.current = null
+      magneticSelectionRef.current = null
+      magneticBrushGestureRef.current = null
+      setMagneticTracePreview(null)
+      setMagneticSelection(null)
+      setMagneticAdjustMode(null)
+      setMagneticBrushCursor(null)
+    }
     if (nextTool === 'color' || nextTool === 'gradient' || nextTool === 'swatches') return
     setColorSamplerActive(false)
     setRasterBrushColor(null)
@@ -982,6 +1092,8 @@ export function Workspace({
   const [toolDialog, setToolDialog] = useState<DrawKind | 'pen' | 'pencil' | null>(null)
   const [runningHeaderDialog, setRunningHeaderDialog] = useState(false)
   const [footnoteConverterOpen, setFootnoteConverterOpen] = useState(false)
+  const [footnoteConverterFocus, setFootnoteConverterFocus] = useState<'inline' | 'placement'>('inline')
+  const [footnoteConverterFocusRequest, setFootnoteConverterFocusRequest] = useState(0)
   const [tocDialogOpen, setTocDialogOpen] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [windowTextDialog, setWindowTextDialog] = useState(false)
@@ -1455,6 +1567,12 @@ export function Workspace({
     pageOps.setup({ ...doc, footnotes: config }, 'footnotes:options')
     setFootnotePreviewConfig(null)
     setFootnoteOptionsOpen(false)
+  }
+
+  const setFootnotePlacement = (placement: FootnoteLayoutConfig['placement']) => {
+    const current = doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
+    if (current.placement === placement) return
+    pageOps.setup({ ...doc, footnotes: { ...current, placement } }, 'footnotes:placement')
   }
 
   const commitFootnoteWidth = (widthScale: number) => {
@@ -3936,7 +4054,16 @@ export function Workspace({
     },
     cleanSpacing: cleanSpacingCmd,
     insertRunningHeader,
-    openFootnoteConverter: () => setFootnoteConverterOpen(true),
+    openFootnoteConverter: () => {
+      setFootnoteConverterFocus('inline')
+      setFootnoteConverterFocusRequest((request) => request + 1)
+      setFootnoteConverterOpen(true)
+    },
+    openFootnoteEndnoteConverter: () => {
+      setFootnoteConverterFocus('placement')
+      setFootnoteConverterFocusRequest((request) => request + 1)
+      setFootnoteConverterOpen(true)
+    },
     insertTableOfContents: () => setTocDialogOpen(true),
     firstWordStyler: () => setFirstWordDialog(true),
     windowText: () => setWindowTextDialog(true),
@@ -4302,6 +4429,309 @@ export function Workspace({
     return cached
   }
 
+  /** the line as the screen shows it: what is fixed, and the live wire from the last anchor to the pointer */
+  const magneticPreviewOf = (trace: MagneticLassoTrace): MagneticLassoPreview => ({
+    imageId: trace.imageId,
+    assetId: trace.assetId,
+    points: trace.tail.length > 0 ? [...trace.points, ...trace.tail] : trace.points.slice(),
+    anchors: trace.anchorIndices
+      .map((index) => trace.points[index])
+      .filter((point): point is MagneticPoint => point !== undefined),
+    mapWidth: trace.mapWidth,
+    mapHeight: trace.mapHeight,
+    loading: !trace.edgeMap,
+    pointerDown: trace.pointerDown,
+  })
+
+  /** how far the pointer reaches for an edge, and when the wire fixes an anchor by itself: measured on the screen, whatever the size of the picture and the zoom */
+  const magneticSettingsOf = (trace: MagneticLassoTrace) => ({
+    radius: trace.snapRadius,
+    autoAnchorAfter: Math.max(12, 40 * trace.mapPerScreen),
+    autoAnchorKeep: Math.max(4, 8 * trace.mapPerScreen),
+  })
+
+  /** the pointer is over `pixel` of the picture: the wire is drawn again from the last anchor to the edge nearest it */
+  const moveMagneticWire = (trace: MagneticLassoTrace, pixel: MagneticPoint) => {
+    const edgeMap = trace.edgeMap
+    const asset = assetsRef.current[trace.assetId]
+    if (!edgeMap || !asset || trace.points.length === 0) return
+    trace.latestPoint = pixel
+    advanceWire(edgeMap, trace, { x: sourceToMap(pixel.x, edgeMap.width, asset.width), y: sourceToMap(pixel.y, edgeMap.height, asset.height) }, magneticSettingsOf(trace))
+    setMagneticTracePreview(magneticPreviewOf(trace))
+  }
+
+  /** the wire as it is now becomes fixed, ending in a new anchor */
+  const anchorMagneticLine = (trace: MagneticLassoTrace) => {
+    anchorWire(trace)
+    setMagneticTracePreview(magneticPreviewOf(trace))
+  }
+
+  /** takes the last anchor back; with only the start left the whole line is dropped */
+  const removeMagneticAnchor = (trace: MagneticLassoTrace) => {
+    if (magneticTraceRef.current !== trace) return
+    if (!removeLastMagneticAnchor(trace)) {
+      magneticTraceRef.current = null
+      setMagneticTracePreview(null)
+      return
+    }
+    moveMagneticWire(trace, trace.latestPoint)
+  }
+
+  /** closes the line: from its last anchor (or from the pointer, with `withTail`) a wire goes back to where it began, and what is inside becomes the selection */
+  const finishMagneticTrace = (trace: MagneticLassoTrace, withTail: boolean) => {
+    const edgeMap = trace.edgeMap
+    if (magneticTraceRef.current !== trace || !edgeMap) return
+    const closed = closeMagneticTrace(edgeMap, trace, withTail)
+    magneticTraceRef.current = null
+    setMagneticTracePreview(null)
+    if (closed.length < 3) {
+      onNotify('לא נוצרה בחירה. עקבו אחרי קצה בתמונה וסגרו אזור גדול יותר.')
+      return
+    }
+    const selection: MagneticLassoSelection = { ...magneticPreviewOf({ ...trace, points: closed, tail: [] }), loading: false, pointerDown: false, edgeMap }
+    magneticSelectionRef.current = selection
+    setMagneticSelection(selection)
+  }
+  magneticKeys.current = {
+    back: () => {
+      const trace = magneticTraceRef.current
+      if (trace) removeMagneticAnchor(trace)
+    },
+    close: () => {
+      const trace = magneticTraceRef.current
+      if (trace) finishMagneticTrace(trace, false)
+    },
+  }
+
+  const beginMagneticTrace = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const activeTrace = magneticTraceRef.current
+    const element = event.target instanceof Element
+      ? event.target.closest<HTMLElement>('[data-object-kind="image"]')
+      : null
+    const imageId = element?.dataset.objectId
+    const image = imageId ? images.find((candidate) => candidate.id === imageId) : undefined
+    if (activeTrace) {
+      const edgeMap = activeTrace.edgeMap
+      if (!edgeMap) {
+        onNotify('הלאסו עדיין מנתח את התמונה. המתינו לסיום הניתוח ואז המשיכו.')
+        return
+      }
+      if (!image || !element || image.id !== activeTrace.imageId || image.assetId !== activeTrace.assetId) {
+        onNotify('המשיכו את קו הלאסו על אותה תמונה.')
+        return
+      }
+      if (itemLocks[image.id] || image.hidden || element.classList.contains('locked')) {
+        onNotify('אי אפשר לערוך תמונה נעולה או מוסתרת.')
+        return
+      }
+      const asset = assets[image.assetId]
+      const pixel = asset ? imagePixelAt(image, asset, toWorld(event.clientX, event.clientY)) : null
+      if (!asset || !pixel) {
+        onNotify('המשיכו על החלק הגלוי של אותה תמונה.')
+        return
+      }
+      const first = activeTrace.points[0]
+      const startWorld = first ? imagePixelWorldAt(image, asset, { x: mapToSource(first.x, edgeMap.width, asset.width), y: mapToSource(first.y, edgeMap.height, asset.height) }) : null
+      const pointerWorld = toWorld(event.clientX, event.clientY)
+      const nearStart = !!startWorld && Math.hypot(pointerWorld.x - startWorld.x, pointerWorld.y - startWorld.y) * zoom <= 12
+      const previous = activeTrace.lastDown
+      // the second press of a double click closes the line
+      const doubled = !!previous && event.timeStamp - previous.time < 400 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 6
+      activeTrace.lastDown = { x: event.clientX, y: event.clientY, time: event.timeStamp }
+      const enough = activeTrace.points.length + activeTrace.tail.length >= 3
+      if (doubled && enough) {
+        finishMagneticTrace(activeTrace, true)
+        return
+      }
+      // the wire to exactly where the pointer is; a press on the start closes the line with it
+      moveMagneticWire(activeTrace, pixel)
+      if (nearStart && enough) {
+        finishMagneticTrace(activeTrace, true)
+        return
+      }
+      anchorMagneticLine(activeTrace)
+      activeTrace.pointerDown = true
+      activeTrace.downClient = { x: event.clientX, y: event.clientY }
+      vpRef.current?.setPointerCapture(event.pointerId)
+      return
+    }
+    if (!element || !image) {
+      onNotify('כדי להשתמש בלאסו המגנטי, התחילו בלחיצה על תמונה.')
+      return
+    }
+    if (itemLocks[image.id] || image.hidden || element.classList.contains('locked')) {
+      onNotify('אי אפשר לערוך תמונה נעולה או מוסתרת.')
+      return
+    }
+    const asset = assets[image.assetId]
+    if (!asset?.dataUrl) {
+      onShowError('לא ניתן לבחור אזור בתמונה', new Error('נתוני התמונה אינם זמינים במסמך.'))
+      return
+    }
+    const startPoint = imagePixelAt(image, asset, toWorld(event.clientX, event.clientY))
+    if (!startPoint) {
+      onNotify('התחילו על החלק הגלוי של התמונה.')
+      return
+    }
+    const trace: MagneticLassoTrace = {
+      imageId: image.id,
+      assetId: image.assetId,
+      points: [],
+      anchors: [],
+      mapWidth: 0,
+      mapHeight: 0,
+      loading: true,
+      edgeMap: null,
+      startPoint,
+      latestPoint: startPoint,
+      anchorIndices: [],
+      tail: [],
+      snapRadius: 8,
+      mapPerScreen: 1,
+      pointerDown: true,
+      downClient: { x: event.clientX, y: event.clientY },
+      lastDown: { x: event.clientX, y: event.clientY, time: event.timeStamp },
+    }
+    magneticSelectionRef.current = null
+    setMagneticSelection(null)
+    magneticTraceRef.current = trace
+    setMagneticTracePreview(magneticPreviewOf(trace))
+    setSelectedId(image.id)
+    setSelectedPage(ownerPage(rects, image.x + image.w / 2, image.y + image.h / 2))
+    vpRef.current?.setPointerCapture(event.pointerId)
+
+    void samplerCanvas(asset).then((source) => {
+      const edgeMap = prepareMagneticEdgeMap(source)
+      if (magneticTraceRef.current !== trace) return
+      trace.edgeMap = edgeMap
+      trace.mapWidth = edgeMap.width
+      trace.mapHeight = edgeMap.height
+      const fitScale = image.fit === 'stretch' ? null : image.fit === 'fit'
+        ? Math.min(image.w / asset.width, image.h / asset.height)
+        : Math.max(image.w / asset.width, image.h / asset.height)
+      const contentWidth = fitScale === null ? image.w : asset.width * fitScale
+      trace.mapPerScreen = edgeMap.width / Math.max(1, contentWidth * live.current.zoom)
+      trace.snapRadius = Math.max(2, Math.min(64, magneticWidthRef.current * trace.mapPerScreen))
+      const start = startMagneticTrace(edgeMap, { x: sourceToMap(trace.startPoint.x, edgeMap.width, asset.width), y: sourceToMap(trace.startPoint.y, edgeMap.height, asset.height) }, trace.snapRadius)
+      trace.points = start.points
+      trace.anchorIndices = start.anchorIndices
+      trace.tail = []
+      if (Math.hypot(trace.latestPoint.x - trace.startPoint.x, trace.latestPoint.y - trace.startPoint.y) > 1) moveMagneticWire(trace, trace.latestPoint)
+      else setMagneticTracePreview(magneticPreviewOf(trace))
+    }).catch((error: unknown) => {
+      if (magneticTraceRef.current !== trace) return
+      magneticTraceRef.current = null
+      setMagneticTracePreview(null)
+      onShowError('זיהוי הקצוות נכשל', error)
+    })
+  }
+
+  /** the pointer moves over the picture (with or without the button): the live wire follows it */
+  const moveMagneticTrace = (clientX: number, clientY: number) => {
+    const trace = magneticTraceRef.current
+    if (!trace) return false
+    const image = images.find((candidate) => candidate.id === trace.imageId)
+    const asset = assetsRef.current[trace.assetId]
+    const pixel = image && asset ? imagePixelAt(image, asset, toWorld(clientX, clientY)) : null
+    if (pixel) {
+      trace.latestPoint = pixel
+      if (trace.edgeMap) moveMagneticWire(trace, pixel)
+    }
+    return true
+  }
+
+  const endMagneticTrace = (clientX: number, clientY: number) => {
+    const trace = magneticTraceRef.current
+    if (!trace?.pointerDown) return false
+    trace.pointerDown = false
+    // a press dragged along the edge fixes the place where it ended; a plain click fixed its anchor when it went down
+    const dragged = !!trace.downClient && Math.hypot(clientX - trace.downClient.x, clientY - trace.downClient.y) > 5
+    moveMagneticTrace(clientX, clientY)
+    if (dragged && trace.edgeMap) anchorMagneticLine(trace)
+    else setMagneticTracePreview(magneticPreviewOf(trace))
+    return true
+  }
+
+  const beginMagneticBrush = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const selection = magneticSelectionRef.current
+    const image = selection ? images.find((candidate) => candidate.id === selection.imageId) : undefined
+    const asset = image ? assets[image.assetId] : undefined
+    if (!selection || !magneticAdjustMode || !image || image.assetId !== selection.assetId || !asset) {
+      return false
+    }
+    const point = imagePixelAt(image, asset, toWorld(event.clientX, event.clientY))
+    if (!point) return false
+    event.preventDefault()
+    event.stopPropagation()
+    magneticBrushGestureRef.current = { imageId: image.id, lastClient: { x: event.clientX, y: event.clientY }, settled: new Set() }
+    setMagneticBrushCursor({ x: event.clientX, y: event.clientY })
+    vpRef.current?.setPointerCapture(event.pointerId)
+    moveMagneticBrush(event.clientX, event.clientY, true)
+    return true
+  }
+
+  const moveMagneticBrush = (clientX: number, clientY: number, pressed = false) => {
+    const gesture = magneticBrushGestureRef.current
+    const selection = magneticSelectionRef.current
+    if (!gesture || !selection || !magneticAdjustMode) return false
+    const image = images.find((candidate) => candidate.id === gesture.imageId && candidate.id === selection.imageId)
+    const asset = image ? assetsRef.current[image.assetId] : undefined
+    if (!image || !asset) return true
+    const point = imagePixelAt(image, asset, toWorld(clientX, clientY))
+    setMagneticBrushCursor({ x: clientX, y: clientY })
+    const distance = Math.hypot(clientX - gesture.lastClient.x, clientY - gesture.lastClient.y)
+    gesture.lastClient = { x: clientX, y: clientY }
+    if (!point || (distance === 0 && !pressed) || selection.mapWidth <= 0) return true
+    const fitScale = image.fit === 'stretch' ? null : image.fit === 'fit'
+      ? Math.min(image.w / asset.width, image.h / asset.height)
+      : Math.max(image.w / asset.width, image.h / asset.height)
+    const contentWidth = fitScale === null ? image.w : asset.width * fitScale
+    const mapScale = selection.mapWidth / Math.max(1, contentWidth * live.current.zoom)
+    const center = { x: sourceToMap(point.x, selection.mapWidth, asset.width), y: sourceToMap(point.y, selection.mapHeight, asset.height) }
+    const adjusted = adjustMagneticPath(selection.points, center, selection.edgeMap, magneticBrushRadius * mapScale, magneticAdjustMode, gesture.settled)
+    if (adjusted !== selection.points) {
+      const nextSelection = { ...selection, points: adjusted }
+      magneticSelectionRef.current = nextSelection
+      setMagneticSelection(nextSelection)
+    }
+    return true
+  }
+
+  const endMagneticBrush = () => {
+    const gesture = magneticBrushGestureRef.current
+    if (!gesture) return false
+    magneticBrushGestureRef.current = null
+    // the stroke is over: the line it moved is cleaned of the small waves the steps of the circle left
+    const selection = magneticSelectionRef.current
+    if (selection && gesture.settled.size > 0) {
+      const cleaned = cleanMagneticPath(selection.points, gesture.settled, selection.edgeMap.width)
+      if (cleaned !== selection.points) {
+        const next = { ...selection, points: cleaned }
+        magneticSelectionRef.current = next
+        setMagneticSelection(next)
+      }
+    }
+    return true
+  }
+
+  const imagePixelWorldAt = (image: ImageFrame, asset: Asset, point: MagneticPoint) => {
+    const fitScale = image.fit === 'stretch' ? null : image.fit === 'fit'
+      ? Math.min(image.w / asset.width, image.h / asset.height)
+      : Math.max(image.w / asset.width, image.h / asset.height)
+    const contentWidth = fitScale === null ? image.w : asset.width * fitScale
+    const contentHeight = fitScale === null ? image.h : asset.height * fitScale
+    let x = (point.x / asset.width) * contentWidth - image.w / 2 + (image.w - contentWidth) / 2
+    let y = (point.y / asset.height) * contentHeight - image.h / 2 + (image.h - contentHeight) / 2
+    if (image.flipX) x = -x
+    if (image.flipY) y = -y
+    const angle = ((image.rotation ?? 0) * Math.PI) / 180
+    const worldX = image.x + image.w / 2 + x * Math.cos(angle) - y * Math.sin(angle)
+    const worldY = image.y + image.h / 2 + x * Math.sin(angle) + y * Math.cos(angle)
+    return { x: worldX, y: worldY }
+  }
+
   const cssColorHex = (value: string) => {
     const canvas = document.createElement('canvas')
     const context = canvas.getContext('2d')
@@ -4625,6 +5055,75 @@ export function Workspace({
       }
     } catch (error) {
       console.error('Could not paint the image.', error)
+    }
+  }
+
+  const applyMagneticSelection = async (operation: MagneticOperation) => {
+    const selection = magneticSelectionRef.current
+    if (!selection || magneticBusy) return
+    if (documentSessionId === null) {
+      onNotify('אי אפשר לערוך תמונות במצב תצוגה מקדימה.')
+      return
+    }
+    const image = images.find((candidate) => candidate.id === selection.imageId)
+    const asset = assetsRef.current[selection.assetId]
+    if (!image || image.assetId !== selection.assetId || !asset) {
+      onShowError('הפעולה נכשלה', new Error('התמונה השתנתה או הוסרה לאחר יצירת הבחירה.'))
+      setMagneticSelection(null)
+      magneticSelectionRef.current = null
+      setMagneticAdjustMode(null)
+      setMagneticBrushCursor(null)
+      return
+    }
+    if (asset.mime === 'image/gif') {
+      onNotify('הלאסו המגנטי אינו עורך GIF, כדי לשמור על האנימציה. המירו את התמונה ל-PNG או JPEG ונסו שוב.')
+      return
+    }
+    setMagneticBusy(true)
+    try {
+      const source = await samplerCanvas(asset)
+      const output = magneticSelectionCanvas(
+        source,
+        selection.points,
+        selection.mapWidth,
+        selection.mapHeight,
+        operation,
+        magneticFillColor,
+      )
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        output.toBlob((result) => result ? resolve(result) : reject(new Error('לא ניתן ליצור תמונת PNG מהבחירה.')), 'image/png')
+      })
+      if (blob.size > MAX_IMAGE_BYTES) throw new Error('התמונה שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.')
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('לא ניתן לקרוא את תמונת PNG שנוצרה.'))
+        reader.onerror = () => reject(reader.error ?? new Error('לא ניתן לקרוא את תמונת PNG שנוצרה.'))
+        reader.readAsDataURL(blob)
+      })
+      const nextAssetId = newFrameId()
+      const baseName = asset.name.replace(/\.[^.]+$/, '') || 'תמונה'
+      const actionName = operation === 'fill' ? 'מילוי' : operation === 'delete' ? 'מחיקה' : 'מסיכה'
+      const nextAsset: Asset = {
+        name: `${baseName} — ${actionName}.png`,
+        mime: 'image/png',
+        dataUrl,
+        width: output.width,
+        height: output.height,
+      }
+      if (!onReplaceImageAsset(documentSessionId, editingParentId, image.id, selection.assetId, nextAssetId, nextAsset)) {
+        throw new Error('התמונה השתנתה או הוסרה לפני סיום הפעולה, ולכן התוצאה לא הוחלה.')
+      }
+      magneticSelectionRef.current = null
+      setMagneticSelection(null)
+      setSelectedId(image.id)
+      activateTool('select')
+      onNotify(operation === 'fill' ? 'האזור הנבחר מולא. אפשר לבטל כדי לחזור לתמונה המקורית.' : operation === 'delete'
+        ? 'האזור הנבחר נמחק. אפשר לבטל כדי לחזור לתמונה המקורית.'
+        : 'נשאר רק האזור הנבחר. אפשר לבטל כדי לחזור לתמונה המקורית.')
+    } catch (error) {
+      onShowError('עריכת הבחירה נכשלה', error)
+    } finally {
+      setMagneticBusy(false)
     }
   }
 
@@ -6309,6 +6808,17 @@ export function Workspace({
     }
   }
   const onPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool === 'magneticLasso' && !panMode && e.button === 0) {
+      if (magneticSelectionRef.current && magneticAdjustMode) {
+        if (!beginMagneticBrush(e)) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+        return
+      }
+      beginMagneticTrace(e)
+      return
+    }
     if (tool === 'gap' && !panMode && e.button === 0) {
       e.preventDefault()
       e.stopPropagation()
@@ -6358,6 +6868,19 @@ export function Workspace({
     void updateColorSampler(e.clientX, e.clientY).then((color) => { if (color) addColorSample(color) })
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (magneticBrushGestureRef.current) {
+      moveMagneticBrush(e.clientX, e.clientY)
+      return
+    }
+    if (magneticTraceRef.current) {
+      moveMagneticTrace(e.clientX, e.clientY)
+      return
+    }
+    if (magneticAdjustMode && magneticSelectionRef.current) {
+      setMagneticBrushCursor({ x: e.clientX, y: e.clientY })
+    } else if (magneticBrushCursor) {
+      setMagneticBrushCursor(null)
+    }
     if (colorSamplerActive) {
       moveColorSamplerLens(e.clientX, e.clientY)
       void updateColorSampler(e.clientX, e.clientY)
@@ -6392,8 +6915,14 @@ export function Workspace({
     cancelGapPreviewFrame()
     if (marqueeCutRef.current) {
       const previous = marqueeCutRef.current
-      const world = toWorld(e.clientX, e.clientY)
-      const next = { ...previous, x1: world.x, y1: world.y, clientX1: e.clientX, clientY1: e.clientY }
+      let next: MarqueeGesture
+      if (space) {
+        const clientDelta = { x: e.clientX - previous.clientX1, y: e.clientY - previous.clientY1 }
+        next = translateMarqueeDrag(previous, { x: clientDelta.x / zoom, y: clientDelta.y / zoom }, clientDelta)
+      } else {
+        const world = toWorld(e.clientX, e.clientY)
+        next = { ...previous, x1: world.x, y1: world.y, clientX1: e.clientX, clientY1: e.clientY }
+      }
       marqueeCutRef.current = next
       setMarqueeCut(next)
       return
@@ -6788,6 +7317,8 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (endMagneticBrush()) return
+    if (endMagneticTrace(event.clientX, event.clientY)) return
     const activeGap = gapDrag.current
     if (activeGap) {
       const point = toWorld(event.clientX, event.clientY)
@@ -6881,6 +7412,11 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    if (magneticBrushGestureRef.current) {
+      magneticBrushGestureRef.current = null
+      setMagneticBrushCursor(null)
+      return
+    }
     cancelGapPreviewFrame()
     if (gapCancel.current) gapCancel.current()
     else {
@@ -6893,6 +7429,10 @@ export function Workspace({
     paintStroke.current = null
     marqueeCutRef.current = null
     setMarqueeCut(null)
+    magneticTraceRef.current = null
+    magneticSelectionRef.current = null
+    setMagneticTracePreview(null)
+    setMagneticSelection(null)
     eraserDragging.current = false
     eraserDragKey.current = null
     eraserPreviousPoint.current = null
@@ -7177,6 +7717,27 @@ export function Workspace({
       : gapPreview.some((gap) => gap.axis === 'y')
         ? ' gap-y'
         : ''
+  const magneticOverlay = magneticTracePreview ?? magneticSelection
+  const magneticOverlayImage = magneticOverlay ? images.find((image) => image.id === magneticOverlay.imageId && image.assetId === magneticOverlay.assetId) : undefined
+  const magneticOverlayAsset = magneticOverlayImage ? assets[magneticOverlayImage.assetId] : undefined
+  const magneticPath = magneticOverlay && magneticOverlayImage && magneticOverlayAsset && magneticOverlay.mapWidth > 0
+    ? magneticOverlay.points.map((point, index) => {
+      const world = imagePixelWorldAt(magneticOverlayImage, magneticOverlayAsset, {
+        x: mapToSource(point.x, magneticOverlay.mapWidth, magneticOverlayAsset.width),
+        y: mapToSource(point.y, magneticOverlay.mapHeight, magneticOverlayAsset.height),
+      })
+      return `${index === 0 ? 'M' : 'L'}${tx + world.x * zoom},${ty + world.y * zoom}`
+    }).join(' ') + (magneticSelection ? ' Z' : '')
+    : ''
+  const magneticAnchorPoints = magneticTracePreview && magneticOverlayImage && magneticOverlayAsset && magneticTracePreview.mapWidth > 0
+    ? magneticTracePreview.anchors.map((point) => {
+      const world = imagePixelWorldAt(magneticOverlayImage, magneticOverlayAsset, {
+        x: mapToSource(point.x, magneticTracePreview.mapWidth, magneticOverlayAsset.width),
+        y: mapToSource(point.y, magneticTracePreview.mapHeight, magneticOverlayAsset.height),
+      })
+      return { x: tx + world.x * zoom, y: ty + world.y * zoom }
+    })
+    : []
   const viewportClass =
     'viewport' +
     (previewMode ? ' preview' : '') +
@@ -7190,6 +7751,8 @@ export function Workspace({
         ? ' pan'
         : marqueeTool
           ? ' marqueetool'
+        : tool === 'magneticLasso'
+          ? ' magneticlassotool' + (magneticTracePreview ? ' magnetic-tracing' : '')
         : placing || placingImages.length > 0
           ? ' placing'
           : linkFrom
@@ -8581,6 +9144,69 @@ export function Workspace({
 
   return (
     <div className="workspace">
+      {magneticAdjustMode && magneticBrushCursor && magneticSelection && (
+        <div
+          className={'magnetic-brush-cursor ' + (magneticAdjustMode === 'expand' ? 'expand' : 'contract')}
+          style={{ left: magneticBrushCursor.x, top: magneticBrushCursor.y, width: magneticBrushRadius * 2, height: magneticBrushRadius * 2 }}
+          aria-hidden="true"
+        >
+          {magneticAdjustMode === 'expand' ? '+' : '−'}
+        </div>
+      )}
+      {(magneticTracePreview || magneticSelection) && (
+        <div className="magnetic-lasso-banner" role="status">
+          <div className="magnetic-lasso-title">
+            <b>{magneticBusy ? 'מעבד את הבחירה…' : magneticTracePreview ? magneticTracePreview.loading ? 'מנתח את קצוות התמונה…' : 'עקבו אחרי קצה האובייקט: הקו נצמד אליו. לחיצה מציבה עוגן' : magneticAdjustMode ? magneticAdjustMode === 'expand' ? 'מצב פלוס: הניחו את העיגול בתוך הצורה וגררו; הקו נדחף החוצה אל הקצה' : 'מצב מינוס: קרבו את העיגול לקו מבחוץ וגררו; הקו נדחף פנימה אל הקצה' : 'האזור נבחר. בחרו פעולה לתמונה.'}</b>
+          </div>
+          {magneticSelection && (
+            <div className="magnetic-lasso-actions">
+              <button
+                className={'btn small' + (magneticAdjustMode === 'expand' ? ' magnetic-adjust-active' : '')}
+                aria-pressed={magneticAdjustMode === 'expand'}
+                title="גררו ליד קו הבחירה כדי להרחיב אותו מקומית"
+                disabled={magneticBusy}
+                onClick={() => {
+                  setMagneticAdjustMode((mode) => mode === 'expand' ? null : 'expand')
+                  setMagneticBrushCursor(null)
+                }}
+              >הרחבה (+)</button>
+              <button
+                className={'btn small' + (magneticAdjustMode === 'contract' ? ' magnetic-adjust-active' : '')}
+                aria-pressed={magneticAdjustMode === 'contract'}
+                title="גררו ליד קו הבחירה כדי לצמצם אותו מקומית"
+                disabled={magneticBusy}
+                onClick={() => {
+                  setMagneticAdjustMode((mode) => mode === 'contract' ? null : 'contract')
+                  setMagneticBrushCursor(null)
+                }}
+              >צמצום (−)</button>
+              {magneticAdjustMode && <span className="magnetic-brush-size" aria-live="polite">
+                גודל המברשת: {magneticBrushRadius * 2} פיקסלים · [ הקטנה · ] הגדלה
+              </span>}
+              <label className="magnetic-lasso-color" title="צבע המילוי">
+                צבע מילוי
+                <input type="color" value={magneticFillColor} onChange={(event) => setMagneticFillColor(event.target.value)} disabled={magneticBusy} />
+              </label>
+              <button className="btn small" disabled={magneticBusy} onClick={() => void applyMagneticSelection('fill')}>מילוי</button>
+              <button className="btn small" disabled={magneticBusy} title="מוחק את הפיקסלים בתוך האזור הנבחר" onClick={() => void applyMagneticSelection('delete')}>מחק אזור</button>
+              <button className="btn small" disabled={magneticBusy} title="משאיר גלוי רק את האזור הנבחר ומסתיר את יתר התמונה" onClick={() => void applyMagneticSelection('mask')}>השאר בחירה (מסיכה)</button>
+              <button className="btn small" disabled={magneticBusy} onClick={() => {
+                magneticSelectionRef.current = null
+                setMagneticSelection(null)
+                setMagneticAdjustMode(null)
+                setMagneticBrushCursor(null)
+              }}>סגור בחירה</button>
+            </div>
+          )}
+          <div className="place-hint">
+            {magneticTracePreview
+              ? magneticTracePreview.loading ? 'טוען את התמונה ומחשב את הקצוות. אפשר לבטל עם Esc.' : `Backspace מוחק את העוגן האחרון · לחיצה כפולה, Enter או לחיצה על נקודת ההתחלה סוגרים · [ ] משנים את הרוחב (${magneticWidth} פיקסלים) · Esc מבטל.`
+              : magneticAdjustMode
+                ? 'העיגול הוא אזור ההשפעה של המברשת. ברגע שהוא נוגע בקו הוא דוחף אותו: פלוס מתוך הצורה החוצה, מינוס מבחוץ פנימה, עד הקצה של האובייקט.'
+              : 'הפעולות משנות את התמונה ומחליפות את קובץ התמונה במסמך; Ctrl+Z מחזיר את המקור.'}
+          </div>
+        </div>
+      )}
       {placingImages.length > 0 && (
         <div className="place-banner" role="status">
           <img className="place-thumb" src={placingImages[0].asset.dataUrl} alt="" />
@@ -8871,6 +9497,9 @@ export function Workspace({
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={cancelDrag}
+            onPointerLeave={() => {
+              if (!magneticBrushGestureRef.current) setMagneticBrushCursor(null)
+            }}
             onDoubleClick={(e) => {
               if (tool === 'pen' && penPoints.current.length >= 2) {
                 e.preventDefault()
@@ -8889,6 +9518,13 @@ export function Workspace({
                 }}
                 aria-hidden="true"
               />}
+              {magneticPath && <svg className="magnetic-selection-layer" width={sheetW} height={sheetH} aria-hidden="true">
+                <path className="magnetic-selection-outline-under" d={magneticPath} />
+                <path className="magnetic-selection-outline" d={magneticPath} />
+                {magneticAnchorPoints.map((point, index) => (
+                  <circle key={index} className="magnetic-selection-anchor" cx={point.x} cy={point.y} r={3} />
+                ))}
+              </svg>}
               {featherGuide && <svg className="feather-gesture-layer" width={sheetW} height={sheetH} aria-hidden="true">
                 <line x1={tx + featherGuide.start.x * zoom} y1={ty + featherGuide.start.y * zoom} x2={tx + featherGuide.end.x * zoom} y2={ty + featherGuide.end.y * zoom} />
                 <circle cx={tx + featherGuide.start.x * zoom} cy={ty + featherGuide.start.y * zoom} r={4} />
@@ -9192,6 +9828,8 @@ export function Workspace({
                     tocPageMarkers={tocMarkers?.pageNumbers}
                     tocLeaderMarkers={tocMarkers?.leaders}
                     footnoteReferenceScale={footnoteConfig.referenceScale}
+                    footnoteReferenceGap={footnoteConfig.referenceGap}
+                    footnoteReferenceVerticalOffset={footnoteConfig.referenceVerticalOffset}
                     footnoteAlignment={footnoteConfig.alignment}
                     footnotes={fl.footnotes}
                     footnoteHeight={fl.footnoteHeight}
@@ -9754,7 +10392,16 @@ export function Workspace({
         <RunningHeaderDialog styles={paragraphStyles} onApply={applyRunningHeader} onClose={() => setRunningHeaderDialog(false)} />
       )}
       {footnoteConverterOpen && (
-        <FootnoteConverterPanel styles={paragraphStyles} defaultStyleId={footnoteConfig.paragraphStyleId} onConvert={convertFootnotes} onClose={() => setFootnoteConverterOpen(false)} />
+        <FootnoteConverterPanel
+          styles={paragraphStyles}
+          defaultStyleId={footnoteConfig.paragraphStyleId}
+          footnotePlacement={footnoteConfig.placement}
+          focusTarget={footnoteConverterFocus}
+          focusRequestId={footnoteConverterFocusRequest}
+          onFootnotePlacementChange={setFootnotePlacement}
+          onConvert={convertFootnotes}
+          onClose={() => setFootnoteConverterOpen(false)}
+        />
       )}
       {tocDialogOpen && (
         <TocDialog styles={paragraphStyles} initial={doc.toc} onConfirm={createTableOfContents} onClose={() => setTocDialogOpen(false)} />

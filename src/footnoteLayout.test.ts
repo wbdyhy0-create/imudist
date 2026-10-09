@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_FOOTNOTE_CONFIG, DEFAULT_PARAGRAPH_STYLES, DEFAULT_TEXT_STYLE, defaultDocSettings, type TextFrame } from './document'
 import { parseDocument, serializeDocument } from './fileFormat'
-import { changedFootnoteOffset, footnoteBlockWidth, footnoteDividerHeight, layoutFootnotes, type FootnoteLayoutItem, updateFootnoteParagraphStyle } from './footnoteLayout'
+import { changedFootnoteOffset, footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, formatFootnoteNumber, layoutFootnotes, type FootnoteLayoutItem, updateFootnoteParagraphStyle } from './footnoteLayout'
 import { computeLayout } from './layout'
 import { columnBoxes, primaryTextFramePageGroups } from './placeText'
 import { pageRects } from './pages'
@@ -22,8 +22,8 @@ describe('footnote divider settings', () => {
     expect(footnoteDividerHeight({ ...DEFAULT_FOOTNOTE_CONFIG, dividerMode: 'heading', dividerHeadingStyleId: 'heading' }, paragraphStylesWithHeading)).toBe(30)
   })
 
-  it('preserves divider width, thickness, and alignment when saving and reopening a document', () => {
-    const divider = { ...DEFAULT_FOOTNOTE_CONFIG, placement: 'endnotes' as const, dividerWidth: 62, dividerThickness: 2.5, dividerAlignment: 'center' as const, dividerMode: 'heading' as const, dividerText: 'הערות חשובות', dividerHeadingLines: true, dividerHeadingDecoration: 'needle' as const, dividerHeadingStyleId: 'heading' }
+  it('preserves layout and inline-reference settings when saving and reopening a document', () => {
+    const divider = { ...DEFAULT_FOOTNOTE_CONFIG, placement: 'endnotes' as const, dividerWidth: 62, dividerThickness: 2.5, dividerAlignment: 'center' as const, dividerMode: 'heading' as const, dividerText: 'הערות חשובות', dividerHeadingLines: true, dividerHeadingDecoration: 'needle' as const, dividerHeadingStyleId: 'heading', referenceGap: 1.5, referenceVerticalOffset: -2.25 }
     const note = { id: 'note-1', anchor: 0, content: 'Styled note', runs: [{ len: 11, style: { ...DEFAULT_TEXT_STYLE, fontSize: 9, weight: 700 } }], style: { ...DEFAULT_TEXT_STYLE, fontSize: 9 }, paragraphStyleId: 'heading' }
     const frame = { ...DEFAULT_TEXT_STYLE, id: 'story', x: 0, y: 0, w: 100, h: 100, text: '\uE006', runs: [{ len: 1, style: DEFAULT_TEXT_STYLE }], next: null, footnotes: [note] }
     const content = {
@@ -34,7 +34,7 @@ describe('footnote divider settings', () => {
 
     const restored = parseDocument(serializeDocument(content), 'footnotes')
 
-    expect(restored.doc.footnotes).toMatchObject({ placement: 'endnotes', dividerWidth: 62, dividerThickness: 2.5, dividerAlignment: 'center', dividerMode: 'heading', dividerText: 'הערות חשובות', dividerHeadingLines: true, dividerHeadingDecoration: 'needle', dividerHeadingStyleId: 'heading' })
+    expect(restored.doc.footnotes).toMatchObject({ placement: 'endnotes', dividerWidth: 62, dividerThickness: 2.5, dividerAlignment: 'center', dividerMode: 'heading', dividerText: 'הערות חשובות', dividerHeadingLines: true, dividerHeadingDecoration: 'needle', dividerHeadingStyleId: 'heading', referenceGap: 1.5, referenceVerticalOffset: -2.25 })
     expect(restored.frames[0].footnotes?.[0]).toMatchObject({
       id: note.id,
       anchor: note.anchor,
@@ -43,6 +43,26 @@ describe('footnote divider settings', () => {
       style: { fontSize: 9 },
       runs: [{ len: 11, style: { fontSize: 9, weight: 700 } }],
     })
+  })
+})
+
+describe('footnote label punctuation', () => {
+  it('keeps prefixes and suffixes next to the number, before outer punctuation', () => {
+    expect(formatFootnoteNumber(1, 'arabic', 'dot', '[', ']')).toBe('[1].')
+    expect(footnoteLabelParts('[1].')).toEqual([
+      { text: '[', direction: 'rtl' },
+      { text: '1', direction: 'ltr' },
+      { text: ']', direction: 'rtl' },
+      { text: '.', direction: 'rtl' },
+    ])
+    const parts = footnoteLabelParts('(1.)')
+    expect(parts).toEqual([
+      { text: '(', direction: 'rtl' },
+      { text: '1', direction: 'ltr' },
+      { text: '.', direction: 'rtl' },
+      { text: ')', direction: 'rtl' },
+    ])
+    expect(parts.map((part) => part.text).join('')).toBe('(1.)')
   })
 })
 

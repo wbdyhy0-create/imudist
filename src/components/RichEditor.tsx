@@ -40,6 +40,8 @@ interface Props {
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
   footnoteReferenceScale?: number
+  footnoteReferenceGap?: number
+  footnoteReferenceVerticalOffset?: number
   /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
   baseAlign?: TextAlign
@@ -127,7 +129,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${p.footnoteReferenceGap}|${p.footnoteReferenceVerticalOffset}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? p.selectionHint ?? readSelectionIn(el) : null
     if (rebuilt) {
@@ -148,6 +150,8 @@ export function RichEditor(p: Props) {
             tocPageMarkers: p.tocPageMarkers,
             tocLeaderMarkers: p.tocLeaderMarkers,
             footnoteReferenceScale: p.footnoteReferenceScale,
+            footnoteReferenceGap: p.footnoteReferenceGap,
+            footnoteReferenceVerticalOffset: p.footnoteReferenceVerticalOffset,
           },
           p.paragraphPatches,
           p.baseAlign,
