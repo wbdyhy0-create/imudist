@@ -61,6 +61,7 @@ interface Props {
   onSelect: (a: number, b: number) => void
   onSelectAll?: () => void
   onSelectToStart?: (offset: number) => void
+  onSelectionStart?: () => void
   onBackspaceAtStart: () => void
   onBackspaceAtParagraphStart?: (offset: number) => boolean
   /** text for the clipboard instead of the selected part (e.g. a whole story), or null */
@@ -404,6 +405,7 @@ export function RichEditor(p: Props) {
           }
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Home' && live.current.onSelectToStart) {
+          live.current.onSelectionStart?.()
           e.preventDefault()
           e.stopPropagation()
           const selection = document.getSelection()
@@ -419,6 +421,9 @@ export function RichEditor(p: Props) {
           e.stopPropagation()
           live.current.onSelectAll()
           return
+        }
+        if (['ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp'].includes(e.key)) {
+          live.current.onSelectionStart?.()
         }
         if (e.key === 'Escape') {
           e.currentTarget.blur()

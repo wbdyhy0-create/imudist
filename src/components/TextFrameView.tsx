@@ -720,6 +720,7 @@ export function TextFrameView(p: Props) {
                       onEdit={(from, to, insert) => p.onFootnoteTextEdit?.(note.id, (note.offset ?? 0) + from, (note.offset ?? 0) + to, insert)}
                       onSelect={(from, to) => p.onFootnoteSelect?.(note.id, (note.offset ?? 0) + from, (note.offset ?? 0) + to)}
                       onSelectAll={() => p.onFootnoteSelectAll?.(note.id)}
+                      onSelectionStart={() => p.onFootnoteSelectionStart?.(note.id)}
                       onBackspaceAtStart={() => {}}
                       onCopyText={() => p.onFootnoteCopyText?.(note.id) ?? null}
                       onStop={() => p.onFootnoteStop?.()}

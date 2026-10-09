@@ -9864,7 +9864,7 @@ export function Workspace({
                     }}
                     onFootnoteSelect={(noteId, from, to) => setFootnoteSel((previous) => {
                       const wholeVisibleFragment = fl.footnotes?.some((placement) => placement.id === noteId && from === (placement.offset ?? 0) && to === (placement.offset ?? 0) + placement.content.length)
-                      if (previous?.allNotes && previous.headId === fl.headId && previous.noteId === noteId && wholeVisibleFragment) return previous
+                      if (previous?.allNotes && previous.headId === fl.headId && previous.noteId === noteId && (from === to || wholeVisibleFragment)) return previous
                       return previous?.headId === fl.headId && previous.noteId === noteId && previous.a === from && previous.b === to ? previous : { headId: fl.headId, noteId, a: from, b: to }
                     })}
                     onFootnoteSelectAll={(noteId) => selectAllFootnote(fl.headId, noteId)}

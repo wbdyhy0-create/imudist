@@ -1,6 +1,6 @@
 [package]
 name = "imudist"
-version = "0.0.17"
+version = "0.0.18"
 description = "Imudist desktop publishing application"
 authors = ["Imudist"]
 edition = "2021"
