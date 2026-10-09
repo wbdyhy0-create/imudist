@@ -187,8 +187,10 @@ export function RichEditor(p: Props) {
 
     const onSelectionChange = () => {
       const s = readSelectionIn(el)
-      if (s && s[0] === s[1]) normalizeCaretIn(el)
-      if (s) live.current.onSelect(s[0], s[1])
+      if (s && document.activeElement === el) {
+        if (s[0] === s[1]) normalizeCaretIn(el)
+        live.current.onSelect(s[0], s[1])
+      }
       markSelectedMarkers(el)
     }
 
