@@ -333,6 +333,8 @@ export default function App() {
           }
         }
         queuePlacedImages(read, problems)
+        // the desktop app lets the page see drags (masters, pages, swatches), so a dropped file has no path to link to
+        if (isTauri && read.length > 0 && problems.length === 0) session.notify('התמונות הוטמעו במסמך. כדי לקשר אותן לקובץ המקורי השתמשו ב„קובץ” > „הוספת קובץ…”.')
       } else if (files.length > 0) {
         if (files[0].name.toLowerCase().endsWith('.docx')) {
           setImportOptionsFile(files[0])

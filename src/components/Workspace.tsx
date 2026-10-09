@@ -8614,7 +8614,7 @@ export function Workspace({
             </button>
           </div>
           <button className="btn small" onClick={() => onPlacingChange(null)}>
-            בטל
+            סגור
           </button>
           <div className="place-hint">לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.</div>
         </div>
