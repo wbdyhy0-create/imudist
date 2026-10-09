@@ -619,6 +619,15 @@ export function Workspace({
   const flow = useMemo(() => footnoteNumbers.size
     ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
     : provisionalFlow, [frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, provisionalFlow, sharedFootnoteGroups])
+  // the text loaded by a semi-automatic placing is what the last frame of the thread could not hold: once the thread holds
+  // all of it (a page was threaded by hand, or a frame was made bigger) there is nothing left to place
+  useEffect(() => {
+    const from = placing?.continueFrom
+    if (!from || !frames.some((frame) => frame.id === from)) return
+    const thread = chainOf(frames, from)
+    const last = thread[thread.length - 1]
+    if (last && flow.get(last.id)?.overflow === false) onPlacingChange(null)
+  }, [placing, frames, flow, onPlacingChange])
   const endnotePages = useMemo(() => layoutEndnotes(doc, frames, footnoteConfig, footnoteNumbers, paragraphStyles), [doc, frames, footnoteConfig, footnoteNumbers, paragraphStyles])
   const viewDoc = useMemo(() => endnotePages.frames.length ? { ...doc, pages: doc.pages + endnotePages.frames.length } : doc, [doc, endnotePages.frames.length])
   const documentSpreads = useMemo(() => computeLayout(doc).spreads, [doc])
@@ -6167,7 +6176,18 @@ export function Workspace({
       return // scrollbars
     }
     if (linkFrom && !panMode) {
-      setLinkFrom(null) // clicked away from any frame
+      if (e.button !== 0) {
+        setLinkFrom(null)
+        return
+      }
+      // the red + was clicked and now an empty place on a page: the text goes on in a new frame there — the column under
+      // the click, or the rectangle that is dragged out (finishDraft)
+      const p = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey).p
+      createStart.current = p
+      setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+      setSelectedPage(ownerPage(rects, p.x, p.y))
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
       return
     }
     if (marqueeTool && e.button === 0) {
@@ -6703,8 +6723,29 @@ export function Workspace({
     setSelectedId(shape.id)
     setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
   }
+  /** the thread that was armed with the red + goes on in a new frame in `box`; one undo step */
+  const continueThreadIn = (box: Box) => {
+    const from = linkFrom ? frames.find((f) => f.id === linkFrom) : undefined
+    if (!from || from.next) return
+    const head = chainOf(frames, from.id)[0]
+    const frame: TextFrame = { ...styleOf(head), id: newFrameId(), layerId: head.layerId ?? creationLayerId, ...box, text: '', runs: [], next: null, z: nextZ(frames, images, shapes) }
+    const linked = linkFrames([...frames, frame], from.id, frame.id)
+    if (!linked) return
+    onFramesChange(linked)
+    setSelectedId(frame.id)
+    setEditingId(null)
+  }
   const finishDraft = () => {
-    if (draft && createStart.current && placingImages.length > 0) {
+    if (draft && createStart.current && linkFrom) {
+      const w = Math.abs(draft.x1 - draft.x0)
+      const h = Math.abs(draft.y1 - draft.y0)
+      continueThreadIn(
+        w >= MIN_FRAME_PT && h >= MIN_FRAME_PT
+          ? { x: Math.min(draft.x0, draft.x1), y: Math.min(draft.y0, draft.y1), w, h }
+          : boxAtClick(doc, draft.x0, draft.y0),
+      )
+      setLinkFrom(null)
+    } else if (draft && createStart.current && placingImages.length > 0) {
       const w = Math.abs(draft.x1 - draft.x0)
       const h = Math.abs(draft.y1 - draft.y0)
       // a dragged rectangle sets the size; a plain click places the picture at its natural size

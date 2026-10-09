@@ -267,8 +267,11 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
   const box: Box = existing ? { x: existing.x, y: existing.y, w: existing.w, h: existing.h } : target.box
   const id = existing?.id ?? newId()
   const others = frames.filter((f) => f.id !== existing?.id)
-  // the frame the new one continues from (it may have been deleted since the last click)
-  const tail = placed.continueFrom ? others.find((f) => f.id === placed.continueFrom && !f.next) : undefined
+  // the frame the new one continues from: the end of the thread of the last frame that was filled (frames or pages may have
+  // been added to it by hand since the last click; it may also have been deleted, then the rest starts a new story)
+  const from = placed.continueFrom ? others.find((f) => f.id === placed.continueFrom) : undefined
+  const thread = from ? chainOf(others, from.id) : []
+  const tail = thread[thread.length - 1]
   const z = nextZ(frames, images, shapes)
 
   let next: TextFrame[]
@@ -281,7 +284,7 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
   } else {
     const runs = normalizeRuns(placed.text, placed.runs, placed.style)
     const footnotes = placed.footnotes?.map((note) => ({ ...note, id: newId() }))
-    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, paragraphStyleIds: placed.paragraphStyleIds, paragraphStyleNames: placed.paragraphStyleNames, ...(footnotes?.length ? { footnotes } : {}), next: null, z }]
+    next = [...others, { ...placed.style, id, x: box.x, y: box.y, w: box.w, h: box.h, text: placed.text, runs, paragraphStyleIds: placed.paragraphStyleIds, paragraphStyleNames: placed.paragraphStyleNames, paragraphStylePatches: placed.paragraphStylePatches, tocPageReferences: placed.tocPageReferences, tocFootnoteReferences: placed.tocFootnoteReferences, ...(footnotes?.length ? { footnotes } : {}), next: null, z }]
     headId = id
   }
 
@@ -289,7 +292,7 @@ function pourSemi(doc: DocSettings, frames: TextFrame[], images: ImageFrame[], s
   const headFrame = next.find((f) => f.id === headId)!
   const storyRuns = normalizeRuns(headFrame.text, headFrame.runs, headFrame)
   const remaining: PlacedText | null = last.overflow
-    ? { ...placed, text: last.story.slice(last.end), runs: sliceRuns(storyRuns, last.end, last.story.length), paragraphStyleIds: placed.paragraphStyleIds?.slice(paragraphIndexAt(last.story, last.end)), paragraphStyleNames: placed.paragraphStyleNames?.slice(paragraphIndexAt(last.story, last.end)), continueFrom: id }
+    ? { ...placed, text: last.story.slice(last.end), runs: sliceRuns(storyRuns, last.end, last.story.length), paragraphStyleIds: placed.paragraphStyleIds?.slice(paragraphIndexAt(last.story, last.end)), paragraphStyleNames: placed.paragraphStyleNames?.slice(paragraphIndexAt(last.story, last.end)), paragraphStylePatches: placed.paragraphStylePatches?.slice(paragraphIndexAt(last.story, last.end)), continueFrom: id }
     : null
   return { content: { doc, frames: next }, headId, remaining, overflow: false, pagesAdded: 0 }
 }
