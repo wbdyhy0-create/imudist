@@ -64,12 +64,12 @@ describe('notes in brackets to footnotes', () => {
 })
 
 describe('footnotes to notes in brackets', () => {
-  it('puts each footnote in brackets where its reference was, after a space', () => {
+  it('puts each footnote in brackets exactly where its reference was', () => {
     const text = `ראה${M} ועוד${M} סוף`
     const notes: FootnoteItem[] = [{ id: 'a', anchor: 3, content: '  מקור א\n' }, { id: 'b', anchor: 9, content: 'שורה אחת\nושנייה' }]
     const { frame: out, count } = footnotesToInlineNotes(frame(text, notes), ROUND)
     expect(count).toBe(2)
-    expect(out.text).toBe('ראה (מקור א) ועוד (שורה אחת ושנייה) סוף')
+    expect(out.text).toBe('ראה(מקור א) ועוד(שורה אחת ושנייה) סוף')
     expect(out.footnotes ?? []).toEqual([])
   })
 
@@ -78,9 +78,27 @@ describe('footnotes to notes in brackets', () => {
     const notes: FootnoteItem[] = [{ id: 'a', anchor: 1, content: 'ראשונה' }, { id: 'b', anchor: 4, content: 'שנייה' }]
     const { frame: out, count } = footnotesToInlineNotes(frame(text, notes), BOTH, { range: { from: 3, to: 6 } })
     expect(count).toBe(1)
-    expect(out.text).toBe(`א${M} ב ([שנייה]) ג`)
+    expect(out.text).toBe(`א${M} ב([שנייה]) ג`)
     expect(out.footnotes?.map((note) => note.id)).toEqual(['a'])
     expect(out.text[out.footnotes![0].anchor]).toBe(M)
+  })
+
+  it('preserves the reference-to-word spacing after a full conversion round trip', () => {
+    const text = `צמוד${M} מרווח ${M}`
+    const notes: FootnoteItem[] = [
+      { id: 'a', anchor: 4, content: 'הערה צמודה' },
+      { id: 'b', anchor: 12, content: 'הערה עם רווח' },
+    ]
+    const original = frame(text, notes)
+    const inline = footnotesToInlineNotes(original, ROUND)
+    const restored = inlineNotesToFootnotes(inline.frame, ROUND, { newId })
+
+    expect(inline.frame.text).toBe('צמוד(הערה צמודה) מרווח (הערה עם רווח)')
+    expect(restored.frame.text).toBe(text)
+    expect(restored.frame.footnotes?.map(({ anchor, content }) => ({ anchor, content }))).toEqual([
+      { anchor: 4, content: 'הערה צמודה' },
+      { anchor: 12, content: 'הערה עם רווח' },
+    ])
   })
 
   it('does nothing to a story with no footnotes', () => {
@@ -104,7 +122,7 @@ describe('a story with thousands of notes', () => {
     expect(forward.frame.paragraphStyleIds).toHaveLength(1500)
     expect(back.count).toBe(3000)
     expect(back.frame.footnotes).toBeUndefined()
-    expect(back.frame.text.split(String.fromCharCode(10))[7]).toBe('פסקה 7 עם טקסט ארוך למדי  (הערה 7) ועוד קצת טקסט, ועוד  (הערה נוספת 7) לסיום.')
+    expect(back.frame.text.split(String.fromCharCode(10))[7]).toBe('פסקה 7 עם טקסט ארוך למדי (הערה 7) ועוד קצת טקסט, ועוד (הערה נוספת 7) לסיום.')
   })
 })
 

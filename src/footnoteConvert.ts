@@ -159,7 +159,7 @@ export function inlineNotesToFootnotes(
 const inlineText = (content: string) => content.replace(/^[\s ]+|[\s ]+$/g, '').replace(/\s*\n+\s*/g, ' ')
 
 /**
- * The story of `frame` with every footnote turned into a note in brackets: its reference is replaced by a space and the footnote's
+ * The story of `frame` with every footnote turned into a note in brackets: its reference is replaced by the bracketed text and the footnote's
  * text in the brackets, and the footnote is gone. (The text is plain, as in InDesign: it takes the look of the text around it.)
  */
 export function footnotesToInlineNotes(
@@ -173,7 +173,7 @@ export function footnotesToInlineNotes(
     if (frame.text[note.anchor] !== FOOTNOTE_MARKER) continue
     if (options.range && (note.anchor < options.range.from || note.anchor + 1 > options.range.to)) continue
     if (options.onlyStyleId && (note.paragraphStyleId ?? options.defaultStyleId) !== options.onlyStyleId) continue
-    edits.push({ start: note.anchor, end: note.anchor + 1, replacement: ` ${bracket.open}${inlineText(note.content)}${bracket.close}` })
+    edits.push({ start: note.anchor, end: note.anchor + 1, replacement: `${bracket.open}${inlineText(note.content)}${bracket.close}` })
   }
   if (edits.length === 0) return { frame, count: 0 }
   edits.sort((a, b) => a.start - b.start)
