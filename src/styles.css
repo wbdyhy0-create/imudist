@@ -732,6 +732,14 @@ svg { display: block; }
 .footnote-divider-heading-line.decor-needle { border: 0; background: currentColor; }
 .footnote-divider-heading-line.decor-needle.side-right { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 0 100%); }
 .footnote-divider-heading-line.decor-needle.side-left { clip-path: polygon(100% 0, 8px 0, 0 50%, 8px 100%, 100% 100%); }
+.pdf-export-root .footnote-divider-heading-line::before, .pdf-export-root .footnote-divider-heading-line::after { display: none; content: none; }
+.pdf-footnote-divider-decoration { position: absolute; z-index: 1; top: 50%; pointer-events: none; }
+.pdf-footnote-divider-decoration.curl { background: #fff; color: currentColor; font-family: Georgia, 'Times New Roman', serif; font-size: 12px; line-height: 1; }
+.pdf-footnote-divider-decoration.curl.right { right: -1px; transform: translateY(-50%); }
+.pdf-footnote-divider-decoration.curl.left { left: -1px; transform: translateY(-50%) scaleX(-1); }
+.pdf-footnote-divider-decoration.diamond { width: 4px; height: 4px; background: currentColor; transform: translateY(-50%) rotate(45deg); }
+.pdf-footnote-divider-decoration.diamond.right { right: 0; }
+.pdf-footnote-divider-decoration.diamond.left { left: 0; }
 .footnote-divider-heading-text { flex: 0 1 auto; min-width: 0; max-width: 85%; overflow: hidden; text-overflow: ellipsis; text-align: center; }
 .footnote-dialog-checkbox { display: flex; align-items: center; gap: 7px; margin: 6px 0; cursor: pointer; }
 .footnote-dialog-checkbox input { width: 15px; height: 15px; margin: 0; }

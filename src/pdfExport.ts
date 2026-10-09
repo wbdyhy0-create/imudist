@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
@@ -21,6 +21,7 @@ import { countPicture, extractGlyphs, type FrameGeometry, type PictureReason, ty
 import { registerFont } from './fontFiles'
 import { shapeToVector, writeShapes, type VectorShape } from './vectorShapes'
 import { stackOrder } from './stacking'
+import { substituteMarker } from './numbering'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -76,6 +77,13 @@ function clearCanvasShadow(ctx: CanvasRenderingContext2D) {
   ctx.shadowOffsetX = 0
   ctx.shadowOffsetY = 0
   ctx.shadowBlur = 0
+}
+
+export function resolvePdfRunningHeader(frame: TextFrame, page: number, headerAtPage: ReturnType<typeof runningHeaderLookup>): TextFrame {
+  if (!frame.runningHeaderStyleId || !frame.text.includes(RUNNING_HEADER_MARKER)) return frame
+  const label = headerAtPage(page, frame.runningHeaderStyleId, frame.runningHeaderStrategy ?? 'last')
+  const replacement = substituteMarker(frame.text, normalizeRuns(frame.text, frame.runs, frame), RUNNING_HEADER_MARKER, label)
+  return { ...frame, ...replacement }
 }
 
 function applyPaddedFeatherMask(canvas: HTMLCanvasElement, feather: Feather, x: number, y: number, width: number, height: number, scale: number) {
@@ -167,6 +175,7 @@ async function drawTextDom(
   }
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
   const root = document.createElement('div')
+  root.className = 'pdf-export-root'
   Object.assign(root.style, {
     position: 'fixed',
     left: '-100000px',
@@ -321,16 +330,27 @@ async function drawTextDom(
             letterSpacing: headingStyle.tracking ? `${(headingStyle.tracking / 1000) * headingStyle.fontSize}px` : undefined,
           })
           const appendRule = (side: 'right' | 'left') => {
-            if (footnoteConfig.dividerHeadingDecoration === 'needle') {
-              const segment = document.createElement('span')
-              segment.className = `footnote-divider-heading-line side-${side} decor-needle`
-              Object.assign(segment.style, { border: '0', height: `${Math.max(1, footnoteConfig.dividerThickness)}px` })
-              heading.appendChild(segment)
-              return
-            }
             const segment = document.createElement('span')
             segment.className = `footnote-divider-heading-line side-${side} decor-${footnoteConfig.dividerHeadingDecoration}`
-            segment.style.borderTopWidth = `${footnoteConfig.dividerThickness}px`
+            if (footnoteConfig.dividerHeadingDecoration === 'needle') {
+              Object.assign(segment.style, { border: '0', height: `${Math.max(1, footnoteConfig.dividerThickness)}px` })
+            } else {
+              segment.style.borderTopWidth = `${footnoteConfig.dividerThickness}px`
+            }
+            const addDecoration = (edge: 'left' | 'right', kind: 'curl' | 'diamond') => {
+              const decoration = document.createElement('span')
+              decoration.className = `pdf-footnote-divider-decoration ${kind} ${edge}`
+              if (kind === 'curl') decoration.textContent = '❧'
+              segment.appendChild(decoration)
+            }
+            if (footnoteConfig.dividerHeadingDecoration === 'curl') {
+              addDecoration(side === 'right' ? 'right' : 'left', 'curl')
+            } else if (footnoteConfig.dividerHeadingDecoration === 'outer') {
+              addDecoration(side === 'right' ? 'right' : 'left', 'diamond')
+            } else if (footnoteConfig.dividerHeadingDecoration === 'both') {
+              addDecoration('left', 'diamond')
+              addDecoration('right', 'diamond')
+            }
             heading.appendChild(segment)
           }
           if (footnoteConfig.dividerHeadingLines) appendRule('right')
@@ -767,12 +787,19 @@ export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'crop
 export function prepareExport(content: ExportContent): PreparedExport {
   const documentRects = pageRects(content.doc)
   const footnoteConfig = content.doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
-  const primaryFrameIds = primaryTextFrameOrder(content.doc, content.frames)
-  const sharedFootnoteGroups = primaryTextFramePageGroups(content.doc, content.frames)
+  let source = content
+  if (content.frames.some((frame) => frame.runningHeaderStyleId && frame.text.includes(RUNNING_HEADER_MARKER))) {
+    const headerFlows = flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
+    const headerAtPage = runningHeaderLookup(content.doc, content.frames, headerFlows)
+    const frames = content.frames.map((frame) => resolvePdfRunningHeader(frame, ownerPage(documentRects, frame.x + frame.w / 2, frame.y + frame.h / 2), headerAtPage))
+    if (frames.some((frame, index) => frame !== content.frames[index])) source = { ...content, frames }
+  }
+  const primaryFrameIds = primaryTextFrameOrder(source.doc, source.frames)
+  const sharedFootnoteGroups = primaryTextFramePageGroups(source.doc, source.frames)
   const provisionalFlows = sharedFootnoteGroups.length
-    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, new Map(), primaryFrameIds, content.paragraphStyles, undefined, sharedFootnoteGroups)
-    : flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
-  const frameById = new Map(content.frames.map((frame) => [frame.id, frame]))
+    ? flowFramesWithFootnoteContinuation(source.frames, source.images, footnoteConfig, new Map(), primaryFrameIds, source.paragraphStyles, undefined, sharedFootnoteGroups)
+    : flowFrames(source.frames, source.images, footnoteConfig, undefined, new Map(), source.paragraphStyles)
+  const frameById = new Map(source.frames.map((frame) => [frame.id, frame]))
   const numbering = numberFootnotes([...provisionalFlows].flatMap(([frameId, flow]) => {
     const frame = frameById.get(frameId)
     if (!frame) return []
@@ -782,12 +809,12 @@ export function prepareExport(content: ExportContent): PreparedExport {
     return flow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
   }), footnoteConfig, content.doc.binding)
   const bodyFlows = numbering.size
-    ? flowFramesWithFootnoteContinuation(content.frames, content.images, footnoteConfig, numbering, primaryFrameIds, content.paragraphStyles, undefined, sharedFootnoteGroups)
+    ? flowFramesWithFootnoteContinuation(source.frames, source.images, footnoteConfig, numbering, primaryFrameIds, source.paragraphStyles, undefined, sharedFootnoteGroups)
     : provisionalFlows
-  const endnotePages = layoutEndnotes(content.doc, content.frames, footnoteConfig, numbering, content.paragraphStyles)
+  const endnotePages = layoutEndnotes(source.doc, source.frames, footnoteConfig, numbering, source.paragraphStyles)
   const renderContent = endnotePages.frames.length
-    ? { ...content, doc: endnotePages.doc, frames: [...content.frames, ...endnotePages.frames] }
-    : content
+    ? { ...source, doc: endnotePages.doc, frames: [...source.frames, ...endnotePages.frames] }
+    : source
   return { content: renderContent, flows: new Map([...bodyFlows, ...endnotePages.flows]), rects: pageRects(renderContent.doc) }
 }
 
