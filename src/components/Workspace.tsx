@@ -776,6 +776,7 @@ export function Workspace({
   const parentShadowZ = doc.parentItemsAbovePageContent || shiftPressed ? rank.size + 1 : 0
   const [panning, setPanning] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
+  const zoomAltPan = useRef<{ x: number; y: number; sx: number; sy: number; moved: boolean } | null>(null)
   /** the selected text frame or picture (guides have their own, multiple, selection) */
   const [selectedId, setSelectedIdRaw] = useState<string | null>(() =>
     initiallySelectPrimaryFrame ? primaryFrameIds[0] ?? null : null,
@@ -1136,9 +1137,11 @@ export function Workspace({
   // ── geometry: world (pt) → screen (px) inside the scrollable sheet ──────────────
   const cw = bounds.maxX - bounds.minX
   const ch = bounds.maxY - bounds.minY
-  const originX = Math.max(PAD, (vp.w - cw * zoom) / 2)
+  const contentW = cw * zoom
+  const panSpace = Math.max(PAD, vp.w, contentW)
+  const sheetW = Math.ceil(contentW + panSpace * 2)
+  const originX = panSpace
   const originY = Math.max(PAD, (vp.h - ch * zoom) / 2)
-  const sheetW = Math.ceil(originX * 2 + cw * zoom)
   const sheetH = Math.ceil(originY * 2 + ch * zoom)
   const tx = originX - bounds.minX * zoom // screen x of world x = 0
   const ty = originY - bounds.minY * zoom
@@ -4123,18 +4126,18 @@ export function Workspace({
     [],
   )
 
-  // Ctrl/meta+wheel pans horizontally; Alt alone zooms towards the pointer.
+  // Ctrl/meta+wheel zooms towards the pointer; Alt+wheel pans horizontally.
   useEffect(() => {
     const el = vpRef.current!
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
+      if (e.altKey) {
         e.preventDefault()
         const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
         const multiplier = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1
         setScrollX(el, getScrollX(el) + delta * multiplier)
         return
       }
-      if (e.altKey) {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
         const rect = el.getBoundingClientRect()
         const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025))
@@ -6808,6 +6811,21 @@ export function Workspace({
     }
   }
   const onPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (tool === 'zoom' && e.altKey && e.button === 0) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      zoomAltPan.current = {
+        x: e.clientX,
+        y: e.clientY,
+        sx: e.clientX - rect.left - live.current.sb,
+        sy: e.clientY - rect.top,
+        moved: false,
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      setPanning(true)
+      return
+    }
     if (tool === 'magneticLasso' && !panMode && e.button === 0) {
       if (magneticSelectionRef.current && magneticAdjustMode) {
         if (!beginMagneticBrush(e)) {
@@ -6868,6 +6886,18 @@ export function Workspace({
     void updateColorSampler(e.clientX, e.clientY).then((color) => { if (color) addColorSample(color) })
   }
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const altPan = zoomAltPan.current
+    if (altPan) {
+      if (!altPan.moved && Math.hypot(e.clientX - altPan.x, e.clientY - altPan.y) < 3) return
+      altPan.moved = true
+      const viewport = e.currentTarget
+      setScrollX(viewport, getScrollX(viewport) - (e.clientX - altPan.x))
+      viewport.scrollTop -= e.clientY - altPan.y
+      setScroll({ x: getScrollX(viewport), y: viewport.scrollTop })
+      altPan.x = e.clientX
+      altPan.y = e.clientY
+      return
+    }
     if (magneticBrushGestureRef.current) {
       moveMagneticBrush(e.clientX, e.clientY)
       return
@@ -7317,6 +7347,12 @@ export function Workspace({
     setDraft(null)
   }
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const altPan = zoomAltPan.current
+    if (altPan) {
+      zoomAltPan.current = null
+      setPanning(false)
+      if (!altPan.moved) zoomAt(stepZoom(zoom, -1), altPan.sx, altPan.sy)
+    }
     if (endMagneticBrush()) return
     if (endMagneticTrace(event.clientX, event.clientY)) return
     const activeGap = gapDrag.current
@@ -7412,6 +7448,7 @@ export function Workspace({
     setPanning(false)
   }
   const cancelDrag = () => {
+    zoomAltPan.current = null
     if (magneticBrushGestureRef.current) {
       magneticBrushGestureRef.current = null
       setMagneticBrushCursor(null)
