@@ -22,6 +22,7 @@ import {
   validateDoc,
   type Asset,
   type AssetLink,
+  type BlendMode,
   type Assets,
   type ColorSample,
   type CharacterStyleRecord,
@@ -539,6 +540,7 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       ...itemLabelOf(raw),
       ...(raw.rasterized === true ? { rasterized: true } : {}),
       ...opacityOf(raw),
+      ...blendModeOf(raw),
       ...(isObj(raw.textScale) && typeof raw.textScale.x === 'number' && typeof raw.textScale.y === 'number' ? { textScale: { x: raw.textScale.x, y: raw.textScale.y } } : {}),
       ...(typeof raw.runningHeaderStyleId === 'string' && raw.runningHeaderStyleId ? { runningHeaderStyleId: raw.runningHeaderStyleId } : {}),
       ...(raw.runningHeaderStrategy === 'first' || raw.runningHeaderStrategy === 'last' ? { runningHeaderStrategy: raw.runningHeaderStrategy } : {}),
@@ -644,6 +646,8 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       ...zOf(raw),
       ...rotationOf(raw),
       ...opacityOf(raw),
+      ...blendModeOf(raw),
+      ...(typeof raw.whitePoint === 'number' && Number.isFinite(raw.whitePoint) && raw.whitePoint >= 128 && raw.whitePoint < 255 ? { whitePoint: Math.round(raw.whitePoint) } : {}),
       ...shadowOf(raw),
       ...parseFeather(raw.feather),
       ...(raw.flipX === true ? { flipX: true as const } : {}),
@@ -668,6 +672,10 @@ function parseColorSamples(value: unknown): ColorSample[] {
     return [{ id, color: raw.color.toUpperCase(), label: typeof raw.label === 'string' ? raw.label.slice(0, 120) : raw.color.toUpperCase() }]
   })
 }
+/** how an object is mixed with what is under it: only the modes this version knows are kept */
+const blendModeOf = (raw: Record<string, unknown>): { blendMode?: BlendMode } =>
+  raw.blendMode === 'multiply' || raw.blendMode === 'screen' ? { blendMode: raw.blendMode } : {}
+
 /** object opacity, 0…1: only written when the object is not fully opaque */
 const opacityOf = (raw: Record<string, unknown>): { opacity?: number } =>
   typeof raw.opacity === 'number' && Number.isFinite(raw.opacity) && raw.opacity < 1 ? { opacity: num(raw.opacity, 1, 0, 1) } : {}
@@ -858,6 +866,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...zOf(raw),
       ...(kind === 'table' ? {} : rotationOf(raw)),
       ...opacityOf(raw),
+      ...blendModeOf(raw),
       ...shadowOf(raw),
       ...parseFeather(raw.feather),
     })

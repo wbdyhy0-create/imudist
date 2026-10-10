@@ -4,6 +4,7 @@ import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
 import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { ExportPdfDialog } from './components/ExportPdfDialog'
+import { SeparationPreviewDialog } from './components/SeparationPreviewDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
@@ -128,7 +129,9 @@ export default function App() {
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
   const [newPresetUnit, setNewPresetUnit] = useState<Unit | null>(null)
   /** the left-hand dialog: creating a document, or changing the open document's settings */
-  const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | null>(null)
+  const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | 'separations' | null>(null)
+  /** the page the separation preview opens on (the one that is shown when it is asked for) */
+  const [separationPage, setSeparationPage] = useState(0)
   const dialogOpen = dialog !== null
   const [preview, setPreview] = useState<DocSettings | null>(null)
   /** the parent (master) page open for editing instead of the document itself, if any */
@@ -246,7 +249,7 @@ export default function App() {
   // made while the export dialog is open (and nothing else is edited), not on every change: laying the text out to find
   // the running headers of each page is not cheap
   const exportContent = useMemo(() => {
-    if (dialog !== 'export' || !doc) return null
+    if ((dialog !== 'export' && dialog !== 'separations') || !doc) return null
     return exportContentOf(exportSourceOf(session))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialog, doc, session.frames, session.images, session.shapes, session.layerOrder, session.layers, session.assets, session.paragraphStyles, session.sections, session.parents, session.pageParents, session.parentOverrides])
@@ -539,6 +542,10 @@ export default function App() {
         toggleGuides: () => setShowGuides((v) => !v),
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
         exportPdf: () => setDialog('export'),
+        separationPreview: () => {
+          setSeparationPage(ws.current?.currentPageIndex() ?? 0)
+          setDialog('separations')
+        },
         exportPng: () => void exportCurrentPagePng(),
         newBook: () => void bookRef.current.create(),
         openBook: () => void bookRef.current.open(),
@@ -874,6 +881,9 @@ export default function App() {
             onClose={closeDialog}
             onPreview={setPreview}
           />
+        )}
+        {dialog === 'separations' && doc && exportContent && (
+          <SeparationPreviewDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} layerOrder={session.layerOrder} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} initialPage={separationPage} onClose={closeDialog} />
         )}
         {dialog === 'export' && doc && exportContent && (
           <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} layerOrder={session.layerOrder} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} onClose={closeDialog} />

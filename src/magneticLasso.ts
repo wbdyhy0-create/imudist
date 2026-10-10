@@ -94,6 +94,7 @@ export function adjustMagneticPath(
   // the points the circle touches, and of those the ones that have an edge to be on (found now, or held where they are)
   const touched: boolean[] = new Array(count).fill(false)
   const settled: (MagneticPoint | null)[] = new Array(count).fill(null)
+  const thornOnly: boolean[] = new Array(count).fill(false)
   let changed = false
   for (let index = 0; index < count; index += 1) {
     const point = points[index]!
@@ -116,16 +117,29 @@ export function adjustMagneticPath(
     const normalY = (-tangentX / tangentLength) * direction
     // the circle is on the side the line is to be pushed from
     if (fromX * normalX + fromY * normalY <= 0) continue
+    // a thorn (or a notch) in the line is taken into the line when there is no edge for it to go to, or it holds on one
+    const flatten = () => {
+      const flattened = thornFlattened(points, index, normalX, normalY, radius)
+      if (!flattened) return false
+      // (it is not settled: the next time the circle goes over it, it may still be sent to an edge)
+      pushed[index] = flattened
+      thornOnly[index] = true
+      changed = true
+      return true
+    }
     // how far into the circle the point is: a line that is on an edge (of the shape: a spot or grain on it does not count) lets go only when
     // the circle is pushed well in
     const onEdge = Math.max(broadEdgenessNear(edgeMap, point.x, point.y), broadEdgenessNear(edgeMap, point.x + normalX, point.y + normalY), broadEdgenessNear(edgeMap, point.x - normalX, point.y - normalY)) >= PUSH_EDGE_HOLD
     if (onEdge && radius - distance <= holdAt) {
-      settled[index] = point
+      if (!flatten()) settled[index] = point
       continue
     }
 
     const found = edgeAlong(edgeMap, point, normalX, normalY, reach, onEdge ? 4 : 2, mode === 'expand')
-    if (found < 0) continue
+    if (found < 0) {
+      flatten()
+      continue
+    }
     const moved = {
       x: Math.max(1, Math.min(edgeMap.width - 2, Math.round(point.x + normalX * found * 0.5))),
       y: Math.max(1, Math.min(edgeMap.height - 2, Math.round(point.y + normalY * found * 0.5))),
@@ -189,6 +203,7 @@ export function adjustMagneticPath(
   if (settledBefore) {
     for (let index = 0; index < count; index += 1) {
       const place = pushed[index]
+      if (thornOnly[index]) continue
       if (place) settledBefore.add(place.y * edgeMap.width + place.x)
       else if (settled[index]) settledBefore.add(settled[index]!.y * edgeMap.width + settled[index]!.x)
     }
@@ -392,6 +407,60 @@ function simplifiedLine(line: MagneticPoint[], tolerance: number): MagneticPoint
   }
   return line.filter((_, at) => keep[at] === 1)
 }
+
+/**
+ * Where a point goes if it is part of a thorn of the line (a narrow spike out of it, or a notch into it): onto the straight line between the
+ * places a little way before and after it, where the line goes the same way on both sides. A corner, or a bend, is not a thorn: the line
+ * goes another way after it. Null when the point is not in a thorn, or when taking it to the line would not be in the direction (nx, ny)
+ * the brush pushes in.
+ */
+export function thornFlattened(points: MagneticPoint[], index: number, nx: number, ny: number, radius: number): MagneticPoint | null {
+  const count = points.length
+  const point = points[index]!
+  // a thorn of any width up to some twenty pixels: the line is looked at from farther and farther away until it is seen on both sides of it
+  for (const near of THORN_REACHES) {
+    const far = near * 2
+    if (count < far * 2 + 4) return null
+    const at = (offset: number) => points[(index + offset + count * 3) % count]!
+    const before = at(-near)
+    const after = at(near)
+    const comingX = before.x - at(-far).x
+    const comingY = before.y - at(-far).y
+    const goingX = at(far).x - after.x
+    const goingY = at(far).y - after.y
+    const coming = Math.hypot(comingX, comingY)
+    const going = Math.hypot(goingX, goingY)
+    if (coming < 2 || going < 2) continue
+    // the line goes the same way into the thorn's place as out of it, and comes back to where it was (a step is not a thorn, and nor is a corner)
+    if ((comingX * goingX + comingY * goingY) / (coming * going) < 0.9) continue
+    const chordX = after.x - before.x
+    const chordY = after.y - before.y
+    const chord = Math.hypot(chordX, chordY)
+    if (chord < 2) continue
+    if (Math.abs(chordX * (comingY / coming) - chordY * (comingX / coming)) > 2) continue
+    // the foot of the point on the straight line between the two
+    const along = ((point.x - before.x) * chordX + (point.y - before.y) * chordY) / (chord * chord)
+    const footX = before.x + chordX * along
+    const footY = before.y + chordY * along
+    const moveX = footX - point.x
+    const moveY = footY - point.y
+    const moved = Math.hypot(moveX, moveY)
+    if (moved < THORN_MIN || moved > Math.min(radius, THORN_MAX)) continue
+    if ((moveX * nx + moveY * ny) / moved < 0.5) continue
+    // a thorn is contained in what is looked at: just inside the places the line is seen from, it is already back on the straight line. A
+    // corner, or a bend, is not: there the line is still going away from it
+    const awayFromLine = (other: MagneticPoint) => Math.abs((other.x - before.x) * chordY - (other.y - before.y) * chordX) / chord
+    if (awayFromLine(at(-near + 1)) > 0.8 || awayFromLine(at(near - 1)) > 0.8) continue
+    return { x: Math.round(footX), y: Math.round(footY) }
+  }
+  return null
+}
+
+/** how many points before and after a point are looked at to see whether it is in a thorn (the thorn must be narrower than twice this) */
+const THORN_REACHES = [6, 9, 13, 18]
+/** a point must be this far (pixels) from the straight line to be taken for a thorn, and no farther than the other number: a longer way is a step, or a bend, not a thorn */
+const THORN_MIN = 2
+const THORN_MAX = 7
 
 /** 0 to 1: the edge at the nearest pixel of a position (0 outside the picture) */
 function edgenessNear(map: MagneticEdgeMap, x: number, y: number) {

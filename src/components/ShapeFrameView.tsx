@@ -4,7 +4,7 @@ import { linearGradientLine } from '../colorModels'
 import { featherMaskStyles } from '../feather'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
-import { CORNERS, editableRing, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
+import { CORNERS, editablePoints, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
 import { normalizeRuns } from '../story'
 import { dropShadowFilter } from '../shadow'
 import type { CellRange, TableData, TableLayout } from '../table'
@@ -127,11 +127,14 @@ export function ShapeFrameView({
   const h = shape.h * zoom
   const maskFeather = featherOverride ?? shape.feather
   const radii = shape.kind === 'rect' ? fitRadii(shape.radii, shape.w, shape.h) : null
-  /** the shape's own corner points, while the point-editing tool has it selected */
-  const ring = directMode ? editableRing(shape) : null
-  const showHandles = selected && showEdge && !ghost && !ring
+  /** the shape's own points (every ring of it), while the point-editing tool has it selected */
+  const points = directMode ? editablePoints(shape) : null
+  const showHandles = selected && showEdge && !ghost && !points
   const showCorners = showHandles && radii !== null
-  const showPoints = !!ring && selected && showEdge
+  const showPoints = !!points && selected && showEdge
+  // the edge between two points is a place to grab, one for each: for an outline of thousands of points (a headline turned into
+  // outlines) they are left out, the points themselves stay
+  const showEdges = !!points && points.length <= MANY_POINTS
   const img = shape.image && asset ? { box: imageGeometry(shape, asset), asset } : null
   const showContent = !!img && directMode && selected && showEdge && !ghost
   const clipId = `clip-${shape.id}`
@@ -175,6 +178,7 @@ export function ShapeFrameView({
         height: h,
         zIndex: z,
         opacity: shape.opacity ?? 1,
+        mixBlendMode: shape.blendMode,
         overflow: isLine || tableShape ? 'visible' : undefined,
         transform: shape.rotation ? `rotate(${shape.rotation}deg)` : undefined,
       }}
@@ -379,7 +383,7 @@ export function ShapeFrameView({
         <>
           <div className="direct-move-handle" title="גרור כדי להזיז את האובייקט" style={{ left: w / 2, top: h / 2 }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDirectMove?.(e) }} />
           <svg className="curve-handle-lines" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-            {ring!.map((v, i) => {
+            {points!.map(({ vertex: v, index: i }) => {
               if (!selectedPoints?.includes(i)) return null
               const p = vertexPoint(v)
               const hi = vertexHi(v)
@@ -393,11 +397,11 @@ export function ShapeFrameView({
             })}
           </svg>
 
-          {ring!.map((_, i) => (
-            <div key={`edge${i}`} className="edge-handle" title="גרור כדי להוסיף נקודה ולעצב את הקו" style={edgeAt(ring!, i, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
+          {showEdges && points!.map(({ vertex, next, index: i }) => (
+            <div key={`edge${i}`} className="edge-handle" title="גרור כדי להוסיף נקודה ולעצב את הקו" style={edgeAt(vertex, next, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
           ))}
 
-          {ring!.map((v, i) => {
+          {points!.map(({ vertex: v, index: i }) => {
             const p = vertexPoint(v)
             const on = selectedPoints?.includes(i)
             return (
@@ -411,7 +415,7 @@ export function ShapeFrameView({
             )
           })}
 
-          {ring!.flatMap((v, i): ReactNode[] => {
+          {points!.flatMap(({ vertex: v, index: i }): ReactNode[] => {
             if (!selectedPoints?.includes(i)) return []
             const p = vertexPoint(v)
             const out: ReactNode[] = []
@@ -472,8 +476,11 @@ function contentHandleAt(corner: ContentCorner, box: { x: number; y: number; w: 
 }
 
 /** the screen position of the middle of the edge from point `i` to the next one (wrapping around) */
-function edgeAt(ring: PathVertex[], i: number, w: number, h: number) {
-  const [ax, ay] = vertexPoint(ring[i])
-  const [bx, by] = vertexPoint(ring[(i + 1) % ring.length])
+function edgeAt(from: PathVertex, to: PathVertex, w: number, h: number) {
+  const [ax, ay] = vertexPoint(from)
+  const [bx, by] = vertexPoint(to)
   return { left: ((ax + bx) / 2) * w, top: ((ay + by) / 2) * h }
 }
+
+/** an outline with more points than this has no grabbing places on its edges */
+const MANY_POINTS = 1500

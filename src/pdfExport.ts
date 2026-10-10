@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
@@ -17,11 +17,13 @@ import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
 import { addCmykPicture, rgbToInks } from './cmykPage'
-import { countPicture, extractGlyphs, type FrameGeometry, type PictureReason, type VectorGlyph, type VectorReport } from './vectorText'
+import { countPicture, emptyReport, extractGlyphs, type FrameGeometry, type PictureReason, type VectorGlyph, type VectorReport } from './vectorText'
 import { registerFont } from './fontFiles'
 import { shapeToVector, writeShapes, type VectorShape } from './vectorShapes'
 import { stackOrder } from './stacking'
-import { substituteMarker } from './numbering'
+import { pageNumberLabel, substituteMarker } from './numbering'
+import { outerRoomOf } from './printSheet'
+import { applyWhitePoint, effectiveWhitePoint } from './whitePoint'
 
 export interface PdfExportOptions {
   /** 1-based, inclusive; null = the whole document */
@@ -30,6 +32,17 @@ export interface PdfExportOptions {
   /** points, only used when `bleed` is on */
   bleedPt: number
   cropMarks: boolean
+  /** a target at the middle of each side of the page, outside the bleed */
+  registrationMarks?: boolean
+  /** a strip of the inks (and of greys) along the bottom, outside the bleed */
+  colorBars?: boolean
+  /** the slug (information area): empty space outside the bleed, `slugPt` points from the edge of the page */
+  slug?: boolean
+  slugPt?: number
+  /** the name of the file, the page and the date are written in the slug */
+  pageInfo?: boolean
+  /** the name written in the slug (the export of one file puts its own name there) */
+  infoName?: string
   /** pixels per inch for placed pictures */
   dpi: number
   /** the colours the PDF is written in: RGB as the screen has them (the default), or CMYK for a printing press */
@@ -117,6 +130,13 @@ async function drawImage(ctx: CanvasRenderingContext2D, image: ImageFrame, asset
   const layerContext = layer.getContext('2d')!
   const fit = OBJECT_FIT_RECT(image.fit, boxW, boxH, img.naturalWidth || img.width, img.naturalHeight || img.height)
   layerContext.drawImage(img, fit.x, fit.y, fit.w, fit.h)
+  // the white point (only with multiply): what is nearly white becomes white, so that it does not darken what is under it
+  const whitePoint = image.blendMode === 'multiply' ? effectiveWhitePoint(image.whitePoint) : null
+  if (whitePoint) {
+    const pixels = layerContext.getImageData(0, 0, layer.width, layer.height)
+    applyWhitePoint(pixels.data, whitePoint)
+    layerContext.putImageData(pixels, 0, 0)
+  }
   if (image.feather) applyFeatherCanvasMask(layerContext, image.feather, boxW, boxH, scale)
   ctx.save()
   ctx.translate(boxX + boxW / 2, boxY + boxH / 2)
@@ -450,6 +470,15 @@ async function drawTextDom(
   }
 }
 
+/** whether some object on a page (or its bleed) is mixed with what is under it */
+function pageHasBlend(content: ExportContent, page: PageRect, bleedPt: number) {
+  const near = (item: { x: number; y: number; w: number; h: number }) =>
+    item.x < page.x + page.w + bleedPt && item.x + item.w > page.x - bleedPt && item.y < page.y + page.h + bleedPt && item.y + item.h > page.y - bleedPt
+  return content.frames.some((frame) => frame.blendMode && !frame.hidden && near(frame)) ||
+    content.images.some((image) => image.blendMode && !image.hidden && near(image)) ||
+    content.shapes.some((shape) => shape.blendMode && !shape.hidden && near(shape))
+}
+
 /** Why a frame of text cannot be written as text whatever is in it, or null when it can (what is in it is looked at later). */
 function framePictureReason(frame: TextFrame, flow: FrameFlow): PictureReason | null {
   if (frame.rasterized) return 'rasterized'
@@ -592,8 +621,10 @@ export async function renderPageLayers(
   page: PageRect,
   bleedPt: number,
   dpi: number,
-  vector: false | { report?: VectorReport },
+  vectorRequested: false | { report?: VectorReport },
 ): Promise<PageLayer[]> {
+  // an object that is mixed with what is under it (a blend mode) needs what is under it as pixels: such a page is one picture
+  const vector = vectorRequested && !pageHasBlend(content, page, bleedPt) ? vectorRequested : false
   const scale = pxPerPt(dpi)
   const w = (page.w + 2 * bleedPt) * scale
   const h = (page.h + 2 * bleedPt) * scale
@@ -655,6 +686,22 @@ export async function renderPageLayers(
     await drawImage(context, image, asset, page, scale)
     return { kind: 'image', canvas, x: x0 - page.x, y: y0 - page.y, w: canvas.width / scale, h: canvas.height / scale }
   }
+  /** an object drawn on a layer of its own and laid on the page with the blend mode: it is mixed with everything drawn so far */
+  const drawBlended = async (mode: BlendMode, paint: (layer: CanvasRenderingContext2D) => Promise<unknown>) => {
+    const target = surface()
+    target.dirty = true
+    const layer = document.createElement('canvas')
+    layer.width = target.canvas.width
+    layer.height = target.canvas.height
+    const layerContext = layer.getContext('2d')!
+    layerContext.translate(bleedPt * scale, bleedPt * scale)
+    await paint(layerContext)
+    target.ctx.save()
+    target.ctx.setTransform(1, 0, 0, 1, 0, 0)
+    target.ctx.globalCompositeOperation = mode
+    target.ctx.drawImage(layer, 0, 0)
+    target.ctx.restore()
+  }
   const isParentShadow = (item: { id: string }) => item.id.startsWith('parent-shadow:')
   const parentContentAbove = content.doc.parentItemsAbovePageContent ?? false
 
@@ -687,12 +734,30 @@ export async function renderPageLayers(
     for (const item of ordered) {
       if (item.kind === 'frame') {
         const frame = frameById.get(item.id)
+        if (frame?.blendMode) {
+          await flushFrames()
+          const blended = frame
+          await drawBlended(frame.blendMode, (layer) => drawTextDom(layer, {
+            doc: content.doc,
+            frames: [blended],
+            images: content.images,
+            paragraphStyles: content.paragraphStyles,
+            sections: content.sections,
+            storyFrames: content.frames,
+          }, flows, page, scale, false))
+          continue
+        }
         if (frame) pendingFrames.push(frame)
         continue
       }
       await flushFrames()
       if (item.kind === 'shape') {
         const shape = shapeById.get(item.id)
+        if (shape?.blendMode && overlaps(shape.x, shape.y, shape.w, shape.h)) {
+          const blended = shape
+          await drawBlended(shape.blendMode, (layer) => drawShape(layer, blended, page, scale, blended.image ? content.assets[blended.image.assetId] : undefined))
+          continue
+        }
         if (shape && overlaps(shape.x, shape.y, shape.w, shape.h)) {
           const asVector = vector ? shapeToVector(shape, page.x, page.y) : null
           if (vector && asVector && !('reason' in asVector)) {
@@ -714,6 +779,11 @@ export async function renderPageLayers(
         if (!image || !overlaps(image.x, image.y, image.w, image.h)) continue
         const asset = content.assets[image.assetId]
         if (!asset) continue
+        if (image.blendMode) {
+          const blended = image
+          await drawBlended(image.blendMode, (layer) => drawImage(layer, blended, asset, page, scale))
+          continue
+        }
         if (vector && !image.feather && (image.shadowOpacity ?? 0) <= 0) {
           const placed = await imageLayer(image, asset)
           if (placed) {
@@ -778,7 +848,10 @@ export interface PreparedExport {
 }
 
 /** The look of the pages of a PDF: bleed around them, crop marks outside it, the resolution of what is drawn. */
-export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'dpi' | 'colorMode' | 'vectorText' | 'vectorReport'>
+export type PageDrawOptions = Pick<PdfExportOptions, 'bleed' | 'bleedPt' | 'cropMarks' | 'registrationMarks' | 'colorBars' | 'slug' | 'slugPt' | 'pageInfo' | 'infoName' | 'dpi' | 'colorMode' | 'vectorText' | 'vectorReport'>
+
+/** the height of the line of information in the slug, in points */
+const SLUG_INFO_SIZE = 7
 
 /**
  * Lays a document out for export: the footnotes are numbered and placed, the endnote pages are added. Nothing is drawn
@@ -818,6 +891,31 @@ export function prepareExport(content: ExportContent): PreparedExport {
   return { content: renderContent, flows: new Map([...bodyFlows, ...endnotePages.flows]), rects: pageRects(renderContent.doc) }
 }
 
+/**
+ * The letters of one text frame as the export would write them to a PDF: where each stands (points from the frame's own top-left,
+ * the frame not turned), its size, font and colour. Or the reason the frame is not plain text that can be turned into shapes.
+ * Used by "create outlines".
+ */
+export async function frameLetters(prepared: PreparedExport, frameId: string): Promise<{ glyphs: VectorGlyph[]; frame: TextFrame } | { reason: PictureReason | 'empty' }> {
+  const frame = prepared.content.frames.find((candidate) => candidate.id === frameId)
+  const flow = prepared.flows.get(frameId)
+  if (!frame || !flow || !flow.slice) return { reason: 'empty' }
+  // laid out where it is, but not turned: the letters come back as places in the frame, and the shape is turned the way the frame was
+  const upright: TextFrame = { ...frame, rotation: 0 }
+  const page: PageRect = { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
+  const sink: VectorGlyph[] = []
+  const report = emptyReport()
+  const scratch = document.createElement('canvas')
+  scratch.width = 1
+  scratch.height = 1
+  const content = { ...prepared.content, frames: [upright], storyFrames: prepared.content.frames }
+  await drawTextDom(scratch.getContext('2d')!, content, prepared.flows, page, 1, true, { sink, report })
+  if (report.text === 1 && sink.length > 0) return { glyphs: sink, frame }
+  if (report.text === 1) return { reason: 'empty' }
+  const reason = (Object.keys(report.reasons)[0] as PictureReason | undefined) ?? 'empty'
+  return { reason }
+}
+
 /** What a document is made of, as `exportContentOf` takes it: its own content and its parent (master) pages. */
 export type ExportSource = Pick<DocContent, 'doc' | 'frames' | 'images' | 'shapes' | 'assets' | 'paragraphStyles' | 'sections' | 'layerOrder' | 'layers' | 'parents' | 'pageParents' | 'parentOverrides'>
 
@@ -855,7 +953,7 @@ export function exportContentOf(source: ExportSource): ExportContent {
 /** The size of the sheet a page is drawn on: the page, the bleed around it and room for the crop marks outside that. */
 export function sheetSizeOf(page: PageRect, options: PageDrawOptions): { w: number; h: number } {
   const bleedPt = options.bleed ? options.bleedPt : 0
-  const marksMargin = options.cropMarks ? 20 : 0
+  const marksMargin = outerRoomOf(options)
   return { w: page.w + 2 * bleedPt + 2 * marksMargin, h: page.h + 2 * bleedPt + 2 * marksMargin }
 }
 
@@ -866,7 +964,7 @@ export const TOO_LARGE_MESSAGE = 'הקובץ יהיה גדול מדי כדי ל�
 /** Pages `from`..`to` (1-based) of a prepared document, added to the PDF (which is made with the first one when there is none yet). */
 export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport, options: PageDrawOptions, from: number, to: number, onPage?: (done: number, total: number) => void): Promise<jsPDF | null> {
   const bleedPt = options.bleed ? options.bleedPt : 0
-  const marksMargin = options.cropMarks ? 20 : 0 // room outside the bleed for the crop marks themselves
+  const marksMargin = outerRoomOf(options) // room outside the bleed: for the crop marks, and for the slug
   const last = Math.min(prepared.rects.length, to)
   const first = Math.max(1, from)
   const total = Math.max(0, last - first + 1)
@@ -911,6 +1009,9 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
       }
       if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
       if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, cmyk)
+      if (options.registrationMarks) drawRegistrationMarks(target, page, marksMargin + bleedPt, bleedPt, cmyk)
+      if (options.colorBars) drawColorBar(target, page, marksMargin + bleedPt, bleedPt, cmyk)
+      if (options.slug && options.pageInfo) await drawSlugInfo(target, sheet, marksMargin + bleedPt, slugInfoText(prepared, options, i - 1), cmyk)
       onPage?.(i - first + 1, total)
       continue
     }
@@ -927,6 +1028,9 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     // a PDF is built as one string, and a string cannot be longer than about 512 MB: say so before drawing the rest of the pages
     if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
     if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, cmyk)
+    if (options.registrationMarks) drawRegistrationMarks(target, page, marksMargin + bleedPt, bleedPt, cmyk)
+    if (options.colorBars) drawColorBar(target, page, marksMargin + bleedPt, bleedPt, cmyk)
+    if (options.slug && options.pageInfo) await drawSlugInfo(target, sheet, marksMargin + bleedPt, slugInfoText(prepared, options, i - 1), cmyk)
     onPage?.(i - first + 1, total)
   }
   return target
@@ -1013,12 +1117,112 @@ export async function exportPdf(
   const prepared = prepareExport(content)
   const from = options.range ? Math.max(1, options.range.from) : 1
   const to = options.range ? Math.min(prepared.rects.length, options.range.to) : prepared.rects.length
-  const pdf = await addPagesToPdf(null, prepared, options, from, to, onProgress)
+  const pdf = await addPagesToPdf(null, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, from, to, onProgress)
   if (!pdf) {
     viewWindow?.close()
     return false
   }
   return deliverPdf(pdf, fileBaseName, viewWindow)
+}
+
+/** how far from the trim (beyond the bleed) the centre of a registration mark, and the line of the colour bar, lie */
+const MARK_OFFSET = 9
+
+/** A target (a circle and a cross) at the middle of every side of the page, outside the bleed. Drawn in all the inks (registration) in CMYK. */
+function drawRegistrationMarks(pdf: jsPDF, page: PageRect, edge: number, bleedPt: number, cmyk: boolean) {
+  const left = edge
+  const top = edge
+  const right = left + page.w
+  const bottom = top + page.h
+  const radius = 3.5
+  const reach = 7
+  if (cmyk) pdf.setDrawColor(1, 1, 1, 1)
+  else pdf.setDrawColor(0, 0, 0)
+  pdf.setLineWidth(0.3)
+  const target = (x: number, y: number) => {
+    pdf.circle(x, y, radius, 'S')
+    pdf.line(x - reach, y, x + reach, y)
+    pdf.line(x, y - reach, x, y + reach)
+  }
+  const offset = bleedPt + MARK_OFFSET
+  target(left + page.w / 2, top - offset)
+  target(left + page.w / 2, bottom + offset)
+  target(left - offset, top + page.h / 2)
+  target(right + offset, top + page.h / 2)
+}
+
+/** The colours of a colour bar: the inks, the colours they make two by two, and greys of the black ink from light to full. */
+const COLOR_BAR: { rgb: [number, number, number]; inks: [number, number, number, number] }[] = [
+  { rgb: [0, 174, 239], inks: [1, 0, 0, 0] },
+  { rgb: [236, 0, 140], inks: [0, 1, 0, 0] },
+  { rgb: [255, 242, 0], inks: [0, 0, 1, 0] },
+  { rgb: [0, 0, 0], inks: [0, 0, 0, 1] },
+  { rgb: [237, 28, 36], inks: [0, 1, 1, 0] },
+  { rgb: [0, 166, 81], inks: [1, 0, 1, 0] },
+  { rgb: [46, 49, 146], inks: [1, 1, 0, 0] },
+  ...Array.from({ length: 10 }, (_, step) => {
+    const share = (step + 1) / 10
+    const grey = Math.round(255 * (1 - share))
+    return { rgb: [grey, grey, grey] as [number, number, number], inks: [0, 0, 0, share] as [number, number, number, number] }
+  }),
+]
+
+/** A strip of squares of the inks and of greys, in the bottom margin from the middle of the page to its right. */
+function drawColorBar(pdf: jsPDF, page: PageRect, edge: number, bleedPt: number, cmyk: boolean) {
+  const size = 7
+  const bottom = edge + page.h
+  const y = bottom + bleedPt + MARK_OFFSET - size / 2
+  const start = edge + page.w / 2 + 14
+  const room = edge + page.w - start
+  const count = Math.min(COLOR_BAR.length, Math.floor(room / size))
+  for (let index = 0; index < count; index += 1) {
+    const color = COLOR_BAR[index]!
+    if (cmyk) pdf.setFillColor(color.inks[0], color.inks[1], color.inks[2], color.inks[3])
+    else pdf.setFillColor(color.rgb[0], color.rgb[1], color.rgb[2])
+    pdf.rect(start + index * size, y, size, size, 'F')
+  }
+}
+
+/** What the slug says about a page: the name of the file, the number the page has (as it is printed), and the date. */
+function slugInfoText(prepared: PreparedExport, options: PageDrawOptions, pageIndex: number) {
+  const { doc, sections } = prepared.content
+  const label = pageNumberLabel(sections ?? [], pageIndex, doc.startPage)
+  const date = new Date().toLocaleDateString('he-IL')
+  return `${options.infoName ?? doc.name} · עמוד ${label} · ${date}`
+}
+
+/**
+ * A line of information in the top of the slug, at the left corner of the page. It is drawn as a picture of the text, as the fonts a PDF has of
+ * its own cannot write Hebrew. `room` is how far from the top of the sheet the page (the trim) begins.
+ */
+async function drawSlugInfo(pdf: jsPDF, sheet: { w: number; h: number }, room: number, text: string, cmyk: boolean) {
+  const scale = 4
+  const probe = document.createElement('canvas').getContext('2d')
+  if (!probe) return
+  const font = `${SLUG_INFO_SIZE * scale}px Arial, "Segoe UI", sans-serif`
+  probe.font = font
+  const width = Math.ceil(probe.measureText(text).width) + 4 * scale
+  const height = Math.ceil(SLUG_INFO_SIZE * 1.5 * scale)
+  const w = width / scale
+  const h = height / scale
+  // no room above the page for a line of text: nothing is written
+  if (room < h + 2 || w > sheet.w - 4) return
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) return
+  context.font = font
+  context.direction = 'rtl'
+  context.textAlign = 'right'
+  context.textBaseline = 'middle'
+  context.fillStyle = '#000'
+  context.fillText(text, width - 2 * scale, height / 2)
+  // at the left corner of the page, away from the target at the middle of the top (`room` is also how far the page is from the left of the sheet)
+  const x = w > sheet.w / 2 - room - 20 ? (sheet.w - w) / 2 : room + 8
+  const y = (room - h) / 2
+  if (cmyk) await addCmykPicture(pdf, canvas, x, y, w, h, true)
+  else pdf.addImage(canvas.toDataURL('image/png'), 'PNG', x, y, w, h, undefined, 'FAST')
 }
 
 /** Crop marks around a page whose trim box sits at (originX + bleedPt, originY + bleedPt) on the sheet. */

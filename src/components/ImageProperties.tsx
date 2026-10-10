@@ -24,6 +24,8 @@ interface Props {
   onMatchShape: () => void
   onRemoveBackground: () => void
   removingBackground: boolean
+  /** open the dialog that turns the picture into a vector shape */
+  onTraceToVector: () => void
   onDelete: () => void
 }
 
@@ -40,7 +42,7 @@ const FITS: { id: ImageFit; label: string; hint: string }[] = [
 ]
 
 /** The properties panel of a selected picture. */
-export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onShadowChange, onFeatherChange, onUseFeatherTool, onArrange, onMatchShape, onRemoveBackground, removingBackground, onDelete }: Props) {
+export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap, onWrapOffset, onShadowChange, onFeatherChange, onUseFeatherTool, onArrange, onMatchShape, onRemoveBackground, removingBackground, onTraceToVector, onDelete }: Props) {
   const wrap = image.wrap ?? 'none'
   // pixels per inch at the current size: a hint for print quality (72 pt = 1 inch)
   const ppi = asset ? Math.round(asset.width / (image.w / 72)) : null
@@ -109,6 +111,13 @@ export function ImageProperties({ image, asset, unit, onGeometry, onFit, onWrap,
           {removingBackground ? 'מסיר רקע…' : 'הסר רקע'}
         </button>
         <p className="muted">העיבוד נעשה במחשב, בזיהוי של 512×512 פיקסלים. התמונה המקורית נשמרת במסמך כדי לאפשר ביטול.</p>
+      </Group>
+
+      <Group title="המרה לווקטור">
+        <button className="btn small" onClick={onTraceToVector} disabled={!asset}>
+          המר תמונה לווקטור…
+        </button>
+        <p className="muted">ללוגו או שרטוט בצבע אחד: הופך את התמונה לצורה חדה בכל גודל ובהדפסה, שאפשר לצבוע.</p>
       </Group>
 
       <Group title="הצללה">

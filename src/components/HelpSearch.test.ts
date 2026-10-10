@@ -231,8 +231,33 @@ describe('help topic search', () => {
     expect(orientation?.answer[0]).toContain('„קובץ” > „הגדרות מסמך…” > „גודל”')
 
     const background = search('הסרת רקע מתמונה').find((result) => result.id === 'image-background-removal')
+    expect(background?.answer[0]).toContain('„הסר רקע” בסרגל הכלים העליון')
     expect(background?.answer[0]).toContain('„אובייקט” > „הסר רקע מהתמונה הנבחרת”')
     expect(background?.answer[0]).toContain('„חלון” > „מאפיינים”')
+  })
+
+  it('explains how to turn a picture of a logo into a vector shape', () => {
+    const topic = search('המרת תמונה לווקטור').find((result) => result.id === 'image-trace')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„אובייקט” > „המר תמונה לווקטור…”', 'סף בהירות', 'חור', 'Ctrl+Z', 'בצבע אחד']) {
+      expect(answer).toContain(detail)
+    }
+    // a logo that prints with broken letters leads here too
+    expect(search('לוגו שבור בהדפסה').some((result) => result.id === 'image-trace')).toBe(true)
+  })
+
+  it('explains how to turn live text into vector outlines', () => {
+    const topic = search('המרת טקסט לווקטור').find((result) => result.id === 'create-outlines')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„אובייקט” > „המר טקסט לווקטור”', 'Ctrl+Shift+O', 'Ctrl+Z', 'TrueType', 'ניקוד', 'לחיצה כפולה על האות', 'באפור', 'Esc', 'עריכת נקודות', 'כל אות היא צורה בפני עצמה', '„אובייקט” > „שחרר נתיב מורכב”']) {
+      expect(answer).toContain(detail)
+    }
+    expect(search('איך להפוך טקסט לוקטור').some((result) => result.id === 'create-outlines')).toBe(true)
+    // the name other programs give it still finds it
+    expect(search('יצירת קווי מתאר').some((result) => result.id === 'create-outlines')).toBe(true)
+    expect(search('איך לבחור אות אחת ולגרור אותה').some((result) => result.id === 'create-outlines')).toBe(true)
   })
 
   it('explains how to use the magnetic lasso and its raster editing actions', () => {
@@ -311,7 +336,7 @@ describe('help topic search', () => {
       ['מה זה מילה שלמה בלבד', 'find-replace-whole-word'],
       ['מה זה ביטוי רגולרי', 'find-replace-regex-meaning'],
       ['מה לכתוב בחפש ובהחלף בביטוי רגולרי', 'find-replace-regex-examples'],
-      ['GREP אינדיזיין', 'find-replace-regex-meaning'],
+      ['מה זה GREP', 'find-replace-regex-meaning'],
       ['גרעפ', 'find-replace-regex-meaning'],
       ['מה זה תווים מיוחדים', 'find-replace-special-meaning'],
     ]
@@ -328,7 +353,7 @@ describe('help topic search', () => {
     expect(answerFor('find-replace-case')).toContain('בעברית אין אותיות גדולות וקטנות')
     expect(answerFor('find-replace-whole-word')).toContain('חיפוש „בית” ימצא „בית גדול”, אך לא „ביתי”')
     expect(answerFor('find-replace-regex-meaning')).toContain('התבנית ‎[א-ת]+')
-    expect(answerFor('find-replace-regex-meaning')).toContain('באינדיזיין תכונת החיפוש וההחלפה לפי תבניות נקראת GREP')
+    expect(answerFor('find-replace-regex-meaning')).toContain('תכונת החיפוש וההחלפה לפי תבניות נקראת בתוכנות פריסה GREP')
     expect(answerFor('find-replace-regex-examples')).toContain('„חפש” ‎([א-תךםןףץ]+) ([א-תךםןףץ]+), „החלף ב” ‎$2 $1')
     expect(answerFor('find-replace-special-meaning')).toContain('‎\\n מייצג ירידת פסקה')
   })

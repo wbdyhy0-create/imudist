@@ -52,7 +52,7 @@ export async function exportBookPdf(
       for (let blank = 0; blank < chapter.skipped; blank++) pdf.addPage([sheet.w, sheet.h])
     }
     const before: number = pdf ? pdf.getNumberOfPages() : 0
-    pdf = await addPagesToPdf(pdf, prepared, options, 1, prepared.rects.length, (page, pages) => onProgress?.({ chapter: index + 1, chapters: chapters.length, page, pages }))
+    pdf = await addPagesToPdf(pdf, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, 1, prepared.rects.length, (page, pages) => onProgress?.({ chapter: index + 1, chapters: chapters.length, page, pages }))
     bookmarks.push({ title: chapter.title, page: before + 1 })
   }
   if (!pdf) {

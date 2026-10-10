@@ -4,6 +4,7 @@ import { runPreflight, type PreflightIssue } from '../preflight'
 import { bridgeTransparentSeams, canvasDataUrl, captureObject, captureObjects, clipCanvasToBoxes, splitObjectCanvas, translateMarqueeDrag, trimTransparentBounds, type CaptureItem, type MarqueeDragPosition, type MarqueeKind, type ScreenBox } from '../marquee'
 import { applyFeatherCanvasMask } from '../feather'
 import { paintImageStroke } from '../imagePaint'
+import { whitePointOfBorder } from '../whitePoint'
 import { adjustMagneticPath, advanceMagneticTrace as advanceWire, anchorMagneticTrace as anchorWire, cleanMagneticPath, closeMagneticTrace, magneticSelectionCanvas, mapToSource, prepareMagneticEdgeMap, removeLastMagneticAnchor, sourceToMap, startMagneticTrace, type MagneticAdjustMode, type MagneticEdgeMap, type MagneticOperation, type MagneticPoint } from '../magneticLasso'
 import { removeImageBackground } from '../backgroundRemoval'
 import { deliverPng } from '../pngExport'
@@ -105,7 +106,7 @@ import { detachedParentContent, ownerPage, pageRects, parentShadowContent, runni
 import { plainTocHeading, sliceTocDisplayMarkers, tocDisplayMarkers } from '../toc'
 import { caretOffsetAt } from '../richtext'
 import { DEFAULT_PATH_TEXT_COLOR, DEFAULT_PATH_TEXT_STYLE, MIN_SPAN, nearestOnRing, pointInRing, ringInfo, snapTextToCenter, textPlacement, type Pt } from '../pathText'
-import { boxFromEndpoints, CORNERS, editableRing, fitRadii, imageGeometry, lineEndpoints, regularRatio, replaceVertex, splitPathVerticesAt, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
+import { boxFromEndpoints, CORNERS, deleteVertices, editablePoints, editableRing, fitRadii, imageGeometry, lineEndpoints, locateVertex, regularRatio, replaceVertex, splitPathVerticesAt, vertexAt, vertexHi, vertexHo, vertexPoint, type ImageBox, type ShapePrefs } from '../shapes'
 import { spacing, spacingMarksForSelection, type SpacingMark } from '../spacing'
 import { expandGapObject, findGaps, moveGap, type GapMember, type GapObject, type GapRegion } from '../gapTool'
 import { paragraphOverrides } from '../styleOverrides'
@@ -114,7 +115,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
-import { arrange, nextZ, stackOrder, type ArrangeOp } from '../stacking'
+import { arrange, nextZ, stackOrder, zOfFrame, zOfImage, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
@@ -132,6 +133,9 @@ import { FontPicker } from './FontPicker'
 import type { AlignOp } from './AlignButtons'
 import { MultiSelectionToolbar } from './MultiSelectionToolbar'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
+import { ImageTraceDialog, type ImageTraceRequest } from './ImageTraceDialog'
+import { shapeFromTrace } from '../imageTrace'
+import { pieceCount, releaseCompoundPath } from '../compoundPath'
 import { SmartLayoutDialog, type SmartLayoutRequest } from './SmartLayoutDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
@@ -321,6 +325,12 @@ export interface WorkspaceHandle {
   arrange: (op: ArrangeOp) => void
   /** remove the background from the selected image */
   removeBackgroundFromSelection: () => void
+  /** open the dialog that traces the selected picture into a vector shape */
+  traceImageFromSelection: () => void
+  /** turn the selected text frames into vector shapes ("create outlines") */
+  createOutlinesFromSelection: () => void
+  /** split the selected path shapes made of several pieces into one shape per piece */
+  releaseCompoundPaths: () => void
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
   shapeOp: (op: BoolOp) => void
   group: () => void
@@ -467,6 +477,8 @@ interface Props {
 }
 
 const newFrameId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
+/** the most letters one text frame is turned into outlines for: a shape for each, so more would be slow to draw and to edit */
+const MAX_OUTLINE_LETTERS = 3000
 
 /** Zoom plus, optionally, "world point (wx, wy) must end up at viewport pixel (sx, sy)". */
 interface View {
@@ -1125,6 +1137,8 @@ export function Workspace({
   /** the color new guides get: the last one the user chose */
   const [guideColor, setGuideColor] = useState(DEFAULT_GUIDE_COLOR)
   const [guidesDialog, setGuidesDialog] = useState(false)
+  /** the picture the trace dialog is open for */
+  const [traceImageId, setTraceImageId] = useState<string | null>(null)
   const [smartLayoutDialog, setSmartLayoutDialog] = useState(false)
   const latestGuides = useRef(guides)
   latestGuides.current = guides
@@ -2822,6 +2836,7 @@ export function Workspace({
     if (itemLocks[id]) return
     const im = images.find((x) => x.id === id)
     if (!im) return
+    if (isolationTakes(id, e)) return
     if (tool === 'heal') {
       beginRepairStroke(im, e)
       return
@@ -3334,6 +3349,49 @@ export function Workspace({
     setSelectedId(id)
     setMultiSel([])
     return true
+  }
+  /**
+   * While one object of a group is picked out (isolation: a double click on it), the rest of the group does nothing on a click or a
+   * drag (a double click on another one picks that one instead), and a click on anything outside the group ends the isolation and
+   * goes on as an ordinary click. Returns true when the click was taken.
+   */
+  const isolationTakes = (id: string, e: ReactPointerEvent<Element>): boolean => {
+    if (!isolatedGroupId || id === selectedId) return false
+    if (objectGroupId(id) === isolatedGroupId) {
+      e.stopPropagation()
+      e.preventDefault()
+      return true
+    }
+    setIsolatedGroupId(null)
+    return false
+  }
+  /** the group is back as the selection and the isolation is over (a click on the empty canvas, or Escape) */
+  const leaveIsolation = () => {
+    if (!isolatedGroupId) return
+    const members = objectsInGroup(isolatedGroupId)
+    setIsolatedGroupId(null)
+    setSelectedIdRaw(null)
+    setMultiSel(members)
+  }
+  /** the selected shapes that are made of several pieces (the letters of a text turned into outlines in one shape) become one shape each */
+  const releaseCompoundPaths = () => {
+    const chosen = selectedObjectIds().filter((id) => shapes.some((shape) => shape.id === id && pieceCount(shape) > 1 && !itemLocks[id]))
+    if (chosen.length === 0) {
+      onNotify('בחרו צורה שמורכבת מכמה חלקים (נתיב מורכב), כמו טקסט שהומר לווקטור כצורה אחת.')
+      return
+    }
+    const gone = new Set(chosen)
+    const made: ShapeFrame[] = []
+    for (const shape of shapes) {
+      if (!gone.has(shape.id)) continue
+      const pieces = releaseCompoundPath(shape, newFrameId, shape.groupId ?? newFrameId())
+      if (pieces) made.push(...pieces)
+    }
+    if (made.length === 0) return
+    commitMultiObjectChange({ shapes: [...shapes.filter((shape) => !gone.has(shape.id)), ...made] }, 'compound:release')
+    setMultiSel(made.map((shape) => shape.id))
+    setSelectedIdRaw(null)
+    onNotify(`הנתיב המורכב פורק ל-${made.length} צורות מקובצות. לחיצה כפולה על חלק בוחרת אותו לבדו.`)
   }
   const groupSelectedObjects = () => {
     const ids = selectedObjectIds()
@@ -3877,7 +3935,8 @@ export function Workspace({
   const handleMultiPointer = (id: string, e: ReactPointerEvent<Element>): boolean => {
     if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) return altDuplicateDrag(id, e)
     const groupId = objectGroupId(id)
-    if (tool === 'select' && groupId && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    // a click on a member of a group picks the whole group - except in the isolated group, where the members are picked one by one
+    if (tool === 'select' && groupId && groupId !== isolatedGroupId && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.stopPropagation()
       e.preventDefault()
       setGuideSel([])
@@ -3907,7 +3966,8 @@ export function Workspace({
       }
       return true
     }
-    if (multiSel.length > 1 && multiSel.includes(id)) {
+    // the point-editing tool picks the one object under the pointer, even from a selection of several (a letter out of its group)
+    if (tool !== 'direct' && multiSel.length > 1 && multiSel.includes(id)) {
       e.stopPropagation()
       e.preventDefault()
       const origins = new Map(chosenObjects().map((o) => [o.id, { x: o.x, y: o.y }]))
@@ -4024,6 +4084,154 @@ export function Workspace({
       .finally(() => setRemovingBackgroundId(null))
   }
 
+  const traceImageFromSelection = () => {
+    const image = selectedId ? images.find((candidate) => candidate.id === selectedId) : undefined
+    if (!image) {
+      onNotify('בחרו תמונה בעמוד כדי להמיר אותה לווקטור.')
+      return
+    }
+    if (!assets[image.assetId]) {
+      onShowError('ההמרה לווקטור נכשלה', new Error('קובץ התמונה אינו זמין במסמך.'))
+      return
+    }
+    if (itemLocks[image.id]) {
+      onNotify('התמונה נעולה. שחררו את הנעילה כדי להמיר אותה.')
+      return
+    }
+    setTraceImageId(image.id)
+  }
+
+  /** the picture is replaced (or, when asked, kept under it) by the vector shape the dialog traced */
+  const applyImageTrace = (request: ImageTraceRequest) => {
+    const image = images.find((candidate) => candidate.id === traceImageId)
+    const asset = image ? assets[image.assetId] : undefined
+    setTraceImageId(null)
+    if (!image || !asset) return
+    const shape = shapeFromTrace(image, request.region, request.result, request.color, newFrameId(), zOfImage(image), `וקטור: ${asset.name}`)
+    const nextImages = request.keepOriginal ? images : images.filter((candidate) => candidate.id !== image.id)
+    const nextShapes = [...shapes, shape]
+    if (editingParentId) {
+      onParentsChange(parents.map((parent) => parent.id === editingParentId ? { ...parent, images: nextImages, shapes: nextShapes } : parent), 'parent:image-trace')
+    } else {
+      pageOps.commit({ images: nextImages, shapes: nextShapes })
+    }
+    setMultiSel([])
+    setSelectedId(shape.id)
+    onNotify('התמונה הומרה לצורת ווקטור. אפשר לבטל כדי לחזור לתמונה המקורית.')
+  }
+
+  /** the selected text frames (with the rest of their story) become vector shapes: what the letters look like, no longer text */
+  const createOutlines = async () => {
+    if (editingParentId) {
+      onNotify('אי אפשר להמיר טקסט לווקטור בעמוד אב. עברו לעמוד רגיל.')
+      return
+    }
+    const chosen = selectedObjectIds().filter((id) => frames.some((frame) => frame.id === id))
+    if (chosen.length === 0) {
+      onNotify('בחרו תיבת טקסט כדי להמיר אותה לווקטור.')
+      return
+    }
+    if (chosen.some((id) => itemLocks[id])) {
+      onNotify('התיבה נעולה. שחררו את הנעילה כדי להמיר אותה לווקטור.')
+      return
+    }
+    // a story that goes through several frames is turned all at once: what is left of it would otherwise flow into the frame that stays
+    const ids = new Set<string>()
+    for (const id of chosen) for (const frame of chainOf(frames, id)) ids.add(frame.id)
+    onNotify('ממיר את הטקסט לווקטור…')
+    try {
+      const { prepareExport, frameLetters } = await import('../pdfExport')
+      const { outlineFontOf, outlineShapeOf } = await import('../glyphOutlines')
+      const { PICTURE_REASONS } = await import('../vectorText')
+      const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections })
+      const made: ShapeFrame[] = []
+      for (const frame of frames.filter((candidate) => ids.has(candidate.id))) {
+        const result = await frameLetters(prepared, frame.id)
+        if ('reason' in result) {
+          if (result.reason === 'empty') continue
+          onNotify(`אי אפשר להמיר את הטקסט הזה לווקטור: ${PICTURE_REASONS[result.reason]}.`)
+          return
+        }
+        // every letter is a shape of its own (its holes cut out), and the letters of a frame are one group: the group moves as the text
+        // did, and a letter picked out of it (double click, or a click with the point-editing tool) stands and moves on its own
+        if (result.glyphs.length > MAX_OUTLINE_LETTERS) {
+          onNotify(`הטקסט ארוך מדי להמרה לווקטור (${result.glyphs.length} אותיות, עד ${MAX_OUTLINE_LETTERS}). חלקו אותו לכמה תיבות.`)
+          return
+        }
+        const rotation = frame.rotation ?? 0
+        const groupId = frame.groupId ?? (result.glyphs.length > 1 ? newFrameId() : undefined)
+        for (const glyph of result.glyphs) {
+          const font = outlineFontOf(glyph.font.bytes)
+          if (!font) {
+            onNotify('אי אפשר להמיר לווקטור: צורות האותיות של הגופן אינן נגישות.')
+            return
+          }
+          const outline = outlineShapeOf([{ font, text: glyph.text, x: glyph.x, baseline: glyph.baseline, size: glyph.size, width: glyph.width }])
+          if (!outline) continue
+          // the box of the letter is in the frame's own, unturned places: it is turned about the centre of the frame as the frame was
+          const [shiftX, shiftY] = rotateVec(outline.x + outline.w / 2 - frame.w / 2, outline.y + outline.h / 2 - frame.h / 2, rotation)
+          const centerX = frame.x + frame.w / 2 + shiftX
+          const centerY = frame.y + frame.h / 2 + shiftY
+          const [red, green, blue] = glyph.color
+          const shape: ShapeFrame = {
+            id: newFrameId(),
+            kind: 'path',
+            x: centerX - outline.w / 2,
+            y: centerY - outline.h / 2,
+            w: outline.w,
+            h: outline.h,
+            geom: outline.geom,
+            fill: `#${[red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`,
+            stroke: null,
+            strokeWidth: 0,
+            z: zOfFrame(frame),
+            label: `אות ${glyph.text}`,
+          }
+          if (frame.layerId) shape.layerId = frame.layerId
+          if (groupId) shape.groupId = groupId
+          if (rotation) shape.rotation = rotation
+          made.push(shape)
+        }
+      }
+      if (made.length === 0) {
+        onNotify('אין בתיבה טקסט שאפשר להמיר לווקטור.')
+        return
+      }
+      pageOps.commit({ frames: frames.filter((frame) => !ids.has(frame.id)), shapes: [...shapes, ...made] })
+      if (made.length === 1) {
+        setMultiSel([])
+        setSelectedId(made[0].id)
+      } else {
+        setMultiSel(made.map((shape) => shape.id))
+        setSelectedIdRaw(null)
+      }
+      onNotify('הטקסט הומר לצורות ווקטור, אות אחת לכל צורה. לבחירת אות בודדת: לחיצה כפולה עליה, או לחיצה עליה בכלי עריכת הנקודות (A). אפשר לבטל עם Ctrl+Z.')
+    } catch (error) {
+      onShowError('המרת הטקסט לווקטור נכשלה', error)
+    }
+  }
+
+  // the isolation lasts while the picked object is the selection: when something else is selected (from a panel, a marquee) it ends
+  useEffect(() => {
+    if (!isolatedGroupId) return
+    const stillPicked = selectedId !== null && objectGroupId(selectedId) === isolatedGroupId
+    if (!stillPicked) setIsolatedGroupId(null)
+  }, [isolatedGroupId, selectedId])
+
+  // Ctrl+Shift+O: create outlines (the latest closure is kept in a ref so the listener is put on once)
+  const createOutlinesRef = useRef(createOutlines)
+  createOutlinesRef.current = createOutlines
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey || event.code !== 'KeyO') return
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return
+      event.preventDefault()
+      void createOutlinesRef.current()
+    }
+    window.addEventListener('keydown', onShortcut)
+    return () => window.removeEventListener('keydown', onShortcut)
+  }, [])
+
   useImperativeHandle(ref, () => ({
     goToIssue,
     selectTool: activateTool,
@@ -4043,6 +4251,9 @@ export function Workspace({
     deletePage: deleteSelectedPage,
     arrange: (op) => arrangeObject(selectedId, op),
     removeBackgroundFromSelection,
+    traceImageFromSelection,
+    createOutlinesFromSelection: () => void createOutlines(),
+    releaseCompoundPaths,
     shapeOp: (op) => combineSelectedShapes(op),
     group: groupSelectedObjects,
     ungroup: ungroupSelectedObjects,
@@ -4194,6 +4405,7 @@ export function Workspace({
       if (((selectedId && itemLocks[selectedId]) || multiSel.some((id) => itemLocks[id])) && e.key !== 'Escape') return
       if (e.key === 'Escape') {
         if (linkFrom) setLinkFrom(null)
+        else if (isolatedGroupId) leaveIsolation()
         else {
           setSelectedId(null)
           setGuideSel([])
@@ -4225,12 +4437,10 @@ export function Workspace({
         const sh = shapes.find((x) => x.id === pointSel.id)
         const ring = sh && (sh.kind === 'path' ? sh.geom?.[0]?.[0] : editableRing(sh))
         if (sh && ring) {
-          const keep = ring.filter((_, i) => !pointSel.indices.includes(i))
-          if (keep.length >= 3) {
-            const base: PathGeom = sh.kind === 'path' ? (sh.geom ?? [[ring]]) : [[ring]]
-            const geom: PathGeom = [[keep, ...base[0].slice(1)], ...base.slice(1)]
-            onShapesChange(shapes.map((x) => (x.id === sh.id ? { ...x, kind: 'path', geom, sides: undefined, radii: undefined } : x)), `del-points:${sh.id}`)
-          }
+          // every ring of a compound outline is editable; a ring that would be left with fewer than three points goes, or stays as it was
+          const base: PathGeom = sh.kind === 'path' ? (sh.geom ?? [[ring]]) : [[ring]]
+          const geom = deleteVertices(base, pointSel.indices)
+          if (geom) onShapesChange(shapes.map((x) => (x.id === sh.id ? { ...x, kind: 'path', geom, sides: undefined, radii: undefined } : x)), `del-points:${sh.id}`)
         }
         setPointSel(null)
       } else if (selectedId && (e.key === 'Delete' || e.key === 'Backspace')) {
@@ -5939,6 +6149,7 @@ export function Workspace({
     if (itemLocks[id]) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
+    if (isolationTakes(id, e)) return
     if (tool === 'eyedropper') {
       e.stopPropagation()
       e.preventDefault()
@@ -6003,7 +6214,7 @@ export function Workspace({
     setSelectedPage(ownerPage(rects, sh.x + sh.w / 2, sh.y + sh.h / 2))
     setSelectedId(id)
     setEditingId(null)
-    if (tool === 'direct') return
+    // the point-editing tool too moves the whole object when it is grabbed by its body (as a click alone only picks it)
     beginFrameDrag(e as unknown as ReactPointerEvent<HTMLElement>, id, 'move')
   }
 
@@ -6097,8 +6308,8 @@ export function Workspace({
 
   /** which mirror (across the shape's vertical or horizontal middle) maps point `a` onto point `b` — see onEdgeDown's Alt */
   const mirrorAxis = (geom: PathGeom, a: number, b: number): 'v' | 'h' => {
-    const p = vertexPoint(geom[0][0][a])
-    const q = vertexPoint(geom[0][0][b])
+    const p = vertexPoint(vertexAt(geom, a)!)
+    const q = vertexPoint(vertexAt(geom, b)!)
     return Math.abs(q[0] - (1 - p[0])) < 0.02 && Math.abs(q[1] - p[1]) < 0.02 ? 'v' : 'h'
   }
 
@@ -6129,7 +6340,7 @@ export function Workspace({
     e.currentTarget.setPointerCapture(e.pointerId)
     vpRef.current?.setPointerCapture(e.pointerId)
     if (e.altKey) {
-      const v = geomBase[0][0][index]
+      const v = vertexAt(geomBase, index)!
       const geom = replaceVertex(geomBase, index, { p: vertexPoint(v), hi: [0, 0], ho: [0, 0] })
       setPointSel({ id, indices: [index] })
       pointDrag.current = { kind: 'handle', id, geom, index, which: 'ho', forceMirror: true, box, key: `curve:${dragSeq.current}` }
@@ -6156,19 +6367,23 @@ export function Workspace({
     e.preventDefault()
     setSelectedId(id)
     const base = geomOf(sh)
-    const ring = base[0][0]
+    // the edge belongs to one ring of the outline (a compound outline has many): the new point goes into that ring
+    const place = locateVertex(base, edgeIndex)
+    if (!place) return
+    const ring = base[place.poly]![place.ring]!
+    const localEdge = place.index
     const middleOf = (k: number): [number, number] => {
       const a = vertexPoint(ring[k])
       const b = vertexPoint(ring[(k + 1) % ring.length])
       return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
     }
-    const grabbed = middleOf(edgeIndex)
+    const grabbed = middleOf(localEdge)
     let partnerEdge = -1
     if (e.altKey) {
       const near = (x: number, y: number) => Math.abs(x - y) < 0.02
       for (const axis of ['v', 'h'] as const) {
         partnerEdge = ring.findIndex((_, k) => {
-          if (k === edgeIndex) return false
+          if (k === localEdge) return false
           const q = middleOf(k)
           return axis === 'v' ? near(q[0], 1 - grabbed[0]) && near(q[1], grabbed[1]) : near(q[0], grabbed[0]) && near(q[1], 1 - grabbed[1])
         })
@@ -6180,7 +6395,7 @@ export function Workspace({
     let partner = -1
     ring.forEach((v, k) => {
       nextRing.push(v)
-      if (k === edgeIndex) {
+      if (k === localEdge) {
         index = nextRing.length
         nextRing.push(grabbed)
       }
@@ -6189,10 +6404,13 @@ export function Workspace({
         nextRing.push(middleOf(k))
       }
     })
-    const geom: PathGeom = [[nextRing, ...base[0].slice(1)], ...base.slice(1)]
+    const geom: PathGeom = base.map((poly, pi) => (pi === place.poly ? poly.map((r, ri) => (ri === place.ring ? nextRing : r)) : poly))
+    // the points are numbered across all the rings, and the ring's own points come after the rings before it
+    const flatIndex = place.start + index
+    const flatPartner = partner >= 0 ? place.start + partner : -1
     dragSeq.current += 1
-    setPointSel({ id, indices: [index] })
-    pointDrag.current = { kind: 'anchor', id, geom, indices: [index], anchor: index, ...(partner >= 0 ? { twin: partner } : {}), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
+    setPointSel({ id, indices: [flatIndex] })
+    pointDrag.current = { kind: 'anchor', id, geom, indices: [flatIndex], anchor: flatIndex, ...(flatPartner >= 0 ? { twin: flatPartner } : {}), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
   /** double click on a point: a sharp corner becomes a smooth curve point (handles a third of the way to each neighbour), or a curve point loses its handles and becomes a sharp corner again */
@@ -6200,14 +6418,16 @@ export function Workspace({
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
     const geomBase = geomOf(sh)
-    const ring = geomBase[0][0]
-    const v = ring[index]
+    const place = locateVertex(geomBase, index)
+    if (!place) return
+    const ring = geomBase[place.poly]![place.ring]!
+    const v = ring[place.index]!
     const nv: PathVertex = vertexHi(v) || vertexHo(v)
       ? vertexPoint(v)
       : (() => {
           const p = vertexPoint(v)
-          const prev = vertexPoint(ring[(index - 1 + ring.length) % ring.length])
-          const next = vertexPoint(ring[(index + 1) % ring.length])
+          const prev = vertexPoint(ring[(place.index - 1 + ring.length) % ring.length])
+          const next = vertexPoint(ring[(place.index + 1) % ring.length])
           const smooth: PathSmoothPoint = { p, hi: [(prev[0] - p[0]) / 3, (prev[1] - p[1]) / 3], ho: [(next[0] - p[0]) / 3, (next[1] - p[1]) / 3] }
           return smooth
         })()
@@ -6224,7 +6444,7 @@ export function Workspace({
     setSelectedId(id)
     setPointSel({ id, indices: [index] })
     dragSeq.current += 1
-    const vertex = geomOf(sh)[0][0][index]
+    const vertex = vertexAt(geomOf(sh), index)!
     pointDrag.current = { kind: 'handle', id, geom: geomOf(sh), index, which, forceMirror: !vertexHi(vertex) && !vertexHo(vertex), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `handle:${dragSeq.current}` }
     e.currentTarget.setPointerCapture(e.pointerId)
     vpRef.current!.setPointerCapture(e.pointerId)
@@ -6233,7 +6453,7 @@ export function Workspace({
   const moveAnchors = (d: Extract<NonNullable<typeof pointDrag.current>, { kind: 'anchor' }>, e: ReactPointerEvent<HTMLDivElement>) => {
     const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
     setSnapShown(snapped.lines)
-    const anchorFrac = vertexPoint(d.geom[0][0][d.anchor])
+    const anchorFrac = vertexPoint(vertexAt(d.geom, d.anchor)!)
     const anchorWorld = { x: d.box.x + anchorFrac[0] * d.box.w, y: d.box.y + anchorFrac[1] * d.box.h }
     const dx = snapped.p.x - anchorWorld.x
     const dy = snapped.p.y - anchorWorld.y
@@ -6241,14 +6461,17 @@ export function Workspace({
     // an Alt-grabbed edge: the point made on the opposite edge follows by the mirrored amount
     const twins = new Map<number, { dx: number; dy: number }>()
     if (d.twin !== undefined && !sel.has(d.twin)) twins.set(d.twin, mirrorAxis(d.geom, d.anchor, d.twin) === 'v' ? { dx: -dx, dy } : { dx, dy: -dy })
-    const world = d.geom.map((poly, pi) =>
-      poly.map((ring, ri) =>
-        ring.map((v, vi) => {
+    // the points are numbered across all the rings of the outline, one after the other
+    let counted = 0
+    const world = d.geom.map((poly) =>
+      poly.map((ring) =>
+        ring.map((v) => {
           const p = vertexPoint(v)
           const at = { x: d.box.x + p[0] * d.box.w, y: d.box.y + p[1] * d.box.h }
-          if (pi !== 0 || ri !== 0) return at
-          if (sel.has(vi)) return { x: at.x + dx, y: at.y + dy }
-          const twin = twins.get(vi)
+          const number = counted
+          counted += 1
+          if (sel.has(number)) return { x: at.x + dx, y: at.y + dy }
+          const twin = twins.get(number)
           return twin ? { x: at.x + twin.dx, y: at.y + twin.dy } : at
         }),
       ),
@@ -6281,7 +6504,7 @@ export function Workspace({
   const moveHandle = (d: Extract<NonNullable<typeof pointDrag.current>, { kind: 'handle' }>, e: ReactPointerEvent<HTMLDivElement>) => {
     const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
     setSnapShown(snapped.lines)
-    const v = d.geom[0][0][d.index]
+    const v = vertexAt(d.geom, d.index)!
     const anchorFrac = vertexPoint(v)
     const anchorWorld = { x: d.box.x + anchorFrac[0] * d.box.w, y: d.box.y + anchorFrac[1] * d.box.h }
     // the mirror keeps its angle and length in WORLD units, where a straight visual mirror is a straight numeric one too
@@ -6670,11 +6893,7 @@ export function Workspace({
     }
     const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
     if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && !marqueeTool) {
-      if (isolatedGroupId) {
-        setIsolatedGroupId(null)
-        setSelectedIdRaw(null)
-        setMultiSel(objectsInGroup(isolatedGroupId))
-      }
+      leaveIsolation()
       return // scrollbars
     }
     if (linkFrom && !panMode) {
@@ -7519,6 +7738,7 @@ export function Workspace({
     oversetCaret.current = false
     setFootnoteSel(null)
     if (itemLocks[id]) return
+    if (isolationTakes(id, e)) return
     if (placingImages.length > 0) return // the click places a picture on the page, even over a text frame
     const clicked = frames.find((f) => f.id === id)
     if (clicked) setSelectedPage(ownerPage(rects, clicked.x + clicked.w / 2, clicked.y + clicked.h / 2))
@@ -7778,6 +7998,7 @@ export function Workspace({
   const viewportClass =
     'viewport' +
     (previewMode ? ' preview' : '') +
+    (isolatedGroupId && selectedId ? ' isolating' : '') +
     (colorSamplerActive ? ' color-sampler-active' : '') +
     (rasterBrushColor ? ' raster-brush-active' : '') +
     (tool === 'feather' ? ' feathertool' : '') +
@@ -9373,10 +9594,34 @@ export function Workspace({
           else if (selImage) updateImage(selImage.id, { opacity: value }, `context-opacity:${selImage.id}`)
           else if (selFrame) updateFrame(selFrame.id, { opacity: value }, `context-opacity:${selFrame.id}`)
         }}
+        onBlendMode={(blendMode) => {
+          if (selShape) updateShape(selShape.id, { blendMode }, `context-blend:${selShape.id}`)
+          else if (selImage) updateImage(selImage.id, { blendMode }, `context-blend:${selImage.id}`)
+          else if (selFrame) updateFrame(selFrame.id, { blendMode }, `context-blend:${selFrame.id}`)
+        }}
+        onWhitePoint={(whitePoint) => selImage && updateImage(selImage.id, { whitePoint }, `context-white-point:${selImage.id}`)}
+        onAutoWhitePoint={() => {
+          const image = selImage
+          const asset = image && assets[image.assetId]
+          if (!image || !asset) return
+          void samplerCanvas(asset).then((canvas) => {
+            const context = canvas.getContext('2d', { willReadFrequently: true })
+            if (!context) return
+            const point = whitePointOfBorder(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
+            if (point === null) {
+              onNotify('לא נמצא רקע בהיר סביב התמונה: היא לבנה כבר, או שאין לה רקע. אפשר לכוונן את נקודת הלבן ידנית.')
+              return
+            }
+            updateImage(image.id, { whitePoint: point }, `context-white-point:${image.id}`)
+          })
+        }}
         onImageFit={(fit) => selImage && updateImage(selImage.id, { fit })}
         onImageFlip={(axis) => selImage && updateImage(selImage.id, axis === 'x' ? { flipX: !selImage.flipX } : { flipY: !selImage.flipY })}
         onImageWrap={(wrap) => selImage && updateImage(selImage.id, { wrap })}
         onImageMatchShape={() => { const asset = selImage && assets[selImage.assetId]; if (selImage && asset) updateImage(selImage.id, { h: selImage.w * (asset.height / asset.width) }) }}
+        onImageRemoveBackground={removeBackgroundFromSelection}
+        imageBackgroundRemovalDisabled={!selImage || !assets[selImage.assetId] || removingBackgroundId !== null}
+        removingImageBackground={!!selImage && removingBackgroundId === selImage.id}
         onImageDelete={() => { if (selImage) { onImagesChange(images.filter((image) => image.id !== selImage.id)); setSelectedId(null) } }}
         onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame ? applyCharStyle(selFrame.id, patch) : applyTableFormatting(patch)}
         onTextScale={(axis, percent) => selFrame && setFrameTextScale(selFrame.id, axis, percent)}
@@ -9700,7 +9945,7 @@ export function Workspace({
                   activeCorners={sh.id === selectedId ? [0, 1, 2, 3] : undefined}
                   together={roundTogether}
                   directMode={tool === 'direct'}
-                  selectedPoints={tool === 'direct' ? (editableRing(sh)?.map((_, index) => index) ?? undefined) : sh.id === pointSel?.id ? pointSel.indices : undefined}
+                  selectedPoints={tool === 'direct' ? (editablePoints(sh)?.map((point) => point.index) ?? undefined) : sh.id === pointSel?.id ? pointSel.indices : undefined}
                   asset={sh.image ? assets[sh.image.assetId] : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
@@ -9709,7 +9954,6 @@ export function Workspace({
                   onDoubleClick={() => {
                     if (relockParentOverride(sh.id)) return
                     if (enterGroupIsolation(sh.id)) {
-                      if (tool === 'select') setTool('direct')
                       setSelectedId(sh.id)
                       if (sh.pathText && tool === 'select') setPathEdit(sh.id)
                       return
@@ -10300,6 +10544,7 @@ export function Workspace({
                       }}
                       onRemoveBackground={removeBackgroundFromSelection}
                       removingBackground={removingBackgroundId !== null}
+                      onTraceToVector={traceImageFromSelection}
                       onDelete={() => {
                         onImagesChange(images.filter((im) => im.id !== selImage.id))
                         setSelectedId(null)
@@ -10584,6 +10829,11 @@ export function Workspace({
             { label: 'ביטול מיזוג תאים', disabled: !canUnmerge, onClick: () => { close(); runTableOp('unmerge') } },
           ]}
         />
+      })()}
+      {traceImageId !== null && (() => {
+        const image = images.find((candidate) => candidate.id === traceImageId)
+        const asset = image ? assets[image.assetId] : undefined
+        return image && asset ? <ImageTraceDialog image={image} asset={asset} onApply={applyImageTrace} onClose={() => setTraceImageId(null)} /> : null
       })()}
       {guidesDialog && (
         <CreateGuidesDialog

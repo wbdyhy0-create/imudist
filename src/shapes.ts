@@ -193,10 +193,89 @@ export function editableRing(s: ShapeFrame): PathVertex[] | null {
   return null
 }
 
-/** A copy of `geom`'s first ring (of its first polygon) with one vertex replaced; everything else — other rings, other
- * polygons (holes, extra pieces) — unchanged. */
-export function replaceVertex(geom: PathGeom, index: number, v: PathVertex): PathGeom {
-  return [[geom[0][0].map((old, i) => (i === index ? v : old)), ...geom[0].slice(1)], ...geom.slice(1)]
+/**
+ * The points the point-editing tool shows, numbered one after the other across all the rings of the outline (the first polygon's
+ * outer ring first, then its holes, then the next polygon): a compound path (letters turned into outlines, shapes united) has a
+ * ring for every letter, and every one of them is edited. Each point comes with the one after it in its own ring, for the edge between.
+ */
+export interface EditablePoint {
+  index: number
+  vertex: PathVertex
+  next: PathVertex
+}
+
+/** every point of the shape the point-editing tool can edit, or null when it has none (an ellipse) */
+export function editablePoints(s: ShapeFrame): EditablePoint[] | null {
+  const rings = s.kind === 'path' ? (s.geom ? s.geom.flat() : null) : (() => {
+    const ring = editableRing(s)
+    return ring ? [ring] : null
+  })()
+  if (!rings) return null
+  const points: EditablePoint[] = []
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i += 1) points.push({ index: points.length, vertex: ring[i]!, next: ring[(i + 1) % ring.length]! })
+  }
+  return points
+}
+
+/** where a numbered point is: its polygon, its ring, its place in that ring, and where its ring starts in the numbering */
+export function locateVertex(geom: PathGeom, flat: number): { poly: number; ring: number; index: number; start: number; length: number } | null {
+  let start = 0
+  for (let poly = 0; poly < geom.length; poly += 1) {
+    for (let ring = 0; ring < geom[poly]!.length; ring += 1) {
+      const length = geom[poly]![ring]!.length
+      if (flat >= start && flat < start + length) return { poly, ring, index: flat - start, start, length }
+      start += length
+    }
+  }
+  return null
+}
+
+/** the numbered point of an outline */
+export function vertexAt(geom: PathGeom, flat: number): PathVertex | undefined {
+  const at = locateVertex(geom, flat)
+  return at ? geom[at.poly]![at.ring]![at.index] : undefined
+}
+
+/** A copy of `geom` with one numbered point replaced; everything else (the other rings, holes, polygons) is unchanged. */
+export function replaceVertex(geom: PathGeom, flat: number, v: PathVertex): PathGeom {
+  const at = locateVertex(geom, flat)
+  if (!at) return geom
+  return geom.map((poly, pi) => (pi === at.poly ? poly.map((ring, ri) => (ri === at.ring ? ring.map((old, i) => (i === at.index ? v : old)) : ring)) : poly))
+}
+
+/**
+ * The outline without the numbered points. A ring left with fewer than three points is no shape: when all of its points were chosen
+ * it goes (and with it the holes of an outer ring that goes); when only some were, it is left as it was. Null when nothing is deleted
+ * or nothing would be left.
+ */
+export function deleteVertices(geom: PathGeom, flats: number[]): PathGeom | null {
+  const chosen = new Set(flats)
+  let start = 0
+  let changed = false
+  const next: PathGeom = []
+  for (const poly of geom) {
+    const rings: PathVertex[][] = []
+    let outerGone = false
+    poly.forEach((ring, ringIndex) => {
+      const kept = ring.filter((_, i) => !chosen.has(start + i))
+      const allChosen = kept.length === 0
+      start += ring.length
+      if (kept.length === ring.length) {
+        rings.push(ring)
+      } else if (kept.length >= 3) {
+        rings.push(kept)
+        changed = true
+      } else if (allChosen) {
+        changed = true
+        if (ringIndex === 0) outerGone = true
+      } else {
+        rings.push(ring)
+      }
+    })
+    if (!outerGone && rings.length > 0) next.push(rings)
+  }
+  return changed && next.length > 0 ? next : null
 }
 
 /**

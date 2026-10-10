@@ -5,8 +5,10 @@ import { emptyReport, PICTURE_REASONS, type PictureReason, type VectorReport } f
 import { SHAPE_PICTURE_REASONS, type ShapePictureReason } from '../vectorShapes'
 import { isTauri } from '../fileio'
 import { linkStatus } from '../imageLinks'
-import { formatNumber, fromPt, toPt, type Unit } from '../units'
+import type { Unit } from '../units'
 import { NumberField } from './NumberField'
+import { initialPrintMarks, printMarksOptions } from '../printSheet'
+import { PrintMarksFields } from './PrintMarksFields'
 
 interface Props {
   doc: DocSettings
@@ -31,7 +33,6 @@ const COLOR_MODES = [
   { mode: 'cmyk' as const, label: 'CMYK — להדפסה בדפוס' },
 ]
 const CMYK_NOTE = 'הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.'
-const DEFAULT_BLEED_MM = 3
 
 /** File > ייצוא ל-PDF…: every page rendered as a sharp image (see pdfExport.ts for why — this is a deliberate
  *  choice, not a shortcut: it's what actually guarantees the Hebrew text can never come out scrambled), with the
@@ -40,9 +41,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(doc.pages)
-  const [bleedOn, setBleedOn] = useState(doc.bleed.top > 0 || doc.bleed.right > 0)
-  const [bleedPt, setBleedPt] = useState(doc.bleed.top > 0 ? doc.bleed.top : toPt(DEFAULT_BLEED_MM, 'mm'))
-  const [cropMarks, setCropMarks] = useState(false)
+  const [marks, setMarks] = useState(() => initialPrintMarks(doc))
   const [dpi, setDpi] = useState(300)
   const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
   const [vectorText, setVectorText] = useState(false)
@@ -79,9 +78,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
         { doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections },
         {
           range: rangeMode === 'all' ? null : { from: clampedFrom, to: clampedTo },
-          bleed: bleedOn,
-          bleedPt,
-          cropMarks: bleedOn && cropMarks,
+          ...printMarksOptions(marks),
           dpi,
           colorMode,
           vectorText,
@@ -135,25 +132,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
           </div>
         )}
 
-        <label className="page-bar-check">
-          <input type="checkbox" checked={bleedOn} onChange={(e) => setBleedOn(e.target.checked)} />
-          כלול שולי גלישה (Bleed) וסימני חיתוך
-        </label>
-        {bleedOn && (
-          <div className="dlg-cols">
-            <div className="field">
-              <div className="field-label">גודל שולי הגלישה</div>
-              <NumberField value={bleedPt} onChange={setBleedPt} unit={unit} min={0} max={toPt(50, 'mm')} />
-            </div>
-            <label className="page-bar-check" style={{ alignSelf: 'end', marginBottom: 6 }}>
-              <input type="checkbox" checked={cropMarks} onChange={(e) => setCropMarks(e.target.checked)} />
-              הצג סימני חיתוך
-            </label>
-          </div>
-        )}
-        <p className="muted">
-          שולי הגלישה מוסיפים {formatNumber(fromPt(bleedPt, unit))} {unit === 'mm' ? 'מ״מ' : ''} סביב כל עמוד, כדי שרקעים ותמונות שמגיעים עד קצה העמוד יודפסו בלי פס לבן אחרי החיתוך.
-        </p>
+        <PrintMarksFields value={marks} onChange={setMarks} unit={unit} disabled={!!busy} />
 
         <div className="field">
           <div className="field-label">איכות תמונות</div>

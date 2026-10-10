@@ -21,6 +21,8 @@ export interface VectorGlyph {
   size: number
   /** degrees, clockwise: the turn of the frame the letter is in */
   angle: number
+  /** the width of the letter's box (it is wider than the letter where there is tracking), in points */
+  width?: number
   font: LoadedFont
   color: [number, number, number]
 }
@@ -257,7 +259,7 @@ export async function extractGlyphs(
         const centerY = rect.top + rect.height / 2
         if (centerX < box.left - 0.5 || centerX > box.right + 0.5 || centerY < box.top - 0.5 || centerY > box.bottom + 0.5) continue
         const at = placeOnPage(frame, rect.left - origin.left, rect.top - origin.top + ascent)
-        glyphs.push({ text: cluster.text, x: at.x, baseline: at.y, size: run.size * frame.scale, angle: frame.rotation, font, color: run.color })
+        glyphs.push({ text: cluster.text, x: at.x, baseline: at.y, size: run.size * frame.scale, angle: frame.rotation, width: rect.width * frame.scale, font, color: run.color })
       }
     }
     return { glyphs }

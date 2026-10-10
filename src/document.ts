@@ -386,10 +386,24 @@ export function textFlowBoxOf(frame: Pick<TextFrame, 'w' | 'h' | 'textScale'>): 
  * `runs` cover `text` exactly; the style fields of the frame are the story's defaults (used for empty text
  * and as the base when a run list is missing).
  */
+/**
+ * How an object is mixed with what is under it (a blend mode); missing = normal, the object simply covers what is under it.
+ * multiply: the colours are multiplied, the result is always darker and white disappears; screen: the opposite, black disappears.
+ */
+export type BlendMode = 'multiply' | 'screen'
+
+/** the blend modes, in the order they are offered, with the names the interface gives them */
+export const BLEND_MODES: { id: BlendMode; label: string }[] = [
+  { id: 'multiply', label: 'כפל (Multiply)' },
+  { id: 'screen', label: 'מסך (Screen)' },
+]
+
 export interface TextFrame extends TextStyle {
   id: string
   /** opacity of the text drawn in this frame, 0…1; missing = fully opaque */
   opacity?: number
+  /** how the frame is mixed with what is under it; missing = normal */
+  blendMode?: BlendMode
   feather?: Feather
   /** the text remains in its thread as an invisible flow carrier after a marquee cut is rasterized */
   rasterized?: boolean
@@ -574,6 +588,10 @@ export interface ImageFrame {
   assetId: string
   fit: ImageFit
   opacity?: number
+  /** how the picture is mixed with what is under it; missing = normal */
+  blendMode?: BlendMode
+  /** with "multiply": the level (128-254) taken as white, so that the not quite white paper of a logo disappears; missing = the picture as it is */
+  whitePoint?: number
   shadowOffsetX?: number
   shadowOffsetY?: number
   shadowOffset?: number
@@ -718,6 +736,8 @@ export interface ShapeFrame {
   fill: string | null
   /** object opacity, 0…1; missing = fully opaque */
   opacity?: number
+  /** how the shape is mixed with what is under it; missing = normal */
+  blendMode?: BlendMode
   shadowOffsetX?: number
   shadowOffsetY?: number
   shadowOffset?: number

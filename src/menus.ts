@@ -61,6 +61,8 @@ export interface MenuContext {
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
   exportPdf: () => void
+  /** the page as the four inks of a press, each shown or hidden (View > Separation Preview) */
+  separationPreview: () => void
   exportPng: () => void
   /** a new book (a set of documents kept together as chapters) */
   newBook: () => void
@@ -185,8 +187,6 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           submenu: [tool('טקסט', 'type', 'T'), tool('טקסט על קו', 'pathtype', 'Shift+T'), tool('דוגם סגנון', 'eyedropper', 'I')],
         },
         sep,
-        off('יצירת קווי מתאר', 'Ctrl+Shift+O'),
-        sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
         doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
         doc('יצירת חלון בטקסט…', '', (ws) => ws.windowText()),
@@ -229,6 +229,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
         sep,
         doc('הסר רקע מהתמונה הנבחרת', '', (ws) => ws.removeBackgroundFromSelection()),
+        doc('המר תמונה לווקטור…', '', (ws) => ws.traceImageFromSelection()),
+        doc('המר טקסט לווקטור', 'Ctrl+Shift+O', (ws) => ws.createOutlinesFromSelection()),
         sep,
         off('שינוי צורה'),
         {
@@ -249,6 +251,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             doc('החרגה', 'Ctrl+Alt+E', (ws) => ws.shapeOp('exclude')),
           ],
         },
+        doc('שחרר נתיב מורכב', '', (ws) => ws.releaseCompoundPaths()),
         sep,
         doc('קבץ', 'Ctrl+G', (ws) => ws.group()),
         doc('בטל קיבוץ', 'Ctrl+Shift+G', (ws) => ws.ungroup()),
@@ -297,6 +300,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'סרגלים', shortcut: 'Ctrl+R', checked: c.showRulers, onClick: c.toggleRulers },
         { label: 'קווי עזר', shortcut: 'Ctrl+;', checked: c.showGuides, onClick: c.toggleGuides },
         { label: 'תווים נסתרים', shortcut: 'Ctrl+Shift+8', checked: c.showHiddenChars, onClick: c.toggleHiddenChars },
+        sep,
+        { label: 'תצוגת הפרדת צבעים…', disabled: !c.hasDoc, onClick: c.separationPreview },
         sep,
         {
           label: 'מצב מסך',

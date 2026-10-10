@@ -1,5 +1,5 @@
 /**
- * The footnote converter (a script of the InDesign days, "ממיר הערות שוליים", brought into the program): notes written inside the
+ * The footnote converter (a script that was run by hand before, "ממיר הערות שוליים", brought into the program): notes written inside the
  * text in brackets become real footnotes, and footnotes become notes in brackets again. Pure functions on a story; Workspace.tsx
  * gives them the stories, the selection and the one undo step.
  */
@@ -110,7 +110,7 @@ function rewriteStory(frame: TextFrame, edits: Edit[], added: { note: FootnoteIt
 /**
  * The story of `frame` with every note in brackets turned into a footnote: the brackets and what is in them leave the text, a
  * footnote reference stands in their place, and the footnote has the text that was in the brackets and the paragraph style
- * (`paragraphStyleId`) the converter was told. As in InDesign, the bracketed text is taken as plain text, so the footnote
+ * (`paragraphStyleId`) the converter was told. The bracketed text is taken as plain text, so the footnote
  * looks like footnotes do. A bracket that holds a footnote already, or nothing but spaces, is left as it is.
  */
 export function inlineNotesToFootnotes(
@@ -160,7 +160,7 @@ const inlineText = (content: string) => content.replace(/^[\s ]+|[\s ]+$/g, '').
 
 /**
  * The story of `frame` with every footnote turned into a note in brackets: its reference is replaced by the bracketed text and the footnote's
- * text in the brackets, and the footnote is gone. (The text is plain, as in InDesign: it takes the look of the text around it.)
+ * text in the brackets, and the footnote is gone. (The text is plain: it takes the look of the text around it.)
  */
 export function footnotesToInlineNotes(
   frame: TextFrame,

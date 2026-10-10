@@ -131,6 +131,11 @@ describe('sweeping the brush round a whole selection', () => {
         for (let step = 1; step <= steps; step += 1) line.push({ x: Math.round(last.x + ((to.x - last.x) * step) / steps), y: Math.round(last.y + ((to.y - last.y) * step) / steps) })
       }
     }
+    // ... and closed: the last stretch runs back to where it began
+    const first = line[0]!
+    const last = line[line.length - 1]!
+    const closing = Math.max(Math.abs(first.x - last.x), Math.abs(first.y - last.y))
+    for (let step = 1; step < closing; step += 1) line.push({ x: Math.round(last.x + ((first.x - last.x) * step) / closing), y: Math.round(last.y + ((first.y - last.y) * step) / closing) })
     return line
   }
   const sweep = (line: MagneticPoint[], at: number, mode: 'expand' | 'contract') => {
@@ -164,7 +169,9 @@ describe('sweeping the brush round a whole selection', () => {
     for (let degrees = 0; degrees <= 360; degrees += 3) {
       current = adjustMagneticPath(current, { x: 300 + 268 * Math.cos((degrees * Math.PI) / 180), y: 300 + 268 * Math.sin((degrees * Math.PI) / 180) }, flat, 47, 'contract')
     }
-    expect(current).toBe(line)
+    // with no edge to go to the line may only lose its thorns: it is where it was, to within a few pixels
+    const stray = current.map((point) => Math.min(...line.map((other) => Math.hypot(other.x - point.x, other.y - point.y))))
+    expect(Math.max(...stray)).toBeLessThanOrEqual(3)
   })
 })
 
@@ -225,5 +232,64 @@ describe('cleaning a line after a brush stroke', () => {
     }
     // nothing settled: nothing is smoothed
     expect(lengthOf(cleanMagneticPath(wavy, new Set(), SIZE))).toBeGreaterThan(lengthOf(wavy) * 0.9)
+  })
+})
+
+describe('a thorn on the line', () => {
+  /** a box with its left side at x=20 and a thorn on that side, pointing out (to the left) `length` pixels at row 30 */
+  function boxWithThorn(length: number) {
+    const line: MagneticPoint[] = []
+    for (let x = 20; x < 60; x += 1) line.push({ x, y: 10 })
+    for (let y = 10; y < 50; y += 1) line.push({ x: 60, y })
+    for (let x = 60; x > 20; x -= 1) line.push({ x, y: 50 })
+    // up the left side, with the thorn: out along a diagonal and back
+    for (let y = 50; y > 33; y -= 1) line.push({ x: 20, y })
+    for (let step = 1; step <= length; step += 1) line.push({ x: 20 - step, y: 33 - Math.floor(step / 2) })
+    for (let step = length; step >= 0; step -= 1) line.push({ x: 20 - step, y: 30 })
+    for (let y = 29; y > 10; y -= 1) line.push({ x: 20, y })
+    return line
+  }
+  const edgeAtColumn = (column: number) => {
+    const map = { width: 80, height: 70, strengths: new Uint8Array(80 * 70) }
+    for (let y = 1; y < 69; y += 1) map.strengths[y * map.width + column] = 255
+    return map
+  }
+  const leftmost = (line: MagneticPoint[]) => Math.min(...line.map((point) => point.x))
+
+  it('is taken into the line by the minus circle that comes up to it from outside', () => {
+    const line = boxWithThorn(5)
+    expect(leftmost(line)).toBe(15)
+    // the circle is outside the box, to the left, and covers the thorn
+    const pushed = adjustMagneticPath(line, { x: 12, y: 31 }, edgeAtColumn(20), 8, 'contract', new Set())
+    expect(leftmost(pushed)).toBeGreaterThanOrEqual(19)
+  })
+
+  it('is taken in even when the picture has no edge there to go to', () => {
+    const flat = { width: 80, height: 70, strengths: new Uint8Array(80 * 70) }
+    const pushed = adjustMagneticPath(boxWithThorn(5), { x: 12, y: 31 }, flat, 8, 'contract', new Set())
+    // five pixels out before, no more than two now (the stroke goes on, and takes the rest in on the next move)
+    expect(leftmost(pushed)).toBeGreaterThanOrEqual(18)
+  })
+
+  it('is taken in when it lies on the wide hill of a soft edge, where the line would otherwise be left as it is', () => {
+    // a soft edge in column 20, about thirteen pixels wide: the thorn's tip is still on its flank
+    const map = { width: 80, height: 70, strengths: new Uint8Array(80 * 70), broad: new Uint8Array(80 * 70), broadHill: new Uint8Array(80 * 70), broadScale: 128 }
+    for (let y = 1; y < 69; y += 1) {
+      for (let x = 1; x < 79; x += 1) {
+        const value = Math.max(0, Math.round(128 * (1 - Math.abs(x - 20) / 8)))
+        map.broadHill[y * 80 + x] = value
+        map.broad[y * 80 + x] = x === 20 ? 128 : Math.round(value * 0.3)
+      }
+    }
+    const pushed = adjustMagneticPath(boxWithThorn(5), { x: 13, y: 31 }, map, 8, 'contract', new Set())
+    expect(leftmost(pushed)).toBeGreaterThanOrEqual(18)
+  })
+
+  it('does not cut off the corner of a shape', () => {
+    const line = boxWithThorn(0)
+    const flat = { width: 80, height: 70, strengths: new Uint8Array(80 * 70) }
+    // the minus circle comes up to the top left corner from outside
+    const pushed = adjustMagneticPath(line, { x: 15, y: 5 }, flat, 8, 'contract', new Set())
+    expect(pushed).toBe(line)
   })
 })

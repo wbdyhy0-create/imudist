@@ -472,6 +472,7 @@ export function TextFrameView(p: Props) {
         width: frame.w * p.zoom,
         height: frame.h * p.zoom,
         transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
+        mixBlendMode: frame.blendMode,
         pointerEvents: frame.rasterized ? 'none' : undefined,
       }}
       onPointerDown={p.onPointerDown}

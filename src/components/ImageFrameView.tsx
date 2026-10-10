@@ -1,10 +1,17 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Asset, Feather, ImageFrame } from '../document'
 import { featherMaskStyles } from '../feather'
+import { effectiveWhitePoint, whitePointGain } from '../whitePoint'
 import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { useDisplaySrc } from '../imageProxy'
 import { useLinkStatus } from '../imageLinks'
+
+/** the screen raises the picture's levels with `brightness`, which is what the white point does (only with the blend mode multiply) */
+function whitePointFilter(image: ImageFrame) {
+  const point = image.blendMode === 'multiply' ? effectiveWhitePoint(image.whitePoint) : null
+  return point ? `brightness(${whitePointGain(point)})` : undefined
+}
 
 interface Props {
   image: ImageFrame
@@ -51,6 +58,7 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
         transform: image.rotation || image.flipX || image.flipY ? `${image.rotation ? `rotate(${image.rotation}deg) ` : ''}scale(${image.flipX ? -1 : 1}, ${image.flipY ? -1 : 1})` : undefined,
         transformOrigin: 'center',
         opacity: image.opacity ?? 1,
+        mixBlendMode: image.blendMode,
       }}
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick}
@@ -64,7 +72,7 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
             // the copy of a big picture is a moment away the first time: nothing (not the alt text) shows until then
             visibility: src ? undefined : 'hidden',
             objectFit: OBJECT_FIT[image.fit],
-            filter: dropShadowFilter(image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, zoom, image.shadowColor),
+            filter: [whitePointFilter(image), dropShadowFilter(image.shadowOffsetX, image.shadowOffsetY ?? image.shadowOffset, image.shadowOpacity, zoom, image.shadowColor)].filter(Boolean).join(' ') || undefined,
             ...(featherOverride ?? image.feather ? featherMaskStyles(featherOverride ?? image.feather!, image.w * zoom, image.h * zoom, zoom) : {}),
           }}
         />

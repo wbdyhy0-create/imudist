@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { CharStyle, ColorSample, ImageFrame, ShapeFrame, TextAlign, TextFrame, TextStyle } from '../document'
+import { BLEND_MODES, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { FillPicker } from './FillPicker'
 import { ALIGNS } from './PropertiesPanel'
 import { ArrangeButtons } from './ArrangeButtons'
@@ -7,6 +7,17 @@ import type { ToolId } from './Toolbox'
 import type { ArrangeOp } from '../stacking'
 import { useFontCatalog } from '../fonts'
 import { FontPicker } from './FontPicker'
+
+/** the choice of how an object is mixed with what is under it */
+const blendSelect = (value: BlendMode | undefined, onChange: (mode: BlendMode | undefined) => void) => (
+  <label className="context-field" title="מצב שילוב: איך האובייקט משתלב עם מה שמתחתיו">
+    <span>מצב שילוב</span>
+    <select aria-label="מצב שילוב" value={value ?? ''} onChange={(event) => onChange(event.target.value ? (event.target.value as BlendMode) : undefined)}>
+      <option value="">רגיל</option>
+      {BLEND_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+    </select>
+  </label>
+)
 
 interface Props {
   tool: ToolId
@@ -30,10 +41,19 @@ interface Props {
   onFlip: (axis: 'x' | 'y') => void
   onArrange: (op: ArrangeOp) => void
   onOpacity: (value: number) => void
+  /** how the selected object is mixed with what is under it (undefined: normal) */
+  onBlendMode?: (mode: BlendMode | undefined) => void
+  /** the level taken as white for a picture multiplied with what is under it (undefined: the picture as it is) */
+  onWhitePoint?: (value: number | undefined) => void
+  /** finds the level of the picture's paper (its border) and sets the white point to it */
+  onAutoWhitePoint?: () => void
   onImageFit?: (fit: ImageFrame['fit']) => void
   onImageFlip?: (axis: 'x' | 'y') => void
   onImageWrap?: (wrap: ImageFrame['wrap']) => void
   onImageMatchShape?: () => void
+  onImageRemoveBackground?: () => void
+  imageBackgroundRemovalDisabled?: boolean
+  removingImageBackground?: boolean
   onImageDelete?: () => void
   onCharStyle?: (patch: Partial<CharStyle>) => void
   onFontPreview?: (family: string | null) => void
@@ -61,7 +81,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   eraser: 'מחק',
 }
 
-export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? 'כלי'
   const char = (textStyle ?? tableText ?? frame) as CharStyle
   const fontCatalog = useFontCatalog()
@@ -151,8 +171,9 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText
       )}
       {shape && <div className="context-flip-buttons" role="group" aria-label="היפוך צורה"><button className="context-command" title="היפוך אופקי" onClick={() => onFlip('x')}>⇋</button><button className="context-command" title="היפוך אנכי" onClick={() => onFlip('y')}>⇵</button></div>}
       {(shape || image || frame) && <ArrangeButtons onArrange={onArrange} compact />}
+      {shape && onBlendMode && blendSelect(shape.blendMode, onBlendMode)}
       {shape && <label className="context-field"><span>שקיפות</span><input type="range" min="0" max="100" value={Math.round((shape.opacity ?? 1) * 100)} onChange={(event) => onOpacity(Number(event.target.value) / 100)} /><span>{Math.round((shape.opacity ?? 1) * 100)}%</span></label>}
-      {image && <><div className="context-image-fits" role="group" aria-label="מאפייני תמונה"><button title="מילוי המסגרת בתמונה" className={image.fit === 'fill' ? 'on' : ''} onClick={() => onImageFit?.('fill')}>מילוי</button><button title="התאמת התמונה בלי חיתוך" className={image.fit === 'fit' ? 'on' : ''} onClick={() => onImageFit?.('fit')}>התאמה</button><button title="מתיחת התמונה לגודל המסגרת" className={image.fit === 'stretch' ? 'on' : ''} onClick={() => onImageFit?.('stretch')}>מתיחה</button></div><div className="context-image-wrap" role="group" aria-label="עטיפת טקסט"><button title="ללא עטיפת טקסט" className={!image.wrap || image.wrap === 'none' ? 'on' : ''} onClick={() => onImageWrap?.('none')}>ללא</button><button title="טקסט מסביב לתמונה" className={image.wrap === 'around' ? 'on' : ''} onClick={() => onImageWrap?.('around')}>מסביב</button><button title="טקסט מעל ומתחת לתמונה" className={image.wrap === 'jump' ? 'on' : ''} onClick={() => onImageWrap?.('jump')}>קפיצה</button></div><div className="context-flip-buttons" role="group" aria-label="היפוך תמונה"><button className="context-command" title="היפוך אופקי" onClick={() => onImageFlip?.('x')}>⇋</button><button className="context-command" title="היפוך אנכי" onClick={() => onImageFlip?.('y')}>⇵</button></div><button className="context-command" title="התאם את המסגרת ליחס התמונה" onClick={onImageMatchShape}>התאם מסגרת</button><label className="context-field" title="שקיפות התמונה"><span>שקיפות</span><input type="range" min="0" max="100" value={Math.round((image.opacity ?? 1) * 100)} onChange={(event) => onOpacity(Number(event.target.value) / 100)} /><span>{Math.round((image.opacity ?? 1) * 100)}%</span></label><button className="context-command danger" title="מחק את התמונה" onClick={onImageDelete}>מחק תמונה</button></>}
+      {image && <><div className="context-image-fits" role="group" aria-label="מאפייני תמונה"><button title="מילוי המסגרת בתמונה" className={image.fit === 'fill' ? 'on' : ''} onClick={() => onImageFit?.('fill')}>מילוי</button><button title="התאמת התמונה בלי חיתוך" className={image.fit === 'fit' ? 'on' : ''} onClick={() => onImageFit?.('fit')}>התאמה</button><button title="מתיחת התמונה לגודל המסגרת" className={image.fit === 'stretch' ? 'on' : ''} onClick={() => onImageFit?.('stretch')}>מתיחה</button></div><div className="context-image-wrap" role="group" aria-label="עטיפת טקסט"><button title="ללא עטיפת טקסט" className={!image.wrap || image.wrap === 'none' ? 'on' : ''} onClick={() => onImageWrap?.('none')}>ללא</button><button title="טקסט מסביב לתמונה" className={image.wrap === 'around' ? 'on' : ''} onClick={() => onImageWrap?.('around')}>מסביב</button><button title="טקסט מעל ומתחת לתמונה" className={image.wrap === 'jump' ? 'on' : ''} onClick={() => onImageWrap?.('jump')}>קפיצה</button></div><div className="context-flip-buttons" role="group" aria-label="היפוך תמונה"><button className="context-command" title="היפוך אופקי" onClick={() => onImageFlip?.('x')}>⇋</button><button className="context-command" title="היפוך אנכי" onClick={() => onImageFlip?.('y')}>⇵</button></div><button className="context-command" title="התאם את המסגרת ליחס התמונה" onClick={onImageMatchShape}>התאם מסגרת</button><button type="button" className="context-command" title="הסרת הרקע מתבצעת במחשב" onClick={onImageRemoveBackground} disabled={imageBackgroundRemovalDisabled}>{removingImageBackground ? 'מסיר רקע…' : 'הסר רקע'}</button>{onBlendMode && blendSelect(image.blendMode, onBlendMode)}{image.blendMode === 'multiply' && onWhitePoint && <><label className="context-field" title="הרמה שנחשבת ללבן: מה שבהיר ממנה הופך ללבן מלא ונעלם בכפל. הורידו אותה כשהרקע של הלוגו לא לבן לגמרי"><span>נקודת לבן</span><input type="range" min="128" max="255" value={image.whitePoint ?? 255} onChange={(event) => onWhitePoint(Number(event.target.value) >= 255 ? undefined : Number(event.target.value))} /><span>{image.whitePoint ?? 255}</span></label><button type="button" className="context-command" title="מזהה את הלבן של התמונה לפי הקצה שלה" onClick={onAutoWhitePoint}>זהה אוטומטית</button></>}<label className="context-field" title="שקיפות התמונה"><span>שקיפות</span><input type="range" min="0" max="100" value={Math.round((image.opacity ?? 1) * 100)} onChange={(event) => onOpacity(Number(event.target.value) / 100)} /><span>{Math.round((image.opacity ?? 1) * 100)}%</span></label><button className="context-command danger" title="מחק את התמונה" onClick={onImageDelete}>מחק תמונה</button></>}
       {frame && <>
         <div className="context-text-controls" aria-label="מאפייני טקסט">
           <FontPicker
@@ -194,6 +215,7 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText
               </label>
             )}
           </div>
+          {onBlendMode && blendSelect(frame.blendMode, onBlendMode)}
           <label className="context-field" title="מרווח שורות"><span>מרווח שורות</span><input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? para.leading : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />pt</label>
           <label className="context-field" title="קנה מידה אופקי של הטקסט"><span>רוחב</span><input aria-label="קנה מידה אופקי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.x ?? 1) * 100)} onChange={(event) => onTextScale?.('x', Number(event.target.value))} />%</label>
           <label className="context-field" title="קנה מידה אנכי של הטקסט"><span>גובה</span><input aria-label="קנה מידה אנכי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.y ?? 1) * 100)} onChange={(event) => onTextScale?.('y', Number(event.target.value))} />%</label>

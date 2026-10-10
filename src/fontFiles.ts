@@ -45,8 +45,11 @@ export function sfntKind(bytes: Uint8Array): 'truetype' | 'cff' | 'collection' |
   return 'unknown'
 }
 
-/** Whether the font has a glyph for a character, read from the font's own character table (null when there is no usable one). */
-export function glyphLookup(bytes: Uint8Array): ((codePoint: number) => boolean) | null {
+/**
+ * The glyph a font has for a character (0 = none), read from the font's own character table (null when there is no usable one).
+ * Used to know what a font can show, and to find the shapes of the letters (see glyphOutlines.ts).
+ */
+export function glyphIndexLookup(bytes: Uint8Array): ((codePoint: number) => number) | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   if (bytes.length < 12) return null
   const tables = view.getUint16(4)
@@ -80,11 +83,11 @@ export function glyphLookup(bytes: Uint8Array): ((codePoint: number) => boolean)
     return (codePoint) => {
       for (let i = 0; i < groups; i++) {
         const group = chosen + 16 + i * 12
-        if (group + 12 > bytes.length) return false
-        if (codePoint < view.getUint32(group)) return false
-        if (codePoint <= view.getUint32(group + 4)) return view.getUint32(group + 8) + (codePoint - view.getUint32(group)) > 0
+        if (group + 12 > bytes.length) return 0
+        if (codePoint < view.getUint32(group)) return 0
+        if (codePoint <= view.getUint32(group + 4)) return view.getUint32(group + 8) + (codePoint - view.getUint32(group))
       }
-      return false
+      return 0
     }
   }
   const segmentsX2 = view.getUint16(chosen + 6)
@@ -93,21 +96,27 @@ export function glyphLookup(bytes: Uint8Array): ((codePoint: number) => boolean)
   const deltas = starts + segmentsX2
   const rangeOffsets = deltas + segmentsX2
   return (codePoint) => {
-    if (codePoint > 0xffff) return false
+    if (codePoint > 0xffff) return 0
     for (let s = 0; s < segmentsX2; s += 2) {
       if (codePoint > view.getUint16(ends + s)) continue
       const start = view.getUint16(starts + s)
-      if (codePoint < start) return false
+      if (codePoint < start) return 0
       const delta = view.getInt16(deltas + s)
       const rangeOffset = view.getUint16(rangeOffsets + s)
-      if (rangeOffset === 0) return ((codePoint + delta) & 0xffff) !== 0
+      if (rangeOffset === 0) return (codePoint + delta) & 0xffff
       const at = rangeOffsets + s + rangeOffset + (codePoint - start) * 2
-      if (at + 2 > bytes.length) return false
+      if (at + 2 > bytes.length) return 0
       const glyph = view.getUint16(at)
-      return glyph !== 0 && ((glyph + delta) & 0xffff) !== 0
+      return glyph === 0 ? 0 : (glyph + delta) & 0xffff
     }
-    return false
+    return 0
   }
+}
+
+/** Whether the font has a glyph for a character (null when its character table cannot be used). */
+export function glyphLookup(bytes: Uint8Array): ((codePoint: number) => boolean) | null {
+  const index = glyphIndexLookup(bytes)
+  return index ? (codePoint) => index(codePoint) > 0 : null
 }
 
 interface InstalledFont {

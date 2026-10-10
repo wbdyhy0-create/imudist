@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { isTauri } from '../fileio'
-import { toPt } from '../units'
-import { NumberField } from './NumberField'
 import { VectorSummary } from './ExportPdfDialog'
+import { initialPrintMarks, printMarksOptions } from '../printSheet'
+import { PrintMarksFields } from './PrintMarksFields'
 import { emptyReport, type VectorReport } from '../vectorText'
 import { basenameOf, type ChapterStart } from '../book'
 import { canKeepBooks } from '../bookStorage'
@@ -340,9 +340,7 @@ const COLOR_CHOICES = [
 /** The book as one PDF: the same choices as a single document's export, for every page of every chapter. */
 export function BookExportDialog({ controller }: { controller: BookController }) {
   const { book, numbering, exportOpen, exportProgress, busy } = controller
-  const [bleedOn, setBleedOn] = useState(false)
-  const [bleedPt, setBleedPt] = useState(toPt(3, 'mm'))
-  const [cropMarks, setCropMarks] = useState(false)
+  const [marks, setMarks] = useState(() => initialPrintMarks())
   const [dpi, setDpi] = useState(300)
   const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
   const [vectorText, setVectorText] = useState(false)
@@ -363,7 +361,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
       view.document.body.textContent = 'מייצא PDF, נא להמתין…'
     }
     const vectorReport = vectorText ? emptyReport() : undefined
-    const done = await controller.runExport({ bleed: bleedOn, bleedPt, cropMarks: bleedOn && cropMarks, dpi, colorMode, vectorText, vectorReport }, view)
+    const done = await controller.runExport({ ...printMarksOptions(marks), dpi, colorMode, vectorText, vectorReport }, view)
     if (done && vectorReport) setResult(vectorReport)
   }
   return (
@@ -373,22 +371,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
         <p className="muted">
           {plural(book.chapters.length, 'פרק אחד', 'פרקים')}, {numbering.totalPages} עמודים, מהעמוד {book.settings.startPage}. הספר יוצא לקובץ אחד לפי סדר הפרקים, עם הספרור של הספר, עמוד ריק היכן שפרק צריך להתחיל בעמוד אי-זוגי או זוגי, וסימנייה לכל פרק.
         </p>
-        <label className="page-bar-check">
-          <input type="checkbox" checked={bleedOn} onChange={(event) => setBleedOn(event.target.checked)} disabled={busy} />
-          כלול שולי גלישה (Bleed) וסימני חיתוך
-        </label>
-        {bleedOn && (
-          <div className="dlg-cols">
-            <div className="field">
-              <div className="field-label">גודל שולי הגלישה</div>
-              <NumberField value={bleedPt} onChange={setBleedPt} unit="mm" min={0} max={toPt(50, 'mm')} />
-            </div>
-            <label className="page-bar-check" style={{ alignSelf: 'end', marginBottom: 6 }}>
-              <input type="checkbox" checked={cropMarks} onChange={(event) => setCropMarks(event.target.checked)} disabled={busy} />
-              הצג סימני חיתוך
-            </label>
-          </div>
-        )}
+        <PrintMarksFields value={marks} onChange={setMarks} unit="mm" disabled={busy} />
         <div className="field">
           <div className="field-label">איכות תמונות</div>
           <div className="seg small" role="radiogroup" aria-label="איכות תמונות">
