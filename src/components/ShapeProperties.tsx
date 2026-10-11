@@ -1,4 +1,5 @@
-import { DEFAULT_SHADOW_OFFSET, MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type Feather, type LineCap, type PathSide, type PathText, type ShapeFrame } from '../document'
+import { DEFAULT_SHADOW_OFFSET, MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type CharStyle, type Feather, type LineCap, type PathSide, type PathText, type Sharpness, type ShapeFrame } from '../document'
+import { lineLook, MAX_BLUR, SHARPNESS_LEVELS } from '../sharpness'
 import type { Box } from '../frames'
 import { SHAPE_NAMES, SIDE_NAMES, fitRadii } from '../shapes'
 import type { ArrangeOp } from '../stacking'
@@ -38,6 +39,13 @@ interface Props {
 type Radii = [number, number, number, number]
 
 /** The properties panel of a selected shape. */
+/** the sharpness level a line or a drawn path is at: blurred is soft, flat ends are sharp, round ones are medium */
+function sharpnessOf(shape: ShapeFrame): Sharpness {
+  if ((shape.blur ?? 0) > 0) return 'soft'
+  if (shape.kind === 'line') return shape.strokeCap === 'round' || shape.strokeCap === 'square' ? 'medium' : 'sharp'
+  return shape.strokeCap === 'butt' ? 'sharp' : 'medium'
+}
+
 export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeatherTool, onArrange, onDelete, linked, onLinkedChange, cornersPicked, onPickAllCorners, pathStyle, pathScope, onPathChar, onPathChange, onEditPath, onRemovePath }: Props) {
   const radii: Radii = shape.radii ?? [0, 0, 0, 0]
   const shown = fitRadii(radii, shape.w, shape.h)
@@ -244,6 +252,37 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
       )}
 
       {shape.kind === 'line' && <LineProfileControls widths={shape.lineWidths ?? [1, 1, 1]} onChange={(lineWidths) => onChange({ lineWidths })} />}
+
+      {(shape.kind === 'line' || shape.kind === 'path') && !!shape.stroke && (
+        <Group title="חדות הקו">
+          <div className="seg small" role="radiogroup" aria-label="חדות הקו">
+            {SHARPNESS_LEVELS.map((level) => (
+              <button
+                key={level.id}
+                role="radio"
+                aria-checked={sharpnessOf(shape) === level.id}
+                className={sharpnessOf(shape) === level.id ? 'on' : ''}
+                title={level.hint}
+                onClick={() => {
+                  const look = lineLook(level.id, shape.strokeWidth)
+                  onChange({ strokeCap: shape.kind === 'line' && look.strokeCap === 'butt' ? undefined : look.strokeCap, blur: look.blur })
+                }}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+        </Group>
+      )}
+
+      <Group title="טשטוש הצורה">
+        <Labeled label="עוצמה (נקודות)">
+          <NumberField value={shape.blur ?? 0} unit="px" unitLabel="pt" step={0.5} min={0} max={MAX_BLUR} onChange={(v) => onChange({ blur: v > 0 ? v : undefined })} />
+        </Labeled>
+        <p className="muted" style={{ marginTop: 6 }}>
+          בקובץ SVG הטשטוש נשמר כמסנן וקטורי. בייצוא PDF צורה מטושטשת נכתבת כתמונה ברזולוציית הייצוא.
+        </p>
+      </Group>
 
       <Group title="סדר שכבות">
         <ArrangeButtons onArrange={onArrange} />

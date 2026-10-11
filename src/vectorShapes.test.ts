@@ -125,3 +125,26 @@ describe('shapeToVector', () => {
     expect(v.stroke).toBe('#888888')
   })
 })
+
+describe('shapes with a blur, and the ends of a drawn path', () => {
+  const geom = [[[[0, 0], [1, 0.5], [0, 1]]]] as ShapeFrame['geom']
+
+  it('stay a picture, for the reason of the blur', () => {
+    expect(shapeToVector(shape({ blur: 2 }), 0, 0)).toEqual({ reason: 'blur' })
+  })
+
+  it('give an open drawn path the ends it has: round unless they were made flat, and then sharp corners', () => {
+    const round = vector(shape({ kind: 'path', geom, closed: false, fill: null, stroke: '#000000', strokeWidth: 4 }))
+    expect(round.cap).toBe('round')
+    expect(round.join).toBe('round')
+    const flat = vector(shape({ kind: 'path', geom, closed: false, fill: null, stroke: '#000000', strokeWidth: 4, strokeCap: 'butt' }))
+    expect(flat.cap).toBe('butt')
+    expect(flat.join).toBe('miter')
+  })
+
+  it('keep a plain shape as it was', () => {
+    const plain = vector(shape({ stroke: '#000000', strokeWidth: 2 }))
+    expect(plain.cap).toBe('butt')
+    expect(plain.join).toBe('round')
+  })
+})

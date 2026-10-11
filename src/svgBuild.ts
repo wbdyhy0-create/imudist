@@ -105,6 +105,7 @@ export function buildSvg(items: SvgItem[], assets: Record<string, Pick<Asset, 'd
       }
       const filter = shadowFilter(shape)
       const inner: string[] = [`<path ${attributes.join(' ')}/>`]
+      const blur = shape.blur ?? 0
       // a picture put inside the shape is clipped to its outline
       const asset = shape.image ? assets[shape.image.assetId] : undefined
       if (shape.image && asset && DATA_URL.test(asset.dataUrl)) {
@@ -116,7 +117,14 @@ export function buildSvg(items: SvgItem[], assets: Record<string, Pick<Asset, 'd
       // the name the object has in the Layers panel becomes its id, where the file may have it
       const name = shape.label ? shape.label.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '') : ''
       const label = name ? ` id="${escape(/^[\p{L}_]/u.test(name) ? name : `obj-${name}`)}-${nextId('s')}"` : ''
-      body.push(`<g${label} transform="${placement(shape)}"${common(shape, filter) ? ' ' + common(shape, filter) : ''}>${inner.join('')}</g>`)
+      let content = inner.join('')
+      if (blur > 0) {
+        const id = nextId('blur')
+        const room = Math.ceil(blur * 3) + Math.ceil(Math.max(0, shape.strokeWidth) / 2) + 2
+        defs.push(`<filter id="${id}" filterUnits="userSpaceOnUse" x="${num(-room)}" y="${num(-room)}" width="${num(shape.w + 2 * room)}" height="${num(shape.h + 2 * room)}"><feGaussianBlur stdDeviation="${num(blur)}"/></filter>`)
+        content = `<g filter="url(#${id})">${content}</g>`
+      }
+      body.push(`<g${label} transform="${placement(shape)}"${common(shape, filter) ? ' ' + common(shape, filter) : ''}>${content}</g>`)
       continue
     }
     const image = item.image
@@ -172,7 +180,8 @@ export function boundsOfItems(items: SvgItem[]): SvgBox | null {
     const widths = item.kind === 'shape' ? item.shape.lineWidths : undefined
     const stroke = item.kind === 'shape' && item.shape.stroke ? item.shape.strokeWidth * (widths ? Math.max(1, ...widths, 0) : 1) : 0
     const shadow = (o.shadowOpacity ?? 0) > 0 ? Math.hypot(o.shadowOffsetX ?? 0, o.shadowOffsetY ?? o.shadowOffset ?? 6) * 1.5 : 0
-    const pad = stroke / 2 + shadow
+    const blur = item.kind === 'shape' ? Math.ceil((item.shape.blur ?? 0) * 3) : 0
+    const pad = stroke / 2 + shadow + blur
     const turn = ((o.rotation ?? 0) * Math.PI) / 180
     const cos = Math.cos(turn)
     const sin = Math.sin(turn)

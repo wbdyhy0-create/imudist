@@ -43,7 +43,7 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'links', 'color', 'gradient', 'swatches', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'links', 'color', 'gradient', 'swatches', 'brushes', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
@@ -306,6 +306,27 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /** the text of the selected frames (or of the whole document) as a TXT, HTML or RTF file */
+  const exportTextFile = useCallback(async (format: 'txt' | 'html' | 'rtf', encoding: 'utf-8' | 'utf-16' | 'windows-1255' = 'utf-8') => {
+    const current = sessionRef.current
+    const currentDoc = current.doc
+    if (!currentDoc) return
+    try {
+      const { exportText, deliverText } = await import('./textExport')
+      const ids = ws.current?.selectedObjectIds() ?? []
+      const result = exportText(exportContentOf(exportSourceOf(current)), format, { ids, title: currentDoc.name })
+      if (result.stories === 0 || result.content.trim().length === 0) {
+        current.notify('אין טקסט לייצוא.')
+        return
+      }
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
+      if (await deliverText(result, format, safeName, encoding)) current.notify(`${result.stories} טקסטים יוצאו ל-${format.toUpperCase()}.`)
+    } catch (error) {
+      current.showError('ייצוא הטקסט נכשל', error)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   /** pictures read and waiting for a click on the page; whatever could not be read is reported */
   const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
     if (problems.length > 0) session.showError(read.length > 0 ? 'חלק מהתמונות לא יובאו' : 'לא ניתן לייבא את התמונה', new Error(problems.join('\n')))
@@ -321,7 +342,32 @@ export default function App() {
   const placeFiles = async (all: File[]) => {
     // an Imudist document is opened, not placed
     for (const f of all.filter(isDocumentFile)) await sessionRef.current.openTextFile(f)
-    const files = all.filter((f) => !isDocumentFile(f))
+    const idmlFiles = all.filter((f) => f.name.toLowerCase().endsWith('.idml'))
+    for (const f of idmlFiles) {
+      try {
+        const { idmlToDocumentText, readIdmlWithNotes } = await import('./importIdml')
+        const { growOverflowingFrames } = await import('./growFrames')
+        const { content, notes: found } = await readIdmlWithNotes(f)
+        const notes = [...found]
+        // the layout of the other program is not reproduced to the line: a frame that was full there is a line short here, and the
+        // text that does not fit is hidden - so a frame whose text does not fit is made higher (as far as the bottom of its page)
+        try {
+          const fit = growOverflowingFrames(content)
+          content.frames = fit.frames
+          if (fit.grown > 0) notes.push(`${fit.grown} תיבות טקסט הוגדלו כדי שהטקסט ייכנס`)
+          if (fit.stillHidden > 0) notes.push(`ב-${fit.stillHidden} תיבות הטקסט עדיין לא נכנס, כי התיבה כבר בתחתית העמוד (הגדילו אותה או חברו אותה לתיבה נוספת)`)
+        } catch {
+          // the layout could not be run: the frames stay as the file has them
+        }
+        const imported = new File([idmlToDocumentText(content)], `${baseName(f.name)}${FILE_EXT}`, { type: 'application/json' })
+        await sessionRef.current.openTextFile(imported)
+        // what the file had that did not come through as it was
+        if (notes.length > 0) session.notify(`הקובץ יובא. שימו לב: ${notes.join('; ')}.`)
+      } catch (e) {
+        session.showError('לא ניתן לייבא את קובץ ה-IDML', e instanceof Error ? e : new Error('קובץ ה-IDML לא נקרא כראוי.'))
+      }
+    }
+    const files = all.filter((f) => !isDocumentFile(f) && !f.name.toLowerCase().endsWith('.idml'))
     const pdfs = files.filter(isPdfFile)
     if (pdfs.length > 0) {
       if (pdfs.length !== 1 || files.length !== 1) {
@@ -487,19 +533,30 @@ export default function App() {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
+  /** the start screen's button for a layout file (IDML): it opens as a new document, so no document has to be open first */
+  const importIdml = async () => {
+    if (isTauri) {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const picked = await open({ multiple: false, directory: false, filters: [{ name: 'IDML', extensions: ['idml'] }] })
+      if (typeof picked === 'string') await placePaths([picked])
+      return
+    }
+    const files = await pickFiles('.idml', false)
+    if (files.length > 0) await placeFiles(files)
+  }
   const importFiles = async () => {
     if (isTauri) {
       const { open } = await import('@tauri-apps/plugin-dialog')
       const picked = await open({
         multiple: true,
         directory: false,
-        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'docx', 'pdf', 'eps', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
+        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
       })
       await placePaths(picked ?? [])
       return
     }
     const files = await pickFiles(
-      `${FILE_EXT},.docx,.pdf,.eps,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+      `${FILE_EXT},.idml,.docx,.pdf,.eps,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -579,6 +636,7 @@ export default function App() {
         },
         exportPng: () => void exportCurrentPagePng(),
         exportSvg: () => void exportSvgFile(),
+        exportText: (format, encoding) => void exportTextFile(format, encoding),
         newBook: () => void bookRef.current.create(),
         openBook: () => void bookRef.current.open(),
         bookPanelOpen: book.panelOpen,
@@ -663,8 +721,13 @@ export default function App() {
         }
         const rest = files.filter((f) => !isDocumentFile(f))
         if (rest.length === 0) return
+        // an IDML file opens as a document of its own, on the start screen too
+        const layouts = rest.filter((f) => f.name.toLowerCase().endsWith('.idml'))
+        const others = rest.filter((f) => !layouts.includes(f))
+        if (layouts.length > 0) await placeFiles(layouts)
+        if (others.length === 0) return
         if (!doc) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
-        else void placeFiles(rest)
+        else void placeFiles(others)
       })()
     }
     window.addEventListener('dragover', onOver)
@@ -683,8 +746,10 @@ export default function App() {
       void bookRef.current.dropFiles({ paths })
       return
     }
-    if (!doc && !paths.some((path) => path.toLowerCase().endsWith(FILE_EXT))) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
-    else void placePaths(paths)
+    // a document of the program and an IDML file open on the start screen too; anything else needs a document to be put in
+    const opensAlone = (path: string) => /\.(?:imudist|idml)$/i.test(path) || path.toLowerCase().endsWith(FILE_EXT)
+    if (!doc && !paths.some(opensAlone)) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+    else void placePaths(doc ? paths : paths.filter(opensAlone))
   }
   useEffect(() => {
     if (!isTauri) return
@@ -884,6 +949,7 @@ export default function App() {
               recent={session.recent}
               onNew={openNewDocument}
               onOpen={() => void session.openFile()}
+              onImportIdml={() => void importIdml()}
               onOpenRecent={(entry) => void session.openRecent(entry)}
               onRemoveRecent={(entry) => void session.forgetRecent(entry)}
             />

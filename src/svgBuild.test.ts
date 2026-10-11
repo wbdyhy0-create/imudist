@@ -79,3 +79,25 @@ describe('a page as an SVG file', () => {
     expect(bounds.h).toBeCloseTo(20, 5)
   })
 })
+
+describe('a blurred shape as an SVG file', () => {
+  it('gets a Gaussian blur filter in its own space, round the shape with room for the blur', () => {
+    const { svg } = buildSvg([item({ blur: 3, w: 100, h: 0 })], {}, box)
+    expect(svg).toContain('<feGaussianBlur stdDeviation="3"/>')
+    expect(svg).toContain('filterUnits="userSpaceOnUse"')
+    // a flat shape is given a region that has a height
+    expect(svg).toMatch(/<filter id="blur\d+" filterUnits="userSpaceOnUse" x="-\d+" y="-\d+" width="\d+" height="\d+">/)
+    expect(svg).toMatch(/<g filter="url\(#blur\d+\)"><path /)
+  })
+
+  it('has none for a shape that is not blurred', () => {
+    expect(buildSvg([item({})], {}, box).svg).not.toContain('feGaussianBlur')
+  })
+
+  it('has room for the blur in the box the objects fill', () => {
+    const plain = boundsOfItems([item({})])!
+    const blurred = boundsOfItems([item({ blur: 4 })])!
+    expect(blurred.w).toBeGreaterThan(plain.w)
+    expect(blurred.x).toBeLessThan(plain.x)
+  })
+})

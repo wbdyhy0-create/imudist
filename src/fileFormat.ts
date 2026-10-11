@@ -31,6 +31,7 @@ import {
   type NestedStyleRule,
   type CharStyle,
   type DocSettings,
+  type ExtrudeSettings,
   type Feather,
   type FootnoteItem,
   type FootnoteLayoutConfig,
@@ -52,6 +53,7 @@ import {
   type ShapeFrame,
   type ShapeImage,
   type LineCap,
+  type BrushStroke,
   type ShapeKind,
   type Run,
   type Sides,
@@ -67,6 +69,7 @@ import { footnoteTextStyle } from './footnoteLayout'
 import { ORNAMENT_STYLES, usableOrnamentImage } from './footnoteOrnaments'
 import { cleanLineWidths } from './lineProfile'
 import { normalizeDeg } from './frames'
+import { isSharpness, MAX_BLUR } from './sharpness'
 import type { DocContent, ParentOverride } from './pages'
 import { repairBasedOn } from './characterStyleTree'
 import { sanitizeTable } from './table'
@@ -828,6 +831,47 @@ function parseShapeImage(v: unknown, assets: Assets): ShapeImage | undefined {
   return { assetId, fit: oneOf<ImageFit>(v.fit, ['fill', 'fit', 'stretch'], 'fill'), ...(offset ? { offset } : {}), ...(scale ? { scale } : {}) }
 }
 
+/** the depth of a shape: numbers within range, or nothing */
+function parseExtrude(v: unknown): { extrude?: ExtrudeSettings } {
+  if (!isObj(v)) return {}
+  const depth = typeof v.depth === 'number' && Number.isFinite(v.depth) ? v.depth : NaN
+  const angle = typeof v.angle === 'number' && Number.isFinite(v.angle) ? v.angle : NaN
+  if (!(depth > 0) || Number.isNaN(angle)) return {}
+  const sideColor = typeof v.sideColor === 'string' && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v.sideColor) ? v.sideColor : undefined
+  const frame = isObj(v.frame) && typeof v.frame.wall === 'number' && v.frame.wall > 0
+    ? {
+        wall: num(v.frame.wall, 20, 0.1, 2000),
+        outer: num(v.frame.outer, 0, 0, 2000),
+        inner: num(v.frame.inner, 0, 0, 2000),
+        ...Object.fromEntries((['top', 'right', 'bottom', 'left'] as const).flatMap((side) => {
+          const value = (v.frame as Record<string, unknown>)[side]
+          return typeof value === 'number' && Number.isFinite(value) && value > 0 ? [[side, num(value, 20, 0.1, 2000)]] : []
+        })),
+      }
+    : undefined
+  return { extrude: { depth: Math.min(2000, depth), angle: ((angle % 360) + 360) % 360, shade: num(v.shade, 0.6, 0, 1), ...(sideColor ? { sideColor } : {}), ...(v.iso === true || v.iso === 'top' ? { iso: 'top' as const } : v.iso === 'left' || v.iso === 'right' ? { iso: v.iso } : {}), ...(frame ? { frame } : {}), ...(typeof v.lean === 'number' && Number.isFinite(v.lean) && Math.abs(v.lean) > 0.01 ? { lean: Math.max(-75, Math.min(75, v.lean)) } : {}), ...(isObj(v.view) && typeof v.view.yaw === 'number' && typeof v.view.pitch === 'number' ? { view: { yaw: num(v.view.yaw, 0, -80, 80), pitch: num(v.view.pitch, 30, 0, 80) } } : {}) } }
+}
+
+/** the blur of a shape: a number of points within range, or nothing */
+function parseBlur(v: unknown): { blur?: number } {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? { blur: num(v, 0, 0, MAX_BLUR) } : {}
+}
+
+/** the most points of a brush stroke that are kept (a longer stroke is not read as one that can be drawn again) */
+const MAX_STROKE_POINTS = 20000
+
+/** what a brush stroke was drawn with: a style, a size and the points, within range, or nothing */
+function parseBrushStroke(v: unknown): { brush?: BrushStroke } {
+  if (!isObj(v) || typeof v.style !== 'string' || !v.style || v.style.length > 80 || !Array.isArray(v.points)) return {}
+  if (v.points.length < 1 || v.points.length > MAX_STROKE_POINTS) return {}
+  const points: [number, number][] = []
+  for (const p of v.points) {
+    if (!Array.isArray(p) || p.length !== 2 || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return {}
+    points.push([Math.round(Math.max(-50, Math.min(51, p[0])) * 1e4) / 1e4, Math.round(Math.max(-50, Math.min(51, p[1])) * 1e4) / 1e4])
+  }
+  return { brush: { style: v.style, size: num(v.size, 10, 1, 120), sharpness: isSharpness(v.sharpness) ? v.sharpness : 'medium', points } }
+}
+
 function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
   if (!Array.isArray(v)) return []
   const out: ShapeFrame[] = []
@@ -860,6 +904,8 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       h: num(raw.h, 100, minWH, MAX_PAGE_PT),
       ...(kind === 'polygon' ? { sides: int(raw.sides, 6, MIN_SIDES, MAX_SIDES) } : {}),
       ...(kind === 'path' && geom ? { geom } : {}),
+      ...(kind !== 'table' && kind !== 'line' ? parseExtrude(raw.extrude) : {}),
+      ...(typeof raw.extrudeOf === 'string' && raw.extrudeOf ? { extrudeOf: raw.extrudeOf.slice(0, 120) } : {}),
       ...(kind === 'table' && table ? { table } : {}),
       ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
       ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
@@ -882,6 +928,8 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...blendModeOf(raw),
       ...shadowOf(raw),
       ...parseFeather(raw.feather),
+      ...(kind === 'table' ? {} : parseBlur(raw.blur)),
+      ...(kind === 'path' ? parseBrushStroke(raw.brush) : {}),
     })
   }
   return out

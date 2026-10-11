@@ -9,6 +9,8 @@ interface Props {
   recent: RecentEntry[]
   onNew: (preset?: PagePreset, unit?: Unit) => void
   onOpen: () => void
+  /** a layout file (IDML): opens as a new document */
+  onImportIdml?: () => void
   onOpenRecent: (entry: RecentEntry) => void
   onRemoveRecent: (entry: RecentEntry) => void
 }
@@ -18,7 +20,7 @@ type PresetCategory = 'print' | 'digital'
 const formatDate = (ms: number) =>
   new Date(ms).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRecent }: Props) {
+export function Home({ appName, recent, onNew, onOpen, onImportIdml, onOpenRecent, onRemoveRecent }: Props) {
   const [category, setCategory] = useState<PresetCategory>('print')
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const thumbnailTasks = useRef(new Map<string, Promise<string | null>>())
@@ -69,6 +71,11 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRec
           <button className="btn primary" onClick={onOpen}>
             ייבוא קובץ
           </button>
+          {onImportIdml && (
+            <button className="btn" onClick={onImportIdml} title="קובץ עימוד בפורמט IDML נפתח כמסמך חדש, עם העמודים, התיבות והסגנונות שלו">
+              ייבוא קובץ IDML
+            </button>
+          )}
         </div>
 
         <h2>התחל מסמך חדש</h2>

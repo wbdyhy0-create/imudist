@@ -3,6 +3,7 @@ import { MAX_IMAGE_BYTES } from './document'
 import { hashId } from './assetHash'
 import modelUrl from './assets/birefnet-lite-512.onnx?url'
 import { makeInputTensorData, stableSigmoid } from './backgroundRemovalMath'
+import { cleanEdges } from './backgroundEdges'
 
 const MODEL_SIZE = 512
 
@@ -96,7 +97,12 @@ function toPngBlob(canvas: HTMLCanvasElement) {
   })
 }
 
-export async function removeImageBackground(asset: Asset): Promise<{ assetId: string; asset: Asset }> {
+export interface RemoveBackgroundOptions {
+  /** clean the half-transparent edge of the object (no light halo round it on a coloured ground); default on */
+  cleanEdges?: boolean
+}
+
+export async function removeImageBackground(asset: Asset, options: RemoveBackgroundOptions = {}): Promise<{ assetId: string; asset: Asset }> {
   if (asset.mime === 'image/gif') {
     throw new Error('הסרת הרקע מתמונות GIF אינה נתמכת כדי לא לאבד את האנימציה.')
   }
@@ -133,6 +139,11 @@ export async function removeImageBackground(asset: Asset): Promise<{ assetId: st
   output.context.drawImage(image, 0, 0, width, height)
   output.context.globalCompositeOperation = 'destination-in'
   output.context.drawImage(mask.canvas, 0, 0, width, height)
+  if (options.cleanEdges !== false) {
+    const edge = output.context.getImageData(0, 0, width, height)
+    cleanEdges(edge.data, width, height)
+    output.context.putImageData(edge, 0, 0)
+  }
   const blob = await toPngBlob(output.canvas)
   if (blob.size > MAX_IMAGE_BYTES) {
     throw new Error('תמונת ה-PNG שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.')

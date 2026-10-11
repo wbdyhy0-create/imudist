@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { BLEND_MODES, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { BLEND_MODES, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { SHARPNESS_LEVELS } from '../sharpness'
 import { FillPicker } from './FillPicker'
 import { ALIGNS } from './PropertiesPanel'
 import { ArrangeButtons } from './ArrangeButtons'
@@ -21,6 +22,9 @@ const blendSelect = (value: BlendMode | undefined, onChange: (mode: BlendMode | 
 
 interface Props {
   tool: ToolId
+  /** how sharp free-drawn lines and brush strokes are: shown for the pencil and the brush tool, and applied to a selected stroke */
+  sharpness?: Sharpness
+  onSharpness?: (level: Sharpness) => void
   shape: ShapeFrame | null
   image: ImageFrame | null
   frame: TextFrame | null
@@ -72,6 +76,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   type: 'טקסט',
   pen: 'עט',
   pencil: 'עיפרון',
+  brush: 'מברשת',
   line: 'קו',
   rect: 'מרובע',
   ellipse: 'אליפסה',
@@ -81,7 +86,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   eraser: 'מחק',
 }
 
-export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, sharpness, onSharpness, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? 'כלי'
   const char = (textStyle ?? tableText ?? frame) as CharStyle
   const fontCatalog = useFontCatalog()
@@ -234,6 +239,18 @@ export function ContextToolbar({ tool, shape, image, frame, textStyle, tableText
           <span>עובי קו</span>
           <input type="number" min="0" max="200" step="0.25" value={strokeWidth} onChange={(event) => onStrokeWidth(Number(event.target.value))} />
           <span>pt</span>
+        </label>
+      )}
+      {(tool === 'pencil' || tool === 'brush') && sharpness && onSharpness && (
+        <label className="context-field" title={SHARPNESS_LEVELS.find((level) => level.id === sharpness)?.hint}>
+          <span>חדות</span>
+          <select value={sharpness} aria-label="חדות הקו" onChange={(event) => onSharpness(event.target.value as Sharpness)}>
+            {SHARPNESS_LEVELS.map((level) => (
+              <option key={level.id} value={level.id} title={level.hint}>
+                {level.label}
+              </option>
+            ))}
+          </select>
         </label>
       )}
       {tool === 'pencil' && <>

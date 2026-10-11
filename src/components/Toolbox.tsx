@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 export type ToolId =
-  | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'magneticLasso' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'eraser'
+  | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'magneticLasso' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'brush' | 'eraser'
   | 'rect' | 'ellipse' | 'polygon' | 'framerect' | 'frameellipse' | 'framepolygon' | 'scissors' | 'transform' | 'gradient' | 'color' | 'swatches' | 'feather' | 'note' | 'eyedropper' | 'colorSampler' | 'heal'
   | 'hand' | 'zoom'
 
@@ -81,6 +81,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', label: 'עט', group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
+  { id: 'brush', label: 'מברשת', group: 3, key: 'B', code: 'KeyB', enabled: true, icon: <><path d="M14.500 4.500a2.100 2.100 0 0 1 3 3L11.500 13.500l-3-3z" /><path d="M8.500 11.500c-2.500 0-4 1.600-4 3.800 0 1.500-.8 2.700-1.500 3.500 3.500 1 8-.5 8-4" /></> },
 
   { id: 'scissors', label: 'מספריים', group: 4, key: 'C', code: 'KeyC', enabled: true, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
   { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
@@ -156,6 +157,7 @@ export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   line: 'ציור קו ישר',
   pen: 'יצירת נתיב עם נקודות וידיות Bezier',
   pencil: 'ציור קו חופשי מוחלק',
+  brush: 'ציור במברשת: קליגרפית, מדורגת, נתז צבע ועוד. כל משיכה נשמרת כצורה וקטורית',
   scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
   eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
   heal: 'גררו על אזור בתמונה כדי למלא אותו בפיקסלים מהסביבה. להקטנת המברשת החזיקו Shift ולחצו על (, ולהגדלתה החזיקו Shift ולחצו על ).',

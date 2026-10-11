@@ -671,6 +671,20 @@ export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path' | 'line' | 'tabl
 export type DrawKind = 'rect' | 'ellipse' | 'polygon' | 'line'
 /** A line's end cap. */
 export type LineCap = 'butt' | 'round' | 'square'
+
+/** how sharp a free-drawn line or a brush stroke is (see sharpness.ts) */
+export type Sharpness = 'sharp' | 'medium' | 'soft'
+
+/** What a stroke of the brush tool was drawn with, kept on its shape so that it can be drawn again in another style. */
+export interface BrushStroke {
+  /** a brush of the program, or an imported one (`custom:…`) */
+  style: string
+  /** points */
+  size: number
+  sharpness: Sharpness
+  /** where the pointer went, as 0…1 of the box the stroke had when it was made (they move and scale with the shape) */
+  points: [number, number][]
+}
 /**
  * One point of a path's own outline, 0…1 of the shape's box: a plain corner (just its position, straight lines on both
  * sides), or a smooth point with direction handles that curve the segments on either side of it. `hi` / `ho` are the
@@ -720,10 +734,48 @@ export interface ShapeImage {
 }
 
 /** A shape on a page. Position and size are in world points, like text frames. */
+/** How a shape is drawn out into a solid (see extrude.ts): its sides are the shapes that have `extrudeOf` = the shape's id. */
+export interface ExtrudeSettings {
+  /** points: how far back the solid goes */
+  depth: number
+  /** degrees, counter-clockwise from the right as it looks on the page: the way the back lies from the front */
+  angle: number
+  /** the colour the sides are shaded from; missing = the front's colour, darker */
+  sideColor?: string
+  /** 0…1: how much the sides differ from each other by the way they face the light */
+  shade: number
+  /**
+   * the shape's outline was turned into a plane of an isometric solid: `top` lies flat and the depth goes straight down, `left` and
+   * `right` stand up (facing to the left, or to the right) and the depth goes back up and to the right, or up and to the left
+   */
+  iso?: 'top' | 'left' | 'right'
+  /**
+   * the front is a frame: a rectangle (the shape's box) with a rectangular hole that is `wall` points in from every side, the corners
+   * of the outside rounded by `outer` points and those of the hole by `inner`. The outline is made from these when they are applied.
+   */
+  frame?: { wall: number; outer: number; inner: number; top?: number; right?: number; bottom?: number; left?: number }
+  // (`top`, `right`, `bottom`, `left`: the thickness of one side of the frame when it is not `wall`)
+  /**
+   * degrees: how much the front's outline is leaned (its horizontal lines slope down to the right by this angle, up to the right for
+   * a negative one) - 0 or missing is a front that stands straight on the page, with a flat bottom edge
+   */
+  lean?: number
+  /**
+   * the solid is a real box seen from a point of view (degrees): `yaw` turns it about its upright axis (positive: the right side
+   * goes back), `pitch` is how far above it is looked at (0 level, up to 80). The front's outline is the flat one drawn on that
+   * view and the depth goes back in the direction that follows; `lean`, `iso` and `angle` do not apply while this is set.
+   */
+  view?: { yaw: number; pitch: number }
+}
+
 export interface ShapeFrame {
   id: string
   feather?: Feather
   groupId?: string
+  /** this shape has depth: what its sides were made from (they are kept up to date by "3D" in the Object menu) */
+  extrude?: ExtrudeSettings
+  /** this shape is a side of the solid whose front is the shape with this id */
+  extrudeOf?: string
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   hidden?: true
@@ -779,6 +831,10 @@ export interface ShapeFrame {
   stroke: string | null
   /** line thickness, points */
   strokeWidth: number
+  /** Gaussian blur of the whole shape, points (its standard deviation); missing = sharp */
+  blur?: number
+  /** a stroke of the brush tool: what it was drawn with (see BrushStroke) */
+  brush?: BrushStroke
   /** stacking order (see stacking.ts) */
   z?: number
   /** turned around its own centre, clockwise degrees; missing = 0. `x`, `y`, `w`, `h` stay as if it were not turned. */

@@ -73,6 +73,22 @@ export const countWords = (text: string) => (text.match(/\S+/g) ?? []).length
 
 // ── plain text ──────────────────────────────────────────────────────────────────
 function decodeText(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  // a byte order mark names UTF-16; without one, a file whose every second byte is zero is UTF-16 too (Notepad's "Unicode")
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes.subarray(2))
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes.subarray(2))
+  const sample = bytes.subarray(0, Math.min(bytes.length, 200) & ~1)
+  if (sample.length >= 4) {
+    let zeroOdd = 0
+    let zeroEven = 0
+    for (let i = 0; i < sample.length; i += 2) {
+      if (sample[i] === 0) zeroEven++
+      if (sample[i + 1] === 0) zeroOdd++
+    }
+    const pairs = sample.length / 2
+    if (zeroOdd > pairs / 4 && zeroEven === 0) return new TextDecoder('utf-16le').decode(bytes)
+    if (zeroEven > pairs / 4 && zeroOdd === 0) return new TextDecoder('utf-16be').decode(bytes)
+  }
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer)
   } catch {
@@ -81,7 +97,7 @@ function decodeText(buffer: ArrayBuffer): string {
 }
 
 export function placedFromPlainText(name: string, raw: string): PlacedText {
-  const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/\n+$/, '')
+  const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/^\u200f/gm, '').replace(/\n+$/, '')
   if (!text.trim()) throw new ImportError('אין טקסט בקובץ.')
   const style = { ...DEFAULT_TEXT_STYLE, align: alignFor(text) }
   return { name, text, runs: [{ len: text.length, style: { fontFamily: style.fontFamily, fontSize: style.fontSize, weight: style.weight, italic: style.italic, tracking: style.tracking } }], style }

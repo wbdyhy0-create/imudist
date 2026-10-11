@@ -76,6 +76,7 @@ import {
   type PageSection,
   type Run,
   type CharacterStyleRecord,
+  type ExtrudeSettings,
   type CharacterStyleSettings,
   type TextAlign,
   type ParagraphBox,
@@ -95,7 +96,7 @@ import {
 } from '../document'
 import { editRangeInStory, reportIsViewOf } from '../oversetCaret'
 import { isTyping } from '../dom'
-import { HANDLES, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
+import { HANDLES, ROTATE_CORNERS, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, type PlacedText } from '../importText'
 import { applyGuideSpec, snapGuide, type GuideSnap } from '../guides'
@@ -115,7 +116,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
-import { arrange, nextZ, stackOrder, zOfImage, type ArrangeOp } from '../stacking'
+import { arrange, nextZ, stackOrder, zOfImage, zOfShape, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
@@ -127,6 +128,11 @@ import { ContextMenu } from './ContextMenu'
 import { DockingPanels } from './DockingPanels'
 import { GuidedToolTour } from './GuidedToolTour'
 import { ColorToolsPanel } from './ColorToolsPanel'
+import { BrushesPanel } from './BrushesPanel'
+import { centerlinesOf, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from '../brushes'
+import { loadCustomBrushes, MAX_CUSTOM_BRUSHES, restyleStroke, saveCustomBrushes, strokeShape, type CustomBrush } from '../customBrushes'
+import { lineLook, type Sharpness } from '../sharpness'
+import { readBrushFile } from '../brushImport'
 import { ColorSamplerLens, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
 import { FontPicker } from './FontPicker'
@@ -136,6 +142,8 @@ import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDial
 import { ImageTraceDialog, type ImageTraceRequest } from './ImageTraceDialog'
 import { shapeFromTrace } from '../imageTrace'
 import { pieceCount, releaseCompoundPath } from '../compoundPath'
+import { clampView, currentLean, DEFAULT_EXTRUDE, DEFAULT_VIEW, extrudeSides, fitWalls, frameLayout, frameOutline, frameWalls, ISO_DEPTH_ANGLE, isometricShape, ISO_LEAN, leanShape, paintShapes, roundedFrameGeom, SOLID_NAMES, solidSpec, syncSolid, turnedSettings, viewShape, viewVector, type IsoPlane, type SolidKind } from '../extrude'
+import { ExtrudeDialog } from './ExtrudeDialog'
 import { SmartLayoutDialog, type SmartLayoutRequest } from './SmartLayoutDialog'
 import { GuideProperties } from './GuideProperties'
 import { ImageFrameView } from './ImageFrameView'
@@ -201,7 +209,7 @@ const ZOOM_STEPS = [0.05, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75
 function textFrameResizeBox(orig: Box, mode: HandleId, dx: number, dy: number, shift: boolean, alt: boolean): Box {
   return shift && !alt
     ? dragBoxUniform(orig, mode, dx, dy, MIN_FRAME_PT)
-    : dragBox(orig, mode, dx, dy, MIN_FRAME_PT, undefined, false)
+    : dragBox(orig, mode, dx, dy, MIN_FRAME_PT, undefined, alt)
 }
 
 interface MarqueeTarget {
@@ -331,6 +339,10 @@ export interface WorkspaceHandle {
   createOutlinesFromSelection: () => void
   /** split the selected path shapes made of several pieces into one shape per piece */
   releaseCompoundPaths: () => void
+  /** open the dialog for the depth ("3D") of the selected shapes */
+  extrudeSelection: () => void
+  /** a new solid (cube, box, cylinder, frame) in the middle of the view */
+  addSolid: (kind: SolidKind) => void
   /** the ids of the objects that are selected now (text frames, pictures and shapes) */
   selectedObjectIds: () => string[]
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
@@ -982,6 +994,8 @@ export function Workspace({
       start: { x: number; y: number }
       box: Box
       objects: { id: string; x: number; y: number; w: number; h: number }[]
+      /** how each picture was fitted in its frame when the drag began */
+      fits: Map<string, ImageFit>
       key: string
     } | null>(null)
   /** the right-click menu of the rulers (units), at a screen position */
@@ -1017,10 +1031,12 @@ export function Workspace({
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
   /** moving a frame ("move") or resizing it by a handle, with the Selection tool */
-  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape'; table?: TableData; origTextScale?: { x: number; y: number } } | null>(null)
+  const frameDrag = useRef<{ id: string; mode: 'move' | HandleId; start: { x: number; y: number }; orig: Box; key: string; kind: 'frame' | 'image' | 'shape'; table?: TableData; origTextScale?: { x: number; y: number }; origFit?: ImageFit } | null>(null)
   const [graphicFrameHandleDragging, setGraphicFrameHandleDragging] = useState(false)
+  /** turning several selected objects together about the middle of their box, from the ring round a corner of it */
+  const groupRotate = useRef<{ center: { x: number; y: number }; startAngle: number; objects: { id: string; x: number; y: number; w: number; h: number; rotation: number }[]; solids: Map<string, { extrude: ExtrudeSettings; sideIds: string[] }>; key: string } | null>(null)
   /** turning a frame, a picture or a shape around its own centre, from one of its rotate handles */
-  const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; key: string } | null>(null)
+  const rotateDrag = useRef<{ id: string; kind: 'frame' | 'image' | 'shape'; center: { x: number; y: number }; startAngle: number; startRotation: number; extrude?: ExtrudeSettings; key: string } | null>(null)
   /** The "fine outline" rotation guides professional layout tools show: a faint outline of the object's box at the angle this drag
    *  started from, plus a wedge showing how far it has turned since — world point of the centre, box size, the
    *  rotation it started at, and how many degrees it has swept so far */
@@ -1137,6 +1153,54 @@ export function Workspace({
   const [footnoteOptionsOpen, setFootnoteOptionsOpen] = useState(false)
   const [drawingStrokeWidth, setDrawingStrokeWidth] = useState(1)
   const [pencilSettings, setPencilSettings] = useState<PencilSettings>({ fidelity: 2.5, smoothness: 65, cap: 'round', editSelected: true, within: 12 })
+  /** the brush tool: the style, the size (points) and the colour of the stroke it draws */
+  const [brushStyle, setBrushStyle] = useState<string>('splatter')
+  /** the brushes that came from files (kept in the program, not in the document: what they draw is plain shapes) */
+  const [customBrushes, setCustomBrushes] = useState<CustomBrush[]>(loadCustomBrushes)
+  const [brushMessage, setBrushMessage] = useState<string | null>(null)
+  const changeCustomBrushes = (change: (list: CustomBrush[]) => CustomBrush[]) => setCustomBrushes(change)
+  // kept a moment after the last change, so that a slider being dragged does not write all of them on every step
+  const brushesLoaded = useRef(true)
+  useEffect(() => {
+    if (brushesLoaded.current) {
+      brushesLoaded.current = false
+      return
+    }
+    const timer = window.setTimeout(() => {
+      if (!saveCustomBrushes(customBrushes)) setBrushMessage('אין מקום לשמור את המברשות בדפדפן: הן יישארו רק עד סגירת התוכנה.')
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [customBrushes])
+  // selecting a stroke of the brush tool shows in the panel what it was drawn with (not while a drawing tool is in hand)
+  useEffect(() => {
+    if (tool === 'brush' || tool === 'pencil' || !selectedId) return
+    const kept = shapes.find((shape) => shape.id === selectedId)
+    if (!kept?.brush) return
+    setBrushStyle(kept.brush.style)
+    setBrushSize(kept.brush.size)
+    setSharpness(kept.brush.sharpness)
+    if (kept.fill) setBrushColor(kept.fill)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, tool])
+  const importBrush = async (file: File) => {
+    setBrushMessage('קורא את הקובץ…')
+    const result = await readBrushFile(file)
+    if ('error' in result) {
+      setBrushMessage(result.error)
+      return
+    }
+    if (customBrushes.length >= MAX_CUSTOM_BRUSHES) {
+      setBrushMessage('אפשר לשמור עד ' + MAX_CUSTOM_BRUSHES + ' מברשות מיובאות. הסירו אחת ונסו שוב.')
+      return
+    }
+    changeCustomBrushes((list) => (list.length >= MAX_CUSTOM_BRUSHES ? list : [...list, result.brush]))
+    setBrushStyle(result.brush.id)
+    setBrushMessage(result.note ?? `המברשת ”${result.brush.name}” נוספה. אפשר לצייר איתה עכשיו.`)
+  }
+  const [brushSize, setBrushSize] = useState(22)
+  const [brushColor, setBrushColor] = useState('#000000')
+  /** how sharp the free-drawn lines and brush strokes are: sharp, medium (round ends) or soft (slightly blurred) */
+  const [sharpness, setSharpness] = useState<Sharpness>('medium')
   /** dragging one margin line of the Page tool: which side (physical) and the page it is on */
   /** the dragged page has the same height as the pages beside it: where the dashed line goes (world y) and how far it reaches */
   const [pageSnap, setPageSnap] = useState<{ world: number; span: [number, number]; height: number } | null>(null)
@@ -1148,6 +1212,10 @@ export function Workspace({
   const [guidesDialog, setGuidesDialog] = useState(false)
   /** the picture the trace dialog is open for */
   const [traceImageId, setTraceImageId] = useState<string | null>(null)
+  const [extrudeRequest, setExtrudeRequest] = useState<{ ids: string[]; initial: ExtrudeSettings; frontColor: string | null; hasDepth: boolean; corner: number | null } | null>(null)
+  // the shapes as they are now, for a drag that makes the sides again at every move
+  const shapesRef = useRef(shapes)
+  shapesRef.current = shapes
   const [smartLayoutDialog, setSmartLayoutDialog] = useState(false)
   const latestGuides = useRef(guides)
   latestGuides.current = guides
@@ -2986,8 +3054,21 @@ export function Workspace({
     if (tableSel && tableSel.id !== selectedId) setTableSel(null)
   }, [selectedId, tableSel])
 
-  const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) =>
-    onShapesChange(shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh)), key)
+  const updateShape = (id: string, patch: Partial<ShapeFrame>, key?: string) => {
+    // a solid that is painted has its sides shaded from the new colour (and its line and opacity given to them), not painted flat
+    const target = shapes.find((sh) => sh.id === id)
+    if (target?.extrude && ['fill', 'fillGradient', 'stroke', 'strokeWidth', 'opacity', 'blendMode'].some((name) => name in patch)) {
+      onShapesChange(paintShapes(shapes, new Set([id]), patch, newFrameId), key)
+      return
+    }
+    const patched = shapes.map((sh) => (sh.id === id ? { ...sh, ...patch } : sh))
+    // a solid whose front is moved, resized or turned by a number keeps its sides with it
+    if (target?.extrude && ['x', 'y', 'w', 'h', 'rotation'].some((name) => name in patch)) {
+      onShapesChange(syncSolid(patched, id, newFrameId), key)
+      return
+    }
+    onShapesChange(patched, key)
+  }
 
   const copyShapeSize = (targetId: string, sourceId: string) => {
     const target = shapes.find((shape) => shape.id === targetId)
@@ -3277,7 +3358,7 @@ export function Workspace({
   const setSelectedShapeFill = (color: string | null) => {
     const selected = new Set(selectedObjectIds().filter((id) => shapes.some((shape) => shape.id === id)))
     if (selected.size === 0) return
-    commitMultiObjectChange({ shapes: shapes.map((shape) => selected.has(shape.id) ? { ...shape, fill: color, fillGradient: undefined } : shape) }, 'multi-fill')
+    commitMultiObjectChange({ shapes: paintShapes(shapes, selected, { fill: color, fillGradient: undefined }, newFrameId) }, 'multi-fill')
   }
   const setSelectedShapeStroke = (color: string | null) => {
     const selected = new Set(selectedObjectIds().filter((id) => shapes.some((shape) => shape.id === id)))
@@ -3358,6 +3439,12 @@ export function Workspace({
   const objectGroupId = (id: string) => frames.find((f) => f.id === id)?.groupId ?? images.find((im) => im.id === id)?.groupId ?? shapes.find((sh) => sh.id === id)?.groupId
   // the members of a group that can be selected: a locked or hidden one stays out of the selection and does not move with the others
   const objectsInGroup = (groupId: string) => [...frames, ...images, ...shapes].filter((object) => object.groupId === groupId && selectable(object.id)).map((object) => object.id)
+  const groupDragOrigins = (selected: { id: string; x: number; y: number }[]) => {
+    const ids = new Set(selected.map((object) => object.id))
+    const groups = new Set(selected.map((object) => objectGroupId(object.id)).filter((groupId): groupId is string => !!groupId && groupId !== isolatedGroupId))
+    for (const groupId of groups) for (const id of objectsInGroup(groupId)) ids.add(id)
+    return new Map([...frames, ...images, ...shapes].filter((object) => ids.has(object.id)).map((object) => [object.id, { x: object.x, y: object.y }]))
+  }
   const enterGroupIsolation = (id: string) => {
     const groupId = objectGroupId(id)
     if (!groupId) return false
@@ -3409,6 +3496,565 @@ export function Workspace({
     setSelectedIdRaw(null)
     onNotify(`הנתיב המורכב פורק ל-${made.length} צורות מקובצות. לחיצה כפולה על חלק בוחרת אותו לבדו.`)
   }
+  /** the fronts of the selected solids: the selected shapes that can be drawn out, and the front of a side that was picked */
+  const extrudeFronts = (): ShapeFrame[] => {
+    const wanted = new Set<string>()
+    for (const id of selectedObjectIds()) {
+      const shape = shapes.find((candidate) => candidate.id === id)
+      if (shape) wanted.add(shape.extrudeOf ?? shape.id)
+    }
+    return shapes.filter((shape) => wanted.has(shape.id) && shape.kind !== 'table' && shape.kind !== 'line')
+  }
+  const extrudeSelection = () => {
+    const fronts = extrudeFronts()
+    if (fronts.length === 0) {
+      onNotify('בחרו צורה (מלבן, אליפסה, מצולע או צורה מורכבת) כדי להוסיף לה עומק תלת־ממדי.')
+      return
+    }
+    if (fronts.some((front) => itemLocks[front.id])) {
+      onNotify('הצורה נעולה. שחררו את הנעילה כדי לשנות לה עומק.')
+      return
+    }
+    const first = fronts[0]!
+    setExtrudeRequest({ ids: fronts.map((front) => front.id), initial: first.extrude ?? DEFAULT_EXTRUDE, frontColor: first.fill, hasDepth: fronts.some((front) => !!front.extrude), corner: fronts.length === 1 && first.kind === 'rect' ? first.radii?.[0] ?? 0 : null })
+  }
+  /** the depth is given to the shapes the dialog was opened for (null takes it away): the sides are made again, and kept in a group with the front */
+  const applyExtrude = (settings: ExtrudeSettings | null, view: 'side' | IsoPlane | 'turn' | null = null, corner: number | null = null) => {
+    const request = extrudeRequest
+    setExtrudeRequest(null)
+    if (!request) return
+    const ids = new Set(request.ids)
+    const oldSides = shapes.filter((shape) => shape.extrudeOf && ids.has(shape.extrudeOf))
+    const oldSideIds = new Set(oldSides.map((shape) => shape.id))
+    const groups = new Map<string, string>()
+    const made = new Map<string, ShapeFrame[]>()
+    // what each front is after this (an isometric one has its outline turned into the top of the solid) and the settings it was given
+    const fronts = new Map<string, { shape: ShapeFrame; settings: ExtrudeSettings }>()
+    if (settings) {
+      for (const original of shapes.filter((shape) => ids.has(shape.id))) {
+        // a frame has its outline made again from the wall and the roundness; a rectangle has its corners rounded
+        let source = original
+        if (settings.frame && original.extrude?.iso !== 'top') {
+          source = { ...original, kind: 'path', geom: roundedFrameGeom(original.w, original.h, settings.frame) }
+          delete source.radii
+          delete source.sides
+        } else if (corner !== null && original.kind === 'rect') {
+          source = { ...original }
+          if (corner > 0) source.radii = [corner, corner, corner, corner]
+          else delete source.radii
+        }
+        // a solid that was seen from a view has its flat outline back first
+        const wasView = original.extrude?.view
+        if (wasView && source === original) source = viewShape(original, wasView, null) ?? original
+        let front = source
+        let used: ExtrudeSettings = { ...settings }
+        delete used.iso
+        const was = original.extrude?.iso
+        // an outline made again is flat; one that was not is on the plane it was on
+        const from = source === original ? was : undefined
+        const want = view === 'turn' ? 'side' : view ?? was ?? 'side'
+        // the lean the outline has now: the frame made again is straight, and an outline that was moved to a plane has that plane's
+        let sourceLean = source === original ? currentLean(original.extrude) : 0
+        if (want !== (from ?? 'side')) {
+          // the outline is moved to the plane that was chosen (a shape that was on one is first brought back to the flat outline)
+          const laid = isometricShape(source, want === 'side' ? 'flat' : want, from)
+          if (!laid) {
+            onNotify('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+            return
+          }
+          front = laid
+          sourceLean = ISO_LEAN[want === 'side' ? 'top' : want]
+        }
+        if (settings.view) {
+          // a real box seen from a view: the flat outline (an outline on a plane or leaned is brought back to it) drawn on that view
+          let flat = source
+          if (source === original) {
+            if (was) flat = isometricShape(source, 'flat', was) ?? source
+            else if (Math.abs(currentLean(original.extrude)) > 0.01 && !wasView) flat = leanShape(source, currentLean(original.extrude), 0) ?? source
+          }
+          const viewed = viewShape(flat, undefined, clampView(settings.view))
+          if (!viewed) {
+            onNotify('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+            return
+          }
+          front = viewed
+          used = { ...settings, view: clampView(settings.view) }
+          delete used.iso
+          delete used.lean
+          if (source === original) delete used.frame
+        } else if (want !== 'side') {
+          // an outline that is on a plane of a solid is no longer one that the wall and the roundness make
+          used = { ...settings, angle: ISO_DEPTH_ANGLE[want], iso: want }
+          // only the top of an isometric solid is not made from a wall and a roundness any more
+          if (want === 'top') delete used.frame
+          delete used.lean
+        } else {
+          // the lean the dialog asks for (a missing one is a front that stands straight)
+          const target = settings.lean ?? 0
+          if (Math.abs(target - sourceLean) > 0.01) {
+            const leaned = leanShape(front, sourceLean, target)
+            if (leaned) front = leaned
+          }
+          if (Math.abs(target) > 0.01) used.lean = target
+          else delete used.lean
+        }
+        fronts.set(original.id, { shape: front, settings: used })
+        const groupId = front.groupId ?? oldSides.find((side) => side.extrudeOf === front.id)?.groupId ?? newFrameId()
+        const result = extrudeSides(front, used, newFrameId, groupId)
+        if ('problem' in result) {
+          onNotify(result.problem === 'complex' ? 'הצורה מורכבת מדי כדי להוסיף לה עומק (יותר מדי נקודות או חלקים).' : 'אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+          return
+        }
+        groups.set(front.id, groupId)
+        made.set(front.id, result.sides)
+      }
+    }
+    const next: ShapeFrame[] = []
+    for (const shape of shapes) {
+      if (oldSideIds.has(shape.id)) continue
+      if (!ids.has(shape.id)) {
+        next.push(shape)
+        continue
+      }
+      const front: ShapeFrame = { ...(fronts.get(shape.id)?.shape ?? shape) }
+      if (settings) {
+        front.extrude = fronts.get(shape.id)?.settings ?? settings
+        front.groupId = groups.get(shape.id)
+      } else {
+        delete front.extrude
+        // a group that was only this shape and its sides is no group any more
+        const alone = front.groupId && !shapes.some((other) => other.groupId === front.groupId && other.id !== front.id && !oldSideIds.has(other.id)) && !frames.some((frame) => frame.groupId === front.groupId) && !images.some((image) => image.groupId === front.groupId)
+        if (alone) delete front.groupId
+      }
+      next.push(front)
+      next.push(...(made.get(shape.id) ?? []))
+    }
+    commitMultiObjectChange({ shapes: next }, 'extrude')
+    if (request.ids.length === 1) {
+      setMultiSel([])
+      setSelectedId(request.ids[0]!)
+    }
+    onNotify(settings
+      ? 'נוסף עומק תלת־ממדי. הצדדים הם צורות עצמאיות בקבוצה: לחיצה כפולה על צד בוחרת אותו לבדו, ואפשר לצבוע אותו. לשינוי העומק בחרו שוב את הצורה והפעילו את הפקודה.'
+      : 'העומק הוסר.')
+  }
+  /** the handle of the depth: where the back of the selected solid is (the middle of the front, and the depth in its direction) */
+  const depthHandleOf = (): { front: ShapeFrame; cx: number; cy: number; x: number; y: number } | null => {
+    if (tool !== 'select' || extrudeRequest) return null
+    const ids = selectedObjectIds()
+    if (ids.length === 0) return null
+    const fronts = extrudeFronts()
+    if (fronts.length !== 1) return null
+    const front = fronts[0]!
+    if (!front.extrude || itemLocks[front.id]) return null
+    const members = new Set([front.id, ...shapes.filter((shape) => shape.extrudeOf === front.id).map((shape) => shape.id)])
+    if (!ids.every((id) => members.has(id))) return null
+    const turn = (front.extrude.angle * Math.PI) / 180
+    const cx = front.x + front.w / 2
+    const cy = front.y + front.h / 2
+    if (front.extrude.view) {
+      const back = viewVector(front.extrude.depth, front.extrude.view)
+      return { front, cx, cy, x: cx + back[0], y: cy + back[1] }
+    }
+    return { front, cx, cy, x: cx + front.extrude.depth * Math.cos(turn), y: cy - front.extrude.depth * Math.sin(turn) }
+  }
+  /** the depth and direction of a solid set while the handle is dragged: its sides are made again and put in place at once */
+  const setDepthLive = (frontId: string, depth: number, angle: number, editingParent: string | null) => {
+    const current = shapesRef.current
+    const front = current.find((shape) => shape.id === frontId)
+    if (!front?.extrude) return
+    const settings: ExtrudeSettings = { ...front.extrude, depth: Math.round(depth * 10) / 10, angle: Math.round(angle * 10) / 10 }
+    const result = extrudeSides(front, settings, newFrameId, front.groupId)
+    if ('problem' in result) return
+    const next = [...current.filter((shape) => shape.extrudeOf !== frontId).map((shape) => (shape.id === frontId ? { ...shape, extrude: settings } : shape)), ...result.sides]
+    const key = `extrude:drag:${frontId}`
+    if (editingParent) onParentsChange(parents.map((parent) => (parent.id === editingParent ? { ...parent, shapes: next } : parent)), `parent:${key}`)
+    else onShapesChange(next, key)
+  }
+  /** the lean of a solid's front set while its handle is dragged: the outline is leaned and the sides are made again */
+  const setLeanLive = (frontId: string, lean: number, editingParent: string | null) => {
+    const current = shapesRef.current
+    const front = current.find((shape) => shape.id === frontId)
+    if (!front?.extrude) return
+    const leaned = leanShape(front, currentLean(front.extrude), lean, front.extrude.iso === 'left' || front.extrude.iso === 'right')
+    if (!leaned) return
+    // a front that is leaned by hand is no longer a plane of an isometric solid: the direction of the depth is free again
+    const settings: ExtrudeSettings = { ...front.extrude }
+    delete settings.iso
+    if (Math.abs(lean) > 0.01) settings.lean = Math.round(lean * 10) / 10
+    else delete settings.lean
+    const moved: ShapeFrame = { ...leaned, extrude: settings }
+    const result = extrudeSides(moved, settings, newFrameId, front.groupId)
+    if ('problem' in result) return
+    const next = [...current.filter((shape) => shape.extrudeOf !== frontId).map((shape) => (shape.id === frontId ? moved : shape)), ...result.sides]
+    const key = `extrude:lean:${frontId}`
+    if (editingParent) onParentsChange(parents.map((parent) => (parent.id === editingParent ? { ...parent, shapes: next } : parent)), `parent:${key}`)
+    else onShapesChange(next, key)
+  }
+  /** the view of a solid set while its turn handle is dragged: its front is drawn on that view and the sides are made again */
+  const setViewLive = (frontId: string, target: { yaw: number; pitch: number }, editingParent: string | null) => {
+    const current = shapesRef.current
+    const front = current.find((shape) => shape.id === frontId)
+    if (!front?.extrude) return
+    const to = clampView(target)
+    let base = front
+    const from = front.extrude.view
+    if (!from) {
+      // the outline that is leaned or on a plane is brought back to the flat one before it is drawn on the view
+      if (front.extrude.iso) base = isometricShape(front, 'flat', front.extrude.iso) ?? front
+      else if (Math.abs(currentLean(front.extrude)) > 0.01) base = leanShape(front, currentLean(front.extrude), 0) ?? front
+    }
+    const viewed = viewShape(base, from, to)
+    if (!viewed) return
+    const settings: ExtrudeSettings = { ...front.extrude, view: { yaw: Math.round(to.yaw * 10) / 10, pitch: Math.round(to.pitch * 10) / 10 } }
+    delete settings.iso
+    delete settings.lean
+    const moved: ShapeFrame = { ...viewed, extrude: settings }
+    const result = extrudeSides(moved, settings, newFrameId, front.groupId)
+    if ('problem' in result) return
+    const next = [...current.filter((shape) => shape.extrudeOf !== frontId).map((shape) => (shape.id === frontId ? moved : shape)), ...result.sides]
+    const key = `extrude:view:${frontId}`
+    if (editingParent) onParentsChange(parents.map((parent) => (parent.id === editingParent ? { ...parent, shapes: next } : parent)), `parent:${key}`)
+    else onShapesChange(next, key)
+  }
+  const startTurnDrag = (event: ReactPointerEvent<HTMLDivElement>, frontId: string) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const parent = editingParentId
+    const start = shapesRef.current.find((shape) => shape.id === frontId)?.extrude
+    if (!start) return
+    const base = start.view ?? DEFAULT_VIEW
+    const x0 = event.clientX
+    const y0 = event.clientY
+    const onMove = (move: PointerEvent) => {
+      // across turns the solid about its upright axis (dragging the front to the right moves its right edge back), down looks from higher up
+      let yaw = base.yaw + (move.clientX - x0) * 0.5
+      const pitch = base.pitch + (move.clientY - y0) * 0.35
+      if (move.shiftKey) yaw = Math.round(yaw / 15) * 15
+      setViewLive(frontId, { yaw, pitch }, parent)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  /** the wall and the roundness of a frame set while a corner handle is dragged: the outline is made again and so are the sides */
+  const setFrameLive = (frontId: string, frame: { wall: number; outer: number; inner: number }, editingParent: string | null) => {
+    const current = shapesRef.current
+    const front = current.find((shape) => shape.id === frontId)
+    if (!front?.extrude) return
+    const settings: ExtrudeSettings = { ...front.extrude, frame }
+    const outline = frameOutline({ ...front, extrude: settings })
+    if (!outline) return
+    const moved: ShapeFrame = { ...outline, extrude: settings }
+    const result = extrudeSides(moved, settings, newFrameId, front.groupId)
+    if ('problem' in result) return
+    const next = [...current.filter((shape) => shape.extrudeOf !== frontId).map((shape) => (shape.id === frontId ? moved : shape)), ...result.sides]
+    const key = `extrude:frame:${frontId}`
+    if (editingParent) onParentsChange(parents.map((parent) => (parent.id === editingParent ? { ...parent, shapes: next } : parent)), `parent:${key}`)
+    else onShapesChange(next, key)
+  }
+  /** a diamond handle at a corner of the frame, like the one that rounds the corners of an ordinary shape: the outside, or the hole */
+  const startFrameCornerDrag = (event: ReactPointerEvent<HTMLDivElement>, frontId: string, which: 'outer' | 'inner') => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const parent = editingParentId
+    const onMove = (move: PointerEvent) => {
+      const front = shapesRef.current.find((shape) => shape.id === frontId)
+      const frame = front?.extrude?.frame
+      if (!front || !frame) return
+      const layout = frameLayout(front)
+      if (!layout) return
+      const pointer = toWorld(move.clientX, move.clientY)
+      const [fx, fy] = layout.toFlat(pointer.x, pointer.y)
+      const { flat } = layout
+      // the handle sits on the diagonal of the corner, a little in from where the curve ends
+      const walls = fitWalls(frameWalls(frame), flat.w, flat.h)
+      const aroundX = which === 'outer' ? 0 : walls.left
+      const aroundY = which === 'outer' ? 0 : walls.top
+      const along = (fx - flat.x - aroundX + (fy - flat.y - aroundY)) / 2 - CORNER_HANDLE_OFFSET / Math.max(zoom, 0.01)
+      const limit = which === 'outer' ? Math.min(flat.w, flat.h) / 2 : Math.max(0, Math.min(flat.w - walls.left - walls.right, flat.h - walls.top - walls.bottom) / 2)
+      const radius = Math.max(0, Math.min(limit, Math.round(along * 10) / 10))
+      setFrameLive(frontId, { ...frame, [which]: radius }, parent)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  /** a square handle on one side of the hole of a frame: dragging it makes that side thicker or thinner (Shift: all four together) */
+  const startFrameWallDrag = (event: ReactPointerEvent<HTMLDivElement>, frontId: string, side: 'top' | 'right' | 'bottom' | 'left') => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const parent = editingParentId
+    const onMove = (move: PointerEvent) => {
+      const front = shapesRef.current.find((shape) => shape.id === frontId)
+      const frame = front?.extrude?.frame
+      if (!front || !frame) return
+      const layout = frameLayout(front)
+      if (!layout) return
+      const pointer = toWorld(move.clientX, move.clientY)
+      const [fx, fy] = layout.toFlat(pointer.x, pointer.y)
+      const { flat } = layout
+      const walls = fitWalls(frameWalls(frame), flat.w, flat.h)
+      const wanted = side === 'top' ? fy - flat.y
+        : side === 'bottom' ? flat.y + flat.h - fy
+        : side === 'left' ? fx - flat.x
+        : flat.x + flat.w - fx
+      // the hole keeps a point, whatever the opposite side is
+      const opposite = side === 'top' ? walls.bottom : side === 'bottom' ? walls.top : side === 'left' ? walls.right : walls.left
+      const size = side === 'top' || side === 'bottom' ? flat.h : flat.w
+      const thickness = Math.max(1, Math.min(size - opposite - 1, Math.round(wanted * 10) / 10))
+      if (move.shiftKey) {
+        const uniform = Math.max(1, Math.min(Math.min(flat.w, flat.h) / 2 - 0.5, thickness))
+        const { top: _t, right: _r, bottom: _b, left: _l, ...rest } = frame
+        void _t; void _r; void _b; void _l
+        setFrameLive(frontId, { ...rest, wall: uniform }, parent)
+        return
+      }
+      const next = { ...walls, [side]: thickness }
+      const equal = next.top === next.right && next.right === next.bottom && next.bottom === next.left
+      const { top: _t, right: _r, bottom: _b, left: _l, ...rest } = frame
+      void _t; void _r; void _b; void _l
+      setFrameLive(frontId, equal ? { ...rest, wall: next.top } : { ...rest, wall: frame.wall, ...next }, parent)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  const startLeanDrag = (event: ReactPointerEvent<HTMLDivElement>, frontId: string) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const parent = editingParentId
+    const onMove = (move: PointerEvent) => {
+      const front = shapesRef.current.find((shape) => shape.id === frontId)
+      if (!front?.extrude) return
+      const point = toWorld(move.clientX, move.clientY)
+      const half = Math.max(1, front.w / 2)
+      let lean = (Math.atan((point.y - (front.y + front.h / 2)) / half) * 180) / Math.PI
+      lean = Math.max(-60, Math.min(60, lean))
+      // near a straight front, and near the lean of an isometric wall, it holds
+      for (const stop of [0, 30, -30]) if (Math.abs(lean - stop) < 3) lean = stop
+      setLeanLive(frontId, lean, parent)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  const startDepthDrag = (event: ReactPointerEvent<HTMLDivElement>, frontId: string) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const parent = editingParentId
+    const onMove = (move: PointerEvent) => {
+      const front = shapesRef.current.find((shape) => shape.id === frontId)
+      if (!front?.extrude) return
+      const point = toWorld(move.clientX, move.clientY)
+      const dx = point.x - (front.x + front.w / 2)
+      const dy = point.y - (front.y + front.h / 2)
+      let depth = Math.hypot(dx, dy)
+      let angle = (Math.atan2(-dy, dx) * 180) / Math.PI
+      if (angle < 0) angle += 360
+      if (front.extrude.view) {
+        // the direction follows from the view: only how deep the solid is can be changed (the handle moves along it)
+        const unit = viewVector(1, front.extrude.view)
+        const size = unit[0] * unit[0] + unit[1] * unit[1]
+        if (size < 1e-6) return
+        depth = Math.max(0, (dx * unit[0] + dy * unit[1]) / size)
+        angle = front.extrude.angle
+      } else if (front.extrude.iso) {
+        // the direction belongs to the plane: only how far can be changed
+        const fixed = (ISO_DEPTH_ANGLE[front.extrude.iso] * Math.PI) / 180
+        depth = Math.max(0, dx * Math.cos(fixed) - dy * Math.sin(fixed))
+        angle = ISO_DEPTH_ANGLE[front.extrude.iso]
+      } else if (move.shiftKey) {
+        angle = (Math.round(angle / 15) * 15) % 360
+      }
+      setDepthLive(frontId, Math.min(2000, depth), angle, parent)
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+  }
+  const renderDepthHandle = () => {
+    const handle = depthHandleOf()
+    if (!handle) return null
+    const sx = tx + handle.x * zoom
+    const sy = ty + handle.y * zoom
+    // the lean handle sits on the right edge of the front, where the slope of the outline puts the middle of that edge
+    const lean = currentLean(handle.front.extrude)
+    const showLean = handle.front.extrude?.iso !== 'top' && !handle.front.extrude?.view && !handle.front.rotation
+    const lx = tx + (handle.front.x + handle.front.w) * zoom
+    const ly = ty + (handle.cy + (handle.front.w / 2) * Math.tan((lean * Math.PI) / 180)) * zoom
+    // the corner handles of a frame: one rounds the outside, the other the hole (the same diamonds as on an ordinary shape)
+    const frameSpec = handle.front.extrude?.frame
+    const layout = frameSpec && !handle.front.rotation ? frameLayout(handle.front) : null
+    const frameWallsNow = frameSpec && layout ? fitWalls(frameWalls(frameSpec), layout.flat.w, layout.flat.h) : null
+    // the handles sit in the flat frame, and are carried to the page by the lean or the view the frame is in
+    const cornerHandles = frameSpec && layout && frameWallsNow
+      ? (['outer', 'inner'] as const).map((which) => {
+          const aroundX = which === 'outer' ? 0 : frameWallsNow.left
+          const aroundY = which === 'outer' ? 0 : frameWallsNow.top
+          const radius = frameSpec[which]
+          const along = radius + CORNER_HANDLE_OFFSET / Math.max(zoom, 0.01)
+          const [px, py] = layout.toPage(layout.flat.x + aroundX + along, layout.flat.y + aroundY + along)
+          return { which, left: tx + px * zoom, top: ty + py * zoom }
+        })
+      : []
+    // a square handle on the middle of every side of the hole: the thickness of that side
+    const wallHandles = frameSpec && layout && frameWallsNow
+      ? (() => {
+          const f = layout.flat
+          const midX = f.x + frameWallsNow.left + (f.w - frameWallsNow.left - frameWallsNow.right) / 2
+          const midY = f.y + frameWallsNow.top + (f.h - frameWallsNow.top - frameWallsNow.bottom) / 2
+          return [
+            { side: 'top' as const, x: midX, y: f.y + frameWallsNow.top, label: 'העובי של הדופן העליונה' },
+            { side: 'bottom' as const, x: midX, y: f.y + f.h - frameWallsNow.bottom, label: 'העובי של הדופן התחתונה' },
+            { side: 'left' as const, x: f.x + frameWallsNow.left, y: midY, label: 'העובי של הדופן השמאלית' },
+            { side: 'right' as const, x: f.x + f.w - frameWallsNow.right, y: midY, label: 'העובי של הדופן הימנית' },
+          ].map((entry) => {
+            const [px, py] = layout.toPage(entry.x, entry.y)
+            return { ...entry, left: tx + px * zoom, top: ty + py * zoom }
+          })
+        })()
+      : []
+    // the turn handle hangs below the front, on the table the solid sits on
+    const turnX = tx + handle.cx * zoom
+    const turnY = ty + (handle.front.y + handle.front.h) * zoom + 30
+    return (
+      <>
+        <svg className="spacing-layer" aria-hidden="true">
+          <line x1={tx + handle.cx * zoom} y1={ty + handle.cy * zoom} x2={sx} y2={sy} className="extrude-handle-line" />
+        </svg>
+        {wallHandles.map((wall) => (
+          <div
+            key={wall.side}
+            className={'frame-wall-handle ' + (wall.side === 'top' || wall.side === 'bottom' ? 'vertical' : 'horizontal')}
+            title={wall.label + ' (גרור; Shift: כל הצדדים יחד)'}
+            style={{ left: wall.left, top: wall.top }}
+            onPointerDown={(event) => startFrameWallDrag(event, handle.front.id, wall.side)}
+          />
+        ))}
+        {cornerHandles.map((corner) => (
+          <div
+            key={corner.which}
+            className="corner-handle frame-corner-handle"
+            title={corner.which === 'outer' ? 'עגל את הפינות החיצוניות של המסגרת (גרור)' : 'עגל את פינות החור של המסגרת (גרור)'}
+            style={{ left: corner.left, top: corner.top }}
+            onPointerDown={(event) => startFrameCornerDrag(event, handle.front.id, corner.which)}
+          />
+        ))}
+        <div
+          className="extrude-turn-handle"
+          role="slider"
+          aria-label="סיבוב תלת־ממדי"
+          title="גרור הצידה כדי לסובב את הגוף סביב הציר האנכי שלו, ולמעלה או למטה כדי לשנות את זווית המבט (Shift: צעדים של 15°). לחיצה כפולה מיישרת אותו מול המבט"
+          style={{ left: turnX, top: turnY }}
+          onPointerDown={(event) => startTurnDrag(event, handle.front.id)}
+          onDoubleClick={(event) => {
+            event.stopPropagation()
+            setViewLive(handle.front.id, { yaw: 0, pitch: handle.front.extrude?.view?.pitch ?? DEFAULT_VIEW.pitch }, editingParentId)
+          }}
+        >
+          ⟳
+        </div>
+        {showLean && (
+          <div
+            className="extrude-lean-handle"
+            role="slider"
+            aria-label="הטיית החזית"
+            title="גרור כדי להטות את החזית; קרוב לאפס היא מתיישרת (לחיצה כפולה מיישרת מיד)"
+            style={{ left: lx, top: ly }}
+            onPointerDown={(event) => startLeanDrag(event, handle.front.id)}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              setLeanLive(handle.front.id, 0, editingParentId)
+            }}
+          />
+        )}
+        <div
+          className="extrude-handle"
+          role="slider"
+          aria-label="עומק וכיוון תלת־ממדי"
+          title="גרור כדי לשנות את העומק ואת הכיוון (Shift: זוויות של 15°)"
+          style={{ left: sx, top: sy }}
+          onPointerDown={(event) => startDepthDrag(event, handle.front.id)}
+        />
+      </>
+    )
+  }
+  /** a new solid in the middle of the view: the front with its sides, in one group */
+  const addSolid = (kind: SolidKind) => {
+    const spec = solidSpec(kind)
+    const viewport = vpRef.current
+    const rectBox = viewport?.getBoundingClientRect()
+    const center = viewport && rectBox ? toWorld(rectBox.left + viewport.clientWidth / 2, rectBox.top + viewport.clientHeight / 2) : null
+    const pageIndex = center ? ownerPage(rects, center.x, center.y) : selectedPage
+    const area = rects[pageIndex] ?? rects[selectedPage]
+    const cx = center?.x ?? (area ? area.x + area.w / 2 : 150)
+    const cy = center?.y ?? (area ? area.y + area.h / 2 : 150)
+    const turn = (spec.settings.angle * Math.PI) / 180
+    const back = { x: spec.settings.depth * Math.cos(turn), y: -spec.settings.depth * Math.sin(turn) }
+    const groupId = newFrameId()
+    let front: ShapeFrame = {
+      id: newFrameId(),
+      kind: spec.front.kind,
+      x: cx - spec.front.w / 2 - back.x / 2,
+      y: cy - spec.front.h / 2 - back.y / 2,
+      w: spec.front.w,
+      h: spec.front.h,
+      ...(spec.front.geom ? { geom: spec.front.geom } : {}),
+      fill: spec.front.fill,
+      stroke: null,
+      strokeWidth: 0,
+      z: nextZ(frames, images, shapes),
+      layerId: creationLayerId,
+      groupId,
+      extrude: spec.settings,
+    }
+    if (spec.iso) {
+      // the outline given is laid on its plane of the solid, and the whole (the face and its depth) is centred
+      const laid = isometricShape(front, spec.iso)
+      if (!laid) return
+      front = { ...laid, x: cx - laid.w / 2 - back.x / 2, y: cy - laid.h / 2 - back.y / 2 }
+    }
+    const result = extrudeSides(front, spec.settings, newFrameId, groupId)
+    if ('problem' in result) return
+    commitMultiObjectChange({ shapes: [...shapes, front, ...result.sides] }, 'extrude:new')
+    setTool('select')
+    setMultiSel([])
+    setSelectedId(front.id)
+    if (area) setSelectedPage(pageIndex)
+    onNotify(`נוספה ${SOLID_NAMES[kind]} תלת־ממדית. אפשר לצבוע את הצורה ואת הצדדים, ולשנות את העומק בפקודה „עומק תלת־ממדי”.`)
+  }
+
   const groupSelectedObjects = () => {
     const ids = selectedObjectIds()
     if (ids.length < 2) return
@@ -3951,8 +4597,11 @@ export function Workspace({
   const handleMultiPointer = (id: string, e: ReactPointerEvent<Element>): boolean => {
     if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) return altDuplicateDrag(id, e)
     const groupId = objectGroupId(id)
+    const current = selectedId ? [selectedId] : multiSel
+    const clickedGroupSelected = !!groupId && current.some((selectedObjectId) => objectGroupId(selectedObjectId) === groupId)
+    const draggingSelectedMulti = !selectedId && multiSel.length > 1 && (multiSel.includes(id) || clickedGroupSelected)
     // a click on a member of a group picks the whole group - except in the isolated group, where the members are picked one by one
-    if (tool === 'select' && groupId && groupId !== isolatedGroupId && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (tool === 'select' && groupId && groupId !== isolatedGroupId && !e.shiftKey && !e.ctrlKey && !e.metaKey && !draggingSelectedMulti) {
       e.stopPropagation()
       e.preventDefault()
       setGuideSel([])
@@ -3966,7 +4615,6 @@ export function Workspace({
       vpRef.current?.setPointerCapture(e.pointerId)
       return true
     }
-    const current = selectedId ? [selectedId] : multiSel
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       e.stopPropagation()
       e.preventDefault()
@@ -3983,10 +4631,10 @@ export function Workspace({
       return true
     }
     // the point-editing tool picks the one object under the pointer, even from a selection of several (a letter out of its group)
-    if (tool !== 'direct' && multiSel.length > 1 && multiSel.includes(id)) {
+    if (tool !== 'direct' && multiSel.length > 1 && (multiSel.includes(id) || clickedGroupSelected)) {
       e.stopPropagation()
       e.preventDefault()
-      const origins = new Map(chosenObjects().map((o) => [o.id, { x: o.x, y: o.y }]))
+      const origins = groupDragOrigins(chosenObjects())
       dragSeq.current += 1
       groupDrag.current = { origins, start: toWorld(e.clientX, e.clientY), key: `group:${dragSeq.current}` }
       vpRef.current!.setPointerCapture(e.pointerId)
@@ -4237,6 +4885,8 @@ export function Workspace({
     traceImageFromSelection,
     createOutlinesFromSelection: () => void createOutlines(),
     releaseCompoundPaths,
+    extrudeSelection,
+    addSolid,
     selectedObjectIds,
     shapeOp: (op) => combineSelectedShapes(op),
     group: groupSelectedObjects,
@@ -5092,7 +5742,20 @@ export function Workspace({
   }
 
   const addColorSample = (color: string) => {
-    pageOps.commit({ colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: `דגימה ${colorSamples.length + 1}` }] })
+    // a solid that is selected gets the colour at once (its front, and its sides shaded from it), as if the sample were clicked in the panel
+    const solids = extrudeFronts().filter((front) => !itemLocks[front.id])
+    const paint: Partial<ShapeFrame> = colorTarget === 'stroke'
+      ? { stroke: color }
+      : { fill: color, fillGradient: undefined }
+    const painted = solids.length > 0
+      ? paintShapes(shapes, new Set(solids.map((front) => front.id)), colorTarget === 'stroke' ? { ...paint, ...(solids.some((front) => front.strokeWidth === 0) ? { strokeWidth: 0.25 } : {}) } : paint, newFrameId)
+      : null
+    pageOps.commit({
+      colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: `דגימה ${colorSamples.length + 1}` }],
+      ...(painted && !editingParentId ? { shapes: painted } : {}),
+    })
+    // on a parent page the shapes are those of the parent
+    if (painted && editingParentId) commitMultiObjectChange({ shapes: painted }, 'sample-paint')
     setRasterBrushColor(color)
     setColorSamplerActive(false)
     setColorSamplerPreview(null)
@@ -5871,6 +6534,12 @@ export function Workspace({
       ? pathShapeFromPoints(fitPencilStroke(points), false, false, false, 0.28, pencilSettings.cap)
       : pathShapeFromPoints(points, closed, smooth, false, 0.28, 'butt')
     if (!shape) return
+    if (fitted) {
+      // the sharpness chosen for free drawing: the ends of the line, and a slight blur when it is soft
+      const look = lineLook(sharpness, shape.strokeWidth, pencilSettings.cap)
+      if (sharpness !== 'medium') shape.strokeCap = look.strokeCap
+      if (look.blur) shape.blur = look.blur
+    }
     onShapesChange([...shapes, shape])
     lastPencilPathId.current = shape.id
     setSelectedId(shape.id)
@@ -5884,7 +6553,108 @@ export function Workspace({
     setPenHover(null)
   }
 
+  /** a stroke of the brush tool becomes one shape: what the brush covers, filled with the brush colour */
+  const commitBrushStroke = (points: WorldPathPoint[]) => {
+    if (points.length === 0) return
+    const shape = strokeShape(points.map((point): [number, number] => [point.x, point.y]), brushStyle, customBrushes, brushSize, brushColor, newFrameId(), nextZ(frames, images, shapes), creationLayerId, sharpness)
+    if (!shape) return
+    onShapesChange([...shapes, shape])
+    setMultiSel([])
+    setSelectedId(shape.id)
+    setSelectedPage(ownerPage(rects, shape.x + shape.w / 2, shape.y + shape.h / 2))
+  }
+
+  /**
+   * A brush on the outline of the selected shapes: the line they had is replaced by a stroke of the brush in the colour that line had
+   * (the brush colour, when it had none). A shape with a fill keeps it and loses the line; one that was only a line is replaced.
+   */
+  const applyBrushToSelection = () => {
+    const ids = new Set(selectedId ? [selectedId] : multiSel)
+    const made: string[] = []
+    const next: ShapeFrame[] = []
+    for (const shape of shapes) {
+      const lines = ids.has(shape.id) && !itemLocks[shape.id] && !shape.extrude && !shape.extrudeOf && !shape.image ? centerlinesOf(shape) : null
+      if (!lines || lines.length === 0) {
+        next.push(shape)
+        continue
+      }
+      const color = shape.stroke ?? brushColor
+      const keeps = !!shape.fill || !!shape.fillGradient || !!shape.pathText
+      const strokes: ShapeFrame[] = []
+      for (const line of lines) {
+        const stroke = strokeShape(line, brushStyle, customBrushes, brushSize, color, newFrameId(), keeps ? zOfShape(shape) + 0.01 : zOfShape(shape), shape.layerId, sharpness)
+        if (!stroke) continue
+        if (shape.groupId) stroke.groupId = shape.groupId
+        if (shape.opacity !== undefined) stroke.opacity = shape.opacity
+        strokes.push(stroke)
+      }
+      if (strokes.length === 0) {
+        next.push(shape)
+        continue
+      }
+      if (keeps) next.push({ ...shape, stroke: null, strokeWidth: 0 })
+      next.push(...strokes)
+      made.push(...strokes.map((stroke) => stroke.id))
+    }
+    if (made.length === 0) return
+    onShapesChange(next)
+    if (made.length === 1) {
+      setMultiSel([])
+      setSelectedId(made[0]!)
+    } else {
+      setSelectedId(null)
+      setMultiSel(made)
+    }
+  }
+
+  /**
+   * The selected strokes drawn again with what the brush panel (or the sharpness control) was just changed to: a stroke of the brush
+   * tool in its new style, size, colour or sharpness, and a line drawn with the pencil in its new sharpness. Not while a drawing tool
+   * is in hand: then a change is for the next stroke, and the one just drawn stays.
+   */
+  const restyleSelectedStrokes = (change: { style?: string; size?: number; sharpness?: Sharpness; color?: string }, key: string, customs: CustomBrush[] = customBrushes, onlyStyle?: string) => {
+    if (tool === 'brush' || tool === 'pencil') return
+    const ids = new Set(selectedId ? [selectedId] : multiSel)
+    if (ids.size === 0) return
+    let touched = false
+    const next = shapes.map((shape) => {
+      if (!ids.has(shape.id) || itemLocks[shape.id] || shape.extrudeOf) return shape
+      if (shape.brush) {
+        if (onlyStyle && shape.brush.style !== onlyStyle) return shape
+        const redone = restyleStroke(shape, change, customs)
+        if (!redone) return shape
+        touched = true
+        return redone
+      }
+      // a line drawn with the pencil (or any line or path with a stroke): the sharpness is its ends and its blur
+      if (change.sharpness && !onlyStyle && (shape.kind === 'path' || shape.kind === 'line') && shape.stroke && shape.strokeWidth > 0) {
+        const look = lineLook(change.sharpness, shape.strokeWidth, pencilSettings.cap)
+        const redone: ShapeFrame = { ...shape }
+        if (shape.kind === 'line' && look.strokeCap === 'butt') delete redone.strokeCap
+        else redone.strokeCap = look.strokeCap
+        if (look.blur) redone.blur = look.blur
+        else delete redone.blur
+        touched = true
+        return redone
+      }
+      return shape
+    })
+    if (touched) onShapesChange(next, key)
+  }
+
+  const changeSharpness = (level: Sharpness) => {
+    setSharpness(level)
+    restyleSelectedStrokes({ sharpness: level }, 'brush-sharpness')
+  }
+
   const finishPencil = () => {
+    if (tool === 'brush') {
+      commitBrushStroke(pencilPoints.current)
+      pencilEditTarget.current = null
+      pencilPoints.current = []
+      setFreehandPreview(null)
+      return
+    }
     const target = pencilEditTarget.current
     const existing = target && shapes.find((shape) => shape.id === target.id && shape.kind === 'path')
     if (existing) {
@@ -6636,6 +7406,7 @@ export function Workspace({
       kind: isImage ? 'image' : isShape ? 'shape' : 'frame',
       ...(table ? { table } : {}),
       ...(textFrame?.textScale ? { origTextScale: textFrame.textScale } : {}),
+      ...(isImage ? { origFit: images.find((x) => x.id === id)?.fit } : isShape ? { origFit: shapes.find((x) => x.id === id)?.image?.fit } : {}),
     }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
@@ -6649,6 +7420,7 @@ export function Workspace({
       start: toWorld(e.clientX, e.clientY),
       box: { ...groupSelection.box },
       objects: groupSelection.objects.map((o) => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h })),
+      fits: new Map(images.filter((im) => groupSelection.objects.some((o) => o.id === im.id)).map((im) => [im.id, im.fit] as const)),
       key: `group-resize:${dragSeq.current}`,
     }
     vpRef.current!.setPointerCapture(e.pointerId)
@@ -6656,7 +7428,9 @@ export function Workspace({
   const moveGroupResize = (d: NonNullable<typeof groupResize.current>, e: ReactPointerEvent<HTMLDivElement>) => {
     const p = toWorld(e.clientX, e.clientY)
     const raw = { x: p.x - d.start.x, y: p.y - d.start.y }
-    const next = dragBox(d.box, d.mode, raw.x, raw.y, MIN_FRAME_PT, e.shiftKey ? d.box.w / d.box.h : undefined)
+    // Alt stretches to both sides at once, around the middle of the box
+    const next = dragBox(d.box, d.mode, raw.x, raw.y, MIN_FRAME_PT, e.shiftKey ? d.box.w / d.box.h : undefined, e.altKey)
+    const stretching = e.altKey && d.mode.length === 1
     const sx = next.w / d.box.w
     const sy = next.h / d.box.h
     const update = <T extends { id: string; x: number; y: number; w: number; h: number }>(list: T[]) =>
@@ -6672,8 +7446,88 @@ export function Workspace({
         }
       })
     onFramesChange(update(frames), d.key)
+    // a picture in the group is stretched with it by Alt on a side handle, and fitted the way it was otherwise
+    onImagesChange(update(images).map((im) => {
+      const fit = stretching ? 'stretch' : d.fits.get(im.id)
+      return fit && im.fit !== fit && d.objects.some((o) => o.id === im.id) ? { ...im, fit } : im
+    }), d.key)
+    // a solid in the group is scaled by its front only: the sides are made again from it, so that the depth does not stretch
+    let scaled = update(shapes)
+    for (const object of d.objects) {
+      if (scaled.some((shape) => shape.id === object.id && shape.extrude)) scaled = syncSolid(scaled, object.id, newFrameId)
+    }
+    onShapesChange(scaled, d.key)
+  }
+
+  /** the ring round a corner of the box of several selected objects: they turn together about the middle of the box */
+  const beginGroupRotate = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!groupSelection || e.button !== 0 || panMode) return
+    e.stopPropagation()
+    e.preventDefault()
+    dragSeq.current += 1
+    const { box } = groupSelection
+    const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 }
+    const grabbed = toWorld(e.clientX, e.clientY)
+    groupRotate.current = {
+      center,
+      startAngle: angleOf(center, grabbed),
+      objects: groupSelection.objects.map((o) => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h, rotation: o.rotation ?? 0 })),
+      // a solid in the selection is turned as one: its front turns and its sides are made again (the same shapes, as far as they go)
+      solids: new Map(shapes.filter((s) => s.extrude && groupSelection.objects.some((o) => o.id === s.id)).map((s) => [s.id, { extrude: s.extrude!, sideIds: shapes.filter((side) => side.extrudeOf === s.id).map((side) => side.id) }])),
+      key: `group-rotate:${dragSeq.current}`,
+    }
+    setRotatePreview({ cx: center.x, cy: center.y, w: box.w, h: box.h, startRotation: 0, sweep: 0 })
+    setAngleTip({ x: grabbed.x, y: grabbed.y, deg: 0 })
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveGroupRotate = (d: NonNullable<typeof groupRotate.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const pointer = toWorld(e.clientX, e.clientY)
+    let delta = normalizeDeg(angleOf(d.center, pointer) - d.startAngle)
+    if (e.shiftKey) delta = normalizeDeg(Math.round(delta / 45) * 45)
+    setRotatePreview((p) => (p ? { ...p, sweep: delta } : p))
+    setAngleTip({ x: pointer.x, y: pointer.y, deg: delta > 180 ? delta - 360 : delta })
+    const rad = (delta * Math.PI) / 180
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    const update = <T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number; kind?: string }>(list: T[]): T[] =>
+      list.map((o) => {
+        const original = d.objects.find((x) => x.id === o.id)
+        // a table has no turn: it stays where it is
+        if (!original || o.kind === 'table') return o
+        const dx = original.x + original.w / 2 - d.center.x
+        const dy = original.y + original.h / 2 - d.center.y
+        const rotation = normalizeDeg(original.rotation + delta)
+        return {
+          ...o,
+          x: d.center.x + dx * cos - dy * sin - original.w / 2,
+          y: d.center.y + dx * sin + dy * cos - original.h / 2,
+          rotation: rotation || undefined,
+        }
+      })
+    onFramesChange(update(frames), d.key)
     onImagesChange(update(images), d.key)
-    onShapesChange(update(shapes), d.key)
+    const turnedShapes = update(shapes)
+    if (d.solids.size === 0) {
+      onShapesChange(turnedShapes, d.key)
+      return
+    }
+    const kept: ShapeFrame[] = []
+    const made: ShapeFrame[] = []
+    for (const shape of turnedShapes) {
+      if (shape.extrudeOf && d.solids.has(shape.extrudeOf)) continue
+      const solid = d.solids.get(shape.id)
+      if (!solid) {
+        kept.push(shape)
+        continue
+      }
+      const settings = turnedSettings(solid.extrude, delta)
+      const front: ShapeFrame = { ...shape, extrude: settings }
+      kept.push(front)
+      const pool = [...solid.sideIds]
+      const result = extrudeSides(front, settings, () => pool.shift() ?? newFrameId(), shape.groupId)
+      if (!('problem' in result)) made.push(...result.sides)
+    }
+    onShapesChange([...kept, ...made], d.key)
   }
 
   /** grabbing the ring around one of an object's corners: it turns around its own centre from then on (any corner starts
@@ -6696,6 +7550,7 @@ export function Workspace({
       center,
       startAngle: angleOf(center, grabbed),
       startRotation: f.rotation ?? 0,
+      extrude: isShape ? shapes.find((x) => x.id === id)?.extrude : undefined,
       key: `rotate:${dragSeq.current}`,
     }
     setRotatePreview({ cx: center.x, cy: center.y, w: f.w, h: f.h, startRotation: f.rotation ?? 0, sweep: 0 })
@@ -6713,6 +7568,17 @@ export function Workspace({
     setRotatePreview((p) => (p ? { ...p, sweep } : p))
     setAngleTip({ x: pointer.x, y: pointer.y, deg: sweep > 180 ? sweep - 360 : sweep })
     const patch = { rotation: rotation || undefined }
+    const turning = d.kind === 'shape' ? shapes.find((sh) => sh.id === d.id) : undefined
+    if (turning?.extrude && d.extrude) {
+      // the front of a solid turns: the solid turns as one, its depth going back in the turned direction
+      const settings = turnedSettings(d.extrude, sweep)
+      const turned: ShapeFrame = { ...turning, ...patch, extrude: settings }
+      const result = extrudeSides(turned, settings, newFrameId, turning.groupId)
+      if (!('problem' in result)) {
+        onShapesChange([...shapes.filter((sh) => sh.extrudeOf !== d.id).map((sh) => (sh.id === d.id ? turned : sh)), ...result.sides], d.key)
+        return
+      }
+    }
     if (d.kind === 'shape') onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...patch } : sh)), d.key)
     else if (d.kind === 'image') onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...patch } : im)), d.key)
     else updateFrame(d.id, patch, d.key)
@@ -6907,7 +7773,7 @@ export function Workspace({
       return
     }
     const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
-    if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && !marqueeTool) {
+    if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && tool !== 'brush' && !marqueeTool) {
       leaveIsolation()
       return // scrollbars
     }
@@ -6979,9 +7845,9 @@ export function Workspace({
       e.preventDefault()
       e.stopPropagation()
       e.currentTarget.setPointerCapture(e.pointerId)
-    } else if (tool === 'pencil' && e.button === 0) {
+    } else if ((tool === 'pencil' || tool === 'brush') && e.button === 0) {
       const point = toWorld(e.clientX, e.clientY)
-      const target = e.ctrlKey || e.metaKey ? pencilEditHit(point) : null
+      const target = tool === 'pencil' && (e.ctrlKey || e.metaKey) ? pencilEditHit(point) : null
       pencilEditTarget.current = target
       pencilPoints.current = [target?.snap ?? point]
       setFreehandPreview({ points: pencilPoints.current, closed: false })
@@ -7275,7 +8141,7 @@ export function Workspace({
     if (pencilPoints.current.length > 0) {
       const point = toWorld(e.clientX, e.clientY)
       const last = pencilPoints.current[pencilPoints.current.length - 1]
-      if (Math.hypot(point.x - last.x, point.y - last.y) >= pencilSettings.fidelity / zoom) {
+      if (Math.hypot(point.x - last.x, point.y - last.y) >= (tool === 'brush' ? 1.5 : pencilSettings.fidelity) / zoom) {
         pencilPoints.current = [...pencilPoints.current, point]
         setFreehandPreview({ points: pencilPoints.current, closed: false })
       }
@@ -7307,6 +8173,10 @@ export function Workspace({
     }
     if (groupResize.current) {
       moveGroupResize(groupResize.current, e)
+      return
+    }
+    if (groupRotate.current) {
+      moveGroupRotate(groupRotate.current, e)
       return
     }
     if (groupDrag.current) {
@@ -7442,14 +8312,25 @@ export function Workspace({
           onShapesChange(shapes.map((shape) => shape.id === d.id ? { ...shape, ...resized, table } : shape), d.key)
           return
         }
-        onShapesChange(shapes.map((sh) => (sh.id === d.id ? { ...sh, ...box } : sh)), d.key)
+        // Alt on a side handle stretches the picture in it with the shape, to both sides, in that direction only
+        const stretching = e.altKey && d.mode !== 'move' && d.mode.length === 1
+        const moved = shapes.map((sh) => {
+          if (sh.id !== d.id) return sh
+          const fit = stretching ? 'stretch' : d.origFit
+          return sh.image && fit && sh.image.fit !== fit ? { ...sh, ...box, image: { ...sh.image, fit } } : { ...sh, ...box }
+        })
+        // the front of a solid: its sides (and, for a frame, its walls and corners) follow the new box
+        onShapesChange(moved.some((sh) => sh.id === d.id && sh.extrude) ? syncSolid(moved, d.id, newFrameId) : moved, d.key)
         return
       }
       if (d.kind === 'image') {
         // corners keep the picture's proportions unless Shift is held
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? undefined : d.orig.w / d.orig.h, e.altKey)
         if (d.mode === 'move') learnRepeatOffset(d.id, box)
-        onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box } : im)), d.key)
+        // Alt on a side handle stretches the picture itself, to both sides at once and in that direction only (the other direction
+        // stays as it was); without Alt the picture is fitted in its frame the way it was
+        const stretching = e.altKey && d.mode !== 'move' && d.mode.length === 1
+        onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box, ...(stretching ? { fit: 'stretch' as const } : d.origFit ? { fit: d.origFit } : {}) } : im)), d.key)
         return
       }
       // Shift scales text and its frame together; Alt only changes the text's vertical scale.
@@ -7674,6 +8555,7 @@ export function Workspace({
     setSpacingShown((cur) => (cur.length ? [] : cur))
     if (frameDrag.current?.mode === 'move') learnRepeatOffset()
     groupResize.current = null
+    groupRotate.current = null
     // a rubber band that caught a single object leaves it selected the ordinary way (with its panel and handles)
     if (marqueeBase.current && multiSel.length === 1 && guideSel.length === 0) {
       setSelectedIdRaw(multiSel[0])
@@ -7750,6 +8632,7 @@ export function Workspace({
     frameDrag.current = null
     setGraphicFrameHandleDragging(false)
     groupResize.current = null
+    groupRotate.current = null
     rotateDrag.current = null
     setRotatePreview(null)
     pageDrag.current = null
@@ -8052,7 +8935,7 @@ export function Workspace({
               ? ' pagetool'
               : tool === 'pen'
                 ? ' pentool'
-                : tool === 'pencil'
+                : tool === 'pencil' || tool === 'brush'
                   ? ' penciltool'
                 : tool === 'scissors'
                   ? ' scissorstool'
@@ -8094,7 +8977,7 @@ export function Workspace({
       return
     }
     const selected = new Set(selectedPaintShapes.map((shape) => shape.id))
-    onShapesChange(shapes.map((shape) => selected.has(shape.id) ? { ...shape, ...patch } : shape), `${key}:${[...selected].join(',')}`)
+    onShapesChange(paintShapes(shapes, selected, patch, newFrameId), `${key}:${[...selected].join(',')}`)
   }
   /** the layers changed in the panel (order, names, colours, hidden, locked): what just became hidden or locked can no longer stay selected */
   const changeLayerSetup = (order: string[], next: Record<string, LayerInfo>, coalesceKey?: string) => {
@@ -9417,14 +10300,24 @@ export function Workspace({
     return a <= b ? [a - fl.start, b - fl.start] : null
   }
   const freehandShape = freehandPreview
-    ? pathShapeFromPoints(
-        freehandPreview.points,
-        freehandPreview.closed,
-        tool === 'pencil',
-        tool === 'pen',
-        pencilSettings.cap === 'round' ? 0.75 : 0.18 + (pencilSettings.smoothness / 100) * 0.36,
-        tool === 'pencil' ? pencilSettings.cap : 'butt',
-      )
+    ? tool === 'brush'
+      ? strokeShape(freehandPreview.points.map((point): [number, number] => [point.x, point.y]), brushStyle, customBrushes, brushSize, brushColor, 'brush-preview', 900001, undefined, sharpness)
+      : (() => {
+          const preview = pathShapeFromPoints(
+            freehandPreview.points,
+            freehandPreview.closed,
+            tool === 'pencil',
+            tool === 'pen',
+            pencilSettings.cap === 'round' ? 0.75 : 0.18 + (pencilSettings.smoothness / 100) * 0.36,
+            tool === 'pencil' ? pencilSettings.cap : 'butt',
+          )
+          if (preview && tool === 'pencil') {
+            const look = lineLook(sharpness, preview.strokeWidth, pencilSettings.cap)
+            if (sharpness !== 'medium') preview.strokeCap = look.strokeCap
+            if (look.blur) preview.blur = look.blur
+          }
+          return preview
+        })()
     : null
 
   void showProps
@@ -9566,6 +10459,8 @@ export function Workspace({
 
       <ContextToolbar
         tool={space ? 'hand' : tool}
+        sharpness={sharpness}
+        onSharpness={changeSharpness}
         shape={tool === 'feather' || toolbarTable ? null : selShape}
         image={tool === 'feather' ? null : selImage}
         frame={tool === 'feather' ? null : selFrame}
@@ -9934,6 +10829,9 @@ export function Workspace({
                     height: groupSelection.box.h * zoom,
                   }}
                 >
+                  {ROTATE_CORNERS.map((c) => (
+                    <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב את הבחירה כולה (Shift: קפיצות של 45°)" onPointerDown={beginGroupRotate} />
+                  ))}
                   {HANDLES.map((h) => (
                     <div key={h} className={'handle ' + h} onPointerDown={(e) => beginGroupResize(h, e)} />
                   ))}
@@ -9968,7 +10866,7 @@ export function Workspace({
                   tx={tx}
                   ty={ty}
                   z={rank.get(sh.id) ?? 0}
-                  selected={sh.id === selectedId && tool !== 'pencil'}
+                  selected={sh.id === selectedId && tool !== 'pencil' && tool !== 'brush'}
                   locked={!!itemLocks[sh.id]}
                   marked={!previewMode && multiSel.includes(sh.id)}
                   showEdge={!previewMode && !marqueeTool && multiSel.length < 2}
@@ -10376,6 +11274,7 @@ export function Workspace({
                     </svg>
                   )
                 })()}
+              {renderDepthHandle()}
               {marquee && (
                 <div
                   className="marquee"
@@ -10655,6 +11554,11 @@ export function Workspace({
               content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
+              id: 'brushes',
+              label: 'מברשות',
+              content: <BrushesPanel style={brushStyle} size={brushSize} color={brushColor} samples={colorSamples} customs={customBrushes} message={brushMessage} onImport={(file) => void importBrush(file)} onRemoveCustom={(id) => { changeCustomBrushes((list) => list.filter((brush) => brush.id !== id)); if (brushStyle === id) setBrushStyle('splatter') }} onChangeCustom={(id, patch) => { const next = customBrushes.map((brush) => (brush.id === id ? { ...brush, ...patch } : brush)); changeCustomBrushes(() => next); restyleSelectedStrokes({}, 'brush-custom', next, id) }} canApply={(selectedId ? [selectedId] : multiSel).some((id) => shapes.some((sh) => sh.id === id && !sh.extrude && !sh.extrudeOf && !sh.image && !itemLocks[id]))} toolActive={tool === 'brush'} sharpness={sharpness} onSharpness={changeSharpness} onStyle={(id) => { setBrushStyle(id); setBrushMessage(null); restyleSelectedStrokes({ style: id }, 'brush-style') }} onSize={(size) => { const next = Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(size))); setBrushSize(next); restyleSelectedStrokes({ size: next }, 'brush-size') }} onColor={(next) => { setBrushColor(next); restyleSelectedStrokes({ color: next }, 'brush-color') }} onApply={applyBrushToSelection} onUseTool={() => activateTool('brush')} />,
+            },
+            {
               id: 'layers',
               label: 'שכבות',
               content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} layers={layers} onLayersChange={changeLayerSetup} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={(id) => { if (selectable(id)) setSelectedId(id) }} onItemChange={changeLayerItem} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
@@ -10862,6 +11766,17 @@ export function Workspace({
           ]}
         />
       })()}
+      {extrudeRequest && (
+        <ExtrudeDialog
+          initial={extrudeRequest.initial}
+          frontColor={extrudeRequest.frontColor}
+          hasDepth={extrudeRequest.hasDepth}
+          corner={extrudeRequest.corner}
+          onApply={(settings, view, corner) => applyExtrude(settings, view, corner)}
+          onRemove={() => applyExtrude(null)}
+          onClose={() => setExtrudeRequest(null)}
+        />
+      )}
       {traceImageId !== null && (() => {
         const image = images.find((candidate) => candidate.id === traceImageId)
         const asset = image ? assets[image.assetId] : undefined

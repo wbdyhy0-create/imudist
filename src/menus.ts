@@ -66,6 +66,8 @@ export interface MenuContext {
   exportPng: () => void
   /** the selected objects, or the page, as an SVG file */
   exportSvg: () => void
+  /** the text of the selected frames, or of the whole document, as a TXT / HTML / RTF file */
+  exportText: (format: 'txt' | 'html' | 'rtf', encoding?: 'utf-8' | 'utf-16' | 'windows-1255') => void
   /** a new book (a set of documents kept together as chapters) */
   newBook: () => void
   openBook: () => void
@@ -132,9 +134,31 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         off('ייבוא XML…'),
         sep,
         { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
-        { label: 'ייצוא ל-PNG…', disabled: !c.hasDoc, onClick: c.exportPng },
-        { label: 'ייצוא ל-SVG…', disabled: !c.hasDoc, onClick: c.exportSvg },
+        {
+          label: 'ייצוא תמונה',
+          disabled: !c.hasDoc,
+          submenu: [
+            { label: 'PNG…', onClick: c.exportPng },
+            { label: 'SVG…', onClick: c.exportSvg },
+          ],
+        },
         sep,
+        {
+          label: 'ייצוא תוכן וטקסט',
+          disabled: !c.hasDoc,
+          submenu: [
+            { label: 'RTF (Word)…', onClick: () => c.exportText('rtf') },
+            { label: 'HTML…', onClick: () => c.exportText('html') },
+            {
+              label: 'TXT',
+              submenu: [
+                { label: 'UTF-8…', onClick: () => c.exportText('txt', 'utf-8') },
+                { label: 'UTF-16…', onClick: () => c.exportText('txt', 'utf-16') },
+                { label: 'עברית 8 סיביות (Windows-1255)…', onClick: () => c.exportText('txt', 'windows-1255') },
+              ],
+            },
+          ],
+        },        sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
         { label: 'הגדרות מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },
         off('התאמת פריסה…', 'Alt+Shift+P'),
@@ -234,6 +258,23 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('הסר רקע מהתמונה הנבחרת', '', (ws) => ws.removeBackgroundFromSelection()),
         doc('המר תמונה לווקטור…', '', (ws) => ws.traceImageFromSelection()),
         doc('המר טקסט לווקטור', 'Ctrl+Shift+O', (ws) => ws.createOutlinesFromSelection()),
+        sep,
+        doc('עומק תלת־ממדי…', '', (ws) => ws.extrudeSelection()),
+        {
+          label: 'גוף תלת־ממדי חדש',
+          submenu: [
+            doc('קוביה', '', (ws) => ws.addSolid('cube')),
+            doc('תיבה', '', (ws) => ws.addSolid('box')),
+            doc('גליל', '', (ws) => ws.addSolid('cylinder')),
+            doc('מסגרת', '', (ws) => ws.addSolid('frame')),
+            sep,
+            doc('קוביה איזומטרית', '', (ws) => ws.addSolid('isoCube')),
+            doc('תיבה איזומטרית שוכבת', '', (ws) => ws.addSolid('isoBox')),
+            doc('תיבה איזומטרית זקופה', '', (ws) => ws.addSolid('isoBoxStanding')),
+            doc('מסגרת איזומטרית שוכבת', '', (ws) => ws.addSolid('isoFrame')),
+            doc('מסגרת איזומטרית זקופה', '', (ws) => ws.addSolid('isoFrameStanding')),
+          ],
+        },
         sep,
         off('שינוי צורה'),
         {
@@ -361,6 +402,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         dock('color', 'צבע'),
         dock('gradient', 'מעבר צבע'),
         dock('swatches', 'דוגמיות'),
+        dock('brushes', 'מברשות'),
         dock('layers', 'שכבות'),
         dock('links', 'קישורים'),
         { label: 'ספר', checked: c.bookPanelOpen, onClick: c.toggleBookPanel },

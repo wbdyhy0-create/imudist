@@ -20,22 +20,26 @@ interface Props {
   onChange: (color: string | null) => void
   label: string
   samples?: ColorSample[]
+  /** the "none" chip is shown (default); false for a colour that has to be one */
+  allowNone?: boolean
 }
 
 const same = (a: string, b: string | null) => b !== null && a.toLowerCase() === b.toLowerCase()
 
-export function FillPicker({ value, onChange, label, samples = [] }: Props) {
+export function FillPicker({ value, onChange, label, samples = [], allowNone = true }: Props) {
   const inPalette = value === null || COLORS.some((c) => same(c.color, value)) || samples.some((sample) => same(sample.color, value))
   return (
     <div className="swatch-row" role="radiogroup" aria-label={label}>
-      <button
-        role="radio"
-        aria-checked={value === null}
-        className={'swatch-chip none' + (value === null ? ' on' : '')}
-        title="ללא"
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={() => onChange(null)}
-      />
+      {allowNone && (
+        <button
+          role="radio"
+          aria-checked={value === null}
+          className={'swatch-chip none' + (value === null ? ' on' : '')}
+          title="ללא"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onChange(null)}
+        />
+      )}
       {COLORS.map((entry) => (
         <button
           key={entry.label}

@@ -31,6 +31,9 @@ describe('help topic search', () => {
     expect(categoryFor('path-text-create')).toBe('טיפוגרפיה')
     expect(categoryFor('style-sampler-use')).toBe('טיפוגרפיה')
     expect(categoryFor('shape-tools')).toBe('כלי צורה')
+    expect(categoryFor('object-shape-building')).toBe('אובייקט')
+    expect(categoryFor('object-grouping')).toBe('אובייקט')
+    expect(categoryFor('object-multi-select')).toBe('אובייקט')
     expect(categoryFor('file-export')).toBe('תפריט קובץ')
     expect(categoryFor('export-pdf')).toBe('קובץ · PDF')
     expect(categoryFor('pdf-page-range')).toBe('קובץ · PDF')
@@ -44,6 +47,12 @@ describe('help topic search', () => {
     expect(search('וקטורי')[0]?.id).toBe('pdf-vector')
     expect(search('וקטו')[0]?.id).toBe('pdf-vector')
     expect(search('וקטורי בלבד')[0]?.id).toBe('pdf-vector')
+  })
+
+  it('finds dedicated help for object menu commands', () => {
+    expect(search('בניית צורות איחוד חיסור חיתוך והחרגה')[0]?.id).toBe('object-shape-building')
+    expect(search('קיבוץ אובייקטים בטל קיבוץ נתיב מורכב')[0]?.id).toBe('object-grouping')
+    expect(search('בחירה והזזה של כמה אובייקטים יחד')[0]?.id).toBe('object-multi-select')
   })
 
   it('explains the distinct roles of PDF image quality, color mode, and vector export', () => {
@@ -77,7 +86,7 @@ describe('help topic search', () => {
     }
 
     const fileExport = HELP_TOPICS.find((topic) => topic.id === 'file-export')?.answer[0] ?? ''
-    for (const step of ['„קובץ”', '„ייצוא ל-PDF…”', '„ייצוא ל-PNG…”', 'העמוד שמוצג כעת', '„ייצא בחירה ל־PNG”']) {
+    for (const step of ['„קובץ”', '„ייצוא ל-PDF…”', '„ייצוא תמונה” > „PNG…”', 'העמוד שמוצג כעת', '„ייצא בחירה ל־PNG”']) {
       expect(fileExport).toContain(step)
     }
   })
@@ -261,7 +270,7 @@ describe('help topic search', () => {
     const topic = search('ייצוא וקטורים לקובץ').find((result) => result.id === 'export-svg')
     expect(topic).toBeDefined()
     const answer = topic?.answer.join(' ') ?? ''
-    for (const detail of ['„קובץ” > „ייצוא ל-SVG…”', 'אם לא נבחר דבר', 'נתיבים', 'האותיות']) expect(answer).toContain(detail)
+    for (const detail of ['„קובץ” > „ייצוא תמונה” > „SVG…”', 'אם לא נבחר דבר', 'נתיבים', 'האותיות']) expect(answer).toContain(detail)
   })
 
   it('explains how to turn a picture of a logo into a vector shape', () => {

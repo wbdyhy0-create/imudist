@@ -22,16 +22,19 @@ export interface VectorShape {
   /** on/off lengths, null for a solid line */
   dash: number[] | null
   cap: 'butt' | 'round' | 'square'
+  /** the corners of the line: sharp for a path with flat ends, round otherwise */
+  join: 'miter' | 'round'
   opacity: number
 }
 
-export type ShapePictureReason = 'table' | 'feather' | 'gradient' | 'shadow' | 'image' | 'color'
+export type ShapePictureReason = 'table' | 'feather' | 'gradient' | 'shadow' | 'blur' | 'image' | 'color'
 
 export const SHAPE_PICTURE_REASONS: Record<ShapePictureReason, string> = {
   table: 'טבלה',
   feather: 'טשטוש קצוות',
   gradient: 'מילוי מעבר צבעים',
   shadow: 'צל',
+  blur: 'טשטוש',
   image: 'תמונה בתוך צורה',
   color: 'צבע שאינו מספר',
 }
@@ -177,6 +180,7 @@ export function shapeToVector(original: ShapeFrame, pageX: number, pageY: number
   if (shape.feather) return { reason: 'feather' }
   if (shape.fillGradient && !shape.frame) return { reason: 'gradient' }
   if ((shape.shadowOpacity ?? 0) > 0) return { reason: 'shadow' }
+  if ((shape.blur ?? 0) > 0) return { reason: 'blur' }
   if (shape.image) return { reason: 'image' }
   const fill = shape.frame ? null : longHex(shape.fill)
   const stroke = shape.stroke && shape.strokeWidth > 0 ? longHex(shape.stroke) : null
@@ -205,13 +209,15 @@ export function shapeToVector(original: ShapeFrame, pageX: number, pageY: number
   })
   const width = shape.strokeWidth
   const line = shape.kind === 'line'
+  const path = shape.kind === 'path'
   return {
     ops,
     fill,
     stroke,
     strokeWidth: width,
     dash: line && shape.strokeDash === 'dashed' ? [width * 3, width * 2] : null,
-    cap: line ? (shape.strokeCap ?? 'butt') : 'butt',
+    cap: line || path ? (shape.strokeCap ?? (path ? 'round' : 'butt')) : 'butt',
+    join: path && shape.strokeCap === 'butt' ? 'miter' : 'round',
     opacity: shape.opacity ?? 1,
   }
 }
@@ -235,7 +241,7 @@ export function writeShapes(pdf: jsPDF, shapes: VectorShape[], x: number, y: num
       else pdf.setDrawColor(r, g, b)
       pdf.setLineWidth(shape.strokeWidth)
       pdf.setLineCap(shape.cap)
-      pdf.setLineJoin('round')
+      pdf.setLineJoin(shape.join)
       if (shape.dash) pdf.setLineDashPattern(shape.dash, 0)
     }
     for (const op of shape.ops) {

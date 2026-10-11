@@ -208,7 +208,7 @@ export function ShapeFrameView({
         viewBox={`0 0 ${Math.max(w, 1)} ${Math.max(h, 1)}`}
         style={{
           overflow: 'visible',
-          filter: dropShadowFilter(shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, zoom, shape.shadowColor),
+          filter: [(shape.blur ?? 0) > 0 ? `blur(${shape.blur! * zoom}px)` : undefined, dropShadowFilter(shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, zoom, shape.shadowColor)].filter(Boolean).join(' ') || undefined,
           ...(maskFeather ? featherMaskStyles(maskFeather, w, h, zoom) : {}),
         }}
         aria-hidden="true"

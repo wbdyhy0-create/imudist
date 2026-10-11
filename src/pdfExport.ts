@@ -16,6 +16,7 @@ import { hexToRgb, linearGradientLine } from './colorModels'
 import { normalizeRuns } from './story'
 import { tocDisplayMarkers } from './toc'
 import { applyFeatherCanvasMask } from './feather'
+import { blurPadding, blurRgba } from './canvasBlur'
 import { addCmykPicture, rgbToInks } from './cmykPage'
 import { countPicture, emptyReport, extractGlyphs, type FrameGeometry, type PictureReason, type VectorGlyph, type VectorReport } from './vectorText'
 import { registerFont } from './fontFiles'
@@ -564,6 +565,27 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     ctx.restore()
     return
   }
+  if ((shape.blur ?? 0) > 0) {
+    // blurred: the shape is drawn alone on a canvas with room round it, blurred there, and put on the page (in the PDF it is a picture)
+    const sigma = shape.blur! * scale
+    const room = blurPadding(sigma) + Math.ceil((shape.strokeWidth * scale) / 2)
+    const layer = document.createElement('canvas')
+    layer.width = Math.max(1, Math.ceil(w) + 2 * room)
+    layer.height = Math.max(1, Math.ceil(h) + 2 * room)
+    const layerContext = layer.getContext('2d', { willReadFrequently: true })!
+    await drawShape(layerContext, { ...shape, x: room / scale, y: room / scale, opacity: 1, rotation: undefined, blur: undefined, feather: undefined, shadowOpacity: 0 }, { x: 0, y: 0, w: shape.w, h: shape.h }, scale, asset)
+    const pixels = layerContext.getImageData(0, 0, layer.width, layer.height)
+    blurRgba(pixels.data, layer.width, layer.height, sigma)
+    layerContext.putImageData(pixels, 0, 0)
+    ctx.save()
+    ctx.translate(boxX + w / 2, boxY + h / 2)
+    if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
+    ctx.globalAlpha = shape.opacity ?? 1
+    applyCanvasShadow(ctx, shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, shape.shadowColor, scale)
+    ctx.drawImage(layer, -w / 2 - room, -h / 2 - room)
+    ctx.restore()
+    return
+  }
   ctx.save()
   ctx.translate(boxX + w / 2, boxY + h / 2)
   if (shape.rotation) ctx.rotate((shape.rotation * Math.PI) / 180)
@@ -604,7 +626,9 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     if (!hasFill) applyCanvasShadow(ctx, shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, shape.shadowColor, scale)
     ctx.strokeStyle = shape.stroke
     ctx.lineWidth = shape.strokeWidth * scale
-    ctx.lineJoin = 'round'
+    // a drawn path has round ends unless it was made with flat ones (and then sharp corners), as on the screen and in an SVG file
+    ctx.lineJoin = shape.kind === 'path' && shape.strokeCap === 'butt' ? 'miter' : 'round'
+    if (shape.kind === 'path') ctx.lineCap = shape.strokeCap ?? 'round'
     if (shape.kind === 'line') {
       ctx.lineCap = shape.strokeCap ?? 'butt'
       if (shape.strokeDash === 'dashed') ctx.setLineDash([ctx.lineWidth * 3, ctx.lineWidth * 2])
