@@ -22,6 +22,7 @@ import { IMAGE_FILE_EXTENSIONS, fileNameOf, isImagePath, readLinkedImage } from 
 import { GhostscriptMissingError, openGhostscriptDownload, readEpsFile } from './importEps'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
+import { LicensesDialog } from './components/LicensesDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { deliverPng } from './pngExport'
 import { exportContentOf, prepareExport, renderPage } from './pdfExport'
@@ -212,6 +213,7 @@ export default function App() {
   /** text loaded from a file / the clipboard, waiting for a click on the page (the loaded text cursor) */
   const [placing, setPlacing] = useState<PlacedText | null>(null)
   const [importOptionsFile, setImportOptionsFile] = useState<File | null>(null)
+  const [licensesOpen, setLicensesOpen] = useState(false)
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const [importPdfSource, setImportPdfSource] = useState<PdfImportSource | null>(null)
@@ -626,6 +628,7 @@ export default function App() {
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
         importKind: (kind) => void importKind(kind),
+        showLicenses: () => setLicensesOpen(true),
         importParagraphStyles: () => void importParagraphStyles(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
@@ -1014,6 +1017,7 @@ export default function App() {
       <BookExportDialog controller={book} />
       {session.modal && <Modal spec={session.modal} />}
       {saveWorkspaceDialogOpen && <SaveWorkspaceDialog onSave={saveWorkspace} onClose={() => setSaveWorkspaceDialogOpen(false)} />}
+      {licensesOpen && <LicensesDialog onClose={() => setLicensesOpen(false)} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes, flow) => void confirmDocxImport(replaceSelected, includeFootnotes, flow)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
     </div>

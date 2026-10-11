@@ -39,6 +39,8 @@ export interface MenuContext {
   /** load a Word / text file into the text cursor */
   /** File > הוספת קובץ > כל הקבצים הנתמכים */
   importText: () => void
+  /** Help > רישיונות: shows the notices of the third-party parts in a window (a new browser window does not open in the desktop app) */
+  showLicenses: () => void
   /** File > הוספת קובץ > one kind of file; IDML opens as a new document, so it works with no document open */
   importKind: (kind: ImportKind) => void
   /** load another Imudist file's paragraph styles and merge them into this document's */
@@ -434,7 +436,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       items: [
         {
           label: 'רישיונות',
-          onClick: () => window.open('/THIRD-PARTY-NOTICES.txt', '_blank', 'noopener,noreferrer'),
+          onClick: c.showLicenses,
         },
         { separator: true },
         off('אודות'),
