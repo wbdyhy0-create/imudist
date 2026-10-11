@@ -330,8 +330,11 @@ async function drawTextDom(
           const heading = document.createElement('div')
           heading.className = 'footnote-divider-heading'
           heading.dir = 'rtl'
+          // the heading is centred by a wrapper (flex), not by `left: 50%` and a transform: the picture of the page is made by html2canvas,
+          // which clips an element with `overflow: hidden` at the place it has before its transform - only the half of the heading to
+          // the right of the middle of the area came out (a cut title, and the line on the other side missing)
           Object.assign(heading.style, {
-            position: 'absolute',
+            position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -339,15 +342,12 @@ async function drawTextDom(
             overflow: 'hidden',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
-            top: `${footnoteConfig.dividerGap}px`,
+            flex: '0 1 auto',
             // the width that is set is the least the heading has: a longer text (a big font) and its ornaments widen it, up to the whole width
             width: 'max-content',
             minWidth: `${footnoteConfig.dividerWidth}%`,
             maxWidth: '100%',
             height: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
-            left: '50%',
-            right: 'auto',
-            transform: 'translateX(-50%)',
             gap: footnoteConfig.dividerHeadingLines ? `${footnoteConfig.dividerHeadingGap ?? Math.max(6, headingStyle.fontSize * 0.4)}px` : '0',
             color: headingStyle.color ?? '#111111',
             fontFamily: headingStyle.fontFamily,
@@ -408,7 +408,19 @@ async function drawTextDom(
           title.textContent = footnoteConfig.dividerText
           heading.appendChild(title)
           if (footnoteConfig.dividerHeadingLines) appendRule('left')
-          footnotes.appendChild(heading)
+          const headingRow = document.createElement('div')
+          Object.assign(headingRow.style, {
+            position: 'absolute',
+            display: 'flex',
+            justifyContent: 'center',
+            left: '0',
+            right: '0',
+            top: `${footnoteConfig.dividerGap}px`,
+            height: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
+            pointerEvents: 'none',
+          })
+          headingRow.appendChild(heading)
+          footnotes.appendChild(headingRow)
         } else {
           const divider = document.createElement('div')
           divider.className = 'footnote-divider'
