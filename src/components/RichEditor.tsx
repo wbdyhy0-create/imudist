@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { Run, TextAlign } from '../document'
+import type { FootnoteReferenceLook, Run, TextAlign } from '../document'
 import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, normalizeCaretIn, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
@@ -42,6 +42,7 @@ interface Props {
   footnoteReferenceScale?: number
   footnoteReferenceGap?: number
   footnoteReferenceVerticalOffset?: number
+  footnoteReferenceLook?: FootnoteReferenceLook
   /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
   baseAlign?: TextAlign
@@ -130,7 +131,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${p.footnoteReferenceGap}|${p.footnoteReferenceVerticalOffset}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${p.footnoteReferenceGap}|${p.footnoteReferenceVerticalOffset}|${JSON.stringify(p.footnoteReferenceLook)}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? p.selectionHint ?? readSelectionIn(el) : null
     if (rebuilt) {
@@ -153,6 +154,7 @@ export function RichEditor(p: Props) {
             footnoteReferenceScale: p.footnoteReferenceScale,
             footnoteReferenceGap: p.footnoteReferenceGap,
             footnoteReferenceVerticalOffset: p.footnoteReferenceVerticalOffset,
+            footnoteReferenceLook: p.footnoteReferenceLook,
           },
           p.paragraphPatches,
           p.baseAlign,

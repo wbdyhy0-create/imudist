@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from 'react'
-import { formatLength, formatNumber, fromPt, parseLength, toPt, type Unit } from '../units'
+import { formatLength, formatNumber, fromPt, parseFieldValue, toPt, type Unit } from '../units'
 
 interface Props {
   id?: string
@@ -18,11 +18,13 @@ interface Props {
   mixed?: boolean
   /** given, the arrows and the up / down keys report a change (in the displayed unit) instead of computing the next value from `value` */
   onStep?: (delta: number) => void
+  /** the value is reported as it is typed (a number that can be read), and not only when the field is left: for a field whose effect is shown at once */
+  live?: boolean
 }
 
 const STEP: Record<Unit, number> = { px: 1, mm: 1, cm: 0.1, in: 0.1 }
 
-export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity, mixed = false, onStep }: Props) {
+export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity, mixed = false, onStep, live = false }: Props) {
   // non-null while the user is typing
   const [text, setText] = useState<string | null>(null)
   const display = mixed
@@ -36,7 +38,7 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
 
   const commit = (raw: string) => {
-    const parsed = unit ? parseLength(raw, unit) : /^\s*-?\d+\s*$/.test(raw) ? parseInt(raw, 10) : null
+    const parsed = parseFieldValue(raw, unit, unitLabel)
     if (parsed !== null) onChange(clamp(parsed))
   }
 
@@ -82,7 +84,13 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
           setText(display)
           e.currentTarget.select()
         }}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value)
+          if (live) {
+            const parsed = parseFieldValue(e.target.value, unit, unitLabel)
+            if (parsed !== null) onChange(clamp(parsed))
+          }
+        }}
         onBlur={() => {
           if (text !== null) commit(text)
           setText(null)

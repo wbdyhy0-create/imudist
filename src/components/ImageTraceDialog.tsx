@@ -39,6 +39,13 @@ interface Source {
   region: ReturnType<typeof visibleRegion>
 }
 
+/** how far the curves may be from the edge of the picture at first (pixels of the original picture): a logo comes out with few points */
+const DEFAULT_SIMPLIFY = 0.7
+
+/** how much a thin line has to stand out from what is around it (levels of grey) to be kept, for each position of the slider */
+const THIN_LEVELS = [0, 70, 50, 34, 22, 14]
+const DEFAULT_THIN_KEEP = 3
+
 /** a number of points past which a trace is more a photograph in vectors than a logo */
 const MANY_POINTS = 20000
 
@@ -68,6 +75,10 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
   const [smooth, setSmooth] = useState(1)
   /** specks smaller than this (in pixels of the original picture) are left out */
   const [speck, setSpeck] = useState(2)
+  /** how far (in pixels of the original picture) the curves may go from the edge: the more, the fewer the points */
+  const [simplify, setSimplify] = useState(DEFAULT_SIMPLIFY)
+  /** how much of the thin and faint lines is kept: 0 is none, 5 is the faintest */
+  const [thinKeep, setThinKeep] = useState(DEFAULT_THIN_KEEP)
   const [color, setColor] = useState('#000000')
   const [keepOriginal, setKeepOriginal] = useState(false)
   const [result, setResult] = useState<TraceResult | null>(null)
@@ -138,12 +149,14 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
           level,
           smooth: Math.round(smooth * source.scale),
           minArea: speck * source.scale * source.scale,
-          tolerance: 0.35 + 0.15 * source.scale,
+          tolerance: Math.max(0.2, simplify * source.scale),
+          thin: THIN_LEVELS[thinKeep] ?? 0,
+          thinReach: Math.max(2, Math.min(10, Math.round(3 * source.scale))),
         }),
       )
     }, 60)
     return () => window.clearTimeout(timer)
-  }, [source, trace, level, smooth, speck])
+  }, [source, trace, level, smooth, speck, simplify, thinKeep])
 
   // a magnified preview opens on the middle of the picture
   const scroller = useRef<HTMLDivElement>(null)
@@ -214,6 +227,16 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
               <span>חלקות הקו</span>
               <input type="range" min={0} max={3} step={0.25} value={smooth} onChange={(event) => setSmooth(Number(event.target.value))} aria-label="חלקות הקו" />
               <output>{smooth}</output>
+            </label>
+            <label className="color-brush-size trace-slider">
+              <span>פישוט (פחות נקודות)</span>
+              <input type="range" min={0.2} max={3} step={0.1} value={simplify} onChange={(event) => setSimplify(Number(event.target.value))} aria-label="פישוט הקו" />
+              <output>{simplify.toFixed(1)}</output>
+            </label>
+            <label className="color-brush-size trace-slider" title="קווים דקים וחלשים (כמו קצה של סלסול רך) נשארים גם כשהם בהירים מהסף. ככל שגבוה יותר נשמרים גם קווים חלשים יותר, ואם נוצרים כתמים מיותרים מורידים.">
+              <span>שימור קווים דקים</span>
+              <input type="range" min={0} max={5} step={1} value={thinKeep} onChange={(event) => setThinKeep(Number(event.target.value))} aria-label="שימור קווים דקים" />
+              <output>{thinKeep}</output>
             </label>
             <label className="color-brush-size trace-slider">
               <span>הסרת כתמים קטנים</span>

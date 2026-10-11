@@ -1,3 +1,4 @@
+import { lineProfileShape } from './lineProfile'
 import type { Asset, ImageFrame, ShapeFrame, TextFrame } from './document'
 import { isTauri } from './fileio'
 import type { RecentEntry } from './recent'
@@ -77,8 +78,9 @@ function drawText(ctx: CanvasRenderingContext2D, frame: TextFrame, page: { x: nu
   ctx.restore()
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: { x: number; y: number }, scale: number) {
-  if (shape.kind === 'table') return
+function drawShape(ctx: CanvasRenderingContext2D, original: ShapeFrame, page: { x: number; y: number }, scale: number) {
+  if (original.kind === 'table') return
+  const shape = lineProfileShape(original) ?? original
   const x = (shape.x - page.x) * scale
   const y = (shape.y - page.y) * scale
   const w = shape.w * scale

@@ -5,6 +5,7 @@ import { featherMaskStyles } from '../feather'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { arcPoints, pointAtFraction, ringInfo, textPlacement, usedSpan } from '../pathText'
 import { CORNERS, editablePoints, fitRadii, imageGeometry, shapePath, vertexHi, vertexHo, vertexPoint } from '../shapes'
+import { isProfiledLine, lineOutlinePath } from '../lineProfile'
 import { normalizeRuns } from '../story'
 import { dropShadowFilter } from '../shadow'
 import type { CellRange, TableData, TableLayout } from '../table'
@@ -164,6 +165,8 @@ export function ShapeFrameView({
   // a purely horizontal or vertical line has w or h = 0 — an SVG clips to a 0-sized viewport by default, which would
   // hide the line (and its own stroke width) entirely, so it draws outside that box instead
   const lineStrokeWidth = shape.strokeWidth * zoom
+  /** a line that is thicker in some places than others is drawn as the shape it covers, filled with the line's colour */
+  const profiled = isLine && isProfiledLine(shape)
   const dashArray = isLine && shape.strokeDash === 'dashed' ? `${lineStrokeWidth * 3} ${lineStrokeWidth * 2}` : undefined
 
   return (
@@ -199,9 +202,10 @@ export function ShapeFrameView({
         />
       )}
       {!tableShape && <svg
-        width={w}
-        height={h}
-        viewBox={`0 0 ${w} ${h}`}
+        // an svg with no width or no height is not drawn at all (even with its overflow visible): a perfectly horizontal or vertical line gets a pixel of one
+        width={Math.max(w, 1)}
+        height={Math.max(h, 1)}
+        viewBox={`0 0 ${Math.max(w, 1)} ${Math.max(h, 1)}`}
         style={{
           overflow: 'visible',
           filter: dropShadowFilter(shape.shadowOffsetX, shape.shadowOffsetY ?? shape.shadowOffset, shape.shadowOpacity, zoom, shape.shadowColor),
@@ -241,7 +245,7 @@ export function ShapeFrameView({
                 d={shapePath(shape, zoom)}
                 fill={pathInteriorHit ? 'transparent' : 'none'}
                 stroke="transparent"
-                strokeWidth={Math.max(lineStrokeWidth, 12)}
+                strokeWidth={Math.max(profiled ? lineStrokeWidth * 2 : lineStrokeWidth, 12)}
                 strokeLinecap="round"
                 pointerEvents={ghost ? 'none' : pathInteriorHit ? 'all' : 'stroke'}
                 onPointerDown={onPointerDown}
@@ -249,14 +253,14 @@ export function ShapeFrameView({
               />
             )}
             <path
-              d={shapePath(shape, zoom)}
-              fill={fillPaint}
+              d={profiled ? lineOutlinePath(shape, zoom) : shapePath(shape, zoom)}
+              fill={profiled ? shape.stroke ?? 'none' : fillPaint}
               fillRule="evenodd"
-              stroke={shape.stroke ?? 'none'}
+              stroke={profiled ? 'none' : shape.stroke ?? 'none'}
               strokeWidth={lineStrokeWidth}
               strokeLinejoin={isPath ? (shape.strokeCap === 'butt' ? 'miter' : 'round') : 'round'}
               strokeLinecap={isLine || isPath ? (shape.strokeCap ?? (isPath ? 'round' : 'butt')) : undefined}
-              strokeDasharray={dashArray}
+              strokeDasharray={profiled ? undefined : dashArray}
               pointerEvents={ghost ? 'none' : isLine || isPath ? 'none' : 'all'}
               onPointerDown={isLine || isPath ? undefined : onPointerDown}
               onDoubleClick={isLine || isPath ? undefined : onDoubleClick}

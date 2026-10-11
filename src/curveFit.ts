@@ -16,7 +16,7 @@ export interface FittedPoint extends Vec {
   ho?: Vec
 }
 
-type Bezier = [Vec, Vec, Vec, Vec]
+export type Bezier = [Vec, Vec, Vec, Vec]
 
 const add = (a: Vec, b: Vec): Vec => ({ x: a.x + b.x, y: a.y + b.y })
 const sub = (a: Vec, b: Vec): Vec => ({ x: a.x - b.x, y: a.y - b.y })
@@ -101,7 +101,8 @@ function maxDeviation(points: Vec[], b: Bezier, u: number[]): { squared: number;
   return { squared, index }
 }
 
-function fitCubic(points: Vec[], tangent1: Vec, tangent2: Vec, error: number): Bezier[] {
+/** the fewest cubic curves through `points` (an open line) with the tangents given at its two ends, each point within `error` of them */
+export function fitCubic(points: Vec[], tangent1: Vec, tangent2: Vec, error: number): Bezier[] {
   const n = points.length
   if (n === 2) {
     const dist = length(sub(points[1], points[0])) / 3

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_FOOTNOTE_CONFIG, DEFAULT_PARAGRAPH_STYLES, DEFAULT_TEXT_STYLE, defaultDocSettings, type TextFrame } from './document'
 import { parseDocument, serializeDocument } from './fileFormat'
-import { changedFootnoteOffset, footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, formatFootnoteNumber, layoutFootnotes, type FootnoteLayoutItem, updateFootnoteParagraphStyle } from './footnoteLayout'
+import { changedFootnoteOffset, footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, footnoteParagraphStyleId, footnoteReferenceLook, formatFootnoteNumber, layoutFootnotes, type FootnoteLayoutItem, updateFootnoteParagraphStyle } from './footnoteLayout'
 import { computeLayout } from './layout'
 import { columnBoxes, primaryTextFramePageGroups } from './placeText'
 import { pageRects } from './pages'
@@ -67,6 +67,12 @@ describe('footnote label punctuation', () => {
 })
 
 describe('vertical footnote columns', () => {
+  it('uses a note-specific paragraph style before the footnote default style', () => {
+    const config = { ...DEFAULT_FOOTNOTE_CONFIG, paragraphStyleId: 'footnote-style' }
+    expect(footnoteParagraphStyleId(config, { id: 'inherited', anchor: 0, content: 'note' })).toBe('footnote-style')
+    expect(footnoteParagraphStyleId(config, { id: 'specific', anchor: 0, content: 'note', paragraphStyleId: 'other-style' })).toBe('other-style')
+  })
+
   it('starts incremental reflow at the earliest changed footnote anchor', () => {
     const previous = [
       { id: 'earlier', anchor: 10, content: 'unchanged' },
@@ -78,7 +84,7 @@ describe('vertical footnote columns', () => {
     expect(changedFootnoteOffset(previous, previous)).toBeUndefined()
   })
 
-  it('updates imported run defaults when their paragraph style changes and keeps direct run overrides', () => {
+  it('updates every footnote run font size when its paragraph style changes and keeps other direct run overrides', () => {
     const note = {
       id: 'imported',
       anchor: 0,
@@ -97,7 +103,7 @@ describe('vertical footnote columns', () => {
     expect(updated.style?.fontSize).toBe(16)
     expect(updated.style?.align).toBe('center')
     expect(updated.runs?.[0].style.fontSize).toBe(16)
-    expect(updated.runs?.[1].style.fontSize).toBe(9)
+    expect(updated.runs?.[1].style.fontSize).toBe(16)
     expect(updated.runs?.[1].style.weight).toBe(700)
   })
 
@@ -272,5 +278,66 @@ describe('shared page footnotes', () => {
     expect(merged.get('right')?.footnotes[1].y).toBeGreaterThan(merged.get('right')?.footnotes[0].y ?? 0)
     expect(merged.get('left')?.footnotes).toEqual([])
     expect(merged.get('left')?.footnoteHeight).toBe(merged.get('right')?.footnoteHeight)
+  })
+})
+
+describe('the style of the reference numbers in the running text', () => {
+  const styles = [
+    ...DEFAULT_PARAGRAPH_STYLES,
+    { id: 'ref-base', name: 'הפניה בסיס', patch: { fontFamily: 'Frank Ruhl Libre', weight: 700 } },
+    { id: 'ref', name: 'הפניה', basedOnId: 'ref-base', patch: { fontSize: 11, italic: true, color: '#aa0000' } },
+    { id: 'plain', name: 'ללא הגדרה', patch: { align: 'center' as const } },
+  ]
+
+  it('is nothing when no style is chosen, the style is gone, or it sets none of the look', () => {
+    expect(footnoteReferenceLook(DEFAULT_FOOTNOTE_CONFIG, styles)).toBeUndefined()
+    expect(footnoteReferenceLook({ referenceStyleId: 'deleted' }, styles)).toBeUndefined()
+    expect(footnoteReferenceLook({ referenceStyleId: 'plain' }, styles)).toBeUndefined()
+  })
+
+  it('takes only what the style (and the style it is based on) sets', () => {
+    expect(footnoteReferenceLook({ referenceStyleId: 'ref' }, styles)).toEqual({ fontFamily: 'Frank Ruhl Libre', weight: 700, italic: true, fontSize: 11, color: '#aa0000' })
+    expect(footnoteReferenceLook({ referenceStyleId: 'ref-base' }, styles)).toEqual({ fontFamily: 'Frank Ruhl Libre', weight: 700 })
+  })
+
+  it('survives a loop of styles that are based on each other', () => {
+    const loop = [{ id: 'a', name: 'a', basedOnId: 'b', patch: { fontSize: 10 } }, { id: 'b', name: 'b', basedOnId: 'a', patch: { weight: 600 } }]
+    expect(footnoteReferenceLook({ referenceStyleId: 'a' }, loop)).toEqual({ fontSize: 10, weight: 600 })
+  })
+
+  it('is kept when a document is saved and opened again', () => {
+    const frame = { ...DEFAULT_TEXT_STYLE, id: 'story', x: 0, y: 0, w: 100, h: 100, text: 'x', runs: [{ len: 1, style: DEFAULT_TEXT_STYLE }], next: null }
+    const content = {
+      doc: { ...defaultDocSettings('footnotes'), footnotes: { ...DEFAULT_FOOTNOTE_CONFIG, referenceStyleId: 'ref' } },
+      frames: [frame], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: styles,
+      parents: [], pageParents: [], sections: [],
+    }
+    const restored = parseDocument(serializeDocument(content), 'footnotes')
+    expect(restored.doc.footnotes?.referenceStyleId).toBe('ref')
+    const without = parseDocument(serializeDocument({ ...content, doc: { ...content.doc, footnotes: DEFAULT_FOOTNOTE_CONFIG } }), 'footnotes')
+    expect(without.doc.footnotes && 'referenceStyleId' in without.doc.footnotes).toBe(false)
+  })
+})
+
+describe('raising and lowering the ornaments of the divider heading', () => {
+  const frame = { ...DEFAULT_TEXT_STYLE, id: 'story', x: 0, y: 0, w: 100, h: 100, text: 'x', runs: [{ len: 1, style: DEFAULT_TEXT_STYLE }], next: null }
+  const contentWith = (footnotes: typeof DEFAULT_FOOTNOTE_CONFIG) => ({
+    doc: { ...defaultDocSettings('footnotes'), footnotes },
+    frames: [frame], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
+    parents: [], pageParents: [], sections: [],
+  })
+
+  it('is kept, up or down, when a document is saved and opened again', () => {
+    for (const offset of [7.5, -12]) {
+      const restored = parseDocument(serializeDocument(contentWith({ ...DEFAULT_FOOTNOTE_CONFIG, dividerOrnamentOffset: offset })), 'footnotes')
+      expect(restored.doc.footnotes?.dividerOrnamentOffset).toBe(offset)
+    }
+  })
+
+  it('is left out at zero and held to a sane range', () => {
+    const zero = parseDocument(serializeDocument(contentWith({ ...DEFAULT_FOOTNOTE_CONFIG, dividerOrnamentOffset: 0 })), 'footnotes')
+    expect(zero.doc.footnotes && 'dividerOrnamentOffset' in zero.doc.footnotes).toBe(false)
+    const wild = parseDocument(serializeDocument(contentWith({ ...DEFAULT_FOOTNOTE_CONFIG, dividerOrnamentOffset: 5000 })), 'footnotes')
+    expect(wild.doc.footnotes?.dividerOrnamentOffset).toBe(100)
   })
 })

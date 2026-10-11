@@ -50,6 +50,18 @@ export function parseLength(text: string, fallbackUnit: Unit): number | null {
   return unit === 'pt' ? value : toPt(value, unit)
 }
 
+/**
+ * The number typed in a numeric field. A field of percentages is read when the percent sign is typed too ("40%", "40 %": the sign is
+ * what the field shows), a decimal comma works, and a plain field takes the nearest whole number. A field with a unit reads the unit
+ * that is typed in it. Null when it is not a number.
+ */
+export function parseFieldValue(raw: string, unit: Unit | undefined, unitLabel?: string): number | null {
+  const withoutPercent = raw.replace(/\s*%\s*$/, '')
+  if (unit) return parseLength(unitLabel === '%' ? withoutPercent : raw, unit)
+  const m = /^\s*(-?\d+(?:[.,]\d+)?)\s*$/.exec(withoutPercent)
+  return m ? Math.round(parseFloat(m[1]!.replace(',', '.'))) : null
+}
+
 export interface PagePreset {
   id: string
   label: string

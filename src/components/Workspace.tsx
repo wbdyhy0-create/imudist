@@ -10,7 +10,7 @@ import { removeImageBackground } from '../backgroundRemoval'
 import { deliverPng } from '../pngExport'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
 import { createPortal } from 'react-dom'
-import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteTextStyle, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
+import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteParagraphStyleId, footnoteReferenceLook, footnoteTextStyle, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
 import { layoutEndnotes } from '../endnotes'
 import {
   useCallback,
@@ -115,7 +115,7 @@ import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
-import { arrange, nextZ, stackOrder, zOfFrame, zOfImage, type ArrangeOp } from '../stacking'
+import { arrange, nextZ, stackOrder, zOfImage, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
@@ -331,6 +331,8 @@ export interface WorkspaceHandle {
   createOutlinesFromSelection: () => void
   /** split the selected path shapes made of several pieces into one shape per piece */
   releaseCompoundPaths: () => void
+  /** the ids of the objects that are selected now (text frames, pictures and shapes) */
+  selectedObjectIds: () => string[]
   /** combine the selected shapes (unite, subtract, intersect, exclude) */
   shapeOp: (op: BoolOp) => void
   group: () => void
@@ -477,8 +479,6 @@ interface Props {
 }
 
 const newFrameId = () => globalThis.crypto?.randomUUID?.() ?? `f${Date.now()}${Math.random()}`
-/** the most letters one text frame is turned into outlines for: a shape for each, so more would be slow to draw and to edit */
-const MAX_OUTLINE_LETTERS = 3000
 
 /** Zoom plus, optionally, "world point (wx, wy) must end up at viewport pixel (sx, sy)". */
 interface View {
@@ -617,12 +617,17 @@ export function Workspace({
   const documentRects = useMemo(() => pageRects(doc), [doc])
   const [footnotePreviewConfig, setFootnotePreviewConfig] = useState<FootnoteLayoutConfig | null>(null)
   const footnoteConfig = footnotePreviewConfig ?? doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
+  const referenceLook = useMemo(() => footnoteReferenceLook(footnoteConfig, paragraphStyles), [footnoteConfig, paragraphStyles])
   const footnoteDividerHeading = footnoteConfig.dividerMode === 'heading' ? {
     text: footnoteConfig.dividerText,
     height: footnoteDividerHeight(footnoteConfig, paragraphStyles),
     style: footnoteDividerTextStyle(footnoteConfig, paragraphStyles),
     showLines: footnoteConfig.dividerHeadingLines,
     decoration: footnoteConfig.dividerHeadingDecoration,
+    ornament: footnoteConfig.dividerOrnament,
+    ornamentScale: footnoteConfig.dividerOrnamentScale,
+    ornamentOffset: footnoteConfig.dividerOrnamentOffset,
+    gap: footnoteConfig.dividerHeadingGap,
   } : undefined
   // the offset `commitStory` just edited at, read (not a dependency) so typing one more character still only pays for
   // re-laying-out the frame it landed in and whatever follows - not the whole story's frames from its very start.
@@ -1023,6 +1028,10 @@ export function Workspace({
   const dragSeq = useRef(0)
   /** drawing a shape with a shape tool: where it started, and the box it has now (world pt) */
   const shapeStart = useRef<{ kind: DrawKind; x: number; y: number; frame: boolean } | null>(null)
+  /** Space is held while a shape or a frame is being drawn: it moves with the pointer instead of growing, until Space is let go */
+  const drawSpace = useRef(false)
+  /** where the pointer was (world points) at the last step of the drawing, to know how far it went since */
+  const lastDrawWorld = useRef<{ x: number; y: number } | null>(null)
   const [shapeBox, setShapeBox] = useState<Box | null>(null)
   const penPoints = useRef<WorldPathPoint[]>([])
   const pencilPoints = useRef<WorldPathPoint[]>([])
@@ -1590,6 +1599,13 @@ export function Workspace({
     const current = doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
     if (current.placement === placement) return
     pageOps.setup({ ...doc, footnotes: { ...current, placement } }, 'footnotes:placement')
+  }
+
+  /** the paragraph style that sets the look of the reference numbers in the text (or none): also reachable from the footnote options */
+  const setFootnoteReferenceStyle = (styleId: string | undefined) => {
+    const { referenceStyleId: previous, ...rest } = doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG
+    if (previous === styleId) return
+    pageOps.setup({ ...doc, footnotes: styleId ? { ...rest, referenceStyleId: styleId } : rest }, 'footnotes:reference-style')
   }
 
   const commitFootnoteWidth = (widthScale: number) => {
@@ -4140,57 +4156,24 @@ export function Workspace({
     for (const id of chosen) for (const frame of chainOf(frames, id)) ids.add(frame.id)
     onNotify('ממיר את הטקסט לווקטור…')
     try {
-      const { prepareExport, frameLetters } = await import('../pdfExport')
-      const { outlineFontOf, outlineShapeOf } = await import('../glyphOutlines')
+      const { prepareExport } = await import('../pdfExport')
+      const { outlineFrame, MAX_OUTLINE_LETTERS } = await import('../textOutlines')
       const { PICTURE_REASONS } = await import('../vectorText')
       const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections })
       const made: ShapeFrame[] = []
       for (const frame of frames.filter((candidate) => ids.has(candidate.id))) {
-        const result = await frameLetters(prepared, frame.id)
-        if ('reason' in result) {
-          if (result.reason === 'empty') continue
-          onNotify(`אי אפשר להמיר את הטקסט הזה לווקטור: ${PICTURE_REASONS[result.reason]}.`)
+        const outcome = await outlineFrame(prepared, frame, newFrameId)
+        if ('shapes' in outcome) {
+          made.push(...outcome.shapes)
+        } else if (outcome.problem === 'picture') {
+          onNotify(`אי אפשר להמיר את הטקסט הזה לווקטור: ${PICTURE_REASONS[outcome.reason]}.`)
           return
-        }
-        // every letter is a shape of its own (its holes cut out), and the letters of a frame are one group: the group moves as the text
-        // did, and a letter picked out of it (double click, or a click with the point-editing tool) stands and moves on its own
-        if (result.glyphs.length > MAX_OUTLINE_LETTERS) {
-          onNotify(`הטקסט ארוך מדי להמרה לווקטור (${result.glyphs.length} אותיות, עד ${MAX_OUTLINE_LETTERS}). חלקו אותו לכמה תיבות.`)
+        } else if (outcome.problem === 'long') {
+          onNotify(`הטקסט ארוך מדי להמרה לווקטור (${outcome.letters} אותיות, עד ${MAX_OUTLINE_LETTERS}). חלקו אותו לכמה תיבות.`)
           return
-        }
-        const rotation = frame.rotation ?? 0
-        const groupId = frame.groupId ?? (result.glyphs.length > 1 ? newFrameId() : undefined)
-        for (const glyph of result.glyphs) {
-          const font = outlineFontOf(glyph.font.bytes)
-          if (!font) {
-            onNotify('אי אפשר להמיר לווקטור: צורות האותיות של הגופן אינן נגישות.')
-            return
-          }
-          const outline = outlineShapeOf([{ font, text: glyph.text, x: glyph.x, baseline: glyph.baseline, size: glyph.size, width: glyph.width }])
-          if (!outline) continue
-          // the box of the letter is in the frame's own, unturned places: it is turned about the centre of the frame as the frame was
-          const [shiftX, shiftY] = rotateVec(outline.x + outline.w / 2 - frame.w / 2, outline.y + outline.h / 2 - frame.h / 2, rotation)
-          const centerX = frame.x + frame.w / 2 + shiftX
-          const centerY = frame.y + frame.h / 2 + shiftY
-          const [red, green, blue] = glyph.color
-          const shape: ShapeFrame = {
-            id: newFrameId(),
-            kind: 'path',
-            x: centerX - outline.w / 2,
-            y: centerY - outline.h / 2,
-            w: outline.w,
-            h: outline.h,
-            geom: outline.geom,
-            fill: `#${[red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`,
-            stroke: null,
-            strokeWidth: 0,
-            z: zOfFrame(frame),
-            label: `אות ${glyph.text}`,
-          }
-          if (frame.layerId) shape.layerId = frame.layerId
-          if (groupId) shape.groupId = groupId
-          if (rotation) shape.rotation = rotation
-          made.push(shape)
+        } else if (outcome.problem === 'font') {
+          onNotify('אי אפשר להמיר לווקטור: צורות האותיות של הגופן אינן נגישות.')
+          return
         }
       }
       if (made.length === 0) {
@@ -4254,6 +4237,7 @@ export function Workspace({
     traceImageFromSelection,
     createOutlinesFromSelection: () => void createOutlines(),
     releaseCompoundPaths,
+    selectedObjectIds,
     shapeOp: (op) => combineSelectedShapes(op),
     group: groupSelectedObjects,
     ungroup: ungroupSelectedObjects,
@@ -4373,6 +4357,12 @@ export function Workspace({
   // tool shortcuts + hold Space for a temporary Hand tool
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      // while a shape or a frame is being drawn Space moves it (with Shift or Alt held too), instead of becoming the Hand tool
+      if (e.code === 'Space' && (shapeStart.current || createStart.current) && !isTyping(e.target)) {
+        e.preventDefault()
+        drawSpace.current = true
+        return
+      }
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.code === 'Space') {
         e.preventDefault()
@@ -4383,9 +4373,15 @@ export function Workspace({
       if (t) activateTool(t.id)
     }
     const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space') setSpace(false)
+      if (e.code === 'Space') {
+        drawSpace.current = false
+        setSpace(false)
+      }
     }
-    const reset = () => setSpace(false)
+    const reset = () => {
+      drawSpace.current = false
+      setSpace(false)
+    }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
     window.addEventListener('blur', reset)
@@ -5693,7 +5689,26 @@ export function Workspace({
     const s0 = shapeStart.current
     if (!s0) return
     lastShapePointer.current = { x: clientX, y: clientY }
-    const snapped = snapPoint(toWorld(clientX, clientY), false)
+    const world = toWorld(clientX, clientY)
+    const previous = lastDrawWorld.current
+    lastDrawWorld.current = world
+    if (drawSpace.current && previous) {
+      // Space: what is drawn keeps its size and goes where the pointer goes; its starting corner goes with it, so that when Space is
+      // let go the shape goes on growing from where it stands
+      const moveX = world.x - previous.x
+      const moveY = world.y - previous.y
+      s0.x += moveX
+      s0.y += moveY
+      const box = shapeBoxRef.current
+      if (box) {
+        const moved = { ...box, x: box.x + moveX, y: box.y + moveY }
+        shapeBoxRef.current = moved
+        setShapeBox(moved)
+        setAngleTip((tip) => (tip ? { ...tip, x: tip.x + moveX, y: tip.y + moveY } : tip))
+      }
+      return
+    }
+    const snapped = snapPoint(world, false)
     const p = snapped.p
     setSnapShown(snapped.lines)
     let dx = p.x - s0.x
@@ -6905,6 +6920,8 @@ export function Workspace({
       // the click, or the rectangle that is dragged out (finishDraft)
       const p = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey).p
       createStart.current = p
+      drawSpace.current = false
+      lastDrawWorld.current = toWorld(e.clientX, e.clientY)
       setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       setSelectedPage(ownerPage(rects, p.x, p.y))
       e.preventDefault()
@@ -6985,6 +7002,8 @@ export function Workspace({
       const snap = tool === 'type' && !placing && placingImages.length === 0 ? snapNewTextFramePoint : snapPoint
       const p = snap(point, e.ctrlKey || e.metaKey).p
       createStart.current = p
+      drawSpace.current = false
+      lastDrawWorld.current = toWorld(e.clientX, e.clientY)
       setDraft({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
       setSelectedId(null)
       setEditingId(null)
@@ -7003,6 +7022,8 @@ export function Workspace({
       const frameKind = FRAME_TOOL_KIND[tool]
       const p = snapPoint(toWorld(e.clientX, e.clientY), false).p
       shapeStart.current = { kind: frameKind ?? (tool as DrawKind), x: p.x, y: p.y, frame: !!frameKind }
+      drawSpace.current = false
+      lastDrawWorld.current = toWorld(e.clientX, e.clientY)
       shapeBoxRef.current = null
       setSelectedId(null)
       setEditingId(null)
@@ -7460,6 +7481,16 @@ export function Workspace({
     }
     if (createStart.current) {
       const point = toWorld(e.clientX, e.clientY)
+      const previous = lastDrawWorld.current
+      lastDrawWorld.current = point
+      if (drawSpace.current && previous) {
+        // Space: the frame keeps its size and goes where the pointer goes
+        const moveX = point.x - previous.x
+        const moveY = point.y - previous.y
+        createStart.current = { x: createStart.current.x + moveX, y: createStart.current.y + moveY }
+        setDraft((current) => (current ? { x0: current.x0 + moveX, y0: current.y0 + moveY, x1: current.x1 + moveX, y1: current.y1 + moveY } : current))
+        return
+      }
       const snap = tool === 'type' && !placing && placingImages.length === 0 ? snapNewTextFramePoint : snapPoint
       const snapped = snap(point, e.ctrlKey || e.metaKey)
       setSnapShown(snapped.lines)
@@ -8666,9 +8697,9 @@ export function Workspace({
     const oldFootnoteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, id)
     const nextFootnoteStyle = footnoteTextStyle(footnoteConfig, nextStyles, id)
     const updateFootnoteStyles = (frame: TextFrame) => {
-      if (!frame.footnotes?.some((note) => note.paragraphStyleId === id)) return frame
+      if (!frame.footnotes?.some((note) => footnoteParagraphStyleId(footnoteConfig, note) === id)) return frame
       const footnotes = frame.footnotes.map((note) => {
-        if (note.paragraphStyleId !== id) return note
+        if (footnoteParagraphStyleId(footnoteConfig, note) !== id) return note
         return updateFootnoteParagraphStyle(note, oldFootnoteStyle, nextFootnoteStyle)
       })
       return { ...frame, footnotes }
@@ -10111,6 +10142,7 @@ export function Workspace({
                     footnoteReferenceScale={footnoteConfig.referenceScale}
                     footnoteReferenceGap={footnoteConfig.referenceGap}
                     footnoteReferenceVerticalOffset={footnoteConfig.referenceVerticalOffset}
+                    footnoteReferenceLook={referenceLook}
                     footnoteAlignment={footnoteConfig.alignment}
                     footnotes={fl.footnotes}
                     footnoteHeight={fl.footnoteHeight}
@@ -10584,7 +10616,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
             },
             {
               id: 'character-styles',

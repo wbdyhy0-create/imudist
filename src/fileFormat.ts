@@ -6,6 +6,7 @@ import {
   DEFAULT_SHAPE_FILL,
   DEFAULT_SHAPE_STROKE,
   FOOTNOTE_MARKER,
+  type FootnoteHeadingDecoration,
   MAX_GUIDES,
   MAX_SIDES,
   MIN_SIDES,
@@ -63,6 +64,8 @@ import {
   type WrapMode,
 } from './document'
 import { footnoteTextStyle } from './footnoteLayout'
+import { ORNAMENT_STYLES, usableOrnamentImage } from './footnoteOrnaments'
+import { cleanLineWidths } from './lineProfile'
 import { normalizeDeg } from './frames'
 import type { DocContent, ParentOverride } from './pages'
 import { repairBasedOn } from './characterStyleTree'
@@ -257,8 +260,13 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
     dividerMode: oneOf(raw.dividerMode, ['line', 'heading'], DEFAULT_FOOTNOTE_CONFIG.dividerMode),
     dividerText: str(raw.dividerText, DEFAULT_FOOTNOTE_CONFIG.dividerText).slice(0, 200),
     dividerHeadingLines: bool(raw.dividerHeadingLines, DEFAULT_FOOTNOTE_CONFIG.dividerHeadingLines),
-    dividerHeadingDecoration: oneOf(raw.dividerHeadingDecoration, ['none', 'outer', 'both', 'curl', 'needle'], DEFAULT_FOOTNOTE_CONFIG.dividerHeadingDecoration),
+    dividerHeadingDecoration: oneOf(raw.dividerHeadingDecoration, ['none', 'outer', 'both', 'curl', 'needle', 'custom', ...ORNAMENT_STYLES.map((style) => style.id)] as FootnoteHeadingDecoration[], DEFAULT_FOOTNOTE_CONFIG.dividerHeadingDecoration),
+    ...(typeof raw.dividerHeadingGap === 'number' && Number.isFinite(raw.dividerHeadingGap) ? { dividerHeadingGap: num(raw.dividerHeadingGap, 0, 0, 200) } : {}),
+    ...(typeof raw.dividerOrnamentOffset === 'number' && Number.isFinite(raw.dividerOrnamentOffset) && raw.dividerOrnamentOffset !== 0 ? { dividerOrnamentOffset: num(raw.dividerOrnamentOffset, 0, -100, 100) } : {}),
+    ...(typeof raw.dividerOrnamentScale === 'number' && Number.isFinite(raw.dividerOrnamentScale) && Math.round(raw.dividerOrnamentScale) !== 100 ? { dividerOrnamentScale: num(raw.dividerOrnamentScale, 100, 20, 500) } : {}),
+    ...(usableOrnamentImage(raw.dividerOrnament) ? { dividerOrnament: { name: raw.dividerOrnament.name.slice(0, 100), dataUrl: raw.dividerOrnament.dataUrl, width: raw.dividerOrnament.width, height: raw.dividerOrnament.height } } : {}),
     ...(typeof raw.dividerHeadingStyleId === 'string' && raw.dividerHeadingStyleId ? { dividerHeadingStyleId: raw.dividerHeadingStyleId.slice(0, 100) } : {}),
+    ...(typeof raw.referenceStyleId === 'string' && raw.referenceStyleId ? { referenceStyleId: raw.referenceStyleId.slice(0, 100) } : {}),
     spaceBefore: num(raw.spaceBefore, DEFAULT_FOOTNOTE_CONFIG.spaceBefore, 0, MAX_PAGE_PT),
     startAt: int(raw.startAt, DEFAULT_FOOTNOTE_CONFIG.startAt, 1, 9999),
     restart: oneOf(raw.restart, ['continuous', 'page', 'spread'], DEFAULT_FOOTNOTE_CONFIG.restart),
@@ -783,6 +791,10 @@ function parseVertex(v: unknown): PathVertex | undefined {
   const smooth: PathSmoothPoint = { p: pp, hi, ho }
   return smooth
 }
+/** the most points one ring of a shape's outline, and the most in the whole shape, that a file may hold (a file with more is not read as that shape) */
+export const MAX_RING_POINTS = 200_000
+export const MAX_SHAPE_POINTS = 1_000_000
+
 /** the outline of a combined shape: polygons of rings of points, all numbers checked and the amount limited */
 function parseGeom(v: unknown, open = false): PathGeom | undefined {
   if (!Array.isArray(v)) return undefined
@@ -794,7 +806,7 @@ function parseGeom(v: unknown, open = false): PathGeom | undefined {
     for (const ring of poly.slice(0, 500)) {
       if (!Array.isArray(ring)) continue
       const pts = ring
-        .slice(0, 20000)
+        .slice(0, MAX_RING_POINTS)
         .map(parseVertex)
         .filter((p): p is PathVertex => p !== undefined)
       points += pts.length
@@ -803,7 +815,7 @@ function parseGeom(v: unknown, open = false): PathGeom | undefined {
     }
     if (rings.length) out.push(rings)
   }
-  return out.length > 0 && points <= 100000 ? out : undefined
+  return out.length > 0 && points <= MAX_SHAPE_POINTS ? out : undefined
 }
 
 /** a picture placed inside a shape: dropped if its asset is missing from the file */
@@ -851,6 +863,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...(kind === 'table' && table ? { table } : {}),
       ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
       ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
+      ...(kind === 'line' && cleanLineWidths(raw.lineWidths) ? { lineWidths: cleanLineWidths(raw.lineWidths)! } : {}),
       ...(kind === 'line' && (raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
       ...(kind === 'path' && (raw.strokeCap === 'butt' || raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
       ...(kind === 'path' && raw.closed === false ? { closed: false as const } : {}),

@@ -1,4 +1,4 @@
-import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type ParagraphBox, type Run, type TextAlign } from './document'
+import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type FootnoteReferenceLook, type ParagraphBox, type Run, type TextAlign } from './document'
 import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 import { hexToRgb } from './colorModels'
@@ -91,6 +91,8 @@ export interface RunNodeOpts {
   footnoteReferenceScale?: number
   footnoteReferenceGap?: number
   footnoteReferenceVerticalOffset?: number
+  /** the font, weight, italic, colour and size the reference numbers are set in (from the style chosen for them); what is missing comes from the text before the number */
+  footnoteReferenceLook?: FootnoteReferenceLook
   tocPageMarkers?: Record<number, string>
   tocLeaderMarkers?: Record<number, string>
   /** shows a dot over spaces and a ¶ at paragraph breaks (View > תווים נסתרים) */
@@ -201,10 +203,12 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
           marker.className = 'footnote-reference'
           marker.dataset.reference = reference
           marker.dir = /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'
-          marker.style.fontFamily = `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`
-          marker.style.fontWeight = String(referenceStyle.weight)
-          marker.style.fontStyle = referenceStyle.italic ? 'italic' : 'normal'
-          marker.style.setProperty('--footnote-marker-size', `${referenceStyle.fontSize * scale * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)}px`)
+          const look = opts.footnoteReferenceLook
+          marker.style.fontFamily = `"${look?.fontFamily ?? referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`
+          marker.style.fontWeight = String(look?.weight ?? referenceStyle.weight)
+          marker.style.fontStyle = (look?.italic ?? referenceStyle.italic) ? 'italic' : 'normal'
+          if (look?.color) marker.style.color = look.color
+          marker.style.setProperty('--footnote-marker-size', `${(look?.fontSize ?? referenceStyle.fontSize * (opts.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE)) * scale}px`)
           marker.style.setProperty('--footnote-marker-direction', /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr')
           marker.style.setProperty('--footnote-reference-gap', `${(opts.footnoteReferenceGap ?? 0) * scale}px`)
           marker.style.setProperty('--footnote-reference-offset', `${(opts.footnoteReferenceVerticalOffset ?? 0) * scale}px`)
@@ -475,7 +479,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
           return index >= pos && index < end ? [[index - pos, label]] : []
         }))
       : undefined
-    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale, footnoteReferenceGap: opts.footnoteReferenceGap, footnoteReferenceVerticalOffset: opts.footnoteReferenceVerticalOffset, outlineMode: opts.outlineMode })
+    const nodes = buildRunNodes(text.slice(pos, end), sliceRuns(runs, pos, end), scale, { showMarks: opts.showMarks, footnoteMarkers, footnoteReferenceScale: opts.footnoteReferenceScale, footnoteReferenceGap: opts.footnoteReferenceGap, footnoteReferenceVerticalOffset: opts.footnoteReferenceVerticalOffset, footnoteReferenceLook: opts.footnoteReferenceLook, outlineMode: opts.outlineMode })
     const lead = nodes.firstChild as HTMLElement | null
     const isOpening = pos > 0 || !!opts.atParaStart
     // the previous paragraph's closing gap, then this paragraph's own first-line indent

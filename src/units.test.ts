@@ -18,3 +18,26 @@ describe('page size presets', () => {
     ])
   })
 })
+
+describe('the number typed in a numeric field', () => {
+  // imported lazily so that the existing imports of this file stay as they are
+  it('reads a plain number, with or without the percent sign the field shows', async () => {
+    const { parseFieldValue } = await import('./units')
+    expect(parseFieldValue('40', undefined)).toBe(40)
+    expect(parseFieldValue('40%', undefined)).toBe(40)
+    expect(parseFieldValue(' 40 % ', undefined)).toBe(40)
+    expect(parseFieldValue('0,5', undefined)).toBe(1)
+    expect(parseFieldValue('-3', undefined)).toBe(-3)
+    expect(parseFieldValue('', undefined)).toBeNull()
+    expect(parseFieldValue('abc', undefined)).toBeNull()
+  })
+
+  it('reads a field of percentages that has its sign in the text it shows', async () => {
+    const { parseFieldValue } = await import('./units')
+    expect(parseFieldValue('55 %', 'px', '%')).toBe(55)
+    expect(parseFieldValue('55', 'px', '%')).toBe(55)
+    // points and millimetres are still read by their unit
+    expect(parseFieldValue('10 mm', 'mm')).toBeCloseTo(28.346, 2)
+    expect(parseFieldValue('12 pt', 'px', 'pt')).toBe(12)
+  })
+})

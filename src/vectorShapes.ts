@@ -1,3 +1,4 @@
+import { lineProfileShape } from './lineProfile'
 import { GState, type jsPDF } from 'jspdf'
 import type { ShapeFrame } from './document'
 import { rgbToInks } from './cmykPage'
@@ -169,7 +170,9 @@ export function longHex(color: string | null | undefined): string | null {
 }
 
 /** The shape as an outline on the page (`pageX`, `pageY` is the page's own top-left on the world), or the reason it stays a picture. */
-export function shapeToVector(shape: ShapeFrame, pageX: number, pageY: number): VectorShape | { reason: ShapePictureReason } {
+export function shapeToVector(original: ShapeFrame, pageX: number, pageY: number): VectorShape | { reason: ShapePictureReason } {
+  // a line thicker in some places than others is written as the shape it covers
+  const shape = lineProfileShape(original) ?? original
   if (shape.kind === 'table') return { reason: 'table' }
   if (shape.feather) return { reason: 'feather' }
   if (shape.fillGradient && !shape.frame) return { reason: 'gradient' }

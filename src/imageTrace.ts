@@ -1,4 +1,5 @@
 import type { ImageFit, ImageFrame, PathGeom, PathVertex, ShapeFrame } from './document'
+import { fitClosedLoop } from './loopFit'
 
 export const MAX_SMOOTH_PASSES = 12
 
@@ -18,13 +19,21 @@ export interface TraceOptions {
   smooth: number
   /** outlines enclosing fewer pixels than this are dropped (specks, and the holes of a speck) */
   minArea: number
-  /** how far (pixels of the picture) the fitted curve may go from the edge */
+  /** how far (pixels of the picture) the fitted curves may go from the edge: more means fewer points */
   tolerance: number
   /** the turn (degrees) from which a point of the outline is a corner and not a smooth point */
   corner: number
+  /**
+   * Thin and faint lines (the tail of a soft curl, a hair line that is lighter than the level because it is thinner than the blur of
+   * the picture) are kept: a feature narrower than `thinReach` that stands out from what is around it by more than this many levels
+   * (0…255) is taken into the shape even when it is not past the level. 0 = off.
+   */
+  thin: number
+  /** how wide a line can be (pixels of the working picture) and still count as thin */
+  thinReach: number
 }
 
-export const DEFAULT_TRACE: TraceOptions = { trace: 'dark', level: 128, smooth: 1, minArea: 6, tolerance: 0.6, corner: 55 }
+export const DEFAULT_TRACE: TraceOptions = { trace: 'dark', level: 128, smooth: 1, minArea: 6, tolerance: 0.6, corner: 55, thin: 34, thinReach: 3 }
 
 type Pt = [number, number]
 
@@ -128,6 +137,115 @@ export function tracedColor(rgba: ArrayLike<number>, field: Float32Array, level:
   if (count === 0) return trace === 'dark' ? '#000000' : '#ffffff'
   const hex = (value: number) => Math.round(value / count).toString(16).padStart(2, '0')
   return `#${hex(red)}${hex(green)}${hex(blue)}`
+}
+
+/** the biggest (or smallest) value in a window of `radius` either side, along a line of `count` values: a sliding window, in one pass */
+function slidingExtremum(source: Float32Array, count: number, radius: number, largest: boolean, out: Float32Array) {
+  // indices of a monotone queue: the front is always the extreme of the window
+  const queue = new Int32Array(count)
+  let head = 0
+  let tail = 0
+  const better = (a: number, b: number) => (largest ? a >= b : a <= b)
+  let next = 0
+  for (let i = 0; i < count; i += 1) {
+    const reach = Math.min(count - 1, i + radius)
+    while (next <= reach) {
+      while (tail > head && better(source[next]!, source[queue[tail - 1]!]!)) tail -= 1
+      queue[tail] = next
+      tail += 1
+      next += 1
+    }
+    while (queue[head]! < i - radius) head += 1
+    out[i] = source[queue[head]!]!
+  }
+}
+
+/** the picture with each value replaced by the biggest (or smallest) one within `radius` pixels: a square window, done as two passes */
+function extremum(field: Float32Array, width: number, height: number, radius: number, largest: boolean): Float32Array {
+  const across = new Float32Array(field.length)
+  const row = new Float32Array(width)
+  const rowOut = new Float32Array(width)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) row[x] = field[y * width + x]!
+    slidingExtremum(row, width, radius, largest, rowOut)
+    for (let x = 0; x < width; x += 1) across[y * width + x] = rowOut[x]!
+  }
+  const result = new Float32Array(field.length)
+  const column = new Float32Array(height)
+  const columnOut = new Float32Array(height)
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) column[y] = across[y * width + x]!
+    slidingExtremum(column, height, radius, largest, columnOut)
+    for (let y = 0; y < height; y += 1) result[y * width + x] = columnOut[y]!
+  }
+  return result
+}
+
+/**
+ * How much each pixel stands out from what is around it as a thin feature: the difference between the picture and its closing (for
+ * dark lines) or opening (for light ones), which a window wider than the line fills in. Zero everywhere that is not a thin feature.
+ */
+function thinDepth(field: Float32Array, width: number, height: number, trace: 'dark' | 'light', reach: number): Float32Array {
+  const radius = Math.max(1, Math.round(reach))
+  const depth = new Float32Array(field.length)
+  if (trace === 'dark') {
+    // closing = the smallest of the biggest: a dark line narrower than the window is filled with the light around it
+    const closed = extremum(extremum(field, width, height, radius, true), width, height, radius, false)
+    for (let i = 0; i < field.length; i += 1) depth[i] = closed[i]! - field[i]!
+  } else {
+    const opened = extremum(extremum(field, width, height, radius, false), width, height, radius, true)
+    for (let i = 0; i < field.length; i += 1) depth[i] = field[i]! - opened[i]!
+  }
+  return depth
+}
+
+/**
+ * The picture with thin features that stand out from their surroundings made to pass the level, so that a soft, faint line (the tail of
+ * a curl) is not lost because it is lighter than the level. A feature is taken when it stands out by more than `threshold` somewhere
+ * (a seed), and then all of it that is connected to the seed and stands out by half as much; so a faint line comes out whole and
+ * not in pieces where it is a little fainter. The value is moved past `level` by the amount it is over the lower limit, which puts the
+ * edge of the feature where it stands out by that limit.
+ */
+export function boostThinFeatures(field: Float32Array, width: number, height: number, level: number, trace: 'dark' | 'light', reach: number, threshold: number): Float32Array {
+  const depth = thinDepth(field, width, height, trace, reach)
+  const low = Math.max(4, threshold / 2)
+  const keep = new Uint8Array(field.length)
+  const stack = new Int32Array(field.length)
+  let top = 0
+  for (let i = 0; i < field.length; i += 1) {
+    if (depth[i]! > threshold) {
+      keep[i] = 1
+      stack[top] = i
+      top += 1
+    }
+  }
+  // the seeds spread over the pixels that are over the lower limit (eight neighbours)
+  while (top > 0) {
+    top -= 1
+    const at = stack[top]!
+    const x = at % width
+    const y = (at - x) / width
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const ny = y + dy
+      if (ny < 0 || ny >= height) continue
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const nx = x + dx
+        if (nx < 0 || nx >= width) continue
+        const to = ny * width + nx
+        if (keep[to] || depth[to]! <= low) continue
+        keep[to] = 1
+        stack[top] = to
+        top += 1
+      }
+    }
+  }
+  const out = new Float32Array(field)
+  for (let i = 0; i < field.length; i += 1) {
+    if (!keep[i]) continue
+    const over = depth[i]! - low
+    out[i] = trace === 'dark' ? Math.min(field[i]!, level - over - 0.001) : Math.max(field[i]!, level + over + 0.001)
+  }
+  return out
 }
 
 /** a few passes of a 3 by 3 blur */
@@ -290,81 +408,6 @@ function contains(loop: Pt[], x: number, y: number): boolean {
   return inside
 }
 
-/** a closed line reduced to the points that keep its shape to within `tolerance` (Douglas-Peucker; the line is cut in two at its farthest points) */
-function simplifiedLoop(loop: Pt[], tolerance: number): Pt[] {
-  if (loop.length <= 6) return loop
-  let far = 0
-  let farDistance = -1
-  for (let index = 1; index < loop.length; index += 1) {
-    const distance = Math.hypot(loop[index]![0] - loop[0]![0], loop[index]![1] - loop[0]![1])
-    if (distance > farDistance) {
-      farDistance = distance
-      far = index
-    }
-  }
-  const simplify = (points: Pt[]): Pt[] => {
-    const keep = new Uint8Array(points.length)
-    keep[0] = 1
-    keep[points.length - 1] = 1
-    const stack: [number, number][] = [[0, points.length - 1]]
-    while (stack.length > 0) {
-      const [from, to] = stack.pop()!
-      const [ax, ay] = points[from]!
-      const [bx, by] = points[to]!
-      const span = Math.hypot(bx - ax, by - ay)
-      let worst = -1
-      let worstDistance = tolerance
-      for (let index = from + 1; index < to; index += 1) {
-        const [px, py] = points[index]!
-        const distance = span === 0 ? Math.hypot(px - ax, py - ay) : Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / span
-        if (distance > worstDistance) {
-          worst = index
-          worstDistance = distance
-        }
-      }
-      if (worst >= 0) {
-        keep[worst] = 1
-        stack.push([from, worst], [worst, to])
-      }
-    }
-    return points.filter((_, index) => keep[index] === 1)
-  }
-  const first = simplify(loop.slice(0, far + 1))
-  const second = simplify([...loop.slice(far), loop[0]!])
-  return [...first, ...second.slice(1, -1)]
-}
-
-/** The outline as the points of a path: smooth points with handles where the line goes on smoothly, corners where it turns sharply. In pixel units. */
-function curveOf(loop: Pt[], cornerDegrees: number): { p: Pt; hi?: Pt; ho?: Pt }[] {
-  const count = loop.length
-  const cornerCos = Math.cos((cornerDegrees * Math.PI) / 180)
-  return loop.map((point, index) => {
-    const before = loop[(index - 1 + count) % count]!
-    const after = loop[(index + 1) % count]!
-    const inX = point[0] - before[0]
-    const inY = point[1] - before[1]
-    const outX = after[0] - point[0]
-    const outY = after[1] - point[1]
-    const inLength = Math.hypot(inX, inY)
-    const outLength = Math.hypot(outX, outY)
-    if (inLength === 0 || outLength === 0) return { p: point }
-    // a sharp turn is a corner of the shape and stays one
-    const turn = (inX * outX + inY * outY) / (inLength * outLength)
-    if (turn < cornerCos) return { p: point }
-    // otherwise the curve goes through the point in the direction from the point before it to the point after it
-    const directionX = after[0] - before[0]
-    const directionY = after[1] - before[1]
-    const length = Math.hypot(directionX, directionY) || 1
-    const ux = directionX / length
-    const uy = directionY / length
-    return {
-      p: point,
-      hi: [-ux * (inLength / 3), -uy * (inLength / 3)],
-      ho: [ux * (outLength / 3), uy * (outLength / 3)],
-    }
-  })
-}
-
 export interface TraceResult {
   /** the outline, 0…1 of `box` */
   geom: PathGeom
@@ -378,7 +421,8 @@ export interface TraceResult {
 
 /** The picture (as its brightness field) traced into the outline of a vector shape. */
 export function traceField(field: Float32Array, width: number, height: number, options: TraceOptions): TraceResult {
-  const smoothField = options.smooth > 0 ? blurred(field, width, height, Math.min(MAX_SMOOTH_PASSES, Math.round(options.smooth))) : field
+  const blurredField = options.smooth > 0 ? blurred(field, width, height, Math.min(MAX_SMOOTH_PASSES, Math.round(options.smooth))) : field
+  const smoothField = options.thin > 0 ? boostThinFeatures(blurredField, width, height, options.level, options.trace, options.thinReach, options.thin) : blurredField
   const loops = contoursOf(smoothField, width, height, options.level, options.trace)
     .map((loop) => ({ loop, area: signedArea(loop) }))
     .filter(({ area }) => Math.abs(area) >= Math.max(0.5, options.minArea))
@@ -401,7 +445,7 @@ export function traceField(field: Float32Array, width: number, height: number, o
 
   const box = { x: 0, y: 0, w: width, h: height }
   const toVertices = (loop: Pt[]): PathVertex[] => {
-    const fitted = curveOf(simplifiedLoop(loop, options.tolerance), options.corner)
+    const fitted = fitClosedLoop(loop, options.tolerance, options.corner)
     return fitted.map((vertex) => {
       const p: [number, number] = [vertex.p[0] / width, vertex.p[1] / height]
       if (!vertex.hi && !vertex.ho) return p

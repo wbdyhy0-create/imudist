@@ -236,15 +236,53 @@ describe('help topic search', () => {
     expect(background?.answer[0]).toContain('„חלון” > „מאפיינים”')
   })
 
+  it('explains that Space moves a shape while it is being drawn', () => {
+    const topic = search('להזיז צורה תוך כדי ציור').find((result) => result.id === 'shape-tools')
+    expect(topic).toBeDefined()
+    expect(topic?.answer.join(' ')).toContain('מקש הרווח')
+  })
+
+  it('explains the decorations of the footnote divider and how to import one', () => {
+    const topic = search('ייבוא עיטור לקו הפרדה').find((result) => result.id === 'footnote-divider-ornaments')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['ייבוא עיטור מקובץ', 'SVG, PNG או JPG', 'עובי הקווים', 'PDF ול-PNG', 'גודל העיטור', 'גודל הגופן של הכותרת', 'מרווח בין הקווים או העיטורים לכותרת', 'מיושרים לאמצע האותיות']) expect(answer).toContain(detail)
+    for (const removedPreset of ['קו דועך', 'סלסול', 'קו מנוקד', 'עיגול, כוכב, עלה']) expect(answer).not.toContain(removedPreset)
+  })
+
+  it('explains how to make a line thicker at one end or in the middle', () => {
+    const topic = search('קו עבה בצד אחד ודק בצד השני').find((result) => result.id === 'line-width-profile')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„עובי לאורך הקו”', 'עבה באמצע', 'בהתחלה, באמצע ובסוף', 'כצורה מלאה']) expect(answer).toContain(detail)
+  })
+
+  it('explains how to export vectors as an SVG file', () => {
+    const topic = search('ייצוא וקטורים לקובץ').find((result) => result.id === 'export-svg')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„קובץ” > „ייצוא ל-SVG…”', 'אם לא נבחר דבר', 'נתיבים', 'האותיות']) expect(answer).toContain(detail)
+  })
+
   it('explains how to turn a picture of a logo into a vector shape', () => {
     const topic = search('המרת תמונה לווקטור').find((result) => result.id === 'image-trace')
     expect(topic).toBeDefined()
     const answer = topic?.answer.join(' ') ?? ''
-    for (const detail of ['„אובייקט” > „המר תמונה לווקטור…”', 'סף בהירות', 'חור', 'Ctrl+Z', 'בצבע אחד']) {
+    for (const detail of ['„אובייקט” > „המר תמונה לווקטור…”', 'סף בהירות', 'פישוט', 'שימור קווים דקים', 'חור', 'Ctrl+Z', 'בצבע אחד']) {
       expect(answer).toContain(detail)
     }
     // a logo that prints with broken letters leads here too
     expect(search('לוגו שבור בהדפסה').some((result) => result.id === 'image-trace')).toBe(true)
+  })
+
+  it('explains how to add and remove vector anchor points', () => {
+    const topic = search('איך מוסיפים נקודת עיגון לווקטור').find((result) => result.id === 'shape-anchor-points')
+    expect(topic).toBeDefined()
+    const answer = topic?.answer.join(' ') ?? ''
+    for (const detail of ['„עריכת נקודות” (A)', 'ידית אמצע הצלע', 'Delete או Backspace', 'Shift', 'Alt', 'Ctrl+Z']) {
+      expect(answer).toContain(detail)
+    }
+    expect(search('למחוק נקודת עיגון מצורה').some((result) => result.id === 'shape-anchor-points')).toBe(true)
   })
 
   it('explains how to turn live text into vector outlines', () => {

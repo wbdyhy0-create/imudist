@@ -1,6 +1,7 @@
 import { PAGE_PRESETS, toPt, type Unit } from './units'
 import type { TableData } from './table'
 import { getLastUsedFontFamily } from './fontPreference'
+import type { DividerOrnamentImage } from './footnoteOrnaments'
 
 export type Binding = 'ltr' | 'rtl'
 
@@ -21,7 +22,11 @@ export type FootnoteAlignment = 'right' | 'center'
 export type FootnotePlacementMode = 'footnotes' | 'endnotes'
 export type FootnoteDividerAlignment = 'right' | 'center' | 'left'
 export type FootnoteDividerMode = 'line' | 'heading'
-export type FootnoteHeadingDecoration = 'none' | 'outer' | 'both' | 'curl' | 'needle'
+/** the look of the lines on both sides of the footnote heading: the older five are drawn by the stylesheet, the rest by footnoteOrnaments.ts, and 'custom' is the picture the user imported */
+export type FootnoteHeadingDecoration =
+  | 'none' | 'outer' | 'both' | 'curl' | 'needle' | 'custom'
+  | 'dots' | 'dashes' | 'double' | 'thickThin' | 'triple' | 'taper' | 'fade' | 'wave'
+  | 'circleEnd' | 'starEnd' | 'leafEnd' | 'arrowEnd' | 'trioEnd' | 'scrollEnd' | 'scrollFade' | 'scrollBoth'
 export const FOOTNOTE_REFERENCE_SCALE = 0.6
 
 export interface FootnoteLayoutConfig {
@@ -34,6 +39,11 @@ export interface FootnoteLayoutConfig {
   referenceGap: number
   /** vertical adjustment from the default superscript position, in points; positive moves down */
   referenceVerticalOffset: number
+  /**
+   * the paragraph style that sets the look of the reference numbers in the running text: font, weight, italic, colour and size.
+   * What the style does not set is taken from the text before the number; a size it sets replaces the per-cent `referenceScale`.
+   */
+  referenceStyleId?: string
   /** gap between a footnote's number and its text, in points */
   numberTextGap: number
   /** gap between columns in vertical footnote mode, points */
@@ -50,6 +60,14 @@ export interface FootnoteLayoutConfig {
   dividerText: string
   dividerHeadingLines: boolean
   dividerHeadingDecoration: FootnoteHeadingDecoration
+  /** the picture used at the ends of the lines when the decoration is 'custom' */
+  dividerOrnament?: DividerOrnamentImage
+  /** the size of the ornaments of the heading lines, in per cent of the size they have by default (the size of the heading's font); missing = 100 */
+  dividerOrnamentScale?: number
+  /** how far (points) the ornaments are raised above the place where they are level with the middle of the heading's letters; negative lowers them; missing = 0 */
+  dividerOrnamentOffset?: number
+  /** the space (points) between the lines or ornaments and the heading text; missing = automatic, a little under half the heading's font size */
+  dividerHeadingGap?: number
   dividerHeadingStyleId?: string
   spaceBefore: number
   startAt: number
@@ -61,6 +79,16 @@ export interface FootnoteLayoutConfig {
   alignment: FootnoteAlignment
   fontFamily?: string
   paragraphStyleId?: string
+}
+
+/** The look a footnote reference number in the running text is set in, as the style chosen for it gives it; a field that is missing is not set by the style. */
+export interface FootnoteReferenceLook {
+  fontFamily?: string
+  weight?: number
+  italic?: boolean
+  /** points: when set, the number has exactly this size and `referenceScale` is not used */
+  fontSize?: number
+  color?: string
 }
 
 export interface FootnoteItem {
@@ -730,6 +758,8 @@ export interface ShapeFrame {
   flip?: true
   /** line: dashed instead of solid */
   strokeDash?: 'dashed'
+  /** line: its thickness along its length - at the start, the middle and the end, each a multiple of `strokeWidth` (missing = even); see lineProfile.ts */
+  lineWidths?: [number, number, number]
   /** line: the shape of its two ends; missing = 'butt' (a flat cut, flush with the end point) */
   strokeCap?: LineCap
   /** #rrggbb, or null for no fill */

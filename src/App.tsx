@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
+import { MinimumFontNotice } from './components/MinimumFontNotice'
 import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { ExportPdfDialog } from './components/ExportPdfDialog'
 import { SeparationPreviewDialog } from './components/SeparationPreviewDialog'
@@ -271,6 +272,36 @@ export default function App() {
       if (saved) current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
     } catch (error) {
       current.showError('ייצוא PNG נכשל', error)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** the selected objects (or, with nothing selected, the page that is shown) as an SVG file */
+  const exportSvgFile = useCallback(async () => {
+    const current = sessionRef.current
+    const currentDoc = current.doc
+    const workspace = ws.current
+    if (!currentDoc || !workspace) return
+    try {
+      const { exportSvg, deliverSvg } = await import('./svgExport')
+      const ids = workspace.selectedObjectIds()
+      const pageIndex = workspace.currentPageIndex()
+      const content = exportContentOf(exportSourceOf(current))
+      const page = pageRects(content.doc)[pageIndex]
+      current.notify(ids.length > 0 ? 'מייצא את הנבחרים ל-SVG…' : `מייצא את עמוד ${pageIndex + 1} ל-SVG…`)
+      const result = await exportSvg(content, { ids, page, title: currentDoc.name })
+      if (result.count === 0) {
+        current.notify(ids.length > 0 ? 'אין בנבחרים מה לייצא ל-SVG.' : 'אין בעמוד הזה אובייקטים לייצוא ל-SVG.')
+        return
+      }
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
+      const saved = await deliverSvg(result.svg, result.selection ? `${safeName}-נבחרים` : `${safeName}-page-${pageIndex + 1}`)
+      if (saved) {
+        const what = result.selection ? `${result.count} אובייקטים נבחרים` : `עמוד ${pageIndex + 1} (${result.count} אובייקטים)`
+        current.notify(result.notes.length > 0 ? `${what} יוצאו ל-SVG. לא יוצא כמו שהוא: ${result.notes.join(', ')}.` : `${what} יוצאו ל-SVG.`)
+      }
+    } catch (error) {
+      current.showError('ייצוא SVG נכשל', error)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -547,6 +578,7 @@ export default function App() {
           setDialog('separations')
         },
         exportPng: () => void exportCurrentPagePng(),
+        exportSvg: () => void exportSvgFile(),
         newBook: () => void bookRef.current.create(),
         openBook: () => void bookRef.current.open(),
         bookPanelOpen: book.panelOpen,
@@ -890,6 +922,7 @@ export default function App() {
         )}
       </div>
       {session.toast && <div className="toast" role="status">{session.toast}</div>}
+      <MinimumFontNotice />
       <BookPanel controller={book} />
       <ChapterPicker controller={book} />
       <SyncDialog controller={book} />

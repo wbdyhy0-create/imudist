@@ -1,4 +1,5 @@
-import { effectiveLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
+import { ornamentExtent } from './footnoteOrnaments'
+import { effectiveLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type FootnoteReferenceLook, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
 
 export function footnoteBlockWidth(frameWidth: number, widthScale = 1): number {
   return frameWidth * Math.max(0.2, Math.min(1, widthScale))
@@ -14,16 +15,38 @@ export function changedFootnoteOffset(previous: FootnoteItem[], next: FootnoteIt
   return changed.length ? Math.min(...changed.map((note) => note.anchor)) : undefined
 }
 
+/** What a paragraph style sets, the styles it is based on included (the nearest one wins). */
+function resolveStylePatch(styles: ParagraphStyleRecord[], id: string, seen = new Set<string>()): ParagraphStyleRecord['patch'] {
+  if (seen.has(id)) return {}
+  const style = styles.find((candidate) => candidate.id === id)
+  if (!style) return {}
+  const nextSeen = new Set(seen).add(id)
+  return { ...(style.basedOnId ? resolveStylePatch(styles, style.basedOnId, nextSeen) : {}), ...style.patch }
+}
+
 export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[], paragraphStyleId?: string): TextStyle {
-  const resolve = (id: string, seen = new Set<string>()): Partial<TextStyle> => {
-    if (seen.has(id)) return {}
-    const style = styles.find((candidate) => candidate.id === id)
-    if (!style) return {}
-    const nextSeen = new Set(seen).add(id)
-    return { ...(style.basedOnId ? resolve(style.basedOnId, nextSeen) : {}), ...style.patch }
-  }
-  const patch = paragraphStyleId || config.paragraphStyleId ? resolve(paragraphStyleId || config.paragraphStyleId!) : {}
+  const patch = paragraphStyleId || config.paragraphStyleId ? resolveStylePatch(styles, paragraphStyleId || config.paragraphStyleId!) : {}
   return { ...DEFAULT_TEXT_STYLE, ...patch, ...(config.fontFamily ? { fontFamily: config.fontFamily } : {}) }
+}
+
+/**
+ * The look the reference numbers in the running text are set in, from the paragraph style chosen for them (`referenceStyleId`):
+ * only what the style really sets. Undefined when no style is chosen, it is gone, or it sets none of these.
+ */
+export function footnoteReferenceLook(config: Pick<FootnoteLayoutConfig, 'referenceStyleId'>, styles: ParagraphStyleRecord[]): FootnoteReferenceLook | undefined {
+  if (!config.referenceStyleId) return undefined
+  const patch = resolveStylePatch(styles, config.referenceStyleId)
+  const look: FootnoteReferenceLook = {}
+  if (patch.fontFamily) look.fontFamily = patch.fontFamily
+  if (typeof patch.weight === 'number' && patch.weight > 0) look.weight = patch.weight
+  if (typeof patch.italic === 'boolean') look.italic = patch.italic
+  if (typeof patch.fontSize === 'number' && patch.fontSize > 0) look.fontSize = patch.fontSize
+  if (patch.color) look.color = patch.color
+  return Object.keys(look).length ? look : undefined
+}
+
+export function footnoteParagraphStyleId(config: FootnoteLayoutConfig, note: FootnoteItem): string | undefined {
+  return note.paragraphStyleId ?? config.paragraphStyleId
 }
 
 export function footnoteDividerTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[]): TextStyle {
@@ -33,7 +56,10 @@ export function footnoteDividerTextStyle(config: FootnoteLayoutConfig, styles: P
 export function footnoteDividerHeight(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[]): number {
   if (config.dividerMode === 'line') return Math.max(1, config.dividerThickness)
   const style = footnoteDividerTextStyle(config, styles)
-  return Math.max(1, effectiveLeading(style))
+  const line = Math.max(1, effectiveLeading(style))
+  if (!config.dividerHeadingLines) return line
+  // ornaments as big as the font of the heading (times their own scale) must have the room they take
+  return Math.max(line, ornamentExtent(config.dividerHeadingDecoration, style.fontSize, (config.dividerOrnamentScale ?? 100) / 100, !!config.dividerOrnament))
 }
 
 export function updateFootnoteParagraphStyle(note: FootnoteItem, previous: TextStyle, next: TextStyle): FootnoteItem {
@@ -48,7 +74,7 @@ export function updateFootnoteParagraphStyle(note: FootnoteItem, previous: TextS
   const runs = note.runs?.map((run) => {
     const runStyle = { ...run.style }
     for (const key of changedCharKeys) {
-      if (runStyle[key] === previous[key] || runStyle[key] === note.style?.[key]) Object.assign(runStyle, { [key]: next[key] })
+      if (key === 'fontSize' || runStyle[key] === previous[key] || runStyle[key] === note.style?.[key]) Object.assign(runStyle, { [key]: next[key] })
     }
     return { ...run, style: runStyle }
   })

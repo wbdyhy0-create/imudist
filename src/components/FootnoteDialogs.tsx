@@ -2,6 +2,8 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { DEFAULT_FOOTNOTE_CONFIG, DEFAULT_TEXT_STYLE, FONT_FAMILIES, type CharStyle, type FootnoteLayoutConfig, type ParagraphStyleRecord, type Run, type TextStyle } from '../document'
 import { diffEdit, normalizeRuns, sliceRuns, styleAtChar } from '../story'
 import { NumberField } from './NumberField'
+import { footnoteDividerTextStyle, footnoteReferenceLook } from '../footnoteLayout'
+import { isOrnamentDecoration as isOrnament, MAX_ORNAMENT_BYTES, ORNAMENT_STYLES, ornamentPreviewMarkup, type DividerOrnamentImage } from '../footnoteOrnaments'
 
 function styleRuns(text: string, source: Run[], base: CharStyle, from: number, to: number, patch: Partial<CharStyle>): Run[] {
   const runs = normalizeRuns(text, source, base)
@@ -123,18 +125,41 @@ export function FootnoteStyleFields({ fontFamily, paragraphStyleId, paragraphSty
   )
 }
 
+const HIDDEN_FOOTNOTE_ORNAMENT_IDS = new Set([
+  'curl',
+  'wave',
+  'circleEnd',
+  'starEnd',
+  'leafEnd',
+  'trioEnd',
+  'scrollEnd',
+  'scrollFade',
+  'scrollBoth',
+])
+
 const footnoteRuleDecorations: { value: FootnoteLayoutConfig['dividerHeadingDecoration']; label: string }[] = [
   { value: 'none', label: 'קו ישר' },
   { value: 'outer', label: 'עיטור בקצוות החיצוניים' },
   { value: 'both', label: 'עיטור בכל קצות הקווים' },
-  { value: 'curl', label: 'עיטור מסולסל בקצוות' },
   { value: 'needle', label: 'קצוות מחודדים' },
+  ...ORNAMENT_STYLES
+    .filter((style) => !HIDDEN_FOOTNOTE_ORNAMENT_IDS.has(style.id))
+    .map((style) => ({ value: style.id as FootnoteLayoutConfig['dividerHeadingDecoration'], label: style.label })),
 ]
 
-function FootnoteRuleDecorationPicker({ value, onChange }: { value: FootnoteLayoutConfig['dividerHeadingDecoration']; onChange: (value: FootnoteLayoutConfig['dividerHeadingDecoration']) => void }) {
+function FootnoteRuleDecorationPicker({ value, ornament, onChange }: { value: FootnoteLayoutConfig['dividerHeadingDecoration']; ornament?: DividerOrnamentImage; onChange: (value: FootnoteLayoutConfig['dividerHeadingDecoration']) => void }) {
   return (
     <div className="footnote-rule-decoration-picker" role="group" aria-label="עיטור הקווים">
-      {footnoteRuleDecorations.map((decoration) => (
+      {ornament && (
+        <button type="button" aria-label={`העיטור שיובא: ${ornament.name}`} aria-pressed={value === 'custom'} title={`העיטור שיובא: ${ornament.name}`} className={'ornament-choice' + (value === 'custom' ? ' selected' : '')} onClick={() => onChange('custom')}>
+          <span className="ornament-preview" dangerouslySetInnerHTML={{ __html: ornamentPreviewMarkup('custom', ornament) }} />
+        </button>
+      )}
+      {footnoteRuleDecorations.map((decoration) => ORNAMENT_STYLES.some((style) => style.id === decoration.value) ? (
+        <button key={decoration.value} type="button" aria-label={decoration.label} aria-pressed={value === decoration.value} title={decoration.label} className={'ornament-choice' + (value === decoration.value ? ' selected' : '')} onClick={() => onChange(decoration.value)}>
+          <span className="ornament-preview" dangerouslySetInnerHTML={{ __html: ornamentPreviewMarkup(decoration.value) }} />
+        </button>
+      ) : (
         <button key={decoration.value} type="button" aria-label={decoration.label} aria-pressed={value === decoration.value} title={decoration.label} className={value === decoration.value ? 'selected' : ''} onClick={() => onChange(decoration.value)}>
           <svg viewBox="0 0 72 24" aria-hidden="true">
             {decoration.value === 'needle' ? (
@@ -157,16 +182,27 @@ function FootnoteRuleDecorationPicker({ value, onChange }: { value: FootnoteLayo
                 <path d="M43 8 47 12 43 16 39 12 Z" />
               </g>
             )}
-            {decoration.value === 'curl' && (
-              <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M8 12 C2 12 2 5 7 5 C11 5 11 10 8 10 C6 10 6 8 8 8 M64 12 C70 12 70 5 65 5 C61 5 61 10 64 10 C66 10 66 8 64 8" />
-              </g>
-            )}
           </svg>
         </button>
       ))}
     </div>
   )
+}
+
+/** the file read as a data: URL, and the size of the picture in it */
+function readOrnamentFile(file: File): Promise<DividerOrnamentImage> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('read'))
+    reader.onload = () => {
+      const dataUrl = String(reader.result)
+      const image = new Image()
+      image.onerror = () => reject(new Error('image'))
+      image.onload = () => resolve({ name: file.name, dataUrl, width: image.naturalWidth || 100, height: image.naturalHeight || 40 })
+      image.src = dataUrl
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSave, onClose }: OptionsProps) {
@@ -178,6 +214,28 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
     const updated = { ...config, [key]: next }
     setConfig(updated)
     onPreview(updated)
+  }
+  const referenceLook = footnoteReferenceLook(config, paragraphStyles)
+  const ornamentInput = useRef<HTMLInputElement>(null)
+  const [ornamentError, setOrnamentError] = useState<string | null>(null)
+  /** a picture chosen as the ornament of the heading lines: it is kept in the document and used at once */
+  const importOrnament = async (file: File) => {
+    setOrnamentError(null)
+    if (file.size > MAX_ORNAMENT_BYTES) {
+      setOrnamentError(`הקובץ גדול מדי (עד ${Math.round(MAX_ORNAMENT_BYTES / 1024)}KB). אפשר לכווץ אותו או להקטין אותו.`)
+      return
+    }
+    try {
+      const image = await readOrnamentFile(file)
+      // a new picture starts at the size of the heading's font (100%), whatever size the one before it was given
+      const updated: FootnoteLayoutConfig = { ...config, dividerOrnament: image, dividerHeadingDecoration: 'custom' }
+      delete updated.dividerOrnamentScale
+      delete updated.dividerOrnamentOffset
+      setConfig(updated)
+      onPreview(updated)
+    } catch {
+      setOrnamentError('לא ניתן לקרוא את הקובץ הזה כתמונה.')
+    }
   }
   const startWindowDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return
@@ -243,9 +301,10 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
         <label className="footnote-dialog-field"><span>סידור</span><select value={config.mode} onChange={(event) => set('mode', event.target.value as FootnoteLayoutConfig['mode'])}><option value="vertical">אנכי</option><option value="horizontal">אופקי רציף</option></select></label>
         <label className="footnote-dialog-field"><span>מספר עמודות בטקסט ההערות</span><select value={config.columns} onChange={(event) => set('columns', Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>עמודה אחת</option><option value={2}>שתי עמודות</option></select></label>
         <label className="footnote-dialog-field"><span>מרווח בין עמודות אנכיות (ס״מ)</span><NumberField ariaLabel="מרווח בין עמודות אנכיות" value={config.columnGap} unit="cm" unitLabel="ס״מ" min={0} max={100} onChange={(gap) => set('columnGap', gap)} /></label>
-        <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><NumberField ariaLabel="גודל מספרי הפניה בטקסט" value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
-        <label className="footnote-dialog-field"><span>מרווח בין מספר ההפניה למילה (pt)</span><NumberField ariaLabel="מרווח בין מספר ההפניה למילה" value={config.referenceGap} unit="px" unitLabel="pt" step={1} min={0} max={72} onChange={(gap) => set('referenceGap', gap)} /></label>
-        <label className="footnote-dialog-field"><span>הזזה אנכית של מספר ההפניה (pt)</span><NumberField ariaLabel="הזזה אנכית של מספר ההפניה" value={config.referenceVerticalOffset} unit="px" unitLabel="pt" step={1} min={-20} max={20} onChange={(offset) => set('referenceVerticalOffset', offset)} /><small>ערך חיובי מעלה את המספר; ערך שלילי מוריד אותו.</small></label>
+        <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><NumberField ariaLabel="גודל מספרי הפניה בטקסט" live value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
+        <label className="footnote-dialog-field"><span>סגנון פסקה למספרי ההפניה</span><select value={config.referenceStyleId ?? ''} onChange={(event) => set('referenceStyleId', event.target.value || undefined)}><option value="">ללא סגנון (כמו הטקסט שלפני המספר)</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select>{referenceLook?.fontSize !== undefined ? <small>הגודל נקבע לפי הסגנון ({Math.round(referenceLook.fontSize * 100) / 100} pt), ולכן שדה האחוזים שמעל אינו בשימוש.</small> : <small>הגופן, המשקל, הנטייה והצבע של הסגנון חלים על המספרים. אם הסגנון מגדיר גם גודל, הוא קובע את הגודל במקום האחוזים.</small>}</label>
+        <label className="footnote-dialog-field"><span>מרווח בין מספר ההפניה למילה (pt)</span><NumberField ariaLabel="מרווח בין מספר ההפניה למילה" live value={config.referenceGap} unit="px" unitLabel="pt" step={1} min={0} max={72} onChange={(gap) => set('referenceGap', gap)} /></label>
+        <label className="footnote-dialog-field"><span>הזזה אנכית של מספר ההפניה (pt)</span><NumberField ariaLabel="הזזה אנכית של מספר ההפניה" live value={config.referenceVerticalOffset} unit="px" unitLabel="pt" step={1} min={-20} max={20} onChange={(offset) => set('referenceVerticalOffset', offset)} /><small>ערך חיובי מעלה את המספר; ערך שלילי מוריד אותו.</small></label>
         <label className="footnote-dialog-field"><span>מרווח בין מספר ההערה לטקסט (pt)</span><input type="number" min="0" max="100" value={config.numberTextGap} onChange={(event) => set('numberTextGap', Number(event.target.value))} /></label>
         <label className="footnote-dialog-field"><span>מרווח בין הערות אופקיות (pt)</span><input type="number" min="0" max="100" value={config.minSpacingBetweenInline} onChange={(event) => set('minSpacingBetweenInline', Number(event.target.value))} /></label>
         <label className="footnote-dialog-field"><span>גובה מרבי (pt)</span><input type="number" min="12" max="1000" value={config.maxFootnoteHeight} onChange={(event) => set('maxFootnoteHeight', Number(event.target.value))} /></label>
@@ -272,17 +331,42 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
               {config.dividerHeadingLines && (
                 <div className="footnote-rule-decoration-field">
                   <span>עיטור הקווים</span>
-                  <FootnoteRuleDecorationPicker value={config.dividerHeadingDecoration} onChange={(decoration) => set('dividerHeadingDecoration', decoration)} />
+                  <FootnoteRuleDecorationPicker value={config.dividerHeadingDecoration} ornament={config.dividerOrnament} onChange={(decoration) => set('dividerHeadingDecoration', decoration)} />
+                  <div className="footnote-ornament-import">
+                    <button type="button" className="btn small" onClick={() => ornamentInput.current?.click()}>ייבוא עיטור מקובץ…</button>
+                    {config.dividerOrnament && (
+                      <button type="button" className="btn small" onClick={() => {
+                        const { dividerOrnament: _removed, ...rest } = config
+                        const next = { ...rest, dividerHeadingDecoration: config.dividerHeadingDecoration === 'custom' ? 'none' as const : config.dividerHeadingDecoration }
+                        setConfig(next)
+                        onPreview(next)
+                      }}>הסר את העיטור שיובא</button>
+                    )}
+                    <input ref={ornamentInput} type="file" hidden accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif" onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      if (file) void importOrnament(file)
+                    }} />
+                    {ornamentError && <span className="footnote-ornament-error" role="alert">{ornamentError}</span>}
+                  </div>
+                  <span className="muted">העיטור המיובא (SVG, PNG או JPG) מוצב בקצה החיצוני של כל קו, ומתהפך בצד השני. גודלו נגזר מגודל הגופן של הכותרת, ולכן משתנה איתו.</span>
+                  <label className="footnote-dialog-field"><span>מרווח בין הקווים או העיטורים לכותרת (נק׳)</span><NumberField ariaLabel="מרווח בין הקווים או העיטורים לכותרת" live value={config.dividerHeadingGap ?? Math.round(Math.max(6, footnoteDividerTextStyle(config, paragraphStyles).fontSize * 0.4) * 10) / 10} unit="px" unitLabel="pt" step={1} min={0} max={200} onChange={(gap) => set('dividerHeadingGap', gap)} /></label>
+                  {isOrnament(config.dividerHeadingDecoration) && (
+                    <>
+                    <label className="footnote-dialog-field"><span>גודל העיטור (% מגודל הגופן של הכותרת)</span><NumberField ariaLabel="גודל העיטור באחוזים מגודל הגופן של הכותרת" live value={Math.round(config.dividerOrnamentScale ?? 100)} step={5} min={20} max={500} onChange={(scale) => set('dividerOrnamentScale', scale)} /></label>
+                    <label className="footnote-dialog-field"><span>הגבהה או הנמכה של העיטורים לעומת הכותרת (pt)</span><NumberField ariaLabel="הגבהה או הנמכה של העיטורים לעומת הכותרת" live value={config.dividerOrnamentOffset ?? 0} unit="px" unitLabel="pt" step={1} min={-100} max={100} onChange={(offset) => set('dividerOrnamentOffset', offset)} /><small>ערך חיובי מגביה את העיטורים, ערך שלילי מנמיך אותם. באפס הם מיושרים לאמצע האותיות של הכותרת.</small></label>
+                    </>
+                  )}
                 </div>
               )}
             </>
           )}
-          <label className="footnote-dialog-field"><span>מרחק הטקסט הרץ מהקו העליון (pt)</span><input type="number" min="0" max="100" value={config.dividerGap} onChange={(event) => set('dividerGap', Number(event.target.value))} /></label>
-          <label className="footnote-dialog-field"><span>עובי קו ההפרדה (pt)</span><input type="number" min="0.1" max="10" step="0.1" value={config.dividerThickness} onChange={(event) => set('dividerThickness', Number(event.target.value))} /></label>
-          {config.dividerMode === 'heading' && <label className="footnote-dialog-field"><span>רוחב אזור הכותרת והקווים (%)</span><input type="number" min="20" max="100" value={config.dividerWidth} onChange={(event) => set('dividerWidth', Number(event.target.value))} /></label>}
+          <label className="footnote-dialog-field"><span>מרחק הטקסט הרץ מהקו העליון (pt)</span><NumberField ariaLabel="מרחק הטקסט הרץ מהקו העליון" live value={config.dividerGap} unit="px" unitLabel="pt" step={1} min={0} max={100} onChange={(gap) => set('dividerGap', gap)} /></label>
+          <label className="footnote-dialog-field"><span>עובי קו ההפרדה (pt)</span><NumberField ariaLabel="עובי קו ההפרדה" live value={config.dividerThickness} unit="px" unitLabel="pt" step={0.1} min={0.1} max={10} onChange={(thickness) => set('dividerThickness', thickness)} /></label>
+          {config.dividerMode === 'heading' && <label className="footnote-dialog-field"><span>רוחב אזור הכותרת והקווים (%)</span><NumberField ariaLabel="רוחב אזור הכותרת והקווים באחוזים" live value={Math.round(config.dividerWidth)} min={20} max={100} onChange={(width) => set('dividerWidth', width)} /></label>}
           {config.dividerMode === 'line' && (
             <>
-              <label className="footnote-dialog-field"><span>רוחב קו ההפרדה (%)</span><input type="number" min="1" max="100" value={config.dividerWidth} onChange={(event) => set('dividerWidth', Number(event.target.value))} /></label>
+              <label className="footnote-dialog-field"><span>רוחב קו ההפרדה (%)</span><NumberField ariaLabel="רוחב קו ההפרדה באחוזים" live value={Math.round(config.dividerWidth)} min={1} max={100} onChange={(width) => set('dividerWidth', width)} /></label>
               <label className="footnote-dialog-field"><span>יישור קו ההפרדה</span><select value={config.dividerAlignment} onChange={(event) => set('dividerAlignment', event.target.value as FootnoteLayoutConfig['dividerAlignment'])}><option value="right">ימין</option><option value="center">מרכז</option><option value="left">שמאל</option></select></label>
             </>
           )}

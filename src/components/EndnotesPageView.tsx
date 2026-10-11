@@ -23,6 +23,10 @@ export function EndnotesPageView({ frame, flow, config, paragraphStyles, zoom, t
     style: footnoteDividerTextStyle(config, paragraphStyles),
     showLines: config.dividerHeadingLines,
     decoration: config.dividerHeadingDecoration,
+    ornament: config.dividerOrnament,
+    ornamentScale: config.dividerOrnamentScale,
+    ornamentOffset: config.dividerOrnamentOffset,
+    gap: config.dividerHeadingGap,
   } : undefined
   return (
     <div className="endnote-page-readonly" onPointerDownCapture={(event) => event.stopPropagation()} onContextMenuCapture={(event) => event.stopPropagation()}>

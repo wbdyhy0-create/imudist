@@ -34,3 +34,20 @@ describe('the blend mode of an object in the file', () => {
     expect(unknown.shapes[0]).not.toHaveProperty('blendMode')
   })
 })
+
+describe('a shape with a great many points in the file', () => {
+  const ring = (n: number): [number, number][] => Array.from({ length: n }, (_, i) => [0.5 + 0.4 * Math.cos((i / n) * Math.PI * 2), 0.5 + 0.4 * Math.sin((i / n) * Math.PI * 2)])
+  const reopened = (rings: [number, number][][]) => parseDocument(serializeDocument(contentWith({ kind: 'path', geom: [rings] })), 'points.imudist').shapes[0]!
+
+  it('keeps every point of a ring of 50,000 (more than a ring was once allowed to hold)', () => {
+    const shape = reopened([ring(50_000)])
+    expect(shape.kind).toBe('path')
+    expect(shape.geom?.[0]?.[0]).toHaveLength(50_000)
+  })
+
+  it('stays a path with 150,000 points in several rings (more than a shape was once allowed to hold)', () => {
+    const shape = reopened([ring(50_000), ring(50_000), ring(50_000)])
+    expect(shape.kind).toBe('path')
+    expect(shape.geom?.[0]).toHaveLength(3)
+  })
+})

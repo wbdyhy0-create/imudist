@@ -1,6 +1,8 @@
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { useRef } from 'react'
-import type { FootnoteHeadingDecoration } from '../document'
+import type { FootnoteHeadingDecoration, FootnoteReferenceLook } from '../document'
+import { isOrnamentDecoration, ornamentSideMarkup, type DividerOrnamentImage } from '../footnoteOrnaments'
+import { letterCenterShift } from '../headingMetrics'
 import { cssTextAlign, effectiveLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
@@ -38,6 +40,7 @@ function withMarks(
   referenceVerticalOffset = 0,
   textOffset = 0,
   referenceStyle?: CharStyle,
+  referenceLook?: FootnoteReferenceLook,
 ): { nodes: ReactNode[]; trailing: ReactNode[] } {
   if (!showMarks && paraGaps.length === 0 && !firstLineIndent(startParaIndex) && !footnoteMarkers && !tocPageMarkers && !tocLeaderMarkers) return { nodes: [text], trailing: [] }
   let idx = startParaIndex
@@ -67,7 +70,7 @@ function withMarks(
         if (!(character === FOOTNOTE_MARKER && reference !== undefined) && tocPage === undefined && tocLeader === undefined) continue
         if (index > plainStart) nodes.push(piece.text.slice(plainStart, index))
         const key = `marker-${absolute}`
-        if (reference !== undefined) nodes.push(<span key={key} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceFontSize}px`, '--footnote-marker-direction': /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr', '--footnote-reference-gap': `${referenceGap * scale}px`, '--footnote-reference-offset': `${referenceVerticalOffset * scale}px`, ...(referenceStyle ? { fontFamily: `"${referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`, fontWeight: referenceStyle.weight, fontStyle: referenceStyle.italic ? 'italic' : 'normal' } : {}) } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
+        if (reference !== undefined) nodes.push(<span key={key} className="footnote-reference" data-reference={reference} dir={/[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr'} style={{ '--footnote-marker-size': `${referenceLook?.fontSize !== undefined ? referenceLook.fontSize * scale : referenceFontSize}px`, '--footnote-marker-direction': /[\u0590-\u05ff]/.test(reference) ? 'rtl' : 'ltr', '--footnote-reference-gap': `${referenceGap * scale}px`, '--footnote-reference-offset': `${referenceVerticalOffset * scale}px`, ...(referenceStyle ? { fontFamily: `"${referenceLook?.fontFamily ?? referenceStyle.fontFamily}", "Segoe UI", Arial, sans-serif`, fontWeight: referenceLook?.weight ?? referenceStyle.weight, fontStyle: (referenceLook?.italic ?? referenceStyle.italic) ? 'italic' : 'normal' } : {}), ...(referenceLook?.color ? { color: referenceLook.color } : {}) } as CSSProperties}>{FOOTNOTE_MARKER}</span>)
         else if (tocPage !== undefined) nodes.push(<span key={key} className="toc-page-reference" data-reference={tocPage} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_PAGE_MARKER}</span>)
         else nodes.push(<span key={key} className="toc-leader" data-leader={tocLeader} style={{ '--toc-reference-size': `${referenceFontSize / FOOTNOTE_REFERENCE_SCALE}px` } as CSSProperties}>{TOC_LEADER_MARKER}</span>)
         plainStart = index + 1
@@ -146,6 +149,7 @@ interface Props {
   footnoteReferenceScale?: number
   footnoteReferenceGap?: number
   footnoteReferenceVerticalOffset?: number
+  footnoteReferenceLook?: FootnoteReferenceLook
   footnoteAlignment?: 'right' | 'center'
   footnotes?: FootnotePlacement[]
   footnoteHeight: number
@@ -155,7 +159,7 @@ interface Props {
   footnoteDividerWidth?: number
   footnoteDividerThickness?: number
   footnoteDividerAlignment?: 'right' | 'center' | 'left'
-  footnoteDividerHeading?: { text: string; height: number; style: TextStyle; showLines: boolean; decoration: FootnoteHeadingDecoration }
+  footnoteDividerHeading?: { text: string; height: number; style: TextStyle; showLines: boolean; decoration: FootnoteHeadingDecoration; ornament?: DividerOrnamentImage; ornamentScale?: number; ornamentOffset?: number; gap?: number }
   footnoteNumberGap?: number
   footnoteWidthScale?: number
   footnoteMode?: 'vertical' | 'horizontal'
@@ -220,6 +224,7 @@ function RichText({
   footnoteReferenceScale,
   footnoteReferenceGap,
   footnoteReferenceVerticalOffset,
+  footnoteReferenceLook,
 }: {
   text: string
   runs: Run[]
@@ -242,6 +247,7 @@ function RichText({
   footnoteReferenceScale: number
   footnoteReferenceGap: number
   footnoteReferenceVerticalOffset: number
+  footnoteReferenceLook?: FootnoteReferenceLook
 }) {
   const parts: { key: string; text: string; run: Run; hl: boolean }[] = []
   let pos = 0
@@ -266,7 +272,7 @@ function RichText({
       if (segmentStart >= segmentEnd) return []
       const segment = part.text.slice(segmentStart - partStart, segmentEnd - partStart)
       const referenceStyle = styleAtChar(runs, Math.max(0, segmentStart - 1), part.run.style)
-      const { nodes } = withMarks(segment, showMarks, paraGaps, paraIndex, true, true, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, segmentStart, referenceStyle)
+      const { nodes } = withMarks(segment, showMarks, paraGaps, paraIndex, true, true, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, segmentStart, referenceStyle, footnoteReferenceLook)
       return [<span key={`toc-title-run-${segmentStart}`} className={part.hl ? 'sel' : 'toc-title-run'} style={{ fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`, color: part.run.style.color ?? '#111', fontSize: part.run.style.fontSize * scale, fontWeight: part.run.style.weight, fontStyle: part.run.style.italic ? 'italic' : 'normal', letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined, textShadow: textShadow(part.run.style, scale) || undefined }}>{nodes}</span>]
     })
     const rows: ReactNode[] = []
@@ -319,7 +325,7 @@ function RichText({
   let carry: ReactNode[] = []
   for (const [i, part] of parts.entries()) {
     const referenceStyle = styleAtChar(runs, Math.max(0, Number(part.key) - 1), part.run.style)
-    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, Number(part.key), referenceStyle)
+    const { nodes: rendered, trailing } = withMarks(part.text, showMarks, paraGaps, renderParaIndex, i === 0 && atParaStart, i === parts.length - 1, (index) => paragraphPatches?.[index]?.firstLineIndent ?? firstLineIndent(index), scale, footnoteMarkers, tocPageMarkers, tocLeaderMarkers, referenceStyle.fontSize * scale * footnoteReferenceScale, footnoteReferenceGap, footnoteReferenceVerticalOffset, Number(part.key), referenceStyle, footnoteReferenceLook)
     let group = paragraphNodes[paragraphNodes.length - 1]
     let opening: ReactNode[] = []
     if (!group || group.index !== renderParaIndex) {
@@ -403,6 +409,8 @@ export function TextFrameView(p: Props) {
   const maskFeather = p.featherOverride ?? frame.feather
   const textFlowBox = textFlowBoxOf(frame)
   const paragraphPatches = p.paragraphPatches ?? frame.paragraphStylePatches
+  /** how far the heading's ornaments and lines are moved to be level with the middle of the heading's letters (px, down is positive) */
+  const shift = p.footnoteDividerHeading ? letterCenterShift(p.footnoteDividerHeading.style, p.footnoteDividerHeading.height, p.footnoteDividerHeading.text) : 0
   const masterPreview = !editing && (slice.includes(PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_PAGE_NUMBER_MARKER) || slice.includes(EXTERNAL_PAGE_NUMBER_MARKER) || slice.includes(INTERNAL_LETTER_PAGE_NUMBER_MARKER) || slice.includes(LETTER_PAGE_NUMBER_MARKER) || slice.includes(RUNNING_HEADER_MARKER))
   let masterDisplay = { text: slice, runs: p.runs }
   if (masterPreview) {
@@ -537,6 +545,7 @@ export function TextFrameView(p: Props) {
           footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
           footnoteReferenceGap={p.footnoteReferenceGap ?? 0}
           footnoteReferenceVerticalOffset={p.footnoteReferenceVerticalOffset ?? 0}
+          footnoteReferenceLook={p.footnoteReferenceLook}
           onSelectAll={p.onSelectAllText}
           onSelectToStart={(offset) => p.onSelectToStartText?.(frame.id, offset)}
           hasPrev={p.hasPrev}
@@ -571,6 +580,7 @@ export function TextFrameView(p: Props) {
             footnoteReferenceScale={p.footnoteReferenceScale ?? FOOTNOTE_REFERENCE_SCALE}
             footnoteReferenceGap={p.footnoteReferenceGap ?? 0}
             footnoteReferenceVerticalOffset={p.footnoteReferenceVerticalOffset ?? 0}
+            footnoteReferenceLook={p.footnoteReferenceLook}
             firstLineIndent={(index) => paragraphPatches?.[index]?.firstLineIndent ?? style.firstLineIndent ?? 0}
             paragraphPatches={paragraphPatches}
             baseFontSize={style.fontSize}
@@ -590,13 +600,18 @@ export function TextFrameView(p: Props) {
                 dir="rtl"
                 style={{
                   top: p.footnoteDividerGap ?? 0,
-                  width: `${p.footnoteDividerWidth ?? 35}%`,
+                  // the width that is set is the least the heading has: a longer text (a big font) and its ornaments widen it, up to the whole width
+                  width: 'max-content',
+                  minWidth: `${p.footnoteDividerWidth ?? 35}%`,
+                  maxWidth: '100%',
                   height: p.footnoteDividerHeading.height,
+                  // an ornament may be taller than the line of the heading's text
+                  overflow: p.footnoteDividerHeading.showLines && isOrnamentDecoration(p.footnoteDividerHeading.decoration) ? 'visible' : undefined,
                   justifyContent: 'center',
                   left: '50%',
                   right: 'auto',
                   transform: 'translateX(-50%)',
-                  gap: p.footnoteDividerHeading.showLines ? `${Math.max(6, p.footnoteDividerHeading.style.fontSize * 0.4)}px` : '0',
+                  gap: p.footnoteDividerHeading.showLines ? `${p.footnoteDividerHeading.gap ?? Math.max(6, p.footnoteDividerHeading.style.fontSize * 0.4)}px` : '0',
                   color: p.footnoteDividerHeading.style.color ?? '#111111',
                   fontFamily: p.footnoteDividerHeading.style.fontFamily,
                   fontSize: `${p.footnoteDividerHeading.style.fontSize}px`,
@@ -606,13 +621,19 @@ export function TextFrameView(p: Props) {
                   letterSpacing: p.footnoteDividerHeading.style.tracking ? `${(p.footnoteDividerHeading.style.tracking / 1000) * p.footnoteDividerHeading.style.fontSize}px` : undefined,
                 }}
               >
-                {p.footnoteDividerHeading.showLines && (p.footnoteDividerHeading.decoration === 'needle'
-                  ? <span className="footnote-divider-heading-line side-right decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px` }} />
-                  : <span className={`footnote-divider-heading-line side-right decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px` }} />)}
+                {p.footnoteDividerHeading.showLines && isOrnamentDecoration(p.footnoteDividerHeading.decoration) && (
+                  <span style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: ornamentSideMarkup({ decoration: p.footnoteDividerHeading.decoration, side: 'right', color: p.footnoteDividerHeading.style.color ?? '#111111', thickness: p.footnoteDividerThickness ?? 1, height: p.footnoteDividerHeading.height, shift: shift - (p.footnoteDividerHeading.ornamentOffset ?? 0), fontSize: p.footnoteDividerHeading.style.fontSize, scale: (p.footnoteDividerHeading.ornamentScale ?? 100) / 100, custom: p.footnoteDividerHeading.ornament }) }} />
+                )}
+                {p.footnoteDividerHeading.showLines && !isOrnamentDecoration(p.footnoteDividerHeading.decoration) && (p.footnoteDividerHeading.decoration === 'needle'
+                  ? <span className="footnote-divider-heading-line side-right decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px`, top: shift }} />
+                  : <span className={`footnote-divider-heading-line side-right decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px`, top: shift }} />)}
                 <span className="footnote-divider-heading-text">{p.footnoteDividerHeading.text}</span>
-                {p.footnoteDividerHeading.showLines && (p.footnoteDividerHeading.decoration === 'needle'
-                  ? <span className="footnote-divider-heading-line side-left decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px` }} />
-                  : <span className={`footnote-divider-heading-line side-left decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px` }} />)}
+                {p.footnoteDividerHeading.showLines && isOrnamentDecoration(p.footnoteDividerHeading.decoration) && (
+                  <span style={{ display: 'contents' }} dangerouslySetInnerHTML={{ __html: ornamentSideMarkup({ decoration: p.footnoteDividerHeading.decoration, side: 'left', color: p.footnoteDividerHeading.style.color ?? '#111111', thickness: p.footnoteDividerThickness ?? 1, height: p.footnoteDividerHeading.height, shift: shift - (p.footnoteDividerHeading.ornamentOffset ?? 0), fontSize: p.footnoteDividerHeading.style.fontSize, scale: (p.footnoteDividerHeading.ornamentScale ?? 100) / 100, custom: p.footnoteDividerHeading.ornament }) }} />
+                )}
+                {p.footnoteDividerHeading.showLines && !isOrnamentDecoration(p.footnoteDividerHeading.decoration) && (p.footnoteDividerHeading.decoration === 'needle'
+                  ? <span className="footnote-divider-heading-line side-left decor-needle" aria-hidden="true" style={{ borderTopWidth: 0, height: `${Math.max(1, p.footnoteDividerThickness ?? 1)}px`, top: shift }} />
+                  : <span className={`footnote-divider-heading-line side-left decor-${p.footnoteDividerHeading.decoration}`} aria-hidden="true" style={{ borderTopWidth: `${p.footnoteDividerThickness ?? 1}px`, top: shift }} />)}
               </div>
             ) : (
               <div className="footnote-divider" style={{

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { brightnessField, contoursOf, DEFAULT_TRACE, otsuLevel, shapeFromTrace, signedArea, suggestedTrace, tracedColor, traceField, visibleRegion, workingScale } from './imageTrace'
+import { boostThinFeatures, brightnessField, contoursOf, DEFAULT_TRACE, otsuLevel, shapeFromTrace, signedArea, suggestedTrace, tracedColor, traceField, visibleRegion, workingScale } from './imageTrace'
 import { shapePath } from './shapes'
 import type { ImageFrame, ShapeFrame } from './document'
 
@@ -143,5 +143,60 @@ describe('the colour of what is traced', () => {
     }
     const field = brightnessField(data, width, width)
     expect(tracedColor(data, field, 200, 'dark')).toBe('#0066ff')
+  })
+})
+
+describe('keeping thin and faint lines', () => {
+  /** a picture with a bold bar and a faint, thin, soft line (a lot lighter than the level), the way a soft scroll has its tails */
+  const soft = (() => {
+    const width = 60
+    const height = 40
+    const field = new Float32Array(width * height).fill(255)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        // a bold bar on the left
+        if (x >= 4 && x < 14 && y >= 5 && y < 35) field[y * width + x] = 10
+        // a faint line with a soft profile: darkest 60 below the paper, 2 pixels wide
+        const across = Math.abs(y - 20)
+        const x0 = 24
+        if (x >= x0 && x < 56) field[y * width + x] = Math.min(field[y * width + x]!, 255 - 60 * Math.exp(-(across * across) / 2))
+      }
+    }
+    return { field, width, height }
+  })()
+
+  it('loses the faint line when only the level decides', () => {
+    const plain = traceField(soft.field, soft.width, soft.height, { ...DEFAULT_TRACE, level: 128, smooth: 0, thin: 0 })
+    expect(plain.shapes).toBe(1)
+  })
+
+  it('has the faint line too once thin lines are kept, and the bold bar the same as before', () => {
+    const kept = traceField(soft.field, soft.width, soft.height, { ...DEFAULT_TRACE, level: 128, smooth: 0, thin: 30, thinReach: 4 })
+    expect(kept.shapes).toBe(2)
+    // the bar is not changed by it: the same single outline for it
+    const withoutLine = new Float32Array(soft.field)
+    for (let y = 0; y < soft.height; y += 1) for (let x = 20; x < soft.width; x += 1) withoutLine[y * soft.width + x] = 255
+    const barOnly = traceField(withoutLine, soft.width, soft.height, { ...DEFAULT_TRACE, level: 128, smooth: 0, thin: 30, thinReach: 4 })
+    const barOnlyPlain = traceField(withoutLine, soft.width, soft.height, { ...DEFAULT_TRACE, level: 128, smooth: 0, thin: 0 })
+    expect(barOnly.shapes).toBe(1)
+    expect(barOnly.points).toBe(barOnlyPlain.points)
+  })
+
+  it('does not turn a bold shape into a thicker one', () => {
+    // the area of the bold bar is the same with and without the boost
+    const area = (field: Float32Array, thin: number) => {
+      const loops = contoursOf(thin > 0 ? boostThinFeatures(field, soft.width, soft.height, 128, 'dark', 4, thin) : field, soft.width, soft.height, 128, 'dark')
+      return loops.reduce((sum, loop) => sum + Math.abs(signedArea(loop)), 0)
+    }
+    const barOnly = new Float32Array(soft.field)
+    for (let y = 0; y < soft.height; y += 1) for (let x = 20; x < soft.width; x += 1) barOnly[y * soft.width + x] = 255
+    expect(area(barOnly, 30)).toBeCloseTo(area(barOnly, 0), 3)
+  })
+
+  it('works for light lines on a dark ground too', () => {
+    const inverted = new Float32Array(soft.field.length)
+    for (let i = 0; i < inverted.length; i += 1) inverted[i] = 255 - soft.field[i]!
+    const kept = traceField(inverted, soft.width, soft.height, { ...DEFAULT_TRACE, trace: 'light', level: 128, smooth: 0, thin: 30, thinReach: 4 })
+    expect(kept.shapes).toBe(2)
   })
 })

@@ -64,6 +64,8 @@ export interface MenuContext {
   /** the page as the four inks of a press, each shown or hidden (View > Separation Preview) */
   separationPreview: () => void
   exportPng: () => void
+  /** the selected objects, or the page, as an SVG file */
+  exportSvg: () => void
   /** a new book (a set of documents kept together as chapters) */
   newBook: () => void
   openBook: () => void
@@ -131,6 +133,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
         { label: 'ייצוא ל-PNG…', disabled: !c.hasDoc, onClick: c.exportPng },
+        { label: 'ייצוא ל-SVG…', disabled: !c.hasDoc, onClick: c.exportSvg },
         sep,
         { label: 'הגדרות קבועות של מסמך', submenu: [], disabled: true },
         { label: 'הגדרות מסמך…', shortcut: 'Ctrl+Alt+P', disabled: !c.hasDoc, onClick: c.documentSetup },

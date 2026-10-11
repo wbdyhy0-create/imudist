@@ -9,6 +9,7 @@ import { NumberField } from './NumberField'
 import { CharControls, Group, Labeled } from './PropertiesPanel'
 import { ShadowControls } from './ShadowControls'
 import { FeatherControls } from './FeatherControls'
+import { LINE_PROFILES, MAX_LINE_WIDTH_MULTIPLE, type LineWidths } from '../lineProfile'
 
 interface Props {
   shape: ShapeFrame
@@ -242,6 +243,8 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
         </Group>
       )}
 
+      {shape.kind === 'line' && <LineProfileControls widths={shape.lineWidths ?? [1, 1, 1]} onChange={(lineWidths) => onChange({ lineWidths })} />}
+
       <Group title="סדר שכבות">
         <ArrangeButtons onArrange={onArrange} />
       </Group>
@@ -273,5 +276,54 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
         </button>
       </div>
     </aside>
+  )
+}
+
+/** how thick the line is along its length: presets as small pictures, and the three widths for any other shape */
+function LineProfileControls({ widths, onChange }: { widths: LineWidths; onChange: (widths: LineWidths | undefined) => void }) {
+  const same = (a: LineWidths, b: LineWidths) => a.every((value, i) => Math.abs(value - b[i]!) < 0.005)
+  const set = (index: number, percent: number) => {
+    const next = [...widths] as LineWidths
+    next[index] = Math.min(MAX_LINE_WIDTH_MULTIPLE, Math.max(0, percent / 100))
+    onChange(same(next, [1, 1, 1]) ? undefined : next)
+  }
+  const fields = [
+    { index: 0, label: 'בהתחלה' },
+    { index: 1, label: 'באמצע' },
+    { index: 2, label: 'בסוף' },
+  ]
+  return (
+    <Group title="עובי לאורך הקו">
+      <div className="line-profile-presets" role="group" aria-label="צורת העובי לאורך הקו">
+        {LINE_PROFILES.map((preset) => {
+          // a picture of the profile: the outline of a short line with those widths
+          const half = (t: number) => {
+            const [a, m, e] = preset.widths
+            return Math.max(0, a * (1 - t) * (1 - 2 * t) + m * 4 * t * (1 - t) + e * t * (2 * t - 1)) * 6
+          }
+          const top: string[] = []
+          const bottom: string[] = []
+          for (let i = 0; i <= 20; i += 1) {
+            const t = i / 20
+            top.push(`${4 + t * 52} ${10 - half(t)}`)
+            bottom.unshift(`${4 + t * 52} ${10 + half(t)}`)
+          }
+          const selected = same(widths, preset.widths)
+          return (
+            <button key={preset.id} type="button" title={preset.label} aria-label={preset.label} aria-pressed={selected} className={selected ? 'on' : ''} onClick={() => onChange(preset.id === 'even' ? undefined : preset.widths)}>
+              <svg viewBox="0 0 60 20" aria-hidden="true"><path d={`M${top.join('L')}L${bottom.join('L')}Z`} fill="currentColor" /></svg>
+            </button>
+          )
+        })}
+      </div>
+      <div className="grid2" style={{ marginTop: 8 }}>
+        {fields.map((field) => (
+          <Labeled key={field.index} label={`${field.label} (%)`}>
+            <NumberField value={Math.round(widths[field.index]! * 100)} unit="px" unitLabel="%" step={5} min={0} max={MAX_LINE_WIDTH_MULTIPLE * 100} onChange={(percent) => set(field.index, percent)} />
+          </Labeled>
+        ))}
+      </div>
+      <p className="muted">האחוזים הם מעובי הקו שנקבע למעלה. קו שעובהו משתנה נצבע בצבע הקו, ומיוצא כצורה מלאה.</p>
+    </Group>
   )
 }

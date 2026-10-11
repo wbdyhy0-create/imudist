@@ -23,7 +23,7 @@ import { openingRange } from './windowText'
 import { firstLineLift } from './firstLine'
 import { atParaStart, normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
-import { footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, footnoteTextStyle, formatFootnoteNumber, layoutFootnotes, type FootnotePlacement, type FootnoteLayoutItem } from './footnoteLayout'
+import { footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, footnoteReferenceLook, footnoteTextStyle, formatFootnoteNumber, layoutFootnotes, type FootnotePlacement, type FootnoteLayoutItem } from './footnoteLayout'
 
 /** What one frame shows of its story. */
 export interface FrameFlow {
@@ -272,7 +272,7 @@ function fitEnd(
   fontSize: number,
   floats: WrapFloat[],
   hint?: number,
-  paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>,
+  paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   /** per-paragraph layout (a paragraph style's leading / indents / alignment): measured the way TextFrameView draws it */
   patches?: ParagraphPatch[],
 ): number {
@@ -391,7 +391,7 @@ function fitEnd(
  * spanning everything rendered reports one client rect per line it covers), the same way this file already trusts
  * the browser for height in `fitEnd`, instead of a hand-rolled line-breaker.
  */
-function countWrappedLines(m: HTMLDivElement, text: string, runs: Run[], paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>, patches?: ParagraphPatch[], floats: WrapFloat[] = []): number {
+function countWrappedLines(m: HTMLDivElement, text: string, runs: Run[], paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>, patches?: ParagraphPatch[], floats: WrapFloat[] = []): number {
   if (!text) return 0
   const inner = m.firstElementChild as HTMLElement
   inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(text, runs, 1, paraOpts, patches))
@@ -416,7 +416,7 @@ function lineStartAtOffset(
   start: number,
   end: number,
   offset: number,
-  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>,
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   patches?: ParagraphPatch[],
   floats: WrapFloat[] = [],
 ): number {
@@ -475,7 +475,7 @@ function adjustForKeepLines(
   end: number,
   box: { w: number; h: number },
   floats: WrapFloat[],
-  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>,
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   patches: ParagraphPatch[] | undefined,
   paraKeepFirstLines: (number | null)[] | undefined,
   paraKeepLastLines: (number | null)[] | undefined,
@@ -539,7 +539,7 @@ function adjustForKeepWithNext(
   end: number,
   box: { w: number; h: number },
   floats: WrapFloat[],
-  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>,
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   patches: ParagraphPatch[] | undefined,
   keepWithNext: (number | null)[] | undefined,
   paraKeepFirstLines: (number | null)[] | undefined,
@@ -585,7 +585,7 @@ function avoidLooseLastLine(
   start: number,
   end: number,
   baseAlign: TextStyle['align'],
-  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset'>,
+  paraOpts: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   patches?: ParagraphPatch[],
 ): number {
   if (end <= start || end >= story.length || story[end - 1] === '\n') return end
@@ -799,6 +799,7 @@ export function flowFrames(
     const style = styleOf(head)
     const noteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles)
     const dividerHeight = footnoteDividerHeight(footnoteConfig, paragraphStyles)
+    const referenceLook = footnoteReferenceLook(footnoteConfig, paragraphStyles)
     const story = head.text
     const floats = chain.map((f, i) => floatsFor(f, images, style, i === 0))
     // everything the layout depends on: default style (incl. paragraph spacing/indents), per-paragraph overrides,
@@ -997,6 +998,7 @@ export function flowFrames(
             footnoteReferenceScale: footnoteConfig.referenceScale,
             footnoteReferenceGap: footnoteConfig.referenceGap,
             footnoteReferenceVerticalOffset: footnoteConfig.referenceVerticalOffset,
+            footnoteReferenceLook: referenceLook,
           }
           const carried = footnoteContinuations.get(f.id) ?? []
           const pending = footnoteItems.filter((item) => item.anchor >= start)
@@ -1005,7 +1007,7 @@ export function flowFrames(
             const items = [...carried, ...pending.slice(0, budget)]
             const layout = items.length ? layoutNotesForFrame(f, items) : null
             const box = { ...fullBox, h: Math.max(1, fullBox.h - reservationOf(layout, f.id)) }
-            const fitKey = JSON.stringify([f.id, start, box.w, box.h, floatsKey(floats[i]), paraOpts.startParaIndex, paraOpts.atParaStart, paraOpts.firstLineIndent, paraOpts.footnoteMarkers, paraOpts.footnoteReferenceScale, paraOpts.footnoteReferenceGap, paraOpts.footnoteReferenceVerticalOffset])
+            const fitKey = JSON.stringify([f.id, start, box.w, box.h, floatsKey(floats[i]), paraOpts.startParaIndex, paraOpts.atParaStart, paraOpts.firstLineIndent, paraOpts.footnoteMarkers, paraOpts.footnoteReferenceScale, paraOpts.footnoteReferenceGap, paraOpts.footnoteReferenceVerticalOffset, paraOpts.footnoteReferenceLook])
             let fitted = fittedEnds.get(fitKey)
             if (fitted === undefined) {
               fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches)

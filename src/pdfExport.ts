@@ -3,7 +3,7 @@ import html2canvas from 'html2canvas'
 import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type DocSettings, type Feather, type ImageFrame, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
-import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
+import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteReferenceLook, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
 import { layoutEndnotes } from './endnotes'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
@@ -19,6 +19,9 @@ import { applyFeatherCanvasMask } from './feather'
 import { addCmykPicture, rgbToInks } from './cmykPage'
 import { countPicture, emptyReport, extractGlyphs, type FrameGeometry, type PictureReason, type VectorGlyph, type VectorReport } from './vectorText'
 import { registerFont } from './fontFiles'
+import { isOrnamentDecoration, ornamentSideMarkup } from './footnoteOrnaments'
+import { lineProfileShape } from './lineProfile'
+import { letterCenterShift } from './headingMetrics'
 import { shapeToVector, writeShapes, type VectorShape } from './vectorShapes'
 import { stackOrder } from './stacking'
 import { pageNumberLabel, substituteMarker } from './numbering'
@@ -295,6 +298,7 @@ async function drawTextDom(
             footnoteReferenceScale: footnoteConfig.referenceScale,
             footnoteReferenceGap: footnoteConfig.referenceGap,
             footnoteReferenceVerticalOffset: footnoteConfig.referenceVerticalOffset,
+            footnoteReferenceLook: footnoteReferenceLook(footnoteConfig, content.paragraphStyles),
             tocPageMarkers: tocMarkers?.pageNumbers,
             tocLeaderMarkers: tocMarkers?.leaders,
             outlineMode: 'shadow',
@@ -335,12 +339,15 @@ async function drawTextDom(
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
             top: `${footnoteConfig.dividerGap}px`,
-            width: `${footnoteConfig.dividerWidth}%`,
+            // the width that is set is the least the heading has: a longer text (a big font) and its ornaments widen it, up to the whole width
+            width: 'max-content',
+            minWidth: `${footnoteConfig.dividerWidth}%`,
+            maxWidth: '100%',
             height: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
             left: '50%',
             right: 'auto',
             transform: 'translateX(-50%)',
-            gap: footnoteConfig.dividerHeadingLines ? `${Math.max(6, headingStyle.fontSize * 0.4)}px` : '0',
+            gap: footnoteConfig.dividerHeadingLines ? `${footnoteConfig.dividerHeadingGap ?? Math.max(6, headingStyle.fontSize * 0.4)}px` : '0',
             color: headingStyle.color ?? '#111111',
             fontFamily: headingStyle.fontFamily,
             fontSize: `${headingStyle.fontSize}px`,
@@ -349,9 +356,30 @@ async function drawTextDom(
             lineHeight: `${footnoteDividerHeight(footnoteConfig, content.paragraphStyles)}px`,
             letterSpacing: headingStyle.tracking ? `${(headingStyle.tracking / 1000) * headingStyle.fontSize}px` : undefined,
           })
+          if (footnoteConfig.dividerHeadingLines && isOrnamentDecoration(footnoteConfig.dividerHeadingDecoration)) heading.style.overflow = 'visible'
+          // the lines and ornaments are level with the middle of the heading's letters, not with the middle of its line
+          const headingShift = letterCenterShift(headingStyle, footnoteDividerHeight(footnoteConfig, content.paragraphStyles), footnoteConfig.dividerText)
           const appendRule = (side: 'right' | 'left') => {
+            if (isOrnamentDecoration(footnoteConfig.dividerHeadingDecoration)) {
+              // the ornamented lines are described as HTML (footnoteOrnaments.ts), the same as on the screen
+              const holder = document.createElement('template')
+              holder.innerHTML = ornamentSideMarkup({
+                decoration: footnoteConfig.dividerHeadingDecoration,
+                side,
+                color: headingStyle.color ?? '#111111',
+                thickness: footnoteConfig.dividerThickness,
+                height: footnoteDividerHeight(footnoteConfig, content.paragraphStyles),
+                fontSize: headingStyle.fontSize,
+                shift: headingShift - (footnoteConfig.dividerOrnamentOffset ?? 0),
+                scale: (footnoteConfig.dividerOrnamentScale ?? 100) / 100,
+                custom: footnoteConfig.dividerOrnament,
+              })
+              if (holder.content.firstElementChild) heading.appendChild(holder.content.firstElementChild)
+              return
+            }
             const segment = document.createElement('span')
             segment.className = `footnote-divider-heading-line side-${side} decor-${footnoteConfig.dividerHeadingDecoration}`
+            if (Math.abs(headingShift) > 0.05) segment.style.top = `${headingShift}px`
             if (footnoteConfig.dividerHeadingDecoration === 'needle') {
               Object.assign(segment.style, { border: '0', height: `${Math.max(1, footnoteConfig.dividerThickness)}px` })
             } else {
@@ -514,6 +542,8 @@ async function drawTable(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
 
 async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number, asset?: Asset) {
   if (shape.kind === 'table') return drawTable(ctx, shape, page, scale)
+  // a line thicker in some places than others is drawn as the shape it covers
+  shape = lineProfileShape(shape) ?? shape
   const boxX = (shape.x - page.x) * scale
   const boxY = (shape.y - page.y) * scale
   const w = shape.w * scale
