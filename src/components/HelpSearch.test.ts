@@ -31,6 +31,7 @@ describe('help topic search', () => {
     expect(categoryFor('path-text-create')).toBe('טיפוגרפיה')
     expect(categoryFor('style-sampler-use')).toBe('טיפוגרפיה')
     expect(categoryFor('shape-tools')).toBe('כלי צורה')
+    expect(categoryFor('tool-overview')).toBe('כלים')
     expect(categoryFor('object-shape-building')).toBe('אובייקט')
     expect(categoryFor('object-grouping')).toBe('אובייקט')
     expect(categoryFor('object-multi-select')).toBe('אובייקט')

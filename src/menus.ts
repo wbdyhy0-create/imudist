@@ -37,7 +37,10 @@ export interface MenuContext {
   fontCount: number
   documentSetup: () => void
   /** load a Word / text file into the text cursor */
+  /** File > הוספת קובץ > כל הקבצים הנתמכים */
   importText: () => void
+  /** File > הוספת קובץ > one kind of file; IDML opens as a new document, so it works with no document open */
+  importKind: (kind: ImportKind) => void
   /** load another Imudist file's paragraph styles and merge them into this document's */
   importParagraphStyles: () => void
   recent: RecentEntry[]
@@ -74,6 +77,9 @@ export interface MenuContext {
   bookPanelOpen: boolean
   toggleBookPanel: () => void
 }
+
+/** the kinds of file the "הוספת קובץ" submenu offers one by one */
+export type ImportKind = 'pdf' | 'word' | 'text' | 'image' | 'eps' | 'xml' | 'idml'
 
 const off = (label: string, shortcut?: string): MenuItem => ({ label, shortcut, disabled: true })
 const sep: MenuItem = { separator: true }
@@ -130,8 +136,21 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'חזור לגרסה שנשמרה', disabled: !c.canRevert, onClick: c.revert },
         { label: 'שמירה אוטומטית', checked: c.autosave, onClick: c.toggleAutosave },
         sep,
-        { label: 'הוספת קובץ…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
-        off('ייבוא XML…'),
+        {
+          label: 'הוספת קובץ',
+          submenu: [
+            { label: 'כל הקבצים הנתמכים…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
+            sep,
+            { label: 'PDF…', disabled: !c.hasDoc, onClick: () => c.importKind('pdf') },
+            { label: 'Word (DOCX)…', disabled: !c.hasDoc, onClick: () => c.importKind('word') },
+            { label: 'טקסט (TXT, MD, CSV)…', disabled: !c.hasDoc, onClick: () => c.importKind('text') },
+            { label: 'תמונה…', disabled: !c.hasDoc, onClick: () => c.importKind('image') },
+            { label: 'EPS / PS (ציור וקטורי)…', disabled: !c.hasDoc, onClick: () => c.importKind('eps') },
+            { label: 'XML…', disabled: !c.hasDoc, onClick: () => c.importKind('xml') },
+            sep,
+            { label: 'IDML (נפתח כמסמך חדש)…', onClick: () => c.importKind('idml') },
+          ],
+        },
         sep,
         { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
         {
@@ -233,6 +252,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             inParent('אות חיצונית: א, ב, ג', (ws) => ws.insertPageNumberMarker('external-letter')),
           ],
         },
+        doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()),
         sep,
         doc('יתומים, אלמנות וכיווץ…', '', (ws) => ws.openSmartLayout()),
         { label: 'ייבוא סגנונות פסקה ותו…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
@@ -328,8 +348,6 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         doc('מיזוג תאים', '', (ws) => ws.tableCommand('merge')),
         doc('ביטול מיזוג תאים', '', (ws) => ws.tableCommand('unmerge')),
-        sep,
-        doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()),
       ],
     },
     {

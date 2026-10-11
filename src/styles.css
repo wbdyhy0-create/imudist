@@ -981,9 +981,11 @@ svg { display: block; }
 .import-pdf-range-error { margin: 6px 0 0; color: var(--danger); }
 .import-options-body { margin: 8px 0 16px; padding: 10px 12px; background: var(--bg-field); border: 1px solid var(--border); }
 .import-options-body p { margin: 0 0 10px; }
+.import-flow { margin: 4px 0 10px; padding: 0; border: 0; }
+.import-flow legend { padding: 0; margin-bottom: 4px; color: var(--text); font-weight: 600; }
 .dlg-check.disabled { opacity: 0.5; }
 .modal h2 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
-.modal p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+.modal p { margin: 0 0 20px; color: var(--text-dim); font-size: 13px; line-height: 1.5; white-space: pre-line; }
 .modal-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .stroke-settings { width: min(360px, calc(100vw - 32px)); }
 .stroke-preview-wrap { height: 72px; display: grid; place-items: center; margin: 14px 0 18px; background: #fff; border: 1px solid var(--border); }

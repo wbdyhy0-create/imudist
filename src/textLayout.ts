@@ -275,17 +275,20 @@ function fitEnd(
   paraOpts?: Pick<RunNodeOpts, 'paraLineHeight' | 'paraGaps' | 'startParaIndex' | 'firstLineIndent' | 'atParaStart' | 'footnoteMarkers' | 'footnoteReferenceScale' | 'footnoteReferenceGap' | 'footnoteReferenceVerticalOffset' | 'footnoteReferenceLook'>,
   /** per-paragraph layout (a paragraph style's leading / indents / alignment): measured the way TextFrameView draws it */
   patches?: ParagraphPatch[],
+  /** the frame is the last of its thread: a line has no next frame to go to, so it is shown when it fits to the frame's edge */
+  lastFrame = false,
 ): number {
   const len = story.length
   if (start >= len) return len
   m.style.width = `${box.w}px`
   const inner = m.firstElementChild as HTMLElement
+  // Leave a small line-box tolerance: the live renderer includes paragraph blocks and font metrics
+  // that can be a fraction taller than the hidden measurer. A borderline line must flow whole into
+  // the next frame instead of being clipped at the bottom edge. In the last frame there is no next frame: a line that fits
+  // is shown (at worst a sliver of it is clipped) instead of being hidden with free room left under it.
+  const safety = lastFrame ? 1 : Math.min(Math.max(1, fontSize * 0.15), Math.max(1, box.h / 6))
   const fits = (end: number) => {
     inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(story.slice(start, end), sliceRuns(runs, start, end), 1, paraOpts, patches))
-    // Leave a small line-box tolerance: the live renderer includes paragraph blocks and font metrics
-    // that can be a fraction taller than the hidden measurer. A borderline line must flow whole into
-    // the next frame instead of being clipped at the bottom edge.
-    const safety = Math.min(Math.max(1, fontSize * 0.15), Math.max(1, box.h / 6))
     return inner.getBoundingClientRect().height <= box.h - safety
   }
 
@@ -307,7 +310,7 @@ function fitEnd(
    * without a box where one is needed) just gives up and leaves the search to do it the long way.
    */
   const candidate = (): number | null => {
-    const limit = box.h - Math.min(Math.max(1, fontSize * 0.15), Math.max(1, box.h / 6))
+    const limit = box.h - safety
     let upTo = Math.min(len, start + Math.max(16, Math.round((guess - start) * 1.2)))
     for (let attempt = 0; attempt < 5; attempt++) {
       inner.replaceChildren(...buildWrapFloats(floats, 1), buildParagraphNodes(story.slice(start, upTo), sliceRuns(runs, start, upTo), 1, paraOpts, patches))
@@ -1007,10 +1010,10 @@ export function flowFrames(
             const items = [...carried, ...pending.slice(0, budget)]
             const layout = items.length ? layoutNotesForFrame(f, items) : null
             const box = { ...fullBox, h: Math.max(1, fullBox.h - reservationOf(layout, f.id)) }
-            const fitKey = JSON.stringify([f.id, start, box.w, box.h, floatsKey(floats[i]), paraOpts.startParaIndex, paraOpts.atParaStart, paraOpts.firstLineIndent, paraOpts.footnoteMarkers, paraOpts.footnoteReferenceScale, paraOpts.footnoteReferenceGap, paraOpts.footnoteReferenceVerticalOffset, paraOpts.footnoteReferenceLook])
+            const fitKey = JSON.stringify([f.id, isLast, start, box.w, box.h, floatsKey(floats[i]), paraOpts.startParaIndex, paraOpts.atParaStart, paraOpts.firstLineIndent, paraOpts.footnoteMarkers, paraOpts.footnoteReferenceScale, paraOpts.footnoteReferenceGap, paraOpts.footnoteReferenceVerticalOffset, paraOpts.footnoteReferenceLook])
             let fitted = fittedEnds.get(fitKey)
             if (fitted === undefined) {
-              fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches)
+              fitted = fitEnd(m, story, runs, start, box, style.fontSize, floats[i], lengths.get(f.id), paraOpts, head.paragraphStylePatches, isLast)
               fittedEnds.set(fitKey, fitted)
             }
             const deWidowed = isLast ? fitted : avoidLooseLastLine(m, story, runs, start, fitted, style.align, paraOpts, head.paragraphStylePatches)

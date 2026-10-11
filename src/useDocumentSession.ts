@@ -172,8 +172,15 @@ export function useDocumentSession() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600)
   }
 
-  const fail = (title: string, e: unknown) =>
-    setModal({ title, message: messageOf(e), buttons: [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }] })
+  /** `action`: one extra button next to the close button (it leaves the message open, so its steps can be read while it works) */
+  const fail = (title: string, e: unknown, action?: { label: string; run: () => void }) =>
+    setModal({
+      title,
+      message: messageOf(e),
+      buttons: action
+        ? [{ label: action.label, kind: 'primary', run: action.run }, { label: 'סגירה', cancel: true, run: () => setModal(null) }]
+        : [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }],
+    })
 
   // ── the active document's history ──────────────────────────────────────────────
   /**

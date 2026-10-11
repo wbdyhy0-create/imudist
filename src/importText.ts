@@ -59,7 +59,7 @@ const HEBREW_OR_ARABIC = /[֐-ࣿ]/
 const LATIN = /[A-Za-z]/
 
 /** Right-aligned when most letters are Hebrew / Arabic, left-aligned otherwise. */
-function alignFor(text: string): TextStyle['align'] {
+export function alignFor(text: string): TextStyle['align'] {
   let rtl = 0
   let ltr = 0
   for (const ch of text) {
@@ -556,7 +556,11 @@ export async function readPlacedText(file: File, options: { includeFootnotes?: b
   if (file.size > MAX_FILE) throw new ImportError('הקובץ גדול מדי (מעל 40MB).')
   const lower = file.name.toLowerCase()
   if (lower.endsWith('.docx')) return placedFromDocx(file.name, await file.arrayBuffer(), options)
+  if (lower.endsWith('.xml') || file.type === 'application/xml' || file.type === 'text/xml') {
+    const { placedFromXml } = await import('./importXml')
+    return placedFromXml(file.name, decodeText(await file.arrayBuffer()))
+  }
   if (lower.endsWith('.doc')) throw new ImportError('קבצי doc ישנים לא נתמכים. פתח את הקובץ ב-Word ושמור אותו כ-docx.')
   if (/\.(txt|text|md|csv)$/.test(lower) || file.type.startsWith('text/')) return placedFromPlainText(file.name, decodeText(await file.arrayBuffer()))
-  throw new ImportError('סוג הקובץ לא נתמך. אפשר לייבא קובצי docx וקובצי טקסט (txt).')
+  throw new ImportError('סוג הקובץ לא נתמך. אפשר לייבא קובצי docx, קובצי טקסט (txt) וקובצי XML.')
 }

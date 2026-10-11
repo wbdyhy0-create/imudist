@@ -479,6 +479,26 @@ describe('the text of an IDML file', () => {
     expect(leftFirst.x).toBeCloseTo(page.x + 50, 6)
   })
 
+  it('makes a frame of columns of a story whose paragraphs are split into columns', async () => {
+    const entries = fixture().map((entry) =>
+      entry.name === 'Stories/Story_uStory1.xml'
+        ? {
+            ...entry,
+            data: String(entry.data)
+              .replaceAll('<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Titles%3aHeading" Justification="RightAlign">', '<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Titles%3aHeading" Justification="RightAlign" SpanColumnType="SplitColumns" SplitColumnInsideGutter="20"><Properties><SpanSplitColumnCount type="short">2</SpanSplitColumnCount></Properties>')
+              .replaceAll('<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Body">', '<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Body" SpanColumnType="SplitColumns" SplitColumnInsideGutter="20"><Properties><SpanSplitColumnCount type="short">2</SpanSplitColumnCount></Properties>'),
+          }
+        : entry,
+    )
+    const { content } = await open(entries)
+    const first = content.frames.find((frame) => frame.id === 'idml-object-uFrame1')!
+    const second = content.frames.find((frame) => frame.id === 'idml-object-uFrame1-column-2')!
+    // 300 wide, a gutter of 20: two columns of 140
+    expect(first.w).toBe(140)
+    expect(second.w).toBe(140)
+    expect(first.next).toBe(second.id)
+  })
+
   it('takes the insets off the frame, so that it is the area the text has', async () => {
     const entries = fixture().map((entry) =>
       entry.name === 'Spreads/Spread_u1.xml'

@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OPS } from 'pdfjs-dist'
-import { pathDataToShapes, pdfOperatorListToShapes, type SvgPaint } from './importEps'
+import { GhostscriptMissingError, pathDataToShapes, pdfOperatorListToShapes, readEpsFile, type SvgPaint } from './importEps'
+
+// the desktop side answers with this code when Ghostscript is not installed
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async () => {
+    throw 'GHOSTSCRIPT_MISSING'
+  }),
+}))
 
 const paint: SvgPaint = {
   fill: '#336699',
@@ -51,5 +58,16 @@ describe('EPS SVG path conversion', () => {
     expect(shapes).toHaveLength(1)
     expect(shapes[0]).toMatchObject({ id: 'pdf-shape', x: 10, y: 80, w: 10, h: 10, fill: '#336699', stroke: null, closed: true })
     expect(shapes[0].geom[0][0]).toEqual([[0, 1], [1, 1], [1, 0]])
+  })
+})
+describe('Ghostscript missing', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('explains the steps and does not show the internal code', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} })
+    const error = await readEpsFile(new File(['%!PS-Adobe-3.0'], 'drawing.ps')).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(GhostscriptMissingError)
+    expect((error as Error).message).toContain('הורדת Ghostscript')
+    expect((error as Error).message).not.toContain('GHOSTSCRIPT_MISSING')
   })
 })

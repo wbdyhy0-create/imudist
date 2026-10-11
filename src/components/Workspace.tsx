@@ -376,7 +376,10 @@ export interface WorkspaceHandle {
   tableCommand: (op: TableOp) => void
   findReplace: () => void
   canReplaceSelectedText: () => boolean
-  replaceSelectedText: (placed: PlacedText) => boolean
+  /** pours the text into the selected frame; `mode` is how it goes on from there (one frame by default) */
+  replaceSelectedText: (placed: PlacedText, mode?: FlowMode) => boolean
+  /** the way the loaded text cursor flows the text: set by the import dialog */
+  setFlowMode: (mode: FlowMode) => void
   /** types the auto-page-number marker at the text caret (טיפוגרפיה > הוספת מספר עמוד אוטומטי) */
   insertPageNumberMarker: (kind?: 'document' | 'internal-number' | 'external-number' | 'internal-letter' | 'external-letter') => void
   /** opens the dialog for the "יתומים, אלמנות וכיווץ" tools (טיפוגרפיה) */
@@ -2855,14 +2858,16 @@ export function Workspace({
     onPlacingChange(result.remaining)
   }
 
-  const replaceSelectedText = (placed: PlacedText) => {
+  const replaceSelectedText = (placed: PlacedText, mode: FlowMode = 'single') => {
     const selected = selectedId ? frames.find((frame) => frame.id === selectedId) : undefined
     if (!selected) return false
     const prepared = preparePlacedText(placed)
-    const result = pourText(doc, frames, images, prepared.placed, { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, 'single', shapes)
+    const result = pourText(doc, frames, images, prepared.placed, { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, mode, shapes)
     pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
+    // semi-automatic: what did not fit stays loaded in the text cursor for the next click
+    if (mode === 'semi') onPlacingChange(result.remaining)
     return true
   }
 
@@ -4920,6 +4925,7 @@ export function Workspace({
     findReplace: () => openFind(),
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
+    setFlowMode,
     insertPageNumberMarker,
     openSmartLayout: () => setSmartLayoutDialog(true),
     insertFootnote,

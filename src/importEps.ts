@@ -288,12 +288,53 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+/** The code the desktop side answers with when it finds no Ghostscript on the computer. */
+const GHOSTSCRIPT_MISSING = 'GHOSTSCRIPT_MISSING'
+
+/** The official download page of Ghostscript; it is opened only when the user presses the button. */
+export const GHOSTSCRIPT_DOWNLOAD_URL = 'https://ghostscript.com/releases/gsdnld.html'
+
+/** Ghostscript is not installed: the message tells what to do, and the dialog offers a button for the download page. */
+export class GhostscriptMissingError extends ImportError {
+  constructor() {
+    super(
+      [
+        'לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.',
+        '',
+        'מה עושים:',
+        '1. לוחצים על „הורדת Ghostscript”. האתר הרשמי של התוכנה ייפתח בדפדפן.',
+        '2. בדף שנפתח מורידים את הגרסה „Windows (64 bit)”.',
+        '3. מפעילים את הקובץ שהורד ומאשרים את ההתקנה, בלי לשנות את תיקיית ההתקנה המוצעת.',
+        '4. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.',
+        '',
+        'אם בחרתם תיקיית התקנה אחרת, הוסיפו את תיקיית bin שלה למשתנה PATH והפעילו את Imudist מחדש.',
+      ].join('\n'),
+    )
+  }
+}
+
+/** Opens the Ghostscript download page in the user's browser. */
+export async function openGhostscriptDownload(): Promise<void> {
+  if ('__TAURI_INTERNALS__' in window) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(GHOSTSCRIPT_DOWNLOAD_URL)
+  } else {
+    window.open(GHOSTSCRIPT_DOWNLOAD_URL, '_blank', 'noopener,noreferrer')
+  }
+}
+
 export async function readEpsFile(file: File): Promise<VectorShapeData[]> {
   if (file.size > MAX_EPS_BYTES) throw new ImportError('קובץ ה-EPS גדול מדי (מעל 50MB).')
   if (!('__TAURI_INTERNALS__' in window)) throw new ImportError('ייבוא EPS זמין ביישום שולחני עם Ghostscript מותקן.')
   const bytes = new Uint8Array(await file.arrayBuffer())
   const { invoke } = await import('@tauri-apps/api/core')
-  const pdfBase64 = await invoke<string>('convert_eps_to_pdf', { sourceBase64: base64(bytes) })
+  let pdfBase64: string
+  try {
+    pdfBase64 = await invoke<string>('convert_eps_to_pdf', { sourceBase64: base64(bytes) })
+  } catch (error) {
+    if (error === GHOSTSCRIPT_MISSING) throw new GhostscriptMissingError()
+    throw error
+  }
   const binary = atob(pdfBase64)
   const pdfBytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
   const loading = getDocument({ data: pdfBytes })

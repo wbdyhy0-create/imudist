@@ -11,15 +11,15 @@ import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
 import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
-import { emptyPrimaryFrameIds } from './placeText'
+import { emptyPrimaryFrameIds, type FlowMode } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
-import { buildMenus, findShortcut } from './menus'
+import { buildMenus, findShortcut, type ImportKind } from './menus'
 import { baseName, isTauri, pickFiles } from './fileio'
 import { mergeCharacterStyles, remapNestedStyles } from './characterStyleTree'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { IMAGE_FILE_EXTENSIONS, fileNameOf, isImagePath, readLinkedImage } from './imageLinks'
-import { readEpsFile } from './importEps'
+import { GhostscriptMissingError, openGhostscriptDownload, readEpsFile } from './importEps'
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
@@ -57,7 +57,7 @@ const newImportedImageId = () => globalThis.crypto?.randomUUID?.() ?? `pdf-image
 /** Letter key by name or physical position (so it also works with a Hebrew keyboard layout). */
 const isDocumentFile = (f: File) => f.name.toLowerCase().endsWith(FILE_EXT)
 const isPdfFile = (f: File) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
-const isEpsFile = (f: File) => f.name.toLowerCase().endsWith('.eps') || f.type === 'application/postscript'
+const isEpsFile = (f: File) => /\.(eps|ps)$/i.test(f.name) || f.type === 'application/postscript'
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
@@ -396,6 +396,10 @@ export default function App() {
         const shapes = await readEpsFile(epsFiles[0])
         if (!ws.current?.placeVectorShapes(shapes)) throw new ImportError('לא ניתן להוסיף את הצורות לעמוד הנוכחי.')
       } catch (e) {
+        if (e instanceof GhostscriptMissingError) {
+          session.showError('נדרש Ghostscript לייבוא EPS ו-PS', e, { label: 'הורדת Ghostscript', run: () => void openGhostscriptDownload().catch(() => session.notify('לא ניתן לפתוח את הדפדפן. כתובת ההורדה: ghostscript.com/releases/gsdnld.html')) })
+          return
+        }
         session.showError('לא ניתן לייבא את קובץ ה-EPS', e instanceof ImportError ? e : new ImportError(typeof e === 'string' ? e : e instanceof Error ? e.message : 'קובץ ה-EPS לא נקרא כראוי.'))
       }
       return
@@ -414,7 +418,7 @@ export default function App() {
         }
         queuePlacedImages(read, problems)
         // the desktop app lets the page see drags (masters, pages, swatches), so a dropped file has no path to link to
-        if (isTauri && read.length > 0 && problems.length === 0) session.notify('התמונות הוטמעו במסמך. כדי לקשר אותן לקובץ המקורי השתמשו ב„קובץ” > „הוספת קובץ…”.')
+        if (isTauri && read.length > 0 && problems.length === 0) session.notify('התמונות הוטמעו במסמך. כדי לקשר אותן לקובץ המקורי השתמשו ב„קובץ” > „הוספת קובץ” > „תמונה…”.')
       } else if (files.length > 0) {
         if (files[0].name.toLowerCase().endsWith('.docx')) {
           setImportOptionsFile(files[0])
@@ -494,13 +498,14 @@ export default function App() {
       await source.destroy()
     }
   }
-  const confirmDocxImport = async (replaceSelected: boolean, includeFootnotes: boolean) => {
+  const confirmDocxImport = async (replaceSelected: boolean, includeFootnotes: boolean, flow?: FlowMode) => {
     const file = importOptionsFile
     setImportOptionsFile(null)
     if (!file) return
     try {
       const placed = await readPlacedText(file, { includeFootnotes })
-      if (replaceSelected && ws.current?.replaceSelectedText(placed)) return
+      if (replaceSelected && ws.current?.replaceSelectedText(placed, flow)) return
+      if (flow) ws.current?.setFlowMode(flow)
       setPlacingImages([])
       setPlacing(placed)
     } catch (e) {
@@ -533,15 +538,29 @@ export default function App() {
       session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
     }
   }
-  /** the start screen's button for a layout file (IDML): it opens as a new document, so no document has to be open first */
-  const importIdml = async () => {
+  /**
+   * File > הוספת קובץ > one kind of file: the picker lists only that kind. Everything goes the usual way afterwards
+   * (placePaths / placeFiles). An IDML file opens as a new document, so no document has to be open first.
+   */
+  const importKind = async (kind: ImportKind) => {
+    const images = IMAGE_FILE_EXTENSIONS.map((extension) => `.${extension}`).join(',')
+    const picker: Record<ImportKind, { name: string; extensions: string[]; accept: string; multiple?: boolean }> = {
+      pdf: { name: 'PDF', extensions: ['pdf'], accept: '.pdf,application/pdf' },
+      word: { name: 'Word', extensions: ['docx'], accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      text: { name: 'טקסט', extensions: ['txt', 'text', 'md', 'csv'], accept: '.txt,.text,.md,.csv,text/plain' },
+      image: { name: 'תמונות', extensions: [...IMAGE_FILE_EXTENSIONS], accept: `${images},image/*`, multiple: true },
+      eps: { name: 'EPS / PS', extensions: ['eps', 'ps'], accept: '.eps,.ps,application/postscript' },
+      xml: { name: 'XML', extensions: ['xml'], accept: '.xml,application/xml,text/xml' },
+      idml: { name: 'IDML', extensions: ['idml'], accept: '.idml' },
+    }
+    const { name, extensions, accept, multiple = false } = picker[kind]
     if (isTauri) {
       const { open } = await import('@tauri-apps/plugin-dialog')
-      const picked = await open({ multiple: false, directory: false, filters: [{ name: 'IDML', extensions: ['idml'] }] })
-      if (typeof picked === 'string') await placePaths([picked])
+      const picked = await open({ multiple, directory: false, filters: [{ name, extensions }] })
+      await placePaths(picked === null ? [] : Array.isArray(picked) ? picked : [picked])
       return
     }
-    const files = await pickFiles('.idml', false)
+    const files = await pickFiles(accept, multiple)
     if (files.length > 0) await placeFiles(files)
   }
   const importFiles = async () => {
@@ -550,13 +569,13 @@ export default function App() {
       const picked = await open({
         multiple: true,
         directory: false,
-        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
+        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'ps', 'xml', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
       })
       await placePaths(picked ?? [])
       return
     }
     const files = await pickFiles(
-      `${FILE_EXT},.idml,.docx,.pdf,.eps,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+      `${FILE_EXT},.idml,.docx,.pdf,.eps,.ps,.xml,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -606,6 +625,7 @@ export default function App() {
         fontCount: fontCatalog.families.length,
         documentSetup: () => setDialog('setup'),
         importText: () => void importFiles(),
+        importKind: (kind) => void importKind(kind),
         importParagraphStyles: () => void importParagraphStyles(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
@@ -949,7 +969,6 @@ export default function App() {
               recent={session.recent}
               onNew={openNewDocument}
               onOpen={() => void session.openFile()}
-              onImportIdml={() => void importIdml()}
               onOpenRecent={(entry) => void session.openRecent(entry)}
               onRemoveRecent={(entry) => void session.forgetRecent(entry)}
             />
@@ -995,7 +1014,7 @@ export default function App() {
       <BookExportDialog controller={book} />
       {session.modal && <Modal spec={session.modal} />}
       {saveWorkspaceDialogOpen && <SaveWorkspaceDialog onSave={saveWorkspace} onClose={() => setSaveWorkspaceDialogOpen(false)} />}
-      {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes) => void confirmDocxImport(replaceSelected, includeFootnotes)} onClose={() => setImportOptionsFile(null)} />}
+      {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes, flow) => void confirmDocxImport(replaceSelected, includeFootnotes, flow)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
     </div>
   )

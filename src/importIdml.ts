@@ -550,6 +550,32 @@ function paragraphInfoOf(ctx: Context, range: El): ParagraphInfo {
   }
 }
 
+/**
+ * A story whose paragraphs are "split into columns" (a paragraph spread over side-by-side columns inside the frame, as verses are set
+ * in two rows): how many columns, and the gutter between them. Only when most of the text is set that way - a few headings that span
+ * the columns cannot be told apart from it here - and then the frame is made columns, as a frame with columns is.
+ */
+function splitColumnsOf(story: El | undefined): { count: number; gutter?: number } {
+  if (!story) return { count: 1 }
+  let all = 0
+  let split = 0
+  let count = 1
+  let gutter: number | undefined
+  for (const range of descendants(story, 'ParagraphStyleRange')) {
+    let chars = 0
+    for (const content of descendants(range, 'Content')) chars += content.text.length
+    all += chars
+    if (range.attrs.SpanColumnType !== 'SplitColumns') continue
+    const columns = Math.round(number(propertiesOf(range).get('SpanSplitColumnCount'), 1))
+    if (columns < 2) continue
+    split += chars
+    count = Math.max(count, columns)
+    const inside = range.attrs.SplitColumnInsideGutter
+    if (gutter === undefined && inside !== undefined && Number.isFinite(Number.parseFloat(inside))) gutter = Math.max(0, number(inside))
+  }
+  return all > 0 && split / all >= 0.6 ? { count: Math.min(count, 4), gutter } : { count: 1 }
+}
+
 const SKIPPED_IN_STORY = new Set(['Properties', 'StoryPreference', 'InCopyExportOption', 'Rectangle', 'Oval', 'Polygon', 'GraphicLine', 'TextFrame', 'Group', 'Image', 'EPS', 'PDF', 'Note', 'Change'])
 
 /** The text of a story: what its Content elements say, a paragraph break for each Br, the styles of the ranges they are in. */
@@ -916,10 +942,12 @@ function buildObjects(input: BuildInput, spreads: SourceSpread[]): { byPage: Map
         const shiftY = (insetTop - insetBottom) / 2
         const centerX = box.x + box.w / 2 + shiftX * cos - shiftY * sin
         const centerY = box.y + box.h / 2 + shiftX * sin + shiftY * cos
-        const count = clamp(Math.round(number(preference?.attrs.TextColumnCount, 1)), 1, 8)
-        const gutter = Math.max(0, number(preference?.attrs.TextColumnGutter, 12))
+        const storyElement = ctx.stories.get(lastRef(el.attrs.ParentStory))
+        const split = splitColumnsOf(storyElement)
+        const count = clamp(Math.round(number(preference?.attrs.TextColumnCount, 1)) * split.count, 1, 8)
+        const gutter = split.count > 1 && split.gutter !== undefined ? split.gutter : Math.max(0, number(preference?.attrs.TextColumnGutter, 12))
         const columnWidth = count > 1 ? Math.max(1, (area.w - gutter * (count - 1)) / count) : area.w
-        const direction = kid(ctx.stories.get(lastRef(el.attrs.ParentStory)), 'StoryPreference')?.attrs.StoryDirection
+        const direction = kid(storyElement, 'StoryPreference')?.attrs.StoryDirection
         const fromRight = direction !== 'LeftToRightDirection'
         const columns: TextFrame[] = []
         for (let index = 0; index < count; index += 1) {
@@ -1054,6 +1082,10 @@ function applyStory(ctx: Context, frame: TextFrame, story: StoryText): number {
   type Resolved = ParagraphPatch & { autoLeading?: number }
   const resolved = story.paragraphs.map((paragraph): Resolved => ({ ...resolveStyle(ctx.styles.paragraph, paragraph.key, ctx.paragraphCache), ...paragraph.overrides }))
   const frameStyle: Partial<TextStyle> = paragraphPart(resolved[0]!)
+  // The side indents of the story narrow the text of every paragraph, and the indents of a paragraph (its patch) are put on top of
+  // them: so the indents are the paragraphs' own, and the story has none (else a paragraph with an indent of 28 is narrowed by 56).
+  delete frameStyle.indentLeft
+  delete frameStyle.indentRight
   Object.assign(frame, frameStyle)
   if (firstRun) {
     frame.fontFamily = firstRun.fontFamily

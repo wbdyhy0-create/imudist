@@ -103,7 +103,9 @@ fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
   if source.len() > MAX_EPS_BYTES {
     return Err("קובץ ה-EPS גדול מדי (מעל 50MB).".into());
   }
-  if !source.starts_with(b"%!") {
+  // PostScript printed to a file often starts with a Ctrl-D or a printer-job header before "%!", and old EPS files start with a binary header
+  let head = &source[..source.len().min(1024)];
+  if !source.starts_with(&[0xC5, 0xD0, 0xD3, 0xC6]) && !head.windows(2).any(|pair| pair == b"%!") {
     return Err("הקובץ אינו EPS/PostScript תקין.".into());
   }
 
@@ -146,7 +148,7 @@ fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
     let mut last_error = String::new();
     for executable in executables {
       let mut child = match Command::new(&executable)
-        .args(["-dSAFER", "-dBATCH", "-dNOPAUSE", "-dEPSCrop", "-dQUIET", "-sDEVICE=pdfwrite", output_arg.as_str(), input_arg.as_str()])
+        .args(["-dSAFER", "-dBATCH", "-dNOPAUSE", "-dEPSCrop", "-dFirstPage=1", "-dLastPage=1", "-dQUIET", "-sDEVICE=pdfwrite", output_arg.as_str(), input_arg.as_str()])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -180,7 +182,8 @@ fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
       break;
     }
     if !found_ghostscript {
-      return Err("לא נמצא Ghostscript. התקן Ghostscript או הוסף את תיקיית bin שלו למשתנה PATH.".into());
+      // a fixed code: the app shows its own explanation and a download button for it (see importEps.ts)
+      return Err("GHOSTSCRIPT_MISSING".into());
     }
     if !output_path.is_file() {
       return Err(if last_error.is_empty() { "Ghostscript לא יצר קובץ PDF וקטורי.".into() } else { format!("Ghostscript לא הצליח להמיר את הקובץ: {last_error}") });

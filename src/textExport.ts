@@ -341,7 +341,8 @@ const FILTER_NAMES: Record<TextExportFormat, string> = { txt: 'טקסט', html: 
 
 /** Gives the finished file to the user: the save dialog of the desktop app, or a download in the browser. */
 export async function deliverText(result: TextExportResult, format: TextExportFormat, fileBaseName: string, encoding: TextEncoding = 'utf-8'): Promise<boolean> {
-  const bytes = format === 'txt' ? encodeText(result.content, encoding) : encodeText(result.content, 'utf-8', format === 'html')
+  // a text file on Windows ends its lines with CR+LF; older editors show a bare LF file as one long line
+  const bytes = format === 'txt' ? encodeText(result.content.replace(/\n/g, '\r\n'), encoding) : encodeText(result.content, 'utf-8', format === 'html')
   const { isTauri } = await import('./fileio')
   if (isTauri) {
     const { save } = await import('@tauri-apps/plugin-dialog')
