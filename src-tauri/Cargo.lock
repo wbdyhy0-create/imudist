@@ -1670,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "imudist"
-version = "0.0.23"
+version = "0.0.24"
 dependencies = [
  "base64 0.22.1",
  "serde",
