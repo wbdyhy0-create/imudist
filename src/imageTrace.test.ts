@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boostThinFeatures, brightnessField, contoursOf, DEFAULT_TRACE, otsuLevel, shapeFromTrace, signedArea, suggestedTrace, tracedColor, traceField, visibleRegion, workingScale } from './imageTrace'
+import { assignHoles, boostThinFeatures, brightnessField, contoursOf, DEFAULT_TRACE, otsuLevel, shapeFromTrace, signedArea, suggestedTrace, tracedColor, traceField, visibleRegion, workingScale } from './imageTrace'
 import { shapePath } from './shapes'
 import type { ImageFrame, ShapeFrame } from './document'
 
@@ -198,5 +198,41 @@ describe('keeping thin and faint lines', () => {
     for (let i = 0; i < inverted.length; i += 1) inverted[i] = 255 - soft.field[i]!
     const kept = traceField(inverted, soft.width, soft.height, { ...DEFAULT_TRACE, trace: 'light', level: 128, smooth: 0, thin: 30, thinReach: 4 })
     expect(kept.shapes).toBe(2)
+  })
+})
+
+describe('the holes of a trace', () => {
+  type Square = { loop: [number, number][]; area: number; x: number; y: number; size: number }
+  const square = (x: number, y: number, size: number): Square => ({ loop: [[x, y], [x + size, y], [x + size, y + size], [x, y + size]], area: size * size, x, y, size })
+  // a small fixed sequence of numbers, so the test is the same every time
+  let seed = 12345
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    return seed / 4294967296
+  }
+
+  it('go to the smallest larger shape that has their first point, as a plain search finds it', () => {
+    const outers = Array.from({ length: 120 }, () => square(random() * 900, random() * 900, 20 + random() * 180))
+    const holes = Array.from({ length: 200 }, () => square(random() * 1000, random() * 1000, 2 + random() * 30))
+    const found = assignHoles(outers, holes)
+
+    const ordered = outers.slice().sort((a, b) => a.area - b.area)
+    const plain = new Map<Square, Square[]>()
+    for (const hole of holes) {
+      const [px, py] = hole.loop[0]!
+      const parent = ordered.find((outer) => outer.area > hole.area && px >= outer.x && px <= outer.x + outer.size && py >= outer.y && py <= outer.y + outer.size)
+      if (parent) plain.set(parent, [...(plain.get(parent) ?? []), hole])
+    }
+    expect(found.size).toBe(plain.size)
+    expect([...plain].length).toBeGreaterThan(10)
+    for (const [parent, list] of plain) expect(found.get(parent)).toEqual(list)
+  })
+
+  it('that no shape has are left out, and a shape that is smaller than the hole does not take it', () => {
+    const outer = square(0, 0, 10)
+    const insideButBigger = square(1, 1, 20)
+    const away = square(500, 500, 3)
+    const found = assignHoles([outer], [insideButBigger, away])
+    expect(found.size).toBe(0)
   })
 })

@@ -408,6 +408,64 @@ function contains(loop: Pt[], x: number, y: number): boolean {
   return inside
 }
 
+interface Outline {
+  loop: Pt[]
+  area: number
+}
+
+/**
+ * Each hole goes to the smallest shape that has it inside (a shape larger than the hole, whose outline holds the hole's first point).
+ * The shapes are looked at from the smallest up, and the box of a shape is looked at before its outline: a picture of thousands of
+ * shapes and holes would otherwise test every hole against the outline of every shape, which took most of the time of a trace.
+ * Holes that no shape has are left out.
+ */
+export function assignHoles(outers: Outline[], holes: Outline[]): Map<Outline, Outline[]> {
+  const ordered = outers.slice().sort((a, b) => Math.abs(a.area) - Math.abs(b.area))
+  const areas = ordered.map((outer) => Math.abs(outer.area))
+  const boxes = new Float64Array(ordered.length * 4)
+  ordered.forEach((outer, index) => {
+    let x0 = Infinity
+    let y0 = Infinity
+    let x1 = -Infinity
+    let y1 = -Infinity
+    for (const [x, y] of outer.loop) {
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (y < y0) y0 = y
+      if (y > y1) y1 = y
+    }
+    boxes.set([x0, y0, x1, y1], index * 4)
+  })
+  // the first shape that is larger than a hole: the areas are in order, so the shapes from there on are all larger
+  const firstLarger = (area: number) => {
+    let low = 0
+    let high = areas.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (areas[middle]! > area) high = middle
+      else low = middle + 1
+    }
+    return low
+  }
+  const holesOf = new Map<Outline, Outline[]>()
+  for (const hole of holes) {
+    const sample = hole.loop[0]
+    if (!sample) continue
+    const [x, y] = sample
+    for (let index = firstLarger(Math.abs(hole.area)); index < ordered.length; index += 1) {
+      const at = index * 4
+      if (x < boxes[at]! || x > boxes[at + 2]! || y < boxes[at + 1]! || y > boxes[at + 3]!) continue
+      const parent = ordered[index]!
+      if (!contains(parent.loop, x, y)) continue
+      const list = holesOf.get(parent)
+      if (list) list.push(hole)
+      else holesOf.set(parent, [hole])
+      break
+    }
+  }
+  return holesOf
+}
+
 export interface TraceResult {
   /** the outline, 0…1 of `box` */
   geom: PathGeom
@@ -433,15 +491,7 @@ export function traceField(field: Float32Array, width: number, height: number, o
   const outers = loops.filter(({ area }) => Math.sign(area) === outerSign)
   const holes = loops.filter(({ area }) => Math.sign(area) !== outerSign)
 
-  // each hole goes to the smallest shape that has it inside
-  const ordered = outers.slice().sort((a, b) => Math.abs(a.area) - Math.abs(b.area))
-  const holesOf = new Map<{ loop: Pt[]; area: number }, { loop: Pt[]; area: number }[]>()
-  for (const hole of holes) {
-    const sample = hole.loop[0]!
-    const parent = ordered.find((outer) => Math.abs(outer.area) > Math.abs(hole.area) && contains(outer.loop, sample[0], sample[1]))
-    if (!parent) continue
-    holesOf.set(parent, [...(holesOf.get(parent) ?? []), hole])
-  }
+  const holesOf = assignHoles(outers, holes)
 
   const box = { x: 0, y: 0, w: width, h: height }
   const toVertices = (loop: Pt[]): PathVertex[] => {
