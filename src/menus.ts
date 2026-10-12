@@ -81,7 +81,7 @@ export interface MenuContext {
 }
 
 /** the kinds of file the "הוספת קובץ" submenu offers one by one */
-export type ImportKind = 'pdf' | 'word' | 'text' | 'image' | 'eps' | 'xml' | 'idml'
+export type ImportKind = 'pdf' | 'word' | 'text' | 'image' | 'eps' | 'xml' | 'idml' | 'psd'
 
 const off = (label: string, shortcut?: string): MenuItem => ({ label, shortcut, disabled: true })
 const sep: MenuItem = { separator: true }
@@ -147,6 +147,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             { label: 'Word (DOCX)…', disabled: !c.hasDoc, onClick: () => c.importKind('word') },
             { label: 'טקסט (TXT, MD, CSV)…', disabled: !c.hasDoc, onClick: () => c.importKind('text') },
             { label: 'תמונה…', disabled: !c.hasDoc, onClick: () => c.importKind('image') },
+            { label: 'Photoshop (PSD)…', disabled: !c.hasDoc, onClick: () => c.importKind('psd') },
             { label: 'EPS / PS (ציור וקטורי)…', disabled: !c.hasDoc, onClick: () => c.importKind('eps') },
             { label: 'XML…', disabled: !c.hasDoc, onClick: () => c.importKind('xml') },
             sep,
@@ -418,6 +419,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { separator: true },
         dock('paragraph-styles', 'סגנונות פסקה'),
         dock('character-styles', 'סגנונות תו'),
+        dock('object-styles', 'סגנונות אובייקט'),
         dock('style-manager', 'ניהול סגנונות'),
         dock('color', 'צבע'),
         dock('gradient', 'מעבר צבע'),

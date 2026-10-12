@@ -9,14 +9,16 @@ import { SeparationPreviewDialog } from './components/SeparationPreviewDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type ObjectStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds, type FlowMode } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
+import { isClipToken } from './objectClipboard'
 import { buildMenus, findShortcut, type ImportKind } from './menus'
 import { baseName, isTauri, pickFiles } from './fileio'
 import { mergeCharacterStyles, remapNestedStyles } from './characterStyleTree'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
+import { isPsdFile } from './importPsd'
 import { isImageFile, readImageFile, type PlacedImage } from './importImage'
 import { IMAGE_FILE_EXTENSIONS, fileNameOf, isImagePath, readLinkedImage } from './imageLinks'
 import { GhostscriptMissingError, openGhostscriptDownload, readEpsFile } from './importEps'
@@ -44,9 +46,10 @@ const NO_IMAGES: ImageFrame[] = []
 const NO_PLACED: PlacedImage[] = []
 const NO_GUIDES: Guide[] = []
 const NO_SHAPES: ShapeFrame[] = []
-const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'style-manager', 'pages', 'links', 'color', 'gradient', 'swatches', 'brushes', 'layers']
+const ALL_DOCK_PANEL_IDS = ['properties', 'paragraph', 'paragraph-styles', 'character-styles', 'object-styles', 'style-manager', 'pages', 'links', 'color', 'gradient', 'swatches', 'brushes', 'layers']
 const NO_PARAGRAPH_STYLES: ParagraphStyleRecord[] = DEFAULT_PARAGRAPH_STYLES
 const NO_CHARACTER_STYLES: CharacterStyleRecord[] = []
+const NO_OBJECT_STYLES: ObjectStyleRecord[] = []
 const NO_PARENTS: ParentPage[] = []
 const NO_PAGE_PARENTS: (string | null)[] = []
 const NO_SECTIONS: PageSection[] = []
@@ -244,6 +247,7 @@ export default function App() {
     layers: current.layers,
     assets: current.assets,
     paragraphStyles: current.paragraphStyles,
+    objectStyles: current.objectStyles,
     sections: current.sections,
     parents: current.parents,
     pageParents: current.pageParents,
@@ -406,14 +410,14 @@ export default function App() {
       }
       return
     }
-    const pictures = files.filter(isImageFile)
+    const pictures = files.filter((f) => isImageFile(f) || isPsdFile(f))
     try {
       if (pictures.length > 0) {
         const read: PlacedImage[] = []
         const problems: string[] = []
         for (const f of pictures) {
           try {
-            read.push(await readImageFile(f))
+            read.push(isPsdFile(f) ? await (await import('./importPsd')).readPsdFile(f) : await readImageFile(f))
           } catch (e) {
             problems.push(e instanceof Error ? e.message : String(f.name))
           }
@@ -520,7 +524,7 @@ export default function App() {
    */
   const placePaths = async (paths: string[]) => {
     if (paths.length === 0) return
-    if (paths.every(isImagePath)) {
+    if (paths.every(isImagePath) && !paths.some((path) => /\.psd$/i.test(path))) {
       const read: PlacedImage[] = []
       const problems: string[] = []
       for (const path of paths) {
@@ -554,6 +558,7 @@ export default function App() {
       eps: { name: 'EPS / PS', extensions: ['eps', 'ps'], accept: '.eps,.ps,application/postscript' },
       xml: { name: 'XML', extensions: ['xml'], accept: '.xml,application/xml,text/xml' },
       idml: { name: 'IDML', extensions: ['idml'], accept: '.idml' },
+      psd: { name: 'Photoshop', extensions: ['psd'], accept: '.psd,image/vnd.adobe.photoshop' },
     }
     const { name, extensions, accept, multiple = false } = picker[kind]
     if (isTauri) {
@@ -571,13 +576,13 @@ export default function App() {
       const picked = await open({
         multiple: true,
         directory: false,
-        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'ps', 'xml', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
+        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'ps', 'psd', 'xml', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
       })
       await placePaths(picked ?? [])
       return
     }
     const files = await pickFiles(
-      `${FILE_EXT},.idml,.docx,.pdf,.eps,.ps,.xml,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+      `${FILE_EXT},.idml,.docx,.pdf,.eps,.ps,.psd,.xml,.txt,.text,.md,.csv,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.avif,image/*,application/pdf,application/postscript,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
       true,
     )
     if (files.length > 0) await placeFiles(files)
@@ -709,6 +714,8 @@ export default function App() {
       }
       const text = e.clipboardData?.getData('text/plain') ?? ''
       if (!text.trim()) return
+      // the marker of objects copied in the program is not text: it is never placed as one
+      if (isClipToken(text)) return
       e.preventDefault()
       setPlacingImages([])
       setPlacing(placedFromPlainText('הטקסט מהלוח', text))
@@ -919,6 +926,7 @@ export default function App() {
               onLayersChange={editingParent ? noop : preview ? noop : session.changeLayers}
               paragraphStyles={preview ? NO_PARAGRAPH_STYLES : session.paragraphStyles}
               characterStyles={preview ? NO_CHARACTER_STYLES : session.characterStyles}
+              objectStyles={preview ? NO_OBJECT_STYLES : session.objectStyles}
               onParagraphStylesChange={preview ? noop : session.changeParagraphStyles}
               parents={preview ? NO_PARENTS : session.parents}
               onParentsChange={preview ? noop : session.changeParents}

@@ -1,4 +1,4 @@
-import { FOOTNOTE_MARKER, TOC_LEADER_MARKER, type DocSettings, type PageSection, type TextFrame, type TocFootnoteReference, type TocPageReference } from './document'
+import { ANCHOR_MARKER, FOOTNOTE_MARKER, TOC_LEADER_MARKER, type DocSettings, type PageSection, type TextFrame, type TocFootnoteReference, type TocPageReference } from './document'
 import { chainOf } from './frames'
 import { ownerPage, type PageRect } from './pages'
 import { pageNumberLabel } from './numbering'
@@ -97,5 +97,5 @@ export function tocDisplayMarkers(
 }
 
 export function plainTocHeading(text: string): string {
-  return text.replaceAll(FOOTNOTE_MARKER, '').trim()
+  return text.replaceAll(FOOTNOTE_MARKER, '').replaceAll(ANCHOR_MARKER, '').trim()
 }

@@ -87,3 +87,36 @@ describe('a profiled line as a shape for the exports', () => {
     expect(shape.w).toBeGreaterThan(shape.h)
   })
 })
+
+import { widthAt as widthAtPos } from './lineProfile'
+describe('widthAt with a moved middle', () => {
+  it('passes through the ends and the middle', () => {
+    const w: [number, number, number] = [1, 3, 0.5]
+    expect(widthAtPos(w, 0, 0.3)).toBeCloseTo(1)
+    expect(widthAtPos(w, 0.3, 0.3)).toBeCloseTo(3)
+    expect(widthAtPos(w, 1, 0.3)).toBeCloseTo(0.5)
+    expect(widthAtPos(w, 0.5, 0.5)).toBeCloseTo(widthAtPos(w, 0.5))
+  })
+})
+
+import { lineOutline as outlineOf } from './lineProfile'
+describe('line arrows', () => {
+  const base = { w: 100, h: 0, strokeWidth: 2 } as Parameters<typeof outlineOf>[0]
+  it('makes a line with a head a profiled one', () => {
+    expect(isProfiledLine({ kind: 'line', arrowEnd: 'triangle' })).toBe(true)
+    expect(isProfiledLine({ kind: 'line', arrowEnd: 'nope' as never })).toBe(false)
+  })
+  it('puts the tip of a head on the end of the line, for every kind', () => {
+    for (const kind of ['triangle', 'stealth', 'diamond', 'circle', 'square'] as const) {
+      const ring = outlineOf({ ...base, arrowEnd: kind })
+      expect(ring.length).toBeGreaterThan(4)
+      expect(Math.max(...ring.map(([x]) => x))).toBeCloseTo(100, 3)
+      expect(Math.max(...ring.map(([, y]) => Math.abs(y)))).toBeGreaterThan(2.5)
+    }
+  })
+  it('puts a head on the start too', () => {
+    const ring = outlineOf({ ...base, arrowStart: 'triangle', arrowEnd: 'triangle' })
+    expect(Math.min(...ring.map(([x]) => x))).toBeCloseTo(0, 3)
+    expect(Math.max(...ring.map(([x]) => x))).toBeCloseTo(100, 3)
+  })
+})

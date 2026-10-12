@@ -5,8 +5,8 @@ import { normalizeRuns } from './story'
 type Look = ParagraphStyleRecord['patch']
 
 /** the character attributes a paragraph style can set, and what plain text has of them when a style says nothing */
-const CHAR_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'color', 'tracking'] as const
-const CHAR_PLAIN: Partial<Record<(typeof CHAR_KEYS)[number], number | boolean>> = { weight: 400, italic: false, tracking: 0 }
+const CHAR_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'color', 'tracking', 'outlineColor', 'outlineWidth'] as const
+const CHAR_PLAIN: Partial<Record<(typeof CHAR_KEYS)[number], number | boolean>> = { weight: 400, italic: false, tracking: 0, outlineWidth: 0 }
 /** and the paragraph ones */
 const LAYOUT_KEYS = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'wordSpacing'] as const
 
@@ -69,7 +69,7 @@ export function paragraphOverrides(head: TextFrame, index: number, style: Look):
       const expected = style[key] ?? CHAR_PLAIN[key] ?? story[key]
       const actual = run.style[key]
       // a colour of the text's own, where nothing sets one, differs from "none" as well
-      if (actual !== undefined && (expected !== undefined || key === 'color') && !same(actual, expected)) out[key] = actual
+      if (actual !== undefined && (expected !== undefined || key === 'color' || key === 'outlineColor') && !same(actual, expected)) out[key] = actual
     }
   }
   const actual = actualLayout(head, index)

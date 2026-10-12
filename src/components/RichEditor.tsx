@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { FootnoteReferenceLook, Run, TextAlign } from '../document'
 import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, normalizeCaretIn, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
-import { clipForToken, isClipToken } from '../objectClipboard'
+import { clipForToken, isClipToken, type ClipObjects } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
 import { ContextMenu } from './ContextMenu'
@@ -69,6 +69,12 @@ interface Props {
   onCopyText: () => string | null
   onCopyFormattedText?: (a: number, b: number) => RichTextClipboard | null
   onPasteFormattedText?: (a: number, b: number, clipboard: RichTextClipboard) => void
+  /** objects copied from the page, pasted here: they become an anchored object at [a, b); false = not taken */
+  onPasteObjects?: (a: number, b: number, data: ClipObjects) => boolean
+  /** double click on an anchored object: its id and its box on the screen */
+  onAnchorMenu?: (id: string, rect: DOMRect) => void
+  /** a click: the anchored object under it is selected (its id), or none (null) */
+  onAnchorSelect?: (id: string | null) => void
   onStop: () => void
   /**
    * A text-selection drag (button still down) has carried the pointer above/below this frame's own box - `anchor` is
@@ -252,6 +258,11 @@ export function RichEditor(p: Props) {
       e.preventDefault()
       const clipboardText = e.clipboardData?.getData('text/plain') ?? ''
       const entry = isClipToken(clipboardText) ? clipForToken(clipboardText) : null
+      if (entry?.data.preview && entry.data.frames.length === 0 && live.current.onPasteObjects?.(...range(), entry.data)) {
+        // taken here: the program's own paste handlers (a clipboard text that is placed with the text cursor) are not to see it
+        e.stopPropagation()
+        return
+      }
       const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
       if (!text) return
       const [a, b] = range()
@@ -272,11 +283,23 @@ export function RichEditor(p: Props) {
 
     const stop = (e: Event) => e.preventDefault()
 
+    // an anchored object: a click selects it (its handles show), a double click asks what to do with it
+    const onClick = (e: MouseEvent) => {
+      const anchored = e.target instanceof Element ? e.target.closest<HTMLElement>('.anchored-object') : null
+      live.current.onAnchorSelect?.(anchored?.dataset.anchorId ?? null)
+    }
+    const onDoubleClick = (e: MouseEvent) => {
+      const anchored = (e.target instanceof Element ? e.target.closest<HTMLElement>('.anchored-object') : null)
+      if (anchored?.dataset.anchorId) live.current.onAnchorMenu?.(anchored.dataset.anchorId, anchored.getBoundingClientRect())
+    }
+
     document.addEventListener('selectionchange', onSelectionChange)
     el.addEventListener('beforeinput', onBeforeInput)
     el.addEventListener('copy', onCopy)
     el.addEventListener('cut', onCut)
     el.addEventListener('paste', onPaste)
+    el.addEventListener('dblclick', onDoubleClick)
+    el.addEventListener('click', onClick)
     el.addEventListener('compositionend', onCompositionEnd)
     el.addEventListener('drop', stop)
     el.addEventListener('dragover', stop)
@@ -286,6 +309,8 @@ export function RichEditor(p: Props) {
       el.removeEventListener('copy', onCopy)
       el.removeEventListener('cut', onCut)
       el.removeEventListener('paste', onPaste)
+      el.removeEventListener('dblclick', onDoubleClick)
+      el.removeEventListener('click', onClick)
       el.removeEventListener('compositionend', onCompositionEnd)
       el.removeEventListener('drop', stop)
       el.removeEventListener('dragover', stop)
@@ -327,6 +352,7 @@ export function RichEditor(p: Props) {
     }
     if (!clipboardText && lastCopiedText !== null) clipboardText = lastCopiedText
     const entry = isClipToken(clipboardText) ? clipForToken(clipboardText) : null
+    if (entry?.data.preview && entry.data.frames.length === 0 && live.current.onPasteObjects?.(...contextSelection.current, entry.data)) return
     const text = (entry ? entry.data.frames.map((frame) => frame.text).join('\n') : clipboardText).replace(/\r\n?/g, '\n')
     if (!text) return
     const [a, b] = contextSelection.current

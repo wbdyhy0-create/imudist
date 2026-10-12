@@ -48,7 +48,7 @@ function drawText(ctx: CanvasRenderingContext2D, frame: TextFrame, page: { x: nu
   let y = (frame.y - page.y + (frame.spaceBefore ?? 0)) * scale
   const lineHeight = Math.max(frame.fontSize, frame.leading ?? frame.fontSize * 1.25) * scale
   const maxWidth = Math.max(1, (frame.w - (frame.indentLeft ?? 0) - (frame.indentRight ?? 0)) * scale)
-  const paragraphs = frame.text.replace(/[\uE000-\uF8FF]/g, '').split('\n')
+  const paragraphs = frame.text.replace(/[\uE000-\uF8FF\uFFFC]/g, '').split('\n')
   const maxLines = Math.ceil(frame.h / Math.max(1, lineHeight)) + 1
   let count = 0
 

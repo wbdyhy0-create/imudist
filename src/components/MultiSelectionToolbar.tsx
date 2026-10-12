@@ -91,7 +91,7 @@ export function MultiSelectionToolbar({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setOpenPalette((current) => current === 'stroke' ? null : 'stroke')}
               >
-                <span className="context-shape-preview context-shape-outline" style={{ borderColor: !strokeMixed && stroke ? stroke : '#ffffff', borderWidth: `${Math.max(1, (strokeWidth || 0.25) * 96 / 72)}px` }} />
+                <span className="context-shape-preview context-shape-outline" style={{ borderColor: !strokeMixed && stroke ? stroke : '#ffffff', borderWidth: `${Math.min(6, Math.max(1, (strokeWidth || 0.25) * 96 / 72))}px` }} />
               </button>
               {openPalette === 'stroke' && <div className="context-swatch-popover"><FillPicker label="צבע קו מתאר לצורות" value={strokeMixed ? null : stroke} samples={colorSamples} onChange={(color) => { onStroke(color); setOpenPalette(null) }} /></div>}
             </div>

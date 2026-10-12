@@ -1,4 +1,4 @@
-import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type RunningHeaderStrategy, type ShapeFrame, type TextFrame } from './document'
+import { EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, MAX_PAGES, normalizeSizes, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type Assets, type CharacterStyleRecord, type ColorSample, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type ObjectStyleRecord, type PageSection, type ParagraphStyleRecord, type ParentPage, type RunningHeaderStrategy, type ShapeFrame, type TextFrame } from './document'
 import { chainOf, headFrames, removeFrame } from './frames'
 import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
 import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
@@ -43,6 +43,8 @@ export interface DocContent {
   paragraphStyles: ParagraphStyleRecord[]
   /** named character styles (Character Styles panel); absent in older documents */
   characterStyles?: CharacterStyleRecord[]
+  /** named object styles (Object Styles panel); absent in older documents */
+  objectStyles?: ObjectStyleRecord[]
   /** the document's parent (master) pages */
   parents: ParentPage[]
   /** which parent page applies to each document page, by index (null / missing = none) */

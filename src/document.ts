@@ -128,6 +128,8 @@ export interface TocFootnoteReference {
 export const FOOTNOTE_MARKER = '\uE006'
 export const TOC_PAGE_MARKER = '\uE010'
 export const TOC_LEADER_MARKER = '\uE011'
+/** the one character of a story that stands for an anchored object (a picture, a shape in the line): its `CharStyle.anchor` says which */
+export const ANCHOR_MARKER = '\uFFFC'
 
 export const DEFAULT_FOOTNOTE_CONFIG: FootnoteLayoutConfig = {
   placement: 'footnotes',
@@ -210,6 +212,23 @@ export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' 
 }
 
 /** Character formatting: can differ from one piece of text to the next. */
+/**
+ * An object that sits in the line of text as one character. It is a picture of the object (so that every place that
+ * draws text can draw it the same way), and the objects themselves, to give them back when the anchor is removed.
+ */
+export interface AnchoredObject {
+  id: string
+  /** what the object looks like: a PNG as a data: URL */
+  src: string
+  /** its size in points, as it stands in the line */
+  w: number
+  h: number
+  /** points the object hangs below the baseline of its line (0 = it sits on it); the bottom handles change it */
+  offset?: number
+  /** the objects as they were on the page (their own positions): `removeAnchor` puts them back */
+  source?: { images: ImageFrame[]; shapes: ShapeFrame[] }
+}
+
 export interface CharStyle {
   fontFamily: string
   color?: string
@@ -240,6 +259,10 @@ export interface CharStyle {
    * - the way a paragraph style's are - and this id is the link that lets a change of the style reach the text again.
    */
   charStyleId?: string
+  /** the character style was given by hand: the nested styles of a paragraph style do not take it off or give it again */
+  charStyleManual?: boolean
+  /** this character is an object sitting in the line (it is `ANCHOR_MARKER`); the run holds nothing else */
+  anchor?: AnchoredObject
 }
 
 /** The settings a character style can hold; one that is missing is not set by the style, and the text keeps the look it already has. */
@@ -519,6 +542,27 @@ export interface ParagraphBox {
   borderColor?: string
   /** points */
   borderWidth?: number
+  /** a decoration above or below the paragraph: in a paragraph style it is the setting, in the patches a text is drawn with it comes with its look */
+  decoration?: ParagraphDecoration
+}
+
+/**
+ * A decoration (עיטור) of a paragraph style: a bar, a rule or a line with arrow heads, drawn above or below every
+ * paragraph in the style, in the look of an object style (the Object Styles panel). What a paragraph style saves is the
+ * object style and the measures; the look itself is read from the object style when the text is drawn (`look`, never saved).
+ */
+export interface ParagraphDecoration {
+  /** the object style (ObjectStyleRecord) it is drawn in */
+  objectStyleId: string
+  position: 'above' | 'below'
+  /** points: how thick a bar is (a line has the thickness of its own stroke and arrow heads) */
+  height: number
+  /** points: the room between the decoration and the text */
+  gap: number
+  /** points: how long it is; 0 = as wide as the column */
+  length: number
+  align: 'start' | 'center' | 'end'
+  look?: ObjectStyleSettings
 }
 
 export interface ParagraphStyleRecord {
@@ -597,6 +641,8 @@ export const DEFAULT_WRAP_OFFSET = 8
 /** A picture placed on the pasteboard / a page. Position and size are in world points, like text frames. */
 export interface ImageFrame {
   id: string
+  /** the object style (ObjectStyleRecord) this picture follows */
+  objectStyleId?: string
   feather?: Feather
   /** optional label shown in the Layers panel */
   label?: string
@@ -633,6 +679,41 @@ export interface ImageFrame {
   rotation?: number
 }
 
+/**
+ * What an object style can set on a picture or a shape. A key that is missing is left as the object has it; a key that is
+ * there is set on every object that has the style, and followed when the style changes.
+ */
+export interface ObjectStyleSettings {
+  /** #rrggbb, or null for no fill */
+  fill?: string | null
+  /** a gradient fill; null = none (the solid fill shows) */
+  fillGradient?: GradientFill | null
+  /** #rrggbb, or null for no line */
+  stroke?: string | null
+  strokeWidth?: number
+  strokeDash?: 'solid' | 'dashed'
+  strokeCap?: LineCap
+  /** the radius of the four corners of a rectangle, points */
+  radius?: number
+  /** 0…1 */
+  opacity?: number
+  /** how it is mixed with what is under it; null = normal */
+  blendMode?: BlendMode | null
+  /** a drop shadow; null = none */
+  shadow?: { offsetX: number; offsetY: number; color: string; opacity: number } | null
+  /** a line's arrow heads and the way its thickness changes along it; null = none */
+  arrowStart?: LineArrow | null
+  arrowEnd?: LineArrow | null
+  lineWidths?: [number, number, number] | null
+}
+
+/** A named look for objects (סגנון אובייקט): the Object Styles panel. */
+export interface ObjectStyleRecord {
+  id: string
+  name: string
+  settings: ObjectStyleSettings
+}
+
 /** Ruler guides: horizontal ('h') lines run across a page, vertical ('v') ones from top to bottom. */
 export type GuideAxis = 'h' | 'v'
 
@@ -667,6 +748,8 @@ export type ShapeKind = 'rect' | 'ellipse' | 'polygon' | 'path' | 'line' | 'tabl
 export type DrawKind = 'rect' | 'ellipse' | 'polygon' | 'line'
 /** A line's end cap. */
 export type LineCap = 'butt' | 'round' | 'square'
+/** the head put on an end of a line */
+export type LineArrow = 'triangle' | 'stealth' | 'diamond' | 'circle' | 'square'
 
 /** how sharp a free-drawn line or a brush stroke is (see sharpness.ts) */
 export type Sharpness = 'sharp' | 'medium' | 'soft'
@@ -766,6 +849,8 @@ export interface ExtrudeSettings {
 
 export interface ShapeFrame {
   id: string
+  /** the object style (ObjectStyleRecord) this shape follows */
+  objectStyleId?: string
   feather?: Feather
   groupId?: string
   /** this shape has depth: what its sides were made from (they are kept up to date by "3D" in the Object menu) */
@@ -808,6 +893,13 @@ export interface ShapeFrame {
   strokeDash?: 'dashed'
   /** line: its thickness along its length - at the start, the middle and the end, each a multiple of `strokeWidth` (missing = even); see lineProfile.ts */
   lineWidths?: [number, number, number]
+  /** line: where along it (0…1 from its start) the middle of lineWidths sits; missing = the centre (0.5) */
+  lineWidthPos?: number
+  /** line: how far from each end (0…0.4 of its length) the thickness of that end starts to change; missing = a smooth curve from the end */
+  lineWidthEdges?: [number, number]
+  /** line: a head on its start / on its end */
+  arrowStart?: LineArrow
+  arrowEnd?: LineArrow
   /** line: the shape of its two ends; missing = 'butt' (a flat cut, flush with the end point) */
   strokeCap?: LineCap
   /** #rrggbb, or null for no fill */

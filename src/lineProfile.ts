@@ -1,4 +1,4 @@
-import type { ShapeFrame } from './document'
+import type { LineArrow, ShapeFrame } from './document'
 
 /**
  * A width profile for a line: how thick the line is along its length. Three widths (at the start, the middle and the end, each a
@@ -12,6 +12,10 @@ import type { ShapeFrame } from './document'
 export type LineWidths = [number, number, number]
 
 export const MAX_LINE_WIDTH_MULTIPLE = 4
+/** how far from the ends the middle of the profile can be put (0…1 along the line) */
+export const MIN_LINE_WIDTH_POS = 0.1
+export const MAX_LINE_WIDTH_POS = 0.9
+export const MAX_LINE_WIDTH_EDGE = 0.4
 
 export const LINE_PROFILES: { id: string; label: string; widths: LineWidths }[] = [
   { id: 'even', label: 'אחיד', widths: [1, 1, 1] },
@@ -35,28 +39,107 @@ export function cleanLineWidths(value: unknown): LineWidths | null {
   return out as LineWidths
 }
 
-/** does the line have a profile that is not the plain even one */
-export function isProfiledLine(shape: Pick<ShapeFrame, 'kind' | 'lineWidths'>): boolean {
-  if (shape.kind !== 'line' || !shape.lineWidths) return false
+/** the place of the profile's middle along the line (between 0.1 and 0.9, not the centre), or null when it is not one */
+export function cleanLineWidthPos(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const pos = Math.min(MAX_LINE_WIDTH_POS, Math.max(MIN_LINE_WIDTH_POS, value))
+  return near(pos, 0.5) ? null : pos
+}
+
+/** the distances from the two ends where the thickness of the ends starts to change, or null when not set */
+export function cleanLineWidthEdges(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length !== 2) return null
+  const [a, b] = value
+  if (typeof a !== 'number' || typeof b !== 'number' || !Number.isFinite(a) || !Number.isFinite(b)) return null
+  const clamp = (v: number) => Math.min(MAX_LINE_WIDTH_EDGE, Math.max(0, v))
+  return [clamp(a), clamp(b)]
+}
+
+export const LINE_ARROWS: { id: LineArrow; label: string }[] = [
+  { id: 'triangle', label: 'משולש' },
+  { id: 'stealth', label: 'חץ חד' },
+  { id: 'diamond', label: 'מעוין' },
+  { id: 'circle', label: 'עיגול' },
+  { id: 'square', label: 'ריבוע' },
+]
+
+/** the head kind when it is a valid one, else null */
+export function cleanLineArrow(value: unknown): LineArrow | null {
+  return LINE_ARROWS.some((arrow) => arrow.id === value) ? (value as LineArrow) : null
+}
+
+/** does the line have a profile that is not the plain even one, or a head on an end (both are drawn as the filled outline) */
+export function isProfiledLine(shape: Pick<ShapeFrame, 'kind' | 'lineWidths' | 'arrowStart' | 'arrowEnd'>): boolean {
+  if (shape.kind !== 'line') return false
+  if (cleanLineArrow(shape.arrowStart) || cleanLineArrow(shape.arrowEnd)) return true
+  if (!shape.lineWidths) return false
   const widths = cleanLineWidths(shape.lineWidths)
   return !!widths && !widths.every((width, i) => near(width, EVEN[i]!))
 }
 
-/** the width (a multiple of the line's thickness) at a place along it, 0 at the start to 1 at the end: a curve through the three widths */
-export function widthAt(widths: LineWidths, t: number): number {
-  const [start, middle, end] = widths
-  const value = start * (1 - t) * (1 - 2 * t) + middle * 4 * t * (1 - t) + end * t * (2 * t - 1)
-  return Math.max(0, value)
-}
+/** the full width of a head for a line of this thickness: the room the head takes beside the line */
+export const lineArrowWidth = (strokeWidth: number) => Math.max(6, strokeWidth * 3.2)
 
 type Pt = [number, number]
+
+/**
+ * A head, in its own frame: (depth behind its tip, lateral place) pairs. `junction` is how far behind the tip the line's shaft ends (the
+ * shaft's half width there is `hw`); `front` goes from the left side of the head round its tip to the right side.
+ */
+function arrowHead(kind: LineArrow, width: number, hw: number): { junction: number; front: Pt[] } {
+  const half = width / 2
+  const shaft = Math.min(hw, half * 0.9)
+  if (kind === 'stealth') {
+    const length = width * 1.2
+    return { junction: length * 0.7, front: [[length, half], [0, 0], [length, -half]] }
+  }
+  if (kind === 'square') {
+    const length = width * 0.8
+    return { junction: length, front: [[length, half], [0, half], [0, -half], [length, -half]] }
+  }
+  if (kind === 'diamond') {
+    const length = width * 1.3
+    return { junction: length - (shaft * length) / width, front: [[length / 2, half], [0, 0], [length / 2, -half]] }
+  }
+  if (kind === 'circle') {
+    const reach = Math.acos(-Math.sqrt(half * half - shaft * shaft) / half)
+    const front: Pt[] = []
+    const steps = 24
+    for (let i = 0; i <= steps; i += 1) {
+      const angle = reach - (2 * reach * i) / steps
+      front.push([half - half * Math.cos(angle), half * Math.sin(angle)])
+    }
+    return { junction: half + Math.sqrt(half * half - shaft * shaft), front }
+  }
+  return { junction: width, front: [[width, half], [0, 0], [width, -half]] }
+}
+/** the width (a multiple of the line's thickness) at a place along it, 0 at the start to 1 at the end: a curve through the three widths */
+export function widthAt(widths: LineWidths, t: number, pos = 0.5, edges?: [number, number]): number {
+  const [start, middle, end] = widths
+  const p = Math.min(MAX_LINE_WIDTH_POS, Math.max(MIN_LINE_WIDTH_POS, pos))
+  if (edges) {
+    // each end keeps its width up to its handle, then eases to the middle width
+    const smooth = (x: number) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c) }
+    if (t <= p) {
+      const from = Math.min(edges[0], p - 0.02)
+      return Math.max(0, start + (middle - start) * smooth((t - from) / (p - from)))
+    }
+    const from = Math.min(edges[1], 0.98 - p)
+    return Math.max(0, end + (middle - end) * smooth(((1 - t) - from) / (1 - p - from)))
+  }
+  // the parabola through (0, start), (p, middle) and (1, end); at p = 0.5 it is the one of the centred profile
+  const value = (start * (t - p) * (t - 1)) / p + (middle * t * (t - 1)) / (p * (p - 1)) + (end * t * (t - p)) / (1 - p)
+  return Math.max(0, value)
+}
 
 /**
  * The outline of the line as a polygon, in the line's own box (points from its top-left corner): along one side of the line, round
  * the end, back along the other side, round the start. The ends follow the line's `strokeCap`.
  */
-export function lineOutline(shape: Pick<ShapeFrame, 'w' | 'h' | 'flip' | 'strokeWidth' | 'strokeCap' | 'lineWidths'>): Pt[] {
+export function lineOutline(shape: Pick<ShapeFrame, 'w' | 'h' | 'flip' | 'strokeWidth' | 'strokeCap' | 'lineWidths' | 'lineWidthPos' | 'lineWidthEdges' | 'arrowStart' | 'arrowEnd'>): Pt[] {
   const widths = cleanLineWidths(shape.lineWidths) ?? EVEN
+  const pos = shape.lineWidthPos ?? 0.5
+  const edges = shape.lineWidthEdges
   const [x0, y0, x1, y1] = shape.flip ? [0, shape.h, shape.w, 0] : [0, 0, shape.w, shape.h]
   const length = Math.hypot(x1 - x0, y1 - y0)
   if (length < 1e-6 || shape.strokeWidth <= 0) return []
@@ -65,21 +148,40 @@ export function lineOutline(shape: Pick<ShapeFrame, 'w' | 'h' | 'flip' | 'stroke
   // the unit normal: to the left of the way the line goes
   const nx = dy
   const ny = -dx
-  const steps = Math.max(16, Math.min(120, Math.round(length / 3)))
+  const at = (s: number, lateral: number): Pt => [x0 + dx * s + nx * lateral, y0 + dy * s + ny * lateral]
+  const halfAt = (s: number) => (shape.strokeWidth * widthAt(widths, Math.min(1, Math.max(0, s / length)), pos, edges)) / 2
+
+  // a head takes the end of the line: the shaft stops where the head begins, and the head is drawn as part of the same outline
+  const startKind = cleanLineArrow(shape.arrowStart)
+  const endKind = cleanLineArrow(shape.arrowEnd)
+  const room = length * (startKind && endKind ? 0.45 : 0.9)
+  const headOf = (kind: LineArrow, fromEnd: boolean) => {
+    const full = lineArrowWidth(shape.strokeWidth)
+    const probe = arrowHead(kind, full, 0)
+    const width = full * Math.min(1, room / Math.max(probe.junction, 1e-6))
+    const guess = arrowHead(kind, width, 0).junction
+    const junctionHalf = halfAt(fromEnd ? length - guess : guess)
+    const head = arrowHead(kind, width, junctionHalf)
+    return head
+  }
+  const start = startKind ? headOf(startKind, false) : null
+  const end = endKind ? headOf(endKind, true) : null
+  const s0 = start ? start.junction : 0
+  const s1 = end ? length - end.junction : length
+
+  const steps = Math.max(16, Math.min(120, Math.round((s1 - s0) / 3)))
   const left: Pt[] = []
   const right: Pt[] = []
   for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps
-    const half = (shape.strokeWidth * widthAt(widths, t)) / 2
-    const cx = x0 + (x1 - x0) * t
-    const cy = y0 + (y1 - y0) * t
-    left.push([cx + nx * half, cy + ny * half])
-    right.push([cx - nx * half, cy - ny * half])
+    const s = s0 + ((s1 - s0) * i) / steps
+    const half = halfAt(s)
+    left.push(at(s, half))
+    right.push(at(s, -half))
   }
   const ring: Pt[] = [...left]
   const cap = shape.strokeCap ?? 'butt'
-  const endHalf = (shape.strokeWidth * widthAt(widths, 1)) / 2
-  const startHalf = (shape.strokeWidth * widthAt(widths, 0)) / 2
+  const endHalf = halfAt(length)
+  const startHalf = halfAt(0)
   const arc = (centre: Pt, radius: number, from: Pt, towards: Pt, quarters: number): Pt[] => {
     // a half circle from the direction `from` through `towards` to the opposite of `from`
     const points: Pt[] = []
@@ -89,14 +191,15 @@ export function lineOutline(shape: Pick<ShapeFrame, 'w' | 'h' | 'flip' | 'stroke
     }
     return points
   }
-  if (cap === 'round' && endHalf > 0.05) ring.push(...arc([x1, y1], endHalf, [nx, ny], [dx, dy], 5))
+  if (end) ring.push(...end.front.map(([depth, lateral]) => at(length - depth, lateral)))
+  else if (cap === 'round' && endHalf > 0.05) ring.push(...arc([x1, y1], endHalf, [nx, ny], [dx, dy], 5))
   else if (cap === 'square' && endHalf > 0.05) ring.push([left[steps]![0] + dx * endHalf, left[steps]![1] + dy * endHalf], [right[steps]![0] + dx * endHalf, right[steps]![1] + dy * endHalf])
   ring.push(...right.reverse())
-  if (cap === 'round' && startHalf > 0.05) ring.push(...arc([x0, y0], startHalf, [-nx, -ny], [-dx, -dy], 5))
+  if (start) ring.push(...start.front.map(([depth, lateral]) => at(depth, -lateral)))
+  else if (cap === 'round' && startHalf > 0.05) ring.push(...arc([x0, y0], startHalf, [-nx, -ny], [-dx, -dy], 5))
   else if (cap === 'square' && startHalf > 0.05) ring.push([right[0]![0] - dx * startHalf, right[0]![1] - dy * startHalf], [left[0]![0] - dx * startHalf, left[0]![1] - dy * startHalf])
   return ring
 }
-
 const round3 = (value: number) => Math.round(value * 1000) / 1000
 
 /** the outline as an SVG path in the line's own box, scaled by `k` (the zoom of the screen, or the scale of an export) */
@@ -134,7 +237,7 @@ export function lineProfileShape(shape: ShapeFrame): ShapeFrame | null {
   const offsetY = minY + h / 2 - shape.h / 2
   const centreX = shape.x + shape.w / 2 + offsetX * cos - offsetY * sin
   const centreY = shape.y + shape.h / 2 + offsetX * sin + offsetY * cos
-  const { flip: _flip, strokeDash: _dash, strokeCap: _cap, lineWidths: _widths, ...rest } = shape
+  const { flip: _flip, strokeDash: _dash, strokeCap: _cap, lineWidths: _widths, lineWidthPos: _pos, lineWidthEdges: _edges, arrowStart: _arrowStart, arrowEnd: _arrowEnd, ...rest } = shape
   return {
     ...rest,
     kind: 'path',

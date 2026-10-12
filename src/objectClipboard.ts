@@ -12,6 +12,8 @@ export interface ClipObjects {
   shapes: ShapeFrame[]
   /** the picture data the copied pictures use, so they can be pasted into another document */
   assets: Assets
+  /** what pictures and shapes look like, drawn when they were copied: it is what they become when pasted into text (an anchored object) */
+  preview?: { src: string; w: number; h: number }
 }
 
 interface Entry {

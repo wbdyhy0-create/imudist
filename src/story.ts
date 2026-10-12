@@ -17,7 +17,9 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
   ...(s.shadowColor ? { shadowColor: s.shadowColor } : {}),
   ...(s.shadowOpacity !== undefined ? { shadowOpacity: s.shadowOpacity } : {}),
   ...(s.charStyleId ? { charStyleId: s.charStyleId } : {}),
+  ...(s.charStyleId && s.charStyleManual ? { charStyleManual: true } : {}),
   ...(s.baselineShift ? { baselineShift: s.baselineShift } : {}),
+  ...(s.anchor ? { anchor: s.anchor } : {}),
   fontSize: s.fontSize,
   weight: s.weight,
   italic: s.italic,
@@ -25,7 +27,7 @@ export const charStyleOf = (s: CharStyle): CharStyle => ({
 })
 
 const sameStyle = (a: CharStyle, b: CharStyle) =>
-  a.fontFamily === b.fontFamily && a.color === b.color && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth && a.shadowOffsetX === b.shadowOffsetX && (a.shadowOffsetY ?? a.shadowOffset) === (b.shadowOffsetY ?? b.shadowOffset) && a.shadowColor === b.shadowColor && a.shadowOpacity === b.shadowOpacity && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking && a.charStyleId === b.charStyleId && (a.baselineShift ?? 0) === (b.baselineShift ?? 0)
+  a.fontFamily === b.fontFamily && a.color === b.color && a.outlineColor === b.outlineColor && a.outlineWidth === b.outlineWidth && a.shadowOffsetX === b.shadowOffsetX && (a.shadowOffsetY ?? a.shadowOffset) === (b.shadowOffsetY ?? b.shadowOffset) && a.shadowColor === b.shadowColor && a.shadowOpacity === b.shadowOpacity && a.fontSize === b.fontSize && a.weight === b.weight && a.italic === b.italic && a.tracking === b.tracking && a.charStyleId === b.charStyleId && !!a.charStyleManual === !!b.charStyleManual && (a.baselineShift ?? 0) === (b.baselineShift ?? 0) && a.anchor?.id === b.anchor?.id
 
 /** Drop empty runs and join neighbours that have the same style. */
 export function mergeRuns(runs: Run[]): Run[] {
@@ -138,7 +140,10 @@ export function editStory(
   from = Math.max(0, Math.min(from, text.length))
   to = Math.max(from, Math.min(to, text.length))
   const runs = normalizeRuns(text, runsIn, base)
-  const inherit = styleAtChar(runs, Math.max(0, from - 1), base)
+  const before = styleAtChar(runs, Math.max(0, from - 1), base)
+  // text typed next to an anchored object is not part of it: the object is the one character, and nothing else carries it
+  const { anchor: _anchor, ...withoutAnchor } = before
+  const inherit = before.anchor ? withoutAnchor : before
   const mid: Run[] = insert ? [{ len: insert.length, style: inherit }] : []
   return {
     text: text.slice(0, from) + insert + text.slice(to),
@@ -173,7 +178,15 @@ export function cleanSpacingRanges(text: string, from = 0, to = text.length): [n
 }
 
 /** `cleanSpacingRanges`, and which paragraphs (by their index in `text`) go away altogether - for the per-paragraph lists that follow the text. */
-export function cleanSpacingPlan(text: string, from = 0, to = text.length): { ranges: [number, number][]; dropped: number[] } {
+export function cleanSpacingPlan(
+  text: string,
+  from = 0,
+  to = text.length,
+  /** what to clean: both by default; the style manager has a button for each */
+  options: { spaces?: boolean; paragraphs?: boolean } = {},
+): { ranges: [number, number][]; dropped: number[] } {
+  const spaces = options.spaces !== false
+  const paragraphs = options.paragraphs !== false
   const ranges: [number, number][] = []
   const dropped: number[] = []
   let start = 0
@@ -191,12 +204,14 @@ export function cleanSpacingPlan(text: string, from = 0, to = text.length): { ra
         }
       }
       if (empty && start >= from && end <= to) {
-        // a paragraph that is only its own break goes with it; the last paragraph has no break after it to take along
-        if (nl >= 0) {
+        if (!paragraphs) {
+          // empty paragraphs stay
+        } else if (nl >= 0) {
+          // a paragraph that is only its own break goes with it; the last paragraph has no break after it to take along
           ranges.push([start, nl + 1])
           dropped.push(index)
         } else if (end > start) ranges.push([start, end])
-      } else if (!empty) {
+      } else if (!empty && spaces) {
         let i = Math.max(start, from)
         const limit = Math.min(end, to)
         while (i < limit) {
@@ -212,7 +227,7 @@ export function cleanSpacingPlan(text: string, from = 0, to = text.length): { ra
     if (nl < 0) break
     start = nl + 1
   }
-  return withTrailingBreaksRemoved(text, from, to, ranges, dropped)
+  return paragraphs ? withTrailingBreaksRemoved(text, from, to, ranges, dropped) : { ranges, dropped }
 }
 
 /**
@@ -436,13 +451,13 @@ function mapPieces(text: string, runs: Run[], a: number, b: number, change: (sty
 
 /** the style without its link to a character style */
 const withoutLink = (style: CharStyle): CharStyle => {
-  const { charStyleId: _link, ...rest } = style
+  const { charStyleId: _link, charStyleManual: _manual, ...rest } = style
   return rest
 }
 
 /** the settings of a character style written over [a, b), and the link that keeps the text tied to the style */
-export function applyCharacterStyle(runs: Run[], a: number, b: number, record: CharacterStyleRecord): Run[] {
-  return styleRange(runs, a, b, { ...record.patch, charStyleId: record.id })
+export function applyCharacterStyle(runs: Run[], a: number, b: number, record: CharacterStyleRecord, byHand = false): Run[] {
+  return styleRange(runs, a, b, { ...record.patch, charStyleId: record.id, ...(byHand ? { charStyleManual: true } : {}) })
 }
 
 const ALWAYS_SET = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking']
@@ -467,7 +482,8 @@ function restoreKeys(style: CharStyle, keys: string[], base: Partial<CharStyle>)
 export function clearCharacterStyle(text: string, runs: Run[], a: number, b: number, records: CharacterStyleRecord[], baseAt: (paragraphStart: number) => Partial<CharStyle>, only?: ReadonlySet<string>): Run[] {
   const byId = new Map(records.map((record) => [record.id, record]))
   return mapPieces(text, runs, a, b, (style, paragraphStart) => {
-    if (!style.charStyleId || (only && !only.has(style.charStyleId))) return style
+    // `only`: the styles the nested rules of a paragraph own - text that was given one by hand is not theirs to take off
+    if (!style.charStyleId || (only && (!only.has(style.charStyleId) || style.charStyleManual))) return style
     const record = byId.get(style.charStyleId)
     const restored = record ? restoreKeys(style, Object.keys(record.patch), baseAt(paragraphStart)) : style
     return withoutLink(restored)

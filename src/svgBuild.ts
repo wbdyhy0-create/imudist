@@ -1,6 +1,6 @@
 import type { Asset, GradientFill, ImageFrame, ShapeFrame } from './document'
 import { linearGradientLine } from './colorModels'
-import { isProfiledLine, lineOutlinePath } from './lineProfile'
+import { isProfiledLine, lineArrowWidth, lineOutlinePath } from './lineProfile'
 import { shadowBlurRadius } from './shadow'
 import { imageGeometry, shapePath } from './shapes'
 
@@ -181,7 +181,8 @@ export function boundsOfItems(items: SvgItem[]): SvgBox | null {
     const stroke = item.kind === 'shape' && item.shape.stroke ? item.shape.strokeWidth * (widths ? Math.max(1, ...widths, 0) : 1) : 0
     const shadow = (o.shadowOpacity ?? 0) > 0 ? Math.hypot(o.shadowOffsetX ?? 0, o.shadowOffsetY ?? o.shadowOffset ?? 6) * 1.5 : 0
     const blur = item.kind === 'shape' ? Math.ceil((item.shape.blur ?? 0) * 3) : 0
-    const pad = stroke / 2 + shadow + blur
+    const heads = item.kind === 'shape' && item.shape.kind === 'line' && (item.shape.arrowStart || item.shape.arrowEnd) ? lineArrowWidth(item.shape.strokeWidth) * 1.3 : 0
+    const pad = Math.max(stroke / 2, heads / 2) + shadow + blur
     const turn = ((o.rotation ?? 0) * Math.PI) / 180
     const cos = Math.cos(turn)
     const sin = Math.sin(turn)

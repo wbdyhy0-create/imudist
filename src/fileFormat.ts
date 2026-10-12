@@ -22,6 +22,10 @@ import {
   normalizeSizes,
   validateDoc,
   type Asset,
+  type AnchoredObject,
+  type ObjectStyleRecord,
+  type ObjectStyleSettings,
+  type ParagraphDecoration,
   type AssetLink,
   type BlendMode,
   type Assets,
@@ -67,7 +71,7 @@ import {
 } from './document'
 import { footnoteTextStyle } from './footnoteLayout'
 import { ORNAMENT_STYLES, usableOrnamentImage } from './footnoteOrnaments'
-import { cleanLineWidths } from './lineProfile'
+import { cleanLineArrow, cleanLineWidthEdges, cleanLineWidthPos, cleanLineWidths } from './lineProfile'
 import { normalizeDeg } from './frames'
 import { isSharpness, MAX_BLUR } from './sharpness'
 import type { DocContent, ParentOverride } from './pages'
@@ -109,12 +113,23 @@ export interface DocumentFile {
   sections: PageSection[]
   parentOverrides?: ParentOverride[]
   colorSamples?: ColorSample[]
+  /** the document's named object styles (absent in files from before they existed) */
+  objectStyles?: ObjectStyleRecord[]
 }
 
 /** The file's text for a document. Only the pictures that are still in use are stored. */
 export function serializeDocument(c: DocContent): string {
   // a parent page's own pictures need their assets kept too, not just the document pages' own
   const used = new Set([...c.images, ...c.parents.flatMap((p) => p.images)].map((i) => i.assetId))
+  // the pictures of the objects that sit in a line of text (anchored) are kept too: removing the anchor gives them back
+  for (const frame of [...c.frames, ...c.parents.flatMap((p) => p.frames)]) {
+    for (const run of frame.runs ?? []) {
+      const source = run.style.anchor?.source
+      if (!source) continue
+      for (const image of source.images) used.add(image.assetId)
+      for (const shape of source.shapes) if (shape.image) used.add(shape.image.assetId)
+    }
+  }
   const assets: DocumentFile['assets'] = {}
   for (const id of used) {
     const asset = c.assets[id]
@@ -143,6 +158,7 @@ export function serializeDocument(c: DocContent): string {
     sections: c.sections,
     parentOverrides: c.parentOverrides ?? [],
     colorSamples: c.colorSamples ?? [],
+    objectStyles: c.objectStyles ?? [],
   }
   return JSON.stringify(file)
 }
@@ -283,8 +299,30 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
   }
 }
 
+/** the assets of the file being read: the pictures an anchored object keeps are read against them (set by parseDocument) */
+let anchorAssets: Assets = {}
+const ANCHOR_SRC = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/
+
+/** an object sitting in the text as one character; nothing in it is trusted: a picture that is not a data: URL of an image is dropped */
+function parseAnchor(v: unknown): AnchoredObject | undefined {
+  if (!isObj(v) || typeof v.id !== 'string' || !v.id || v.id.length > 100) return undefined
+  if (typeof v.src !== 'string' || v.src.length > 24_000_000 || !ANCHOR_SRC.test(v.src)) return undefined
+  const w = num(v.w, 0, 0, 5000)
+  const h = num(v.h, 0, 0, 5000)
+  if (w <= 0 || h <= 0) return undefined
+  let source: AnchoredObject['source']
+  if (isObj(v.source)) {
+    const images = parseImages(v.source.images, anchorAssets)
+    const shapes = parseShapes(v.source.shapes, anchorAssets)
+    if (images.length + shapes.length > 0) source = { images, shapes }
+  }
+  const offset = typeof v.offset === 'number' && Number.isFinite(v.offset) && v.offset !== 0 ? num(v.offset, 0, -5000, 5000) : 0
+  return { id: v.id, src: v.src, w, h, ...(offset ? { offset } : {}), ...(source ? { source } : {}) }
+}
+
 function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
   const s = isObj(v) ? v : {}
+  const anchor = parseAnchor(s.anchor)
   const color = typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? s.color : fallback.color
   const outlineColor = typeof s.outlineColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.outlineColor) ? s.outlineColor : fallback.outlineColor
   return {
@@ -296,6 +334,8 @@ function parseCharStyle(v: unknown, fallback: CharStyle): CharStyle {
     ...(color ? { color } : {}),
     ...(outlineColor ? { outlineColor } : {}),
     ...(typeof s.charStyleId === 'string' && s.charStyleId && s.charStyleId.length <= 100 ? { charStyleId: s.charStyleId } : {}),
+    ...(s.charStyleManual === true && typeof s.charStyleId === 'string' && s.charStyleId ? { charStyleManual: true } : {}),
+    ...(anchor ? { anchor } : {}),
     ...(typeof s.baselineShift === 'number' && Number.isFinite(s.baselineShift) && s.baselineShift !== 0 ? { baselineShift: num(s.baselineShift, 0, -999, 999) } : {}),
     ...(typeof s.outlineWidth === 'number' && Number.isFinite(s.outlineWidth) ? { outlineWidth: num(s.outlineWidth, 0, 0, 100) } : fallback.outlineWidth !== undefined ? { outlineWidth: fallback.outlineWidth } : {}),
     ...(typeof s.shadowOffsetX === 'number' && Number.isFinite(s.shadowOffsetX) ? { shadowOffsetX: num(s.shadowOffsetX, 0, -100, 100) } : fallback.shadowOffsetX !== undefined ? { shadowOffsetX: fallback.shadowOffsetX } : {}),
@@ -319,6 +359,8 @@ const itemFlagsOf = (raw: Record<string, unknown>): { hidden?: true; locked?: tr
   ...(raw.hidden === true ? { hidden: true as const } : {}),
   ...(raw.locked === true ? { locked: true as const } : {}),
 })
+/** the object style an object follows (a reference: a style that is not in the file is dropped later, with the file's own list) */
+const objectStyleIdOf = (raw: Record<string, unknown>): { objectStyleId?: string } => (typeof raw.objectStyleId === 'string' && raw.objectStyleId && raw.objectStyleId.length <= 120 ? { objectStyleId: raw.objectStyleId } : {})
 const itemLabelOf = (raw: Record<string, unknown>): { label?: string } => (typeof raw.label === 'string' && raw.label.trim() ? { label: raw.label.trim().slice(0, 120) } : {})
 
 /** the layers' names, colours, hidden and locked: only for layers that exist, and only what is valid */
@@ -371,7 +413,19 @@ const paragraphStyleNamesOf = (raw: Record<string, unknown>): { paragraphStyleNa
   ...(Array.isArray(raw.paragraphStyleNames) ? { paragraphStyleNames: raw.paragraphStyleNames.filter((name): name is string => typeof name === 'string').slice(0, 100000) } : {}),
 })
 /** a paragraph's fill and line (see ParagraphBox): the same checks for a paragraph's own patch and for a paragraph style's */
-const parseParagraphBox = (s: Record<string, unknown>): { background?: string; borderColor?: string; borderWidth?: number } => ({
+const parseDecoration = (v: unknown): ParagraphDecoration | undefined => {
+  if (!isObj(v) || typeof v.objectStyleId !== 'string' || !v.objectStyleId || v.objectStyleId.length > 120) return undefined
+  return {
+    objectStyleId: v.objectStyleId,
+    position: v.position === 'below' ? 'below' : 'above',
+    height: num(v.height, 2, 0.25, 500),
+    gap: num(v.gap, 4, 0, 500),
+    length: num(v.length, 0, 0, 5000),
+    align: v.align === 'center' || v.align === 'end' ? v.align : 'start',
+  }
+}
+const parseParagraphBox = (s: Record<string, unknown>): { background?: string; borderColor?: string; borderWidth?: number; decoration?: ParagraphDecoration } => ({
+  ...(parseDecoration(s.decoration) ? { decoration: parseDecoration(s.decoration)! } : {}),
   ...(typeof s.background === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.background) ? { background: s.background } : {}),
   ...(typeof s.borderWidth === 'number' && Number.isFinite(s.borderWidth) && s.borderWidth > 0
     ? { borderWidth: num(s.borderWidth, 1, 0, 100), ...(typeof s.borderColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.borderColor) ? { borderColor: s.borderColor } : {}) }
@@ -648,6 +702,7 @@ function parseImages(v: unknown, assets: Assets): ImageFrame[] {
       ...groupOf(raw),
       ...layerIdOf(raw),
       ...itemFlagsOf(raw),
+      ...objectStyleIdOf(raw),
       ...(typeof raw.label === 'string' && raw.label ? { label: raw.label.slice(0, 120) } : {}),
       assetId,
       x: num(raw.x, 0, -1e6, 1e6),
@@ -684,6 +739,56 @@ function parseColorSamples(value: unknown): ColorSample[] {
     return [{ id, color: raw.color.toUpperCase(), label: typeof raw.label === 'string' ? raw.label.slice(0, 120) : raw.color.toUpperCase() }]
   })
 }
+/** the settings of one object style: each is checked on its own, and what is not understood is left out */
+function parseObjectStyleSettings(v: unknown): ObjectStyleSettings {
+  const s = isObj(v) ? v : {}
+  const out: ObjectStyleSettings = {}
+  if ('fill' in s && (s.fill === null || (typeof s.fill === 'string' && HEX.test(s.fill)))) out.fill = s.fill as string | null
+  if ('stroke' in s && (s.stroke === null || (typeof s.stroke === 'string' && HEX.test(s.stroke)))) out.stroke = s.stroke as string | null
+  if (s.fillGradient === null) out.fillGradient = null
+  else if (isObj(s.fillGradient)) {
+    const gradient = parseGradient({ fillGradient: s.fillGradient }).fillGradient
+    if (gradient) out.fillGradient = gradient
+  }
+  if (typeof s.strokeWidth === 'number' && Number.isFinite(s.strokeWidth)) out.strokeWidth = num(s.strokeWidth, 1, 0, 500)
+  if (s.strokeDash === 'solid' || s.strokeDash === 'dashed') out.strokeDash = s.strokeDash
+  if (s.strokeCap === 'butt' || s.strokeCap === 'round' || s.strokeCap === 'square') out.strokeCap = s.strokeCap
+  if (typeof s.radius === 'number' && Number.isFinite(s.radius)) out.radius = num(s.radius, 0, 0, 5000)
+  if (typeof s.opacity === 'number' && Number.isFinite(s.opacity)) out.opacity = num(s.opacity, 1, 0, 1)
+  if (s.blendMode === null) out.blendMode = null
+  else {
+    const blend = blendModeOf({ blendMode: s.blendMode }).blendMode
+    if (blend) out.blendMode = blend
+  }
+  if (s.shadow === null) out.shadow = null
+  else if (isObj(s.shadow) && typeof s.shadow.opacity === 'number') {
+    out.shadow = {
+      offsetX: num(s.shadow.offsetX, 0, -500, 500),
+      offsetY: num(s.shadow.offsetY, 6, -500, 500),
+      color: typeof s.shadow.color === 'string' && HEX.test(s.shadow.color) ? s.shadow.color : '#000000',
+      opacity: num(s.shadow.opacity, 0, 0, 1),
+    }
+  }
+  for (const key of ['arrowStart', 'arrowEnd'] as const) {
+    if (s[key] === null) out[key] = null
+    else if (cleanLineArrow(s[key])) out[key] = cleanLineArrow(s[key])!
+  }
+  if (s.lineWidths === null) out.lineWidths = null
+  else if (cleanLineWidths(s.lineWidths)) out.lineWidths = cleanLineWidths(s.lineWidths)!
+  return out
+}
+
+function parseObjectStyles(value: unknown): ObjectStyleRecord[] {
+  if (!Array.isArray(value)) return []
+  const ids = new Set<string>()
+  return value.flatMap((raw) => {
+    if (!isObj(raw) || typeof raw.id !== 'string' || !raw.id || raw.id.length > 120 || ids.has(raw.id)) return []
+    ids.add(raw.id)
+    const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 120) : 'סגנון אובייקט'
+    return [{ id: raw.id, name, settings: parseObjectStyleSettings(raw.settings) }]
+  })
+}
+
 /** how an object is mixed with what is under it: only the modes this version knows are kept */
 const blendModeOf = (raw: Record<string, unknown>): { blendMode?: BlendMode } =>
   raw.blendMode === 'multiply' || raw.blendMode === 'screen' ? { blendMode: raw.blendMode } : {}
@@ -898,6 +1003,7 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...layerIdOf(raw),
       ...itemFlagsOf(raw),
       ...itemLabelOf(raw),
+      ...objectStyleIdOf(raw),
       kind,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -911,6 +1017,10 @@ function parseShapes(v: unknown, assets: Assets): ShapeFrame[] {
       ...(kind === 'line' && raw.flip === true ? { flip: true as const } : {}),
       ...(kind === 'line' && raw.strokeDash === 'dashed' ? { strokeDash: 'dashed' as const } : {}),
       ...(kind === 'line' && cleanLineWidths(raw.lineWidths) ? { lineWidths: cleanLineWidths(raw.lineWidths)! } : {}),
+      ...(kind === 'line' && cleanLineWidths(raw.lineWidths) && cleanLineWidthPos(raw.lineWidthPos) !== null ? { lineWidthPos: cleanLineWidthPos(raw.lineWidthPos)! } : {}),
+      ...(kind === 'line' && cleanLineWidths(raw.lineWidths) && cleanLineWidthEdges(raw.lineWidthEdges) ? { lineWidthEdges: cleanLineWidthEdges(raw.lineWidthEdges)! } : {}),
+      ...(kind === 'line' && cleanLineArrow(raw.arrowStart) ? { arrowStart: cleanLineArrow(raw.arrowStart)! } : {}),
+      ...(kind === 'line' && cleanLineArrow(raw.arrowEnd) ? { arrowEnd: cleanLineArrow(raw.arrowEnd)! } : {}),
       ...(kind === 'line' && (raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
       ...(kind === 'path' && (raw.strokeCap === 'butt' || raw.strokeCap === 'round' || raw.strokeCap === 'square') ? { strokeCap: raw.strokeCap as LineCap } : {}),
       ...(kind === 'path' && raw.closed === false ? { closed: false as const } : {}),
@@ -1064,10 +1174,12 @@ export function parseDocument(text: string, name: string): DocContent {
     throw new FileFormatError('הקובץ נשמר בגרסה חדשה יותר של Imudist. עדכן את התוכנה כדי לפתוח אותו.')
   }
   const assets = parseAssets(data.assets)
+  anchorAssets = assets
   const doc = parseSettings(data.settings, name)
   const parents = parseParents(data.parents, assets)
   const paragraphStyles = parseParagraphStyles(data.paragraphStyles)
   const characterStyles = parseCharacterStyles(data.characterStyles)
+  const objectStyles = parseObjectStyles(data.objectStyles)
   const frames = parseFrames(data.frames, doc.footnotes ?? DEFAULT_FOOTNOTE_CONFIG, paragraphStyles)
   const images = parseImages(data.images, assets)
   const shapes = parseShapes(data.shapes, assets)
@@ -1099,6 +1211,7 @@ export function parseDocument(text: string, name: string): DocContent {
     sections: parseSections(data.sections, doc.pages),
     parentOverrides: parseParentOverrides(data.parentOverrides, doc, parents, frames, images, shapes),
     colorSamples: parseColorSamples(data.colorSamples),
+    ...(objectStyles.length > 0 ? { objectStyles } : {}),
   }
 }
 

@@ -1,7 +1,8 @@
-import { cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type FootnoteReferenceLook, type ParagraphBox, type Run, type TextAlign } from './document'
+import { ANCHOR_MARKER, cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type FootnoteReferenceLook, type ParagraphBox, type Run, type TextAlign } from './document'
 import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 import { hexToRgb } from './colorModels'
+import { decorationClass, decorationVars } from './decorations'
 
 export function textOutlineShadow(style: CharStyle, scale: number): string {
   const radius = (style.outlineWidth ?? 0) * scale
@@ -54,6 +55,31 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number, 
 /** the same shift for a React style object */
 export const baselineShiftCss = (style: CharStyle, scale: number): { position: 'relative'; top: string } | undefined =>
   style.baselineShift ? { position: 'relative', top: `${-style.baselineShift * scale}px` } : undefined
+
+/** a run that is an anchored object: its style says so, and what the run holds is only the marker character */
+export const isAnchorRun = (style: CharStyle, text: string): boolean =>
+  !!style.anchor && text.length > 0 && [...text].every((character) => character === ANCHOR_MARKER)
+
+/**
+ * How such a run looks: a box of the object's size that sits on the baseline of the line (`overflow: hidden` makes
+ * an inline-block's baseline its bottom edge), with the picture of the object as its background. The marker character
+ * stays inside, hidden, so that every count of characters (offsets, selection) still sees it.
+ */
+export const anchorRunCss = (style: CharStyle, scale: number) => ({
+  display: 'inline-block' as const,
+  overflow: 'hidden' as const,
+  verticalAlign: style.anchor?.offset ? `${-style.anchor.offset * scale}px` : ('baseline' as string),
+  width: `${(style.anchor?.w ?? 0) * scale}px`,
+  height: `${(style.anchor?.h ?? 0) * scale}px`,
+  backgroundImage: style.anchor ? `url("${style.anchor.src}")` : '',
+  backgroundSize: '100% 100%',
+  backgroundRepeat: 'no-repeat' as const,
+  fontSize: '0px',
+  lineHeight: '0',
+  letterSpacing: '0px',
+  color: 'transparent',
+  textShadow: 'none',
+})
 
 /** One piece of a run's text for formatting-mark rendering: a run of plain characters, or a single space / paragraph break. */
 export interface MarkPiece {
@@ -183,6 +209,11 @@ export function buildRunNodes(text: string, runs: Run[], scale: number, opts: Ru
     const span = document.createElement('span')
     applyRunStyle(span, r.style, scale, opts.outlineMode)
     const runText = text.slice(pos, pos + r.len)
+    if (isAnchorRun(r.style, runText)) {
+      span.className = 'anchored-object'
+      span.dataset.anchorId = r.style.anchor!.id
+      Object.assign(span.style, anchorRunCss(r.style, scale))
+    }
     const appendText = (parent: HTMLElement, value: string, start: number) => {
       if (!opts.footnoteMarkers && !opts.tocPageMarkers && !opts.tocLeaderMarkers) {
         parent.appendChild(document.createTextNode(value))
@@ -294,7 +325,7 @@ export interface ParagraphPatch extends ParagraphBox {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || p.wordSpacing !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (!!p.decoration || p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || p.wordSpacing !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
 
 /** the room (points, unscaled) a paragraph's fill or line keeps between itself and the text at the sides */
 const BOX_INSET = 3
@@ -447,6 +478,14 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       if (spacing) block.style.wordSpacing = `${spacing * scale}px`
     }
     Object.assign(block.style, paragraphSidePadding(patch, scale), paragraphBoxStyle(patch, scale))
+    // a decoration above opens a paragraph that starts here; one below closes a paragraph that ends here (both are
+    // pseudo-elements of the block: they hold no characters, so no count of characters sees them)
+    const decoration = patch?.decoration
+    const decoVars = decoration && !marker && (decoration.position === 'below' ? nl >= 0 : pos > 0 || !!opts.atParaStart) ? decorationVars(decoration, scale) : null
+    if (decoration && decoVars) {
+      block.classList.add(decorationClass(decoration)!)
+      for (const [name, value] of Object.entries(decoVars)) block.style.setProperty(name, value)
+    }
     if (patch?.secondLineIndent) block.style.textIndent = `${-patch.secondLineIndent * scale}px`
     block.style.boxSizing = 'border-box'
     const line = text.slice(pos, end)

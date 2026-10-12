@@ -1,3 +1,5 @@
+import type { ClipObjects } from '../objectClipboard'
+import { decorationClass, decorationVars } from '../decorations'
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { useRef } from 'react'
 import type { FootnoteHeadingDecoration, FootnoteReferenceLook } from '../document'
@@ -5,7 +7,7 @@ import { isOrnamentDecoration, ornamentSideMarkup, type DividerOrnamentImage } f
 import { letterCenterShift } from '../headingMetrics'
 import { cssTextAlign, effectiveLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { baselineShiftCss, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
+import { anchorRunCss, baselineShiftCss, isAnchorRun, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -194,6 +196,11 @@ interface Props {
   onCopyText: () => string | null
   onCopyFormattedText?: (a: number, b: number) => RichTextClipboard | null
   onPasteFormattedText?: (a: number, b: number, clipboard: RichTextClipboard) => void
+  /** objects copied from the page pasted into the text: they become one anchored object; false = not taken */
+  onPasteObjects?: (a: number, b: number, data: ClipObjects) => boolean
+  /** a double click on an anchored object: its id, and where it is on the screen */
+  onAnchorMenu?: (id: string, rect: DOMRect) => void
+  onAnchorSelect?: (id: string | null) => void
   onBackspaceAtStart: () => void
   onBackspaceAtParagraphStart?: (offset: number) => boolean
   onStopEditing: () => void
@@ -336,6 +343,7 @@ function RichText({
     carry = trailing
     // the sizes the paragraph is set in, for the height of its first lines (a window's band lies on its second)
     group.sizes.set(part.run.style.fontSize * scale, (group.sizes.get(part.run.style.fontSize * scale) ?? 0) + part.text.length)
+    const anchored = isAnchorRun(part.run.style, part.text)
     const partStyle: CSSProperties = {
       fontFamily: `"${part.run.style.fontFamily}", "Segoe UI", Arial, sans-serif`,
       color: part.run.style.color ?? '#111',
@@ -345,6 +353,7 @@ function RichText({
       letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
       textShadow: textShadow(part.run.style, scale) || undefined,
       ...baselineShiftCss(part.run.style, scale),
+      ...(anchored ? anchorRunCss(part.run.style, scale) : {}),
     }
     const pageMarkerAt = part.text.indexOf(TOC_PAGE_MARKER)
     const leaderMarkerAt = pageMarkerAt < 0 ? -1 : part.text.lastIndexOf(TOC_LEADER_MARKER, pageMarkerAt)
@@ -364,7 +373,7 @@ function RichText({
       )
     } else {
       group.nodes.push(
-        <span key={part.key} className={part.hl ? 'sel' : undefined} style={partStyle}>
+        <span key={part.key} className={anchored ? (part.hl ? 'sel anchored-object' : 'anchored-object') : part.hl ? 'sel' : undefined} data-anchor-id={anchored ? part.run.style.anchor!.id : undefined} style={partStyle}>
           {opening}
           {rendered}
         </span>,
@@ -397,8 +406,10 @@ function RichText({
         const markerOffset = marker ? paragraphListMarkerOffset(windowGap, patch?.leading ?? baseLeading, scale) : 0
         // the marker has the size of the text of its paragraph (the frame's own size can be smaller than a style's), so it lies level with the line
         const markerSize = marker && paragraph.sizes.size > 0 ? [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined
+        const decoration = patch?.decoration
+        const decoVars = decoration && !marker && (decoration.position === 'below' ? paragraph.index < startParaIndex + (text.match(/\n/g) ?? []).length : paragraph.index > startParaIndex || atParaStart) ? decorationVars(decoration, scale) : null
         const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px`, ...(markerSize ? { fontSize: `${markerSize}px` } : {}) } as CSSProperties : {}
-        return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} className={[tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : '', decoVars ? decorationClass(decoration) : ''].filter(Boolean).join(' ') || undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(decoVars as CSSProperties | null ?? {}), ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
       })}
     </>
   )
@@ -562,6 +573,9 @@ export function TextFrameView(p: Props) {
           onCopyText={p.onCopyText}
           onCopyFormattedText={p.onCopyFormattedText}
           onPasteFormattedText={p.onPasteFormattedText}
+          onPasteObjects={p.onPasteObjects}
+          onAnchorMenu={p.onAnchorMenu}
+          onAnchorSelect={p.onAnchorSelect}
           onStop={p.onStopEditing}
           onLineBoundary={p.onLineBoundary}
           onDragOutside={p.onDragOutside}

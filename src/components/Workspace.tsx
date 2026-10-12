@@ -1,3 +1,4 @@
+import { cleanLineWidthPos, MAX_LINE_WIDTH_EDGE, MAX_LINE_WIDTH_MULTIPLE } from '../lineProfile'
 import { repairImageStroke, type ImagePixelPoint } from '../imageRepair'
 import { fontInstalled, useFontCatalog, weightName } from '../fonts'
 import { runPreflight, type PreflightIssue } from '../preflight'
@@ -35,6 +36,10 @@ import {
   DEFAULT_TEXT_STYLE,
   defaultTextStyle,
   DEFAULT_SPACE_AFTER,
+  ANCHOR_MARKER,
+  type AnchoredObject,
+  type ObjectStyleRecord,
+  type ObjectStyleSettings,
   FOOTNOTE_MARKER,
   frameSpaceAfter,
   frameSpaceBefore,
@@ -96,6 +101,8 @@ import {
 } from '../document'
 import { editRangeInStory, reportIsViewOf } from '../oversetCaret'
 import { isTextEditor, isTyping } from '../dom'
+import { colorParagraphs, textColorUses } from '../colorParagraphs'
+import { drawLines, lineVisualBox } from '../lineSnapshot'
 import { HANDLES, ROTATE_CORNERS, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, type PlacedText } from '../importText'
@@ -134,7 +141,7 @@ import { centerlinesOf, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from '../brushes'
 import { loadCustomBrushes, MAX_CUSTOM_BRUSHES, restyleStroke, saveCustomBrushes, strokeShape, type CustomBrush } from '../customBrushes'
 import { lineLook, type Sharpness } from '../sharpness'
 import { readBrushFile } from '../brushImport'
-import { ColorSamplerLens, type ColorSamplerPreview } from './ColorSamplerLens'
+import { SAMPLER_CELL_PX, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
 import { FontPicker } from './FontPicker'
 import type { AlignOp } from './AlignButtons'
@@ -155,6 +162,10 @@ import { FootnoteEditorDialog, FootnoteOptionsDialog } from './FootnoteDialogs'
 import { ParagraphPanel } from './ParagraphPanel'
 import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStylesPanel'
 import { StyleManagerPanel } from './StyleManagerPanel'
+import { ObjectStylesPanel } from './ObjectStylesPanel'
+import { decorationPatches, withDecorations } from '../decorations'
+import { applyToImage, applyToShape, lookOfImage, lookOfShape, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from '../objectStyles'
+import { AnchorHandles } from './AnchorHandles'
 import { PathTextEditor } from './PathTextEditor'
 import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg } from './ShapeFrameView'
 import { ShapeProperties } from './ShapeProperties'
@@ -446,6 +457,7 @@ interface Props {
   paragraphStyles: ParagraphStyleRecord[]
   /** the document's named character styles */
   characterStyles: CharacterStyleRecord[]
+  objectStyles: ObjectStyleRecord[]
   onParagraphStylesChange: (styles: ParagraphStyleRecord[], coalesceKey?: string) => void
   /** the document's parent (master) pages */
   parents: ParentPage[]
@@ -593,6 +605,7 @@ export function Workspace({
   onLayersChange,
   paragraphStyles,
   characterStyles,
+  objectStyles,
   onParagraphStylesChange,
   parents,
   onParentsChange,
@@ -650,11 +663,14 @@ export function Workspace({
   // Safe when stale (e.g. after a resize instead of a text edit): flowFrames only reuses a frame's cached range when
   // its own full signature (size, floats, style...) still matches too, and re-verifies the reused text didn't change.
   const dirtyOffsetRef = useRef<number | undefined>(undefined)
+  // the frames as they are laid out and drawn: the decoration of the paragraph styles written into the patches of the stories (never saved)
+  const layoutFrames = useMemo(() => withDecorations(frames, paragraphStyles, objectStyles), [frames, paragraphStyles, objectStyles])
+  const layoutById = useMemo(() => new Map(layoutFrames.map((frame) => [frame.id, frame])), [layoutFrames])
   const primaryFrameIds = useMemo(() => primaryTextFrameOrder(doc, frames), [doc, frames])
   const sharedFootnoteGroups = useMemo(() => primaryTextFramePageGroups(doc, frames), [doc, frames])
   const provisionalFlow = useMemo(() => sharedFootnoteGroups.length
-    ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, new Map(), primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
-    : flowFrames(frames, images, footnoteConfig, undefined, new Map(), paragraphStyles, dirtyOffsetRef.current), [frames, images, footnoteConfig, paragraphStyles, primaryFrameIds, sharedFootnoteGroups])
+    ? flowFramesWithFootnoteContinuation(layoutFrames, images, footnoteConfig, new Map(), primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
+    : flowFrames(layoutFrames, images, footnoteConfig, undefined, new Map(), paragraphStyles, dirtyOffsetRef.current), [layoutFrames, images, footnoteConfig, paragraphStyles, primaryFrameIds, sharedFootnoteGroups])
   const footnoteNumbers = useMemo(() => {
     const byId = new Map(frames.map((frame) => [frame.id, frame]))
     const entries = [...provisionalFlow].flatMap(([frameId, frameFlow]) => {
@@ -684,7 +700,7 @@ export function Workspace({
     if (nextFrames !== frames) onFramesChange(nextFrames, 'primary-thread-migration')
   }, [doc.primaryTextFrame, previewMode, editingParentId, primaryFrameIds, frames, onFramesChange])
   const flow = useMemo(() => footnoteNumbers.size
-    ? flowFramesWithFootnoteContinuation(frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
+    ? flowFramesWithFootnoteContinuation(layoutFrames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
     : provisionalFlow, [frames, images, footnoteConfig, footnoteNumbers, primaryFrameIds, paragraphStyles, provisionalFlow, sharedFootnoteGroups])
   // the text loaded by a semi-automatic placing is what the last frame of the thread could not hold: once the thread holds
   // all of it (a page was threaded by hand, or a frame was made bigger) there is nothing left to place
@@ -760,7 +776,12 @@ export function Workspace({
   }, [tool])
   const [colorSamplerActive, setColorSamplerActive] = useState(false)
   const [rasterBrushColor, setRasterBrushColor] = useState<string | null>(null)
+  // Alt held while the paint circle is on: the cursor is the sampler for as long as it is held, a click takes a new colour
+  const [samplerPeek, setSamplerPeek] = useState(false)
   const [colorSamplerPreview, setColorSamplerPreview] = useState<ColorSamplerPreview | null>(null)
+  // the lens is a square of cells (odd, so one is the centre): [ and ] make it smaller and bigger
+  const samplerCells = useRef(5)
+  const samplerPointer = useRef<{ x: number; y: number } | null>(null)
   const colorSamplerLensRef = useRef<HTMLDivElement>(null)
   const samplerImageCache = useRef(new Map<string, Promise<HTMLCanvasElement>>())
   const samplerMoveToken = useRef(0)
@@ -782,6 +803,7 @@ export function Workspace({
       setRasterBrushColor(null)
       setColorSamplerPreview(null)
       paintStroke.current = null
+      setPaintPreview(null)
       setEraserPoint(null)
     }
     window.addEventListener('keydown', cancel)
@@ -790,6 +812,29 @@ export function Workspace({
   useEffect(() => {
     if (tool !== 'color' && tool !== 'gradient' && tool !== 'swatches') setRasterBrushColor(null)
   }, [tool])
+  useEffect(() => {
+    if (!rasterBrushColor) {
+      setSamplerPeek(false)
+      return
+    }
+    const down = (event: KeyboardEvent) => {
+      if (event.key !== 'Alt' || isTyping(event.target)) return
+      event.preventDefault()
+      setSamplerPeek(true)
+    }
+    const up = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') setSamplerPeek(false)
+    }
+    const off = () => setSamplerPeek(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', off)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', off)
+    }
+  }, [rasterBrushColor])
   const [sampledTextStyle, setSampledTextStyle] = useState<SampledTextDesign | null>(null)
   const [space, setSpace] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
@@ -964,8 +1009,12 @@ export function Workspace({
   const eraserDragKey = useRef<string | null>(null)
   const eraserPreviousPoint = useRef<{ x: number; y: number } | null>(null)
   const repairStroke = useRef<{ id: string; assetId: string; points: ImagePixelPoint[]; radius: number } | null>(null)
+  // the stroke being dragged, drawn over the picture at once (the picture itself is repainted when the stroke ends)
+  const [paintPreview, setPaintPreview] = useState<{ points: { x: number; y: number }[]; color: string; strength: number; clip: { x: number; y: number; w: number; h: number } } | null>(null)
   const paintStroke = useRef<{ kind: 'image' | 'shape'; id: string; assetId: string; points: ImagePixelPoint[]; radius: number; color: string; strength: number } | null>(null)
   const [eraserRadius, setEraserRadius] = useState(12)
+  /** the biggest the circle of the eraser, the repair brush and the paint circle gets (screen pixels of radius) */
+  const MAX_BRUSH_RADIUS = 1000
   const [rasterBrushStrength, setRasterBrushStrength] = useState(100)
   const [eraserPoint, setEraserPoint] = useState<{ x: number; y: number } | null>(null)
   const activateTool = useCallback((nextTool: ToolId) => {
@@ -1004,6 +1053,10 @@ export function Workspace({
     } | null>(null)
   /** the right-click menu of the rulers (units), at a screen position */
   const [rulerMenu, setRulerMenu] = useState<{ x: number; y: number } | null>(null)
+  /** the menu of an anchored object (a double click on it in the text): where it is on the screen */
+  const [anchorMenu, setAnchorMenu] = useState<{ id: string; left: number; top: number; bottom: number } | null>(null)
+  /** the anchored object that is selected: its handles are over it */
+  const [selectedAnchor, setSelectedAnchor] = useState<string | null>(null)
   const [objectMenu, setObjectMenu] = useState<{ x: number; y: number; sourceShapeId?: string; targetShapeId?: string; textFrameId?: string } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   // the newest editing frame, for the selection drag: RichEditor keeps calling the callback it had when it was last
@@ -1029,8 +1082,10 @@ export function Workspace({
   const [editingFootnoteOffset, setEditingFootnoteOffset] = useState<number | null>(null)
   const [footnoteRequest, setFootnoteRequest] = useState<{ noteId: string; frameId: string; a: number; b: number; token: number } | null>(null)
   const styleSearchIndex = useRef<Record<string, number>>({})
-  /** which occurrence of the tag search (ניהול סגנונות > כלים) the explorer is on, per tag text */
+  /** which occurrence of the tag search (ניהול סגנונות > סימן) the explorer is on, per tag text */
   const tagSearchIndex = useRef<Record<string, number>>({})
+  /** which paragraph of the colour search (ניהול סגנונות > צבעים) the explorer is on, per colour and mode */
+  const colorSearchIndex = useRef<Record<string, number>>({})
   /** rubber-band rectangle (world pt) while dragging a new text frame with the Type tool */
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const createStart = useRef<{ x: number; y: number } | null>(null)
@@ -1079,6 +1134,7 @@ export function Workspace({
   const enterHeld = useRef(false)
   const shapeBoxRef = useRef<Box | null>(null)
   /** dragging one endpoint of an existing line: the other endpoint stays put */
+  const lineWidthDrag = useRef<{ id: string; which: 0 | 1 | 2; widths: [number, number, number]; perp0: number } | null>(null)
   const lineEndDrag = useRef<{ id: string; fixed: { x: number; y: number } } | null>(null)
   /** rounding a rectangle's corners: the shape, the corners taking part (the one grabbed, plus the ones swept over) and the grab offset */
   const cornerDrag = useRef<{ id: string; corners: number[]; origin: number; sweep: boolean; grab: number; last: { x: number; y: number }; key: string } | null>(null)
@@ -1413,7 +1469,7 @@ export function Workspace({
   const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[]; paraKeepWithNext?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches' | 'footnotes'>, dirtyOffset?: number) => {
     dirtyOffsetRef.current = dirtyOffset
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
-    const nf = flowFrames(next, images, doc.footnotes, undefined, new Map(), paragraphStyles, dirtyOffset)
+    const nf = flowFrames(withDecorations(next, paragraphStyles, objectStyles), images, doc.footnotes, undefined, new Map(), paragraphStyles, dirtyOffset)
     const chain = chainOf(next, headId)
     const target =
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
@@ -1696,6 +1752,20 @@ export function Workspace({
     // a selection across a thread (Ctrl+A) is what the edit replaces; a caret in text no frame shows is where it is made
     const { a, b } = editRangeInStory(fl, from, to, textSel?.headId === fl.headId ? textSel : null, oversetCaret.current)
     applyEdit(fl.headId, a, b, insert)
+  }
+
+  /** objects copied from the page pasted between the words of a text: they become one anchored object, a character of the story */
+  const handlePasteObjects = (frameId: string, from: number, to: number, data: ClipObjects): boolean => {
+    const preview = data.preview
+    const fl = flow.get(frameId)
+    const head = fl ? frames.find((frame) => frame.id === fl.headId) : undefined
+    if (!preview || !fl || !head) return false
+    const { a, b } = editRangeInStory(fl, from, to, textSel?.headId === fl.headId ? textSel : null, oversetCaret.current)
+    const { anchor: _inherited, ...look } = styleAtChar(normalizeRuns(head.text, head.runs, head), Math.max(0, a - 1), head)
+    const anchor: AnchoredObject = { id: newFrameId(), src: preview.src, w: preview.w, h: preview.h, source: { images: data.images, shapes: data.shapes } }
+    applyEdit(fl.headId, a, b, ANCHOR_MARKER, undefined, { text: ANCHOR_MARKER, runs: [{ len: 1, style: { ...look, anchor } }], paragraphs: [] })
+    setSelectedAnchor(anchor.id)
+    return true
   }
 
   const handlePasteFormattedText = (frameId: string, from: number, to: number, clipboard: RichTextClipboard) => {
@@ -2516,13 +2586,13 @@ export function Workspace({
     )
   }
 
-  const sampleTextStyle = (id: string) => {
+  const sampleTextStyle = (id: string, pos: number | null) => {
     const fl = flow.get(id)
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
     const selected = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length
-    const offset = Math.max(0, Math.min(head.text.length, selected && textSel ? Math.min(textSel.a, textSel.b) : fl.start))
+    const offset = Math.max(0, Math.min(head.text.length, selected && textSel ? Math.min(textSel.a, textSel.b) : fl.start + (pos ?? 0)))
     const paragraphIndex = paraIndexAt(head.text, offset)
     const paragraphOverride = head.paragraphStylePatches?.[paragraphIndex] ?? {}
     const style = charStyleOf(styleAtChar(runs, offset, head))
@@ -2549,11 +2619,10 @@ export function Workspace({
     })
   }
 
-  const applySampledTextStyle = (id: string, sampled: SampledTextDesign) => {
+  const applySampledTextStyle = (id: string, sampled: SampledTextDesign, pos: number | null) => {
     const part = flow.get(id)
     const head = part && frames.find((frame) => frame.id === part.headId)
     if (!part || !head) return
-    const chainIds = new Set(chainOf(frames, id).map((frame) => frame.id))
     const runs = normalizeRuns(head.text, head.runs, head)
     const characterPatch: Partial<CharStyle> = {
       fontFamily: sampled.character.fontFamily,
@@ -2574,38 +2643,26 @@ export function Workspace({
     }
     const paragraphPatch = sampled.paragraph
     const paragraphCount = head.text.split('\n').length
-    const paragraphStylePatches = Array.from({ length: paragraphCount }, () => ({ ...paragraphPatch }))
-    const paraSpaceBefore = Array.from({ length: paragraphCount }, () => paragraphPatch.spaceBefore)
-    const paraSpaceAfter = Array.from({ length: paragraphCount }, () => paragraphPatch.spaceAfter)
-    const paraKeepFirstLines = Array.from({ length: paragraphCount }, () => sampled.keepFirstLines || null)
-    const paraKeepLastLines = Array.from({ length: paragraphCount }, () => sampled.keepLastLines || null)
-    const paraKeepWithNext = Array.from({ length: paragraphCount }, () => sampled.keepWithNext || null)
-    onFramesChange(frames.map((frame) => {
-      if (!chainIds.has(frame.id)) return frame
-      return {
-        ...frame,
-        ...characterPatch,
-        align: paragraphPatch.align,
-        leading: paragraphPatch.leading,
-        wordSpacingMin: paragraphPatch.wordSpacingMin,
-        wordSpacingMax: paragraphPatch.wordSpacingMax,
-        spaceBefore: paragraphPatch.spaceBefore,
-        spaceAfter: paragraphPatch.spaceAfter,
-        indentLeft: paragraphPatch.indentLeft,
-        indentRight: paragraphPatch.indentRight,
-        firstLineIndent: paragraphPatch.firstLineIndent,
-        secondLineIndent: paragraphPatch.secondLineIndent,
-        feather: sampled.feather,
-        ...(frame.id === head.id ? {
-          runs: styleRange(runs, 0, head.text.length, characterPatch),
-          paragraphStylePatches,
-          paraSpaceBefore,
-          paraSpaceAfter,
-          paraKeepFirstLines,
-          paraKeepLastLines,
-          paraKeepWithNext,
-        } : {}),
-      }
+    const targetOffset = Math.max(0, Math.min(head.text.length, part.start + (pos ?? 0)))
+    const index = paraIndexAt(head.text, targetOffset)
+    const [from, to] = paragraphBounds(head.text, index)
+    const withAt = (list: (number | null)[] | undefined, value: number | null | undefined): (number | null)[] => {
+      const next = Array.from({ length: paragraphCount }, (_, i) => list?.[i] ?? null)
+      next[index] = value ?? null
+      return next
+    }
+    const paragraphStylePatches: NonNullable<TextFrame['paragraphStylePatches']> = Array.from({ length: paragraphCount }, (_, i) => head.paragraphStylePatches?.[i] ?? {})
+    paragraphStylePatches[index] = { ...paragraphStylePatches[index], ...paragraphPatch }
+    // only the clicked paragraph takes the sampled look: the rest of the story keeps its own
+    onFramesChange(frames.map((frame) => frame.id !== head.id ? frame : {
+      ...frame,
+      runs: styleRange(runs, from, to, characterPatch),
+      paragraphStylePatches,
+      paraSpaceBefore: withAt(frame.paraSpaceBefore, paragraphPatch.spaceBefore),
+      paraSpaceAfter: withAt(frame.paraSpaceAfter, paragraphPatch.spaceAfter),
+      paraKeepFirstLines: withAt(frame.paraKeepFirstLines, sampled.keepFirstLines || null),
+      paraKeepLastLines: withAt(frame.paraKeepLastLines, sampled.keepLastLines || null),
+      paraKeepWithNext: withAt(frame.paraKeepWithNext, sampled.keepWithNext || null),
     }), `eyedropper-text:${head.id}`)
   }
 
@@ -2701,12 +2758,12 @@ export function Workspace({
    * a single combined edit from the first change to the last would have handed every paragraph in between the
    * look of the first one.
    */
-  const cleanSpacingCmd = () => {
+  const cleanSpacingCmd = (options: { spaces?: boolean; paragraphs?: boolean } = {}) => {
     const selection = textSel && textSel.a !== textSel.b ? { headId: textSel.headId, from: Math.min(textSel.a, textSel.b), to: Math.max(textSel.a, textSel.b) } : null
     const heads = selection ? frames.filter((f) => f.id === selection.headId) : headFrames(frames).filter((head) => !head.tocPageReferences?.length && selectable(head.id))
     const edited = new Map<string, TextFrame>()
     for (const head of heads) {
-      const { ranges, dropped } = selection ? cleanSpacingPlan(head.text, selection.from, Math.min(selection.to, head.text.length)) : cleanSpacingPlan(head.text)
+      const { ranges, dropped } = selection ? cleanSpacingPlan(head.text, selection.from, Math.min(selection.to, head.text.length), options) : cleanSpacingPlan(head.text, 0, head.text.length, options)
       if (ranges.length) edited.set(head.id, replaceInStory(head, ranges.map(([start, end]) => ({ start, end, replacement: '' })), { dropParagraphs: dropped }))
     }
     if (selection) setTextSel(null)
@@ -2933,7 +2990,7 @@ export function Workspace({
 
   /** clicking a picture: the Selection tool selects it and starts moving it (other tools pass the click on) */
   const onImagePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || (tool !== 'select' && tool !== 'transform' && tool !== 'direct' && tool !== 'heal')) return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || colorSamplerActive || !!rasterBrushColor || (tool !== 'select' && tool !== 'transform' && tool !== 'direct' && tool !== 'heal')) return
     if (itemLocks[id]) return
     const im = images.find((x) => x.id === id)
     if (!im) return
@@ -4185,6 +4242,15 @@ export function Workspace({
     const data = snapshotObjects(ids)
     if (!data) return null
     const token = setClip(data)
+    // pictures and shapes are drawn into a picture now, while they are still on the page: that is what they become when pasted into text
+    if (data.frames.length === 0 && ids.length <= 12) {
+      const candidates = candidatesForIds(ids)
+      if (candidates.length === ids.length && candidates.every(hasRequiredAssets)) {
+        void captureAnchorPreview(candidates).then((preview) => {
+          if (preview) data.preview = preview
+        })
+      }
+    }
     if (cut) deleteSelection(ids, [])
     return token
   }
@@ -4208,6 +4274,84 @@ export function Workspace({
   const pasteFromClipboard = () => {
     const entry = lastClip()
     if (entry) pasteEntry(entry)
+  }
+
+  /**
+   * "הסר עוגן": the object leaves the line and is back on the page, where it stood on the screen (the text closes over its
+   * place). The character goes first; the objects come in a moment later, once the story has its new text (one edit at a time).
+   */
+  /** the anchored object with this id, as it is in the text now */
+  const anchorById = (id: string): AnchoredObject | undefined => {
+    for (const head of headFrames(frames)) {
+      const found = head.runs?.find((run) => run.style.anchor?.id === id)
+      if (found) return found.style.anchor
+    }
+    return undefined
+  }
+  /** size (and how far below the baseline) of an anchored object, from its handles; one undo step per drag */
+  const resizeAnchor = (id: string, w: number, h: number, offset: number) => {
+    const head = headFrames(frames).find((frame) => frame.runs?.some((run) => run.style.anchor?.id === id))
+    if (!head?.runs) return
+    const runs = head.runs.map((run) => {
+      const anchor = run.style.anchor
+      return anchor?.id === id ? { ...run, style: { ...run.style, anchor: { ...anchor, w, h, offset: offset || undefined } } } : run
+    })
+    onFramesChange(frames.map((frame) => (frame.id === head.id ? { ...frame, runs } : frame)), `anchor-resize:${id}`)
+  }
+  useEffect(() => {
+    if (editingId === null) setSelectedAnchor(null)
+  }, [editingId])
+  const anchorOps = useRef<{ restore: (anchor: AnchoredObject, world: { x: number; y: number }) => void }>({ restore: () => {} })
+  const removeAnchor = (id: string, at: { left: number; top: number }) => {
+    for (const head of headFrames(frames)) {
+      let start = 0
+      for (const run of normalizeRuns(head.text, head.runs, head)) {
+        const anchor = run.style.anchor
+        if (anchor?.id === id) {
+          const offset = head.text.indexOf(ANCHOR_MARKER, start)
+          if (offset < start || offset >= start + run.len) return
+          const world = toWorld(at.left, at.top)
+          applyEdit(head.id, offset, offset + 1, '')
+          setTimeout(() => anchorOps.current.restore(anchor, world), 0)
+          return
+        }
+        start += run.len
+      }
+    }
+  }
+  anchorOps.current = {
+    restore: (anchor, world) => {
+      const images = anchor.source?.images ?? []
+      const shapes = anchor.source?.shapes ?? []
+      const whole = images.length + shapes.length > 0 && images.every((image) => !!assets[image.assetId]) && shapes.every((shape) => !shape.image || !!assets[shape.image.assetId])
+      if (whole) {
+        // the box the picture was made of: a line counts with its thickness and its arrow heads
+        const boxes = [
+          ...images.map((image) => ({ x: image.x, y: image.y, w: image.w, h: image.h })),
+          ...shapes.map((shape) => (shape.kind === 'line' ? lineVisualBox(shape) : { x: shape.x, y: shape.y, w: shape.w, h: shape.h })),
+        ]
+        const ox = Math.min(...boxes.map((box) => box.x))
+        const oy = Math.min(...boxes.map((box) => box.y))
+        // resized in the text: they come back in the size it was made
+        const w0 = Math.max(...boxes.map((box) => box.x + box.w)) - ox
+        const h0 = Math.max(...boxes.map((box) => box.y + box.h)) - oy
+        const sx = w0 > 0 ? anchor.w / w0 : 1
+        const sy = h0 > 0 ? anchor.h / h0 : 1
+        const scaled = <T extends { x: number; y: number; w: number; h: number }>(object: T): T => ({ ...object, x: ox + (object.x - ox) * sx, y: oy + (object.y - oy) * sy, w: object.w * sx, h: object.h * sy })
+        insertObjects({ frames: [], images: images.map(scaled), shapes: shapes.map(scaled), assets: {} }, { x: world.x - ox, y: world.y - oy })
+        return
+      }
+      // the objects themselves are gone (an older file): the picture of them is what comes back
+      const picture = document.createElement('img')
+      picture.onload = () => {
+        const assetId = newFrameId()
+        const asset: Asset = { name: 'עוגן.png', mime: 'image/png', dataUrl: anchor.src, width: picture.naturalWidth, height: picture.naturalHeight }
+        const frame: ImageFrame = { id: newFrameId(), label: 'אובייקט מעוגן', x: world.x, y: world.y, w: anchor.w, h: anchor.h, assetId, fit: 'stretch', layerId: creationLayerId }
+        pageOps.commit({ assets: { ...assetsRef.current, [assetId]: asset }, images: [...images, frame] })
+        setSelectedIdRaw(frame.id)
+      }
+      picture.src = anchor.src
+    },
   }
 
   /** a copy right on top of the selected objects (Ctrl+F) */
@@ -4402,6 +4546,28 @@ export function Workspace({
     const canvas = await captureObjects(captureItems, bounds, captureScale)
     if (canvas.width < 1 || canvas.height < 1) throw new Error('image capture returned an empty canvas')
     return { canvas, bounds }
+  }
+
+  /** what the objects look like, as a picture no bigger than 1600 px and its size in points: the form an anchored object has in the text */
+  const captureAnchorPreview = async (candidates: FlattenCandidate[]): Promise<{ src: string; w: number; h: number } | null> => {
+    try {
+      // lines are drawn from their geometry: a straight one has no height on the screen, so there is nothing there to capture
+      const lines = candidates.flatMap((candidate) => (candidate.kind === 'shape' && candidate.shape.kind === 'line' ? [candidate.shape] : []))
+      const drawn = lines.length === candidates.length ? drawLines(lines) : null
+      const { canvas, bounds } = drawn ? { canvas: drawn.canvas, bounds: { width: drawn.w * zoom, height: drawn.h * zoom } } : await captureSelection(candidates)
+      const longest = Math.max(canvas.width, canvas.height)
+      let out = canvas
+      if (longest > 1600) {
+        const k = 1600 / longest
+        out = document.createElement('canvas')
+        out.width = Math.max(1, Math.round(canvas.width * k))
+        out.height = Math.max(1, Math.round(canvas.height * k))
+        out.getContext('2d')?.drawImage(canvas, 0, 0, out.width, out.height)
+      }
+      return { src: canvasDataUrl(out), w: bounds.width / zoom, h: bounds.height / zoom }
+    } catch {
+      return null
+    }
   }
 
   const exportSelectedPng = async () => {
@@ -4825,7 +4991,7 @@ export function Workspace({
       const { prepareExport } = await import('../pdfExport')
       const { outlineFrame, MAX_OUTLINE_LETTERS } = await import('../textOutlines')
       const { PICTURE_REASONS } = await import('../vectorText')
-      const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections })
+      const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, objectStyles, sections })
       const made: ShapeFrame[] = []
       for (const frame of frames.filter((candidate) => ids.has(candidate.id))) {
         const outcome = await outlineFrame(prepared, frame, newFrameId)
@@ -5709,6 +5875,9 @@ export function Workspace({
 
   const updateColorSampler = async (clientX: number, clientY: number): Promise<string | null> => {
     const moveToken = ++samplerMoveToken.current
+    samplerPointer.current = { x: clientX, y: clientY }
+    const cells = samplerCells.current
+    const reach = (cells - 1) / 2
     const target = document.elementsFromPoint(clientX, clientY).map((element) => element.closest<HTMLElement>('[data-object-id][data-object-kind]')).find((element): element is HTMLElement => !!element)
     const kind = target?.dataset.objectKind
     const id = target?.dataset.objectId
@@ -5725,9 +5894,9 @@ export function Workspace({
       const imagePointAt = (point: { x: number; y: number }) => image && asset ? imagePixelAt(image, asset, point) : shape && asset && shape.image ? shapeImagePixelAt(shape, asset, point) : null
       const imageCenter = samplesImage ? imagePointAt(toWorld(clientX, clientY)) : null
       const imagePoints = samplesImage && asset && canvas && context
-        ? Array.from({ length: 81 }, (_, index) => {
-            const row = Math.floor(index / 9) - 4
-            const column = index % 9 - 4
+        ? Array.from({ length: cells * cells }, (_, index) => {
+            const row = Math.floor(index / cells) - reach
+            const column = index % cells - reach
             if (!imageCenter) return null
             const world = toWorld(clientX + column, clientY + row)
             return image && asset ? imagePixelAt(image, asset, world) : shape && asset ? shapeImagePixelAt(shape, asset, world) : null
@@ -5746,8 +5915,8 @@ export function Workspace({
           })()
         : null
       let pixelIndex = 0
-      for (let row = -4; row <= 4; row++) {
-        for (let column = -4; column <= 4; column++) {
+      for (let row = -reach; row <= reach; row++) {
+        for (let column = -reach; column <= reach; column++) {
           const world = toWorld(clientX + column, clientY + row)
           let color = '#ffffff'
           if (samplesImage && asset && canvas && imagePoints) {
@@ -5773,16 +5942,26 @@ export function Workspace({
       if (moveToken === samplerMoveToken.current) setColorSamplerPreview({ ...samplerLensPosition(clientX, clientY), color: centerColor, pixels, source: kind ?? 'page' })
       return centerColor
     } catch {
-      if (moveToken === samplerMoveToken.current) setColorSamplerPreview({ ...samplerLensPosition(clientX, clientY), color: centerColor, pixels: Array(81).fill(centerColor), source: kind ?? 'page' })
+      if (moveToken === samplerMoveToken.current) setColorSamplerPreview({ ...samplerLensPosition(clientX, clientY), color: centerColor, pixels: Array(cells * cells).fill(centerColor), source: kind ?? 'page' })
       return centerColor
     }
   }
 
   const samplerLensPosition = (clientX: number, clientY: number) => {
-    const left = Math.max(0, Math.min(clientX - 42, window.innerWidth - 84))
-    const top = Math.max(0, Math.min(clientY - 42, window.innerHeight - 84))
-    const readoutTop = top > window.innerHeight - 112 ? -22 : 88
+    const size = samplerCells.current * SAMPLER_CELL_PX
+    const left = Math.max(0, Math.min(clientX - size / 2, window.innerWidth - size))
+    const top = Math.max(0, Math.min(clientY - size / 2, window.innerHeight - size))
+    const readoutTop = top > window.innerHeight - size - 28 ? -22 : size + 4
     return { left, top, focusX: clientX - left, focusY: clientY - top, readoutTop }
+  }
+
+  const resizeColorSamplerRef = useRef<(delta: number) => void>(() => {})
+  const resizeColorSampler = (delta: number) => {
+    const next = Math.max(3, Math.min(21, samplerCells.current + delta * 2))
+    if (next === samplerCells.current) return
+    samplerCells.current = next
+    const point = samplerPointer.current
+    if (point) void updateColorSampler(point.x, point.y)
   }
 
   const moveColorSamplerLens = (clientX: number, clientY: number) => {
@@ -5795,9 +5974,11 @@ export function Workspace({
       lens.style.setProperty('--sampler-focus-y', `${position.focusY}px`)
       lens.style.setProperty('--sampler-readout-top', `${position.readoutTop}px`)
     } else {
-      setColorSamplerPreview((current) => current ?? { ...position, color: '#ffffff', pixels: Array(81).fill('#ffffff'), source: 'page' })
+      setColorSamplerPreview((current) => current ?? { ...position, color: '#ffffff', pixels: Array(samplerCells.current ** 2).fill('#ffffff'), source: 'page' })
     }
   }
+
+  resizeColorSamplerRef.current = resizeColorSampler
 
   const addColorSample = (color: string) => {
     // a solid that is selected gets the colour at once (its front, and its sides shaded from it), as if the sample were clicked in the panel
@@ -5826,18 +6007,138 @@ export function Workspace({
   }
 
   const toggleColorSamplerTool = () => {
-    if (dockOpenId === 'color') {
-      onDockOpenChange(null)
+    // sampling: the button again leaves it
+    if (colorSamplerActive) {
       setColorSamplerActive(false)
       setColorSamplerPreview(null)
       return
     }
-    if (enabledDockPanelIds.includes('color')) onDockOpenChange('color')
-    else onDockPanelToggle('color')
+    // from the paint circle (or from nothing): sampling starts again, with the colour tab shown
+    if (dockOpenId !== 'color') {
+      if (enabledDockPanelIds.includes('color')) onDockOpenChange('color')
+      else onDockPanelToggle('color')
+    }
     startColorSampler()
   }
 
   const deleteColorSample = (id: string) => pageOps.commit({ colorSamples: colorSamples.filter((sample) => sample.id !== id) })
+
+  // ── סגנונות אובייקט ──────────────────────────────────────────────────────────────────
+  /** the selected shapes and pictures (a text frame has no object style) */
+  const objectStyleTargets = () => {
+    const ids = new Set(selectedObjectIds())
+    return { shapes: shapes.filter((shape) => ids.has(shape.id)), images: images.filter((image) => ids.has(image.id)) }
+  }
+  const objectStyleSelection = (() => {
+    const targets = objectStyleTargets()
+    const all = [...targets.shapes, ...targets.images]
+    if (all.length === 0) return { count: 0, styleId: null as string | null | undefined, modified: false }
+    const first = all[0].objectStyleId ?? null
+    const same = all.every((object) => (object.objectStyleId ?? null) === first)
+    const record = same && first ? objectStyles.find((style) => style.id === first) : undefined
+    return { count: all.length, styleId: same ? first : undefined, modified: !!record && all.some((object) => objectStyleOverrides(object, record.settings).length > 0) }
+  })()
+  const objectStyleUsage = useMemo(() => {
+    const usage: Record<string, number> = {}
+    for (const object of [...shapes, ...images]) if (object.objectStyleId) usage[object.objectStyleId] = (usage[object.objectStyleId] ?? 0) + 1
+    return usage
+  }, [shapes, images])
+  const objectStyleLook = (): ObjectStyleSettings | null => {
+    const targets = objectStyleTargets()
+    if (targets.shapes[0]) return lookOfShape(targets.shapes[0])
+    if (targets.images[0]) return lookOfImage(targets.images[0])
+    return null
+  }
+  /** the style (or none: they keep the look they have) given to every selected shape and picture */
+  const applyObjectStyle = (styleId: string | null) => {
+    const targets = objectStyleTargets()
+    const record = styleId ? objectStyles.find((style) => style.id === styleId) : undefined
+    if (targets.shapes.length + targets.images.length === 0 || (styleId && !record)) return
+    const ids = new Set([...targets.shapes, ...targets.images].map((object) => object.id))
+    commitMultiObjectChange({
+      shapes: shapes.map((shape) => (ids.has(shape.id) ? (record ? applyToShape(shape, record.settings, record.id) : withoutObjectStyle(shape)) : shape)),
+      images: images.map((image) => (ids.has(image.id) ? (record ? applyToImage(image, record.settings, record.id) : withoutObjectStyle(image)) : image)),
+    }, `object-style:${styleId ?? 'none'}`)
+  }
+  const createObjectStyle = (name: string, settings: ObjectStyleSettings, apply: boolean) => {
+    const record: ObjectStyleRecord = { id: newFrameId(), name: uniqueObjectStyleName(objectStyles, name), settings }
+    const targets = apply ? objectStyleTargets() : { shapes: [], images: [] }
+    const ids = new Set([...targets.shapes, ...targets.images].map((object) => object.id))
+    const withStyle = {
+      shapes: shapes.map((shape) => (ids.has(shape.id) ? applyToShape(shape, settings, record.id) : shape)),
+      images: images.map((image) => (ids.has(image.id) ? applyToImage(image, settings, record.id) : image)),
+    }
+    if (editingParentId) {
+      pageOps.commit({ objectStyles: [...objectStyles, record] })
+      if (ids.size > 0) commitMultiObjectChange(withStyle, 'object-style:create')
+    } else {
+      pageOps.commit({ objectStyles: [...objectStyles, record], ...(ids.size > 0 ? withStyle : {}) })
+    }
+  }
+  /** a style changed: every object that follows it takes the new settings, on the pages and on the parent pages */
+  const changeObjectStyle = (id: string, name: string, settings: ObjectStyleSettings) => {
+    if (!objectStyles.some((style) => style.id === id)) return
+    const nextStyles = objectStyles.map((style) => (style.id === id ? { ...style, name: uniqueObjectStyleName(objectStyles.filter((other) => other.id !== id), name), settings } : style))
+    const follow = (object: { objectStyleId?: string }) => object.objectStyleId === id
+    const nextShapes = shapes.some(follow) ? shapes.map((shape) => (follow(shape) ? applyToShape(shape, settings, id) : shape)) : undefined
+    const nextImages = images.some(follow) ? images.map((image) => (follow(image) ? applyToImage(image, settings, id) : image)) : undefined
+    if (editingParentId) {
+      pageOps.commit({ objectStyles: nextStyles })
+      if (nextShapes || nextImages) commitMultiObjectChange({ ...(nextShapes ? { shapes: nextShapes } : {}), ...(nextImages ? { images: nextImages } : {}) }, 'object-style:change')
+      return
+    }
+    const touchedParents = parents.some((parent) => parent.shapes.some(follow) || parent.images.some(follow))
+    pageOps.commit({
+      objectStyles: nextStyles,
+      ...(nextShapes ? { shapes: nextShapes } : {}),
+      ...(nextImages ? { images: nextImages } : {}),
+      ...(touchedParents
+        ? { parents: parents.map((parent) => ({ ...parent, shapes: parent.shapes.map((shape) => (follow(shape) ? applyToShape(shape, settings, id) : shape)), images: parent.images.map((image) => (follow(image) ? applyToImage(image, settings, id) : image)) })) }
+        : {}),
+    })
+  }
+  const deleteObjectStyle = (id: string) => {
+    if (!objectStyles.some((style) => style.id === id)) return
+    const follow = (object: { objectStyleId?: string }) => object.objectStyleId === id
+    const nextShapes = shapes.some(follow) ? shapes.map((shape) => (follow(shape) ? withoutObjectStyle(shape) : shape)) : undefined
+    const nextImages = images.some(follow) ? images.map((image) => (follow(image) ? withoutObjectStyle(image) : image)) : undefined
+    if (editingParentId) {
+      pageOps.commit({ objectStyles: objectStyles.filter((style) => style.id !== id) })
+      if (nextShapes || nextImages) commitMultiObjectChange({ ...(nextShapes ? { shapes: nextShapes } : {}), ...(nextImages ? { images: nextImages } : {}) }, 'object-style:delete')
+      return
+    }
+    pageOps.commit({
+      objectStyles: objectStyles.filter((style) => style.id !== id),
+      ...(nextShapes ? { shapes: nextShapes } : {}),
+      ...(nextImages ? { images: nextImages } : {}),
+      ...(parents.some((parent) => parent.shapes.some(follow) || parent.images.some(follow))
+        ? { parents: parents.map((parent) => ({ ...parent, shapes: parent.shapes.map((shape) => (follow(shape) ? withoutObjectStyle(shape) : shape)), images: parent.images.map((image) => (follow(image) ? withoutObjectStyle(image) : image)) })) }
+        : {}),
+    })
+  }
+  /** the style takes what the first selected object looks like, for the settings it already holds */
+  const redefineObjectStyle = (id: string) => {
+    const record = objectStyles.find((style) => style.id === id)
+    const look = objectStyleLook()
+    if (!record || !look) return
+    const settings: ObjectStyleSettings = { ...record.settings }
+    for (const key of Object.keys(record.settings) as (keyof ObjectStyleSettings)[]) {
+      if (key in look) (settings as Record<string, unknown>)[key] = look[key]
+    }
+    changeObjectStyle(id, record.name, settings)
+  }
+  const selectObjectsOfStyle = (id: string) => {
+    const ids = [...shapes, ...images].filter((object) => object.objectStyleId === id).map((object) => object.id)
+    setEditingId(null)
+    if (ids.length === 1) {
+      setMultiSel([])
+      setSelectedIdRaw(ids[0])
+    } else {
+      setMultiSel(ids)
+      setSelectedIdRaw(null)
+    }
+    return ids.length
+  }
 
   const beginRepairStroke = (image: ImageFrame, event: ReactPointerEvent<HTMLDivElement>) => {
     const asset = assets[image.assetId]
@@ -5935,7 +6236,9 @@ export function Workspace({
       color,
       strength: rasterBrushStrength,
     }
-    setEraserPoint(toWorld(event.clientX, event.clientY))
+    const startWorld = toWorld(event.clientX, event.clientY)
+    setPaintPreview({ points: [startWorld], color, strength: rasterBrushStrength, clip: { x: object.x, y: object.y, w: object.w, h: object.h } })
+    setEraserPoint(startWorld)
     setSelectedPage(ownerPage(rects, object.x + object.w / 2, object.y + object.h / 2))
     setSelectedId(id)
     setEditingId(null)
@@ -6968,27 +7271,34 @@ export function Workspace({
   }, [tool])
 
   useEffect(() => {
-    if (tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor) setEraserPoint(null)
-  }, [tool, rasterBrushColor])
+    if (tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor && !colorSamplerActive) setEraserPoint(null)
+  }, [tool, rasterBrushColor, colorSamplerActive])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor) || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
-      if (event.key === '[' || event.key === '{' || event.key === '(' || event.code === 'BracketLeft') {
+      if ((tool !== 'eraser' && tool !== 'heal' && !rasterBrushColor && !colorSamplerActive) || isTyping(event.target) || event.ctrlKey || event.metaKey || event.altKey) return
+      // a step in proportion to the circle (a small circle changes in small steps, a big one in big ones), bigger with Shift
+      const step = (value: number) => Math.max(1, Math.round(value * (event.shiftKey ? 0.3 : 0.12)))
+      // an opening bracket makes the circle bigger, a closing one smaller (by the character; the key's place only when the layout has none)
+      const opening = event.key === '[' || event.key === '{' || event.key === '('
+      const closing = event.key === ']' || event.key === '}' || event.key === ')'
+      const bigger = opening || (!closing && event.code === 'BracketLeft')
+      const smaller = closing || (!opening && event.code === 'BracketRight')
+      if (bigger) {
         event.preventDefault()
-        setEraserRadius((value) => Math.max(1, value - 1))
-      } else if (event.key === ']' || event.key === '}' || event.key === ')' || event.code === 'BracketRight') {
+        setEraserRadius((value) => Math.min(MAX_BRUSH_RADIUS, value + step(value)))
+      } else if (smaller) {
         event.preventDefault()
-        setEraserRadius((value) => Math.min(96, value + 1))
+        setEraserRadius((value) => Math.max(1, value - step(value)))
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tool, rasterBrushColor])
+  }, [tool, rasterBrushColor, colorSamplerActive])
 
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
-    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0) return
+    if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || colorSamplerActive || !!rasterBrushColor) return // the sampler / paint circle take the click (the viewport sees it)
     if (itemLocks[id]) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
@@ -7429,6 +7739,51 @@ export function Workspace({
     setRotatePreview({ cx: fixed[0], cy: fixed[1], w: 0, h: 0, startRotation: angleOf({ x: fixed[0], y: fixed[1] }, { x: moving[0], y: moving[1] }), sweep: 0 })
     vpRef.current!.setPointerCapture(e.pointerId)
   }
+  /** where a world point is on a line, in the line's own box: 	 along it (0 start … 1 end) and perp across it (positive to the left of its direction, points) */
+  const lineLocal = (sh: ShapeFrame, world: { x: number; y: number }) => {
+    const turn = ((sh.rotation ?? 0) * Math.PI) / 180
+    const dx = world.x - (sh.x + sh.w / 2)
+    const dy = world.y - (sh.y + sh.h / 2)
+    const lx = dx * Math.cos(turn) + dy * Math.sin(turn) + sh.w / 2
+    const ly = -dx * Math.sin(turn) + dy * Math.cos(turn) + sh.h / 2
+    const [x0, y0, x1, y1] = sh.flip ? [0, sh.h, sh.w, 0] : [0, 0, sh.w, sh.h]
+    const length = Math.hypot(x1 - x0, y1 - y0) || 1
+    const ux = (x1 - x0) / length
+    const uy = (y1 - y0) / length
+    return { t: ((lx - x0) * ux + (ly - y0) * uy) / length, perp: (lx - x0) * uy - (ly - y0) * ux }
+  }
+  const onLineWidthDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>, which: 0 | 1 | 2) => {
+    if (e.button !== 0 || panMode) return
+    const sh = shapes.find((x) => x.id === id)
+    if (!sh || sh.kind !== 'line') return
+    e.stopPropagation()
+    e.preventDefault()
+    setSelectedId(id)
+    lineWidthDrag.current = { id, which, widths: sh.lineWidths ?? [1, 1, 1], perp0: lineLocal(sh, toWorld(e.clientX, e.clientY)).perp }
+    vpRef.current!.setPointerCapture(e.pointerId)
+  }
+  const moveLineWidth = (d: NonNullable<typeof lineWidthDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
+    const sh = shapes.find((x) => x.id === d.id)
+    if (!sh || sh.strokeWidth <= 0) return
+    const here = lineLocal(sh, toWorld(e.clientX, e.clientY))
+    const next = Math.min(MAX_LINE_WIDTH_MULTIPLE, Math.max(0, d.widths[d.which] + ((here.perp - d.perp0) * 2) / sh.strokeWidth))
+    const widths: [number, number, number] = [...d.widths]
+    widths[d.which] = next
+    const pos = d.which === 1 ? cleanLineWidthPos(here.t) ?? undefined : sh.lineWidthPos
+    const place = sh.lineWidthPos ?? 0.5
+    const edges: [number, number] | undefined = d.which === 1
+      ? sh.lineWidthEdges
+      : [
+          d.which === 0 ? Math.min(MAX_LINE_WIDTH_EDGE, Math.max(0, here.t)) : sh.lineWidthEdges?.[0] ?? 0.1,
+          d.which === 2 ? Math.min(MAX_LINE_WIDTH_EDGE, Math.max(0, 1 - here.t)) : sh.lineWidthEdges?.[1] ?? 0.1,
+        ].map((v) => Math.min(v, place - 0.02)) as [number, number]
+    const even = widths.every((width) => Math.abs(width - 1) < 0.005)
+    onShapesChange(shapes.map((x) => {
+      if (x.id !== d.id) return x
+      const { lineWidths: _widths, lineWidthPos: _pos, lineWidthEdges: _edges, ...rest } = x
+      return even ? rest : { ...rest, lineWidths: widths, ...(pos !== undefined ? { lineWidthPos: pos } : {}), ...(edges ? { lineWidthEdges: edges } : {}) }
+    }), `linewidth:${d.id}`)
+  }
   const moveLineEnd = (d: NonNullable<typeof lineEndDrag.current>, e: ReactPointerEvent<HTMLDivElement>) => {
     const snapped = snapPoint(toWorld(e.clientX, e.clientY), e.ctrlKey || e.metaKey)
     setSnapShown(snapped.lines)
@@ -7830,6 +8185,28 @@ export function Workspace({
       e.currentTarget.setPointerCapture(e.pointerId)
       return
     }
+    // the sampler and the paint circle own the pointer while they are on: a click is a sample or a stroke - never a selection or a move
+    if (e.button === 0 && !panMode && rasterBrushColor && (samplerPeek || e.altKey)) {
+      // Alt: a new colour for the paint circle, taken where the pointer is
+      e.preventDefault()
+      e.stopPropagation()
+      moveColorSamplerLens(e.clientX, e.clientY)
+      void updateColorSampler(e.clientX, e.clientY).then((color) => { if (color) addColorSample(color) })
+      return
+    }
+    if (e.button === 0 && !panMode && rasterBrushColor) {
+      e.preventDefault()
+      e.stopPropagation()
+      beginPaintStroke(e)
+      return
+    }
+    if (e.button === 0 && !panMode && colorSamplerActive) {
+      e.preventDefault()
+      e.stopPropagation()
+      moveColorSamplerLens(e.clientX, e.clientY)
+      void updateColorSampler(e.clientX, e.clientY).then((color) => { if (color) addColorSample(color) })
+      return
+    }
     const clickedCanvas = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('sheet')
     if (clickedCanvas && tool !== 'pen' && tool !== 'pencil' && tool !== 'brush' && !marqueeTool) {
       leaveIsolation()
@@ -8075,7 +8452,7 @@ export function Workspace({
     } else if (magneticBrushCursor) {
       setMagneticBrushCursor(null)
     }
-    if (colorSamplerActive) {
+    if (colorSamplerActive || (samplerPeek && rasterBrushColor)) {
       moveColorSamplerLens(e.clientX, e.clientY)
       void updateColorSampler(e.clientX, e.clientY)
     }
@@ -8132,7 +8509,7 @@ export function Workspace({
     }
     if (tool === 'scissors') setScissorHover(scissorHit(toWorld(e.clientX, e.clientY)))
     else if (scissorHover) setScissorHover(false)
-    if (tool === 'eraser' || tool === 'heal' || rasterBrushColor) setEraserPoint(toWorld(e.clientX, e.clientY))
+    if (tool === 'eraser' || tool === 'heal' || rasterBrushColor || colorSamplerActive) setEraserPoint(toWorld(e.clientX, e.clientY))
     else if (eraserPoint) setEraserPoint(null)
     if (paintStroke.current && e.buttons !== 0) {
       const stroke = paintStroke.current
@@ -8147,7 +8524,10 @@ export function Workspace({
         ? imagePixelAt(image, asset, point)
         : target && asset && shape?.image ? shapeImagePixelAt(shape, asset, point) : null
       const previous = stroke.points[stroke.points.length - 1]
-      if (imagePoint && Math.hypot(imagePoint.x - previous.x, imagePoint.y - previous.y) >= 1) stroke.points.push(imagePoint)
+      if (imagePoint && Math.hypot(imagePoint.x - previous.x, imagePoint.y - previous.y) >= 1) {
+        stroke.points.push(imagePoint)
+        setPaintPreview((current) => current ? { ...current, points: [...current.points, point] } : current)
+      }
       return
     }
     if (repairStroke.current && tool === 'heal' && e.buttons !== 0) {
@@ -8207,6 +8587,10 @@ export function Workspace({
     }
     if (shapeStart.current) {
       updateShapeDraft(e.clientX, e.clientY, { shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey })
+      return
+    }
+    if (lineWidthDrag.current) {
+      moveLineWidth(lineWidthDrag.current, e)
       return
     }
     if (lineEndDrag.current) {
@@ -8386,8 +8770,8 @@ export function Workspace({
         const box = dragBox(d.orig, d.mode, dx, dy, MIN_FRAME_PT, e.shiftKey ? undefined : d.orig.w / d.orig.h, e.altKey)
         if (d.mode === 'move') learnRepeatOffset(d.id, box)
         // Alt on a side handle stretches the picture itself, to both sides at once and in that direction only (the other direction
-        // stays as it was); without Alt the picture is fitted in its frame the way it was
-        const stretching = e.altKey && d.mode !== 'move' && d.mode.length === 1
+        // stays as it was); Shift on any handle stretches the whole picture to the new box (no cropping); otherwise the picture is fitted in its frame the way it was
+        const stretching = d.mode !== 'move' && ((e.altKey && d.mode.length === 1) || e.shiftKey)
         onImagesChange(images.map((im) => (im.id === d.id ? { ...im, ...box, ...(stretching ? { fit: 'stretch' as const } : d.origFit ? { fit: d.origFit } : {}) } : im)), d.key)
         return
       }
@@ -8569,7 +8953,7 @@ export function Workspace({
     if (paintingStroke) {
       paintStroke.current = null
       setEraserPoint(null)
-      void finishPaintStroke(paintingStroke)
+      void finishPaintStroke(paintingStroke).finally(() => setPaintPreview(null))
       return
     }
     const healingStroke = repairStroke.current
@@ -8623,6 +9007,7 @@ export function Workspace({
     pointDrag.current = null
     contentDrag.current = null
     lineEndDrag.current = null
+    lineWidthDrag.current = null
     setAngleTip(null)
     frameDrag.current = null
     setGraphicFrameHandleDragging(false)
@@ -8654,6 +9039,7 @@ export function Workspace({
     setFeatherDrag(null)
     repairStroke.current = null
     paintStroke.current = null
+    setPaintPreview(null)
     marqueeCutRef.current = null
     setMarqueeCut(null)
     magneticTraceRef.current = null
@@ -8680,6 +9066,7 @@ export function Workspace({
     setShapeBox(null)
     setShapeFlip(undefined)
     lineEndDrag.current = null
+    lineWidthDrag.current = null
     setAngleTip(null)
     groupDrag.current = null
     cornerDrag.current = null
@@ -8706,7 +9093,7 @@ export function Workspace({
 
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || panMode) return // let the pan handler see it
+    if (e.button !== 0 || panMode || colorSamplerActive || !!rasterBrushColor) return // let the pan handler (and the sampler / paint circle) see it
     oversetCaret.current = false
     setFootnoteSel(null)
     if (itemLocks[id]) return
@@ -8732,12 +9119,13 @@ export function Workspace({
     if (tool === 'eyedropper') {
       e.stopPropagation()
       e.preventDefault()
+      const clickPos = caretOffsetAt(e.clientX, e.clientY, e.currentTarget.querySelector('.text-frame-body'))
       if (sampledTextStyle) {
-        applySampledTextStyle(id, sampledTextStyle)
+        applySampledTextStyle(id, sampledTextStyle, clickPos)
         setSampledTextStyle(null)
         setTool('select')
       } else {
-        sampleTextStyle(id)
+        sampleTextStyle(id, clickPos)
       }
       return
     }
@@ -9401,16 +9789,18 @@ export function Workspace({
         const from = partial ? Math.min(footnoteSel.a, footnoteSel.b) : 0
         const to = partial ? Math.max(footnoteSel.a, footnoteSel.b) : item.content.length
         if (to <= from) return item
-        return { ...item, runs: record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(item.content, runs, from, to, resolvedChars, () => base) }
+        return { ...item, runs: record ? applyCharacterStyle(runs, from, to, record, true) : clearCharacterStyle(item.content, runs, from, to, resolvedChars, () => base) }
       })
       return frames.map((frame) => (frame.id === head.id ? { ...frame, footnotes: nextNotes } : frame))
     }
     if (!panelHead) return null
     const runs = normalizeRuns(panelHead.text, panelHead.runs, panelHead)
-    const from = panelSel ? Math.min(panelSel.a, panelSel.b) : 0
-    const to = panelSel ? Math.max(panelSel.a, panelSel.b) : panelHead.text.length
+    // selected text: that text; only a caret in a paragraph: that paragraph; a frame that is just selected: the whole story
+    const caretParagraph = !panelSel && panelCaret ? paragraphBounds(panelHead.text, paraIndexAt(panelHead.text, panelCaret.a)) : null
+    const from = panelSel ? Math.min(panelSel.a, panelSel.b) : caretParagraph ? caretParagraph[0] : 0
+    const to = panelSel ? Math.max(panelSel.a, panelSel.b) : caretParagraph ? caretParagraph[1] : panelHead.text.length
     if (to <= from) return null
-    const nextRuns = record ? applyCharacterStyle(runs, from, to, record) : clearCharacterStyle(panelHead.text, runs, from, to, resolvedChars, (start) => paragraphLookAt(panelHead, start))
+    const nextRuns = record ? applyCharacterStyle(runs, from, to, record, true) : clearCharacterStyle(panelHead.text, runs, from, to, resolvedChars, (start) => paragraphLookAt(panelHead, start))
     return frames.map((frame) => (frame.id === panelHead.id ? { ...frame, runs: nextRuns } : frame))
   }
 
@@ -9440,11 +9830,23 @@ export function Workspace({
     const { basedOnId: _previousBase, ...rest } = before
     const nextStyles = characterStyles.map((style) => (style.id === id ? { ...rest, name, ...(basedOnId ? { basedOnId } : {}), patch } : style))
     const affected = [id, ...descendantsOf(nextStyles, id)]
-    const nextFrames = frames.map((frame) => withStoryRuns(frame, (text, runs, base) => affected.reduce(
+    const restyle = (frame: TextFrame) => withStoryRuns(frame, (text, runs, base) => affected.reduce(
       (current, styleId) => updateCharacterStyleRuns(text, current, styleId, resolveCharacterPatch(characterStyles, styleId), resolveCharacterPatch(nextStyles, styleId), base),
       runs,
-    )))
-    pageOps.commit({ characterStyles: nextStyles, ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}) })
+    ))
+    const nextFrames = frames.map(restyle)
+    // the master pages have text too: the style follows there as well
+    const nextParents = editingParentId
+      ? null
+      : parents.map((parent) => {
+        const restyled = parent.frames.map(restyle)
+        return restyled.some((frame, index) => frame !== parent.frames[index]) ? { ...parent, frames: restyled } : parent
+      })
+    pageOps.commit({
+      characterStyles: nextStyles,
+      ...(nextFrames.some((frame, index) => frame !== frames[index]) ? { frames: nextFrames } : {}),
+      ...(nextParents && nextParents.some((parent, index) => parent !== parents[index]) ? { parents: nextParents } : {}),
+    })
   }
 
   /** deleting a style takes it off all the text that has it first, and the styles based on it move up to its own base */
@@ -9744,7 +10146,7 @@ export function Workspace({
     if (paragraphStyles.length <= 1) return
     const fallback = fallbackId ?? paragraphStyles.find((style) => style.id !== id)?.id
     onParagraphStylesChange(paragraphStyles.filter((style) => style.id !== id))
-    const uses = (frame: TextFrame) => frame.paragraphStyleId === id || !!frame.paragraphStyleIds?.includes(id)
+    const uses = (frame: TextFrame) => frame.paragraphStyleId === id || !!frame.paragraphStyleIds?.includes(id) || !!frame.footnotes?.some((note) => note.paragraphStyleId === id)
     if (fallback && baseFrames.some(uses))
       onFramesChange(
         baseFrames.map((frame) =>
@@ -9753,6 +10155,7 @@ export function Workspace({
                 ...frame,
                 ...(frame.paragraphStyleId === id ? { paragraphStyleId: fallback } : {}),
                 ...(frame.paragraphStyleIds ? { paragraphStyleIds: frame.paragraphStyleIds.map((styleId) => (styleId === id ? fallback : styleId)) } : {}),
+                ...(frame.footnotes?.some((note) => note.paragraphStyleId === id) ? { footnotes: frame.footnotes.map((note) => (note.paragraphStyleId === id ? { ...note, paragraphStyleId: fallback } : note)) } : {}),
               }
             : frame,
         ),
@@ -10027,10 +10430,27 @@ export function Workspace({
     return applyNestedToFrame(restyled, styles, targetId, new Set(indexes))
   }
 
+  /** a footnote moved to another paragraph style: the look of the old style it still had becomes that of the new one */
+  const swapNoteStyle = (note: FootnoteItem, targetId: string): FootnoteItem => {
+    const oldBase = footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId)
+    const nextBase = footnoteTextStyle(footnoteConfig, paragraphStyles, targetId)
+    const charKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
+    const runs = note.runs?.map((run) => {
+      const runStyle = { ...run.style }
+      for (const key of charKeys) if (runStyle[key] === oldBase[key]) Object.assign(runStyle, { [key]: nextBase[key] })
+      return { ...run, style: runStyle }
+    })
+    return { ...note, paragraphStyleId: targetId, ...(note.style ? { style: { ...nextBase, ...note.style } } : {}), ...(runs ? { runs } : {}) }
+  }
+  const withNotesSwapped = (frame: TextFrame, sourceId: string, targetId: string): TextFrame =>
+    frame.footnotes?.some((note) => note.paragraphStyleId === sourceId)
+      ? { ...frame, footnotes: frame.footnotes.map((note) => (note.paragraphStyleId === sourceId ? swapNoteStyle(note, targetId) : note)) }
+      : frame
+
   const swapParagraphStyles = (sourceId: string, targetId: string, removeSource: boolean) => {
     if (sourceId === targetId) return
     const heads = new Set(headFrames(frames).map((frame) => frame.id))
-    const nextFrames = frames.map((frame) => (heads.has(frame.id) ? restyleParagraphs(frame, paragraphsWithStyle(frame, sourceId), sourceId, targetId) : frame))
+    const nextFrames = frames.map((frame) => (heads.has(frame.id) ? withNotesSwapped(restyleParagraphs(frame, paragraphsWithStyle(frame, sourceId), sourceId, targetId), sourceId, targetId) : frame))
     onFramesChange(nextFrames, `style-swap:${sourceId}:${targetId}`)
     delete styleSearchIndex.current[sourceId]
     if (removeSource) deleteParagraphStyle(sourceId, nextFrames, targetId)
@@ -10119,15 +10539,10 @@ export function Workspace({
     let nextFrames = frames
     for (const pair of pairs) {
       if (pair.sourceId === pair.targetId) continue
-      nextFrames = nextFrames.map((frame) => (heads.has(frame.id) ? restyleParagraphs(frame, paragraphsWithStyle(frame, pair.sourceId), pair.sourceId, pair.targetId) : frame))
+      nextFrames = nextFrames.map((frame) => (heads.has(frame.id) ? withNotesSwapped(restyleParagraphs(frame, paragraphsWithStyle(frame, pair.sourceId), pair.sourceId, pair.targetId), pair.sourceId, pair.targetId) : frame))
       delete styleSearchIndex.current[pair.sourceId]
     }
     onFramesChange(nextFrames, 'style-batch-swap')
-  }
-
-  const createManagedParagraphStyle = (name: string, patch: ParagraphStyleRecord['patch']) => {
-    const id = `paragraph-style-${Date.now()}`
-    onParagraphStylesChange([...paragraphStyles, { id, name, patch }])
   }
 
   // ── parent (master) pages ──────────────────────────────────────────────────────
@@ -10228,24 +10643,20 @@ export function Workspace({
     if (!tag || !styleId) return
     const nextFrames = frames.map((frame) => {
       if (!frame.text || !headFrames(frames).some((head) => head.id === frame.id)) return frame
-      let text = frame.text
-      let runs = normalizeRuns(text, frame.runs, frame)
       const indexes: number[] = []
-      let at = text.indexOf(tag)
+      const matches: { start: number; end: number; replacement: string }[] = []
+      let at = frame.text.indexOf(tag)
       while (at >= 0) {
-        const index = paraIndexAt(text, at)
+        const index = paraIndexAt(frame.text, at)
         if (!indexes.includes(index)) indexes.push(index)
-        const end = at + tag.length
-        if (removeTag) {
-          const edited = editStory(text, runs, at, end, '', frame)
-          text = edited.text
-          runs = edited.runs
-        }
+        matches.push({ start: at, end: at + tag.length, replacement: '' })
         if (!all) break
-        at = text.indexOf(tag, removeTag ? at : end)
+        at = frame.text.indexOf(tag, at + tag.length)
       }
       if (indexes.length === 0) return frame
-      return restyleParagraphs({ ...frame, text, runs }, indexes, frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
+      // taking the tag out is a real edit of the story (replaceInStory): the runs, the footnote anchors and the paragraph lists follow
+      const edited = removeTag ? replaceInStory(frame, matches) : frame
+      return restyleParagraphs(edited, indexes, frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
     })
     onFramesChange(nextFrames, `tag-style:${styleId}`)
   }
@@ -10267,7 +10678,7 @@ export function Workspace({
   }
 
   /** Selects the next/previous/first occurrence of `tag` in the document and scrolls to it, the explorer for
-   * "סימן לחיפוש" (ניהול סגנונות > כלים) - identical in spirit to findParagraphStyle, just searching by the tag's
+   * "סימן לחיפוש" (ניהול סגנונות > סימן) - identical in spirit to findParagraphStyle, just searching by the tag's
    * own text instead of by which style a paragraph carries. */
   const findTagOccurrence = (tag: string, direction: -1 | 0 | 1 = 0) => {
     const occurrences = tagOccurrences(tag)
@@ -10306,20 +10717,94 @@ export function Workspace({
     const current = Math.min(tagSearchIndex.current[tag] ?? 0, occurrences.length - 1)
     const occurrence = occurrences[current]
     const frame = occurrence.frame
-    let text = frame.text
-    let runs = normalizeRuns(text, frame.runs, frame)
-    if (removeTag) {
-      const edited = editStory(text, runs, occurrence.start, occurrence.end, '', frame)
-      text = edited.text
-      runs = edited.runs
-    }
+    const edited = removeTag ? replaceInStory(frame, [{ start: occurrence.start, end: occurrence.end, replacement: '' }]) : frame
     const index = paraIndexAt(frame.text, occurrence.start)
-    const restyled = restyleParagraphs({ ...frame, text, runs }, [index], frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
+    const restyled = restyleParagraphs(edited, [index], frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles)
     onFramesChange(frames.map((f) => (f.id === frame.id ? restyled : f)), `tag-swap-one:${styleId}`)
     // the list is one shorter now, and the next occurrence sits where this one was (see swapOneParagraphStyle)
     if (current > 0) tagSearchIndex.current[tag] = current - 1
     else delete tagSearchIndex.current[tag]
     return occurrences.length - 1
+  }
+
+  // ── "צבעים" (ניהול סגנונות): text coloured by hand becomes a paragraph style ──────────────
+  const colorSearchKey = (color: string, partial: boolean) => `${color.toLowerCase()}|${partial ? 1 : 0}`
+
+  /** selects a paragraph of a story (the line break after it left out) and brings its page into view */
+  const revealParagraph = (occurrence: { frame: TextFrame; start: number; end: number }) => {
+    const { frame } = occurrence
+    const end = frame.text[occurrence.end - 1] === '\n' ? occurrence.end - 1 : occurrence.end
+    const target = chainOf(frames, frame.id).find((part) => {
+      const flowPart = flow.get(part.id)
+      return !!flowPart && occurrence.start < flowPart.end && end > flowPart.start
+    }) ?? frame
+    const targetFlow = flow.get(target.id)
+    const localStart = targetFlow ? Math.max(0, occurrence.start - targetFlow.start) : 0
+    const localEnd = targetFlow ? Math.min(targetFlow.slice.length, end - targetFlow.start) : 0
+    const page = ownerPage(rects, target.x + target.w / 2, target.y + target.h / 2)
+    setSelectedPage(page)
+    setSelectedId(target.id)
+    setEditingId(target.id)
+    setTextSel({ headId: frame.id, a: occurrence.start, b: end })
+    askSelection(target.id, localStart, localEnd)
+    goTo(spreadOfPage(page))
+  }
+
+  const listTextColors = () => textColorUses(headFrames(frames))
+
+  const findColorParagraph = (color: string, partial: boolean, direction: -1 | 0 | 1 = 0) => {
+    const occurrences = colorParagraphs(headFrames(frames), color, partial)
+    const key = colorSearchKey(color, partial)
+    if (occurrences.length === 0) {
+      delete colorSearchIndex.current[key]
+      return 0
+    }
+    const previous = colorSearchIndex.current[key]
+    const index = direction === 0 ? 0 : previous === undefined ? (direction < 0 ? occurrences.length - 1 : 0) : (previous + direction + occurrences.length) % occurrences.length
+    colorSearchIndex.current[key] = index
+    revealParagraph(occurrences[index])
+    return occurrences.length
+  }
+
+  /**
+   * Gives the paragraph the explorer is on (the first, when it has not been used) `styleId`, and shows the next one.
+   * Through `restyleParagraphs` with the hard reset: the paragraph comes out as the style says, the colour put on it by
+   * hand included (what "clear overrides" does).
+   */
+  const swapOneColorParagraph = (color: string, partial: boolean, styleId: string) => {
+    const occurrences = styleId ? colorParagraphs(headFrames(frames), color, partial) : []
+    if (occurrences.length === 0) return { left: 0, colors: listTextColors() }
+    const key = colorSearchKey(color, partial)
+    const current = Math.min(colorSearchIndex.current[key] ?? 0, occurrences.length - 1)
+    const { frame, index } = occurrences[current]
+    const restyled = restyleParagraphs(frame, [index], frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles, true)
+    const nextFrames = frames.map((item) => (item.id === frame.id ? restyled : item))
+    onFramesChange(nextFrames, `color-swap-one:${styleId}`)
+    const rest = colorParagraphs(headFrames(nextFrames), color, partial)
+    if (rest.length === 0) {
+      delete colorSearchIndex.current[key]
+    } else {
+      // gone from the list: the next one sits where this one was; still in it (the style has the colour itself): the one after
+      const next = rest.length < occurrences.length ? Math.min(current, rest.length - 1) : (current + 1) % rest.length
+      colorSearchIndex.current[key] = next
+      revealParagraph(rest[next])
+    }
+    return { left: rest.length, colors: textColorUses(headFrames(nextFrames)) }
+  }
+
+  const swapColorParagraphs = (color: string, partial: boolean, styleId: string) => {
+    const found = styleId ? colorParagraphs(headFrames(frames), color, partial) : []
+    if (found.length === 0) return { converted: 0, colors: listTextColors() }
+    const byStory = new Map<string, number[]>()
+    for (const { frame, index } of found) byStory.set(frame.id, [...(byStory.get(frame.id) ?? []), index])
+    const nextFrames = frames.map((frame) => {
+      const indexes = byStory.get(frame.id)
+      return indexes ? restyleParagraphs(frame, indexes, frame.paragraphStyleId ?? paragraphStyles[0]?.id ?? '', styleId, false, paragraphStyles, true) : frame
+    })
+    onFramesChange(nextFrames, `color-swap:${styleId}`)
+    delete colorSearchIndex.current[colorSearchKey(color, true)]
+    delete colorSearchIndex.current[colorSearchKey(color, false)]
+    return { converted: found.length, colors: textColorUses(headFrames(nextFrames)) }
   }
 
   /** a guide can be grabbed with the Selection tool only, and not while something is being placed */
@@ -10534,6 +11019,8 @@ export function Workspace({
       <ContextToolbar
         unit={doc.unit}
         tool={space ? 'hand' : tool}
+        onShapePatch={(patch) => { if (selShape) updateShape(selShape.id, patch, patch.strokeWidth !== undefined ? `shape:${selShape.id}` : Object.prototype.hasOwnProperty.call(patch, 'feather') ? `feather:${selShape.id}` : undefined) }}
+        onShapeGeometry={(patch) => { if (selShape) updateShape(selShape.id, patch, `geo:${selShape.id}`) }}
         sharpness={sharpness}
         onSharpness={changeSharpness}
         shape={tool === 'feather' || toolbarTable ? null : selShape}
@@ -10874,7 +11361,7 @@ export function Workspace({
                     paraGaps={paraGapsOf(style, f, f.text)}
                     startParaIndex={0}
                     atParaStart={true}
-                    paragraphPatches={f.paragraphStylePatches}
+                    paragraphPatches={decorationPatches(f, paragraphStyles, objectStyles)}
                     spaceBeforeFirst={frameSpaceBefore(style, f)}
                     spaceAfterLast={frameSpaceAfter(style, f, f.text)}
                     footnoteHeight={0}
@@ -10975,6 +11462,7 @@ export function Workspace({
                   onContentGrab={onContentGrab(sh.id)}
                   onContentResize={onContentResize(sh.id)}
                   onLineEndDown={onLineEndDown(sh.id)}
+                  onLineWidthDown={onLineWidthDown(sh.id)}
                   tableUi={sh.kind === 'table' ? tableUiFor(sh, tool === 'select') : undefined}
                 />
               ))}
@@ -11051,12 +11539,29 @@ export function Workspace({
                   showEdge
                 />
               )}
-              {(tool === 'eraser' || tool === 'heal' || rasterBrushColor) && eraserPoint && (
+              {(tool === 'eraser' || tool === 'heal' || rasterBrushColor || colorSamplerActive) && eraserPoint && (
                 <div
-                  className={tool === 'heal' ? 'heal-brush' : rasterBrushColor ? 'paint-brush' : 'eraser-brush'}
+                  className={tool === 'heal' ? 'heal-brush' : rasterBrushColor && !samplerPeek ? 'paint-brush' : colorSamplerActive || samplerPeek ? 'sampler-brush' : 'eraser-brush'}
                   aria-hidden="true"
-                  style={{ left: tx + eraserPoint.x * zoom - eraserRadius, top: ty + eraserPoint.y * zoom - eraserRadius, width: eraserRadius * 2, height: eraserRadius * 2, ...(rasterBrushColor ? { backgroundColor: `${rasterBrushColor}22` } : {}) }}
+                  style={{
+                    left: tx + eraserPoint.x * zoom - eraserRadius,
+                    top: ty + eraserPoint.y * zoom - eraserRadius,
+                    width: eraserRadius * 2,
+                    height: eraserRadius * 2,
+                    // painting: the sample; sampling: the colour under the circle's centre, so what a click takes is seen
+                    ...(rasterBrushColor && !samplerPeek ? { backgroundColor: `${rasterBrushColor}22` } : (colorSamplerActive || samplerPeek) && colorSamplerPreview ? { backgroundColor: colorSamplerPreview.color } : {}),
+                  }}
                 />
+              )}
+              {paintPreview && (
+                <svg className="paint-stroke-preview" aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none', zIndex: 1000001 }}>
+                  <defs><clipPath id="paint-preview-clip"><rect x={tx + paintPreview.clip.x * zoom} y={ty + paintPreview.clip.y * zoom} width={paintPreview.clip.w * zoom} height={paintPreview.clip.h * zoom} /></clipPath></defs>
+                  <g clipPath="url(#paint-preview-clip)" opacity={paintPreview.strength / 100}>
+                    {paintPreview.points.length === 1
+                      ? <circle cx={tx + paintPreview.points[0].x * zoom} cy={ty + paintPreview.points[0].y * zoom} r={eraserRadius} fill={paintPreview.color} />
+                      : <polyline points={paintPreview.points.map((p) => `${tx + p.x * zoom},${ty + p.y * zoom}`).join(' ')} fill="none" stroke={paintPreview.color} strokeWidth={eraserRadius * 2} strokeLinecap="round" strokeLinejoin="round" />}
+                  </g>
+                </svg>
               )}
               {angleTip && (
                 <div className="guide-tip" style={{ left: tx + angleTip.x * zoom + 10, top: ty + angleTip.y * zoom - 24 }}>
@@ -11105,7 +11610,7 @@ export function Workspace({
                     paraGaps={fl.paraGaps}
                     startParaIndex={fl.startParaIndex}
                     atParaStart={fl.atParaStart}
-                    paragraphPatches={storyHead.paragraphStylePatches}
+                    paragraphPatches={layoutById.get(storyHead.id)?.paragraphStylePatches ?? storyHead.paragraphStylePatches}
                     spaceBeforeFirst={fl.spaceBeforeFirst}
                     firstLineLift={fl.firstLineLift}
                     spaceAfterLast={fl.spaceAfterLast}
@@ -11192,6 +11697,9 @@ export function Workspace({
                     onCopyText={() => copyText(f.id)}
                     onCopyFormattedText={(from, to) => copyFormattedText(f.id, from, to)}
                     onPasteFormattedText={(from, to, clipboard) => handlePasteFormattedText(f.id, from, to, clipboard)}
+                    onPasteObjects={(from, to, data) => handlePasteObjects(f.id, from, to, data)}
+                    onAnchorMenu={(id, rect) => setAnchorMenu({ id, left: rect.left, top: rect.top, bottom: rect.bottom })}
+                    onAnchorSelect={setSelectedAnchor}
                     onBackspaceAtStart={() => backspaceAtStart(f.id)}
                     onBackspaceAtParagraphStart={(offset) => backspaceAtParagraphStart(f.id, offset)}
                     onLineBoundary={(dir, x, toStart) => jumpToLine(f.id, dir, x, toStart)}
@@ -11442,7 +11950,7 @@ export function Workspace({
             </div>
           </div>
         </div>
-        {colorSamplerActive && colorSamplerPreview && createPortal(<ColorSamplerLens ref={colorSamplerLensRef} preview={colorSamplerPreview} />, document.body)}
+        {(colorSamplerActive || (samplerPeek && !!rasterBrushColor)) && colorSamplerPreview && createPortal(<span className="sampler-readout" style={{ left: colorSamplerPreview.focusX + colorSamplerPreview.left + eraserRadius + 8, top: colorSamplerPreview.focusY + colorSamplerPreview.top + eraserRadius + 8 }}><span className="color-sampler-chip" style={{ backgroundColor: colorSamplerPreview.color }} /><bdi dir="ltr">{colorSamplerPreview.color}</bdi></span>, document.body)}
         <DockingPanels
           enabledPanelIds={enabledDockPanelIds}
           tabOrder={dockTabOrder}
@@ -11590,7 +12098,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} objectStyles={objectStyles} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
             },
             {
               id: 'character-styles',
@@ -11598,9 +12106,14 @@ export function Workspace({
               content: <CharacterStylesPanel styles={characterStyles} activeId={activeCharacterStyleId} modified={activeCharacterStyleModified} canApply={!!panelHead || !!footnoteSel} onApply={applyCharacterStyleCmd} onSelectionLook={characterStyleSelectionLook} onCreate={createCharacterStyle} onChange={changeCharacterStyle} onDelete={deleteCharacterStyle} onRedefine={redefineCharacterStyle} onFind={findCharacterStyle} />,
             },
             {
+              id: 'object-styles',
+              label: 'סגנונות אובייקט',
+              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
+            },
+            {
               id: 'style-manager',
               label: 'ניהול סגנונות',
-              content: <StyleManagerPanel styles={paragraphStyles} onChange={changeParagraphStyle} onCreate={createManagedParagraphStyle} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onFindTag={findTagOccurrence} onSwapOneTag={swapOneTagOccurrence} onClean={() => cleanSpacingCmd()} />,
+              content: <StyleManagerPanel styles={paragraphStyles} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onFindTag={findTagOccurrence} onSwapOneTag={swapOneTagOccurrence} onClean={(emptyParagraphs) => cleanSpacingCmd(emptyParagraphs ? { spaces: false } : { paragraphs: false })} onListColors={listTextColors} onFindColor={findColorParagraph} onSwapOneColor={swapOneColorParagraph} onSwapColor={swapColorParagraphs} sampleColor={toolbarTextStyle?.color} />,
             },
             {
               id: 'pages',
@@ -11749,6 +12262,25 @@ export function Workspace({
       )}
       {footnoteOptionsOpen && (
         <FootnoteOptionsDialog value={doc.footnotes} paragraphStyles={paragraphStyles} onPreview={setFootnotePreviewConfig} onSave={saveFootnoteOptions} onClose={() => { setFootnotePreviewConfig(null); setFootnoteOptionsOpen(false) }} />
+      )}
+      {selectedAnchor && anchorById(selectedAnchor) && (
+        <AnchorHandles
+          key={selectedAnchor}
+          id={selectedAnchor}
+          zoom={zoom}
+          w={anchorById(selectedAnchor)!.w}
+          h={anchorById(selectedAnchor)!.h}
+          offset={anchorById(selectedAnchor)!.offset ?? 0}
+          onChange={(w, h, offset) => resizeAnchor(selectedAnchor, w, h, offset)}
+        />
+      )}
+      {anchorMenu && (
+        <ContextMenu
+          x={anchorMenu.left}
+          y={anchorMenu.bottom}
+          onClose={() => setAnchorMenu(null)}
+          items={[{ label: 'הסר עוגן', onClick: () => { const menu = anchorMenu; setAnchorMenu(null); removeAnchor(menu.id, menu) } }]}
+        />
       )}
       {rulerMenu && (
         <ContextMenu

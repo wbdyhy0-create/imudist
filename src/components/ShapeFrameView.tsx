@@ -73,6 +73,8 @@ interface Props {
   onContentResize?: (corner: ContentCorner, e: ReactPointerEvent<HTMLDivElement>) => void
   /** grabbing one of a line's two endpoint handles (0 = its first point, 1 = its second): it moves on its own, the other end staying put */
   onLineEndDown?: (which: 0 | 1, e: ReactPointerEvent<HTMLDivElement>) => void
+  /** the handle in the middle of a line: along the line it moves where the line is thickest, across it the line gets thicker or thinner there */
+  onLineWidthDown?: (e: ReactPointerEvent<HTMLDivElement>, which: 0 | 1 | 2) => void
   /** a table shape: how its cells are laid out, which are picked, and how they are changed */
   tableUi?: {
     layout: TableLayout
@@ -119,6 +121,7 @@ export function ShapeFrameView({
   onContentGrab,
   onContentResize,
   onLineEndDown,
+  onLineWidthDown,
   tableUi,
 }: Props) {
   const isLine = shape.kind === 'line'
@@ -351,6 +354,19 @@ export function ShapeFrameView({
             onPointerDown={(e) => onLineEndDown?.(i as 0 | 1, e)}
           />
         ))}
+      {showHandles && isLine && onLineWidthDown && (() => {
+        const pos = shape.lineWidthPos ?? 0.5
+        const [x0, y0, x1, y1] = shape.flip ? [0, h, w, 0] : [0, 0, w, h]
+        return <div className="handle line-width" title="גרור לאורך הקו כדי להזיז את המקום העבה, ולמעלה או למטה כדי לעבות או לדקק את הקו" style={{ left: x0 + (x1 - x0) * pos, top: y0 + (y1 - y0) * pos }} onPointerDown={(e) => onLineWidthDown(e, 1)} />
+      })()}
+      {showHandles && isLine && onLineWidthDown && (() => {
+        const [x0, y0, x1, y1] = shape.flip ? [0, h, w, 0] : [0, 0, w, h]
+        const inset = Math.min(0.25, 16 / Math.max(1, Math.hypot(w, h)))
+        const edges = shape.lineWidthEdges
+        return ([[0, edges ? edges[0] : inset], [2, 1 - (edges ? edges[1] : inset)]] as const).map(([which, t]) => (
+          <div key={which} className="handle line-width side" title="גרור למעלה או למטה כדי לעבות או לדקק את הקצה, ולאורך הקו כדי להזיז את המקום" style={{ left: x0 + (x1 - x0) * t, top: y0 + (y1 - y0) * t }} onPointerDown={(e) => onLineWidthDown(e, which)} />
+        ))
+      })()}
       {showHandles && !tableShape &&
         ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown?.(c, e)} />)}
 

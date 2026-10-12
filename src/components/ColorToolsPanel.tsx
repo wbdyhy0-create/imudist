@@ -228,7 +228,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
         {brushColor && onBrushRadiusChange && (
           <label className="color-brush-size">
             <span>גודל המברשת</span>
-            <input aria-label="גודל המברשת" type="range" min="1" max="96" value={brushRadius} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
+            <input aria-label="גודל המברשת" type="range" min="1" max="400" value={Math.min(400, brushRadius)} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
             <output>{brushRadius}</output>
           </label>
         )}

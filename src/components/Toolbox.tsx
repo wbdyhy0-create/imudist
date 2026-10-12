@@ -75,7 +75,7 @@ export const TOOLS: ToolDef[] = [
       </>
     ),
   },
-  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <rect x="4" y="5" width="16" height="14" strokeDasharray="2 2" /> },
+  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <><path d="M7 3v14a2 2 0 0 0 2 2h12" /><path d="M3 7h14a2 2 0 0 1 2 2v12" /></> },
   { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
   { id: 'magneticLasso', label: 'לאסו מגנטי', group: 1, enabled: true, icon: <><path d="M5 18.500 6.200 9.200a5.800 5.800 0 0 1 11.600 0L19 18.500a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z" /><path d="m6.500 16.500 2-1.500 2 1 2-2 2 1 2-2" strokeDasharray="1.5 1.5" /></> },
   { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
@@ -107,8 +107,8 @@ export const TOOLS: ToolDef[] = [
   { id: 'swatches', label: 'דוגמיות צבע', group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
   { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', code: 'KeyG', shift: true, enabled: true, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
 
-  { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <path d="m15 4 5 5-2.500 2.500-5-5zM12.500 8.500 4 17v3h3l8.500-8.500" /> },
-  { id: 'colorSampler', label: 'דגימת צבע', group: 5, enabled: true, icon: <><circle cx="12" cy="12" r="8" /><path d="M12 8v8M8 12h8" /></> },
+  { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <><rect x="4" y="3" width="13" height="6" rx="1.500" /><path d="M17 6h2.500v5H11v3" /><rect x="9" y="14" width="4" height="7" rx="1" /></> },
+  { id: 'colorSampler', label: 'דגימת צבע', group: 5, enabled: true, icon: <><path d="m3 21 1-4 9-9 3 3-9 9z" /><path d="m13 8 2.500-2.500a2.100 2.100 0 0 1 3 0l.5.500a2.100 2.100 0 0 1 0 3L16.500 11.500" /><path d="m14 7 3 3" /></> },
   { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
   { id: 'hand', label: 'יד', group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
   { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
@@ -167,7 +167,7 @@ export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   swatches: 'בחירה וניהול של דוגמיות צבע',
   feather: 'גרירת נקודת התחלה וסיום יוצרת מסכת אטימות',
   eyedropper: 'דגימת סגנון מטקסט או אובייקט',
-  colorSampler: 'דגימת צבע מהמסמך באמצעות המגדלת',
+  colorSampler: 'דגימת צבע מהמסמך או מהמסך',
 }
 
 interface ToolboxProps {
@@ -291,7 +291,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
         const isActive = active.id === 'colorSampler'
           ? colorSamplerActive
           : !colorSamplerActive && tool === active.id
-        const tooltipLabel = active.id === 'marqueeRect' ? 'כלי החיתוך' : active.label
+        const tooltipLabel = active.id === 'marqueeRect' ? 'מסגרת חיתוך / Crop Frame' : active.label
         const tooltipDescription = active.id === 'marqueeRect'
           ? `${TOOL_HINTS[active.id]}, לחיצה כפולה להצגת צורות נוספות`
           : `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? ' · לחיצה כפולה להצגת כלים נוספים' : ''}`

@@ -54,7 +54,7 @@ export function ParagraphTextControls({
     <>
       <Labeled label="יישור">
         <div className="toggle-group">
-          {ALIGNS.map((align) => (
+          {[...ALIGNS].reverse().map((align) => (
             <button
               key={align.id}
               className={style.align === align.id ? 'on' : ''}

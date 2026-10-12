@@ -40,12 +40,11 @@ const SETTING_NAMES: Record<keyof CharacterStyleSettings, string> = {
   outlineWidth: 'קו מתאר',
 }
 
-/** how a style looks as a line of text: its own font, weight, colour */
+/** how a style looks as a line of text: its own font, weight; always in the panel's own text colour so dark colours stay readable */
 const sampleCss = (patch: CharacterStyleSettings) => ({
   ...(patch.fontFamily ? { fontFamily: `"${patch.fontFamily}", "Segoe UI", Arial, sans-serif` } : {}),
   ...(patch.weight ? { fontWeight: patch.weight } : {}),
   ...(patch.italic !== undefined ? { fontStyle: patch.italic ? 'italic' : 'normal' } : {}),
-  ...(patch.color ? { color: patch.color } : {}),
 })
 
 type Editing = { id: string | null; name: string; patch: CharacterStyleSettings; basedOnId?: string }
@@ -241,12 +240,14 @@ function CharacterStyleDialog({ styles, initial, onSave, onDelete, onClose }: Di
           <input className="select table-dialog-number" type="number" min={1} max={999} step={0.5} value={shown('fontSize', 14)} onChange={(e) => set({ fontSize: Math.min(999, Math.max(1, Number(e.target.value) || 1)) })} />
         </Setting>
         <Setting label="משקל" on={patch.weight !== undefined} inherited={has('weight')} onToggle={toggle('weight', inherited.weight ?? 700)}>
-          <select className="select" value={shown('weight', 400)} onChange={(e) => set({ weight: Number(e.target.value) })}>
+          <select className="select" value={patch.weight === undefined ? '' : String(patch.weight)} onChange={(e) => (e.target.value === '' ? unset('weight') : set({ weight: Number(e.target.value) }))}>
+            {patch.weight === undefined && <option value="">{inherited.weight !== undefined ? `יורש: ${weightName(inherited.weight)}` : 'לא מוגדר (הטקסט נשאר כמו שהוא)'}</option>}
             {WEIGHTS.map((weight) => <option key={weight} value={weight}>{weightName(weight)}</option>)}
           </select>
         </Setting>
         <Setting label="נטוי" on={patch.italic !== undefined} inherited={has('italic')} onToggle={toggle('italic', inherited.italic ?? true)}>
-          <select className="select" value={shown('italic', false) ? 'yes' : 'no'} onChange={(e) => set({ italic: e.target.value === 'yes' })}>
+          <select className="select" value={patch.italic === undefined ? '' : patch.italic ? 'yes' : 'no'} onChange={(e) => (e.target.value === '' ? unset('italic') : set({ italic: e.target.value === 'yes' }))}>
+            {patch.italic === undefined && <option value="">{inherited.italic !== undefined ? `יורש: ${inherited.italic ? 'נטוי' : 'לא נטוי'}` : 'לא מוגדר (הטקסט נשאר כמו שהוא)'}</option>}
             <option value="yes">נטוי</option>
             <option value="no">לא נטוי</option>
           </select>
