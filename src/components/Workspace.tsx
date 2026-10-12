@@ -6097,6 +6097,19 @@ export function Workspace({
       return undefined
     }
   }
+  /** the size of the objects a style is made from: the first one's own, or the box of all of them; not a line (a line has no box worth the name) */
+  const objectStyleSize = (): { w: number; h: number } | undefined => {
+    const targets = objectStyleTargets()
+    const all = [...targets.shapes, ...targets.images]
+    if (all.length === 0) return undefined
+    if (all.length === 1) {
+      const only = all[0]
+      return 'kind' in only && only.kind === 'line' ? undefined : { w: only.w, h: only.h }
+    }
+    const x0 = Math.min(...all.map((object) => object.x))
+    const y0 = Math.min(...all.map((object) => object.y))
+    return { w: Math.max(...all.map((object) => object.x + object.w)) - x0, h: Math.max(...all.map((object) => object.y + object.h)) - y0 }
+  }
   /** what the first object that follows the style looks like now: what the dialog of the style shows for what the style does not set */
   const followerLook = (id: string): ObjectStyleSettings | null => {
     const shape = shapes.find((candidate) => candidate.objectStyleId === id)
@@ -6115,8 +6128,8 @@ export function Workspace({
       images: images.map((image) => (ids.has(image.id) ? (record ? applyToImage(image, record.settings, record.id) : withoutObjectStyle(image)) : image)),
     }, `object-style:${styleId ?? 'none'}`)
   }
-  const createObjectStyle = (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic) => {
-    const record: ObjectStyleRecord = { id: newFrameId(), name: uniqueObjectStyleName(objectStyles, name), settings, ...(graphic ? { graphic } : {}) }
+  const createObjectStyle = (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic, size?: { w: number; h: number }) => {
+    const record: ObjectStyleRecord = { id: newFrameId(), name: uniqueObjectStyleName(objectStyles, name), settings, ...(graphic ? { graphic } : {}), ...(size ? { size } : {}) }
     const targets = apply ? objectStyleTargets() : { shapes: [], images: [] }
     const ids = new Set([...targets.shapes, ...targets.images].map((object) => object.id))
     const withStyle = {
@@ -6131,12 +6144,12 @@ export function Workspace({
     }
   }
   /** a style changed: every object that follows it takes the new settings, on the pages and on the parent pages */
-  const changeObjectStyle = (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => {
+  const changeObjectStyle = (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic, size?: { w: number; h: number }) => {
     if (!objectStyles.some((style) => style.id === id)) return
     const nextStyles = objectStyles.map((style) => {
       if (style.id !== id) return style
-      const { graphic: _old, ...rest } = style
-      return { ...rest, name: uniqueObjectStyleName(objectStyles.filter((other) => other.id !== id), name), settings, ...(graphic ? { graphic } : {}) }
+      const { graphic: _old, size: _oldSize, ...rest } = style
+      return { ...rest, name: uniqueObjectStyleName(objectStyles.filter((other) => other.id !== id), name), settings, ...(graphic ? { graphic } : {}), ...(size ? { size } : {}) }
     })
     const follow = (object: { objectStyleId?: string }) => object.objectStyleId === id
     const nextShapes = shapes.some(follow) ? shapes.map((shape) => (follow(shape) ? applyToShape(shape, settings, id) : shape)) : undefined
@@ -6185,7 +6198,7 @@ export function Workspace({
       if (key in look) (settings as Record<string, unknown>)[key] = look[key]
     }
     // the drawing follows the object too (none when the object has none)
-    changeObjectStyle(id, record.name, settings, await objectStyleGraphic())
+    changeObjectStyle(id, record.name, settings, await objectStyleGraphic(), objectStyleSize() ?? record.size)
   }
   const selectObjectsOfStyle = (id: string) => {
     const ids = [...shapes, ...images].filter((object) => object.objectStyleId === id).map((object) => object.id)
@@ -12168,7 +12181,7 @@ export function Workspace({
             {
               id: 'object-styles',
               label: 'סגנונות אובייקט',
-              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onFollowerLook={followerLook} onSelectionGraphic={objectStyleGraphic} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
+              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onFollowerLook={followerLook} onSelectionGraphic={objectStyleGraphic} onSelectionSize={objectStyleSize} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
             },
             {
               id: 'style-manager',

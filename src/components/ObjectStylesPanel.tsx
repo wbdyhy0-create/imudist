@@ -18,8 +18,10 @@ interface Props {
   onFollowerLook: (id: string) => ObjectStyleSettings | null
   /** the drawing of the selected objects (an ornament, a picture, several shapes), for a decoration; missing for one line, one plain rectangle or nothing */
   onSelectionGraphic: () => Promise<ObjectStyleGraphic | undefined>
-  onCreate: (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic) => void
-  onChange: (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void
+  /** the size of the object the style is made from (the first selected, or all of them together) */
+  onSelectionSize: () => { w: number; h: number } | undefined
+  onCreate: (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic, size?: { w: number; h: number }) => void
+  onChange: (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic, size?: { w: number; h: number }) => void
   onDelete: (id: string) => void
   /** the style becomes what the first selected object looks like (the settings it already holds) */
   onRedefine: (id: string) => void
@@ -65,9 +67,9 @@ export function objectStyleSwatch(settings: ObjectStyleSettings, graphic?: Objec
   }
 }
 
-type Editing = { id: string | null; name: string; settings: ObjectStyleSettings; graphic?: ObjectStyleGraphic }
+type Editing = { id: string | null; name: string; settings: ObjectStyleSettings; graphic?: ObjectStyleGraphic; size?: { w: number; h: number } }
 
-export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onFollowerLook, onSelectionGraphic, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
+export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onFollowerLook, onSelectionGraphic, onSelectionSize, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
   const [editing, setEditing] = useState<Editing | null>(null)
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -89,7 +91,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
   const fromSelection = async () => {
     const look = onSelectionLook()
     const graphic = look ? await onSelectionGraphic() : undefined
-    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic })
+    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic, size: look ? onSelectionSize() : undefined })
   }
   return (
     <section className="paragraph-styles-panel props-panel object-styles-panel" aria-label="סגנונות אובייקט" dir="rtl">
@@ -139,7 +141,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
                 setFound(null)
                 if (canApply) onApply(style.id)
               }}
-              onDoubleClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic })}
+              onDoubleClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic, size: style.size })}
             >
               <span className="object-style-swatch" style={objectStyleSwatch(style.settings, style.graphic)} aria-hidden="true" />
               <span className="style-sample">
@@ -149,7 +151,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
               {!objectStyleVisible(style) && <span className="object-style-empty" title="בסגנון אין מילוי, קו או ציור, ולכן כעיטור הוא לא מצייר כלום. אפשר להגדיר אותו מחדש לפי אובייקט.">ריק</span>}
               <span className="object-style-count" title="כמה אובייקטים במסמך עם הסגנון">{usage[style.id] ?? 0}</span>
             </button>
-            <button className="icon-button" aria-label={`עריכת ${style.name}`} title="עריכת הסגנון" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic })}>✎</button>
+            <button className="icon-button" aria-label={`עריכת ${style.name}`} title="עריכת הסגנון" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic, size: style.size })}>✎</button>
           </div>
         ))}
         {shown.length === 0 && styles.length > 0 && <span className="muted">אין סגנון בשם הזה.</span>}
@@ -160,7 +162,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: 'עריכת הסגנון…', onClick: () => { const style = styles.find((s) => s.id === menu.id); if (style) setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic }) } },
+            { label: 'עריכת הסגנון…', onClick: () => { const style = styles.find((s) => s.id === menu.id); if (style) setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic, size: style.size }) } },
             { label: 'בחר את כל האובייקטים בסגנון', onClick: () => setFound({ id: menu.id, count: onSelectObjects(menu.id) }) },
             { separator: true },
             { label: 'מחק את הסגנון', onClick: () => onDelete(menu.id) },
@@ -178,10 +180,10 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
         <ObjectStyleDialog
           initial={editing}
           reference={editing.id ? onFollowerLook(editing.id) ?? (canApply ? onSelectionLook() : null) : onSelectionLook()}
-          onApply={editing.id ? (name, settings, graphic) => onChange(editing.id!, name, settings, graphic) : undefined}
+          onApply={editing.id ? (name, settings, graphic) => onChange(editing.id!, name, settings, graphic, editing.size) : undefined}
           onSave={(name, settings, graphic) => {
-            if (editing.id) onChange(editing.id, name, settings, graphic)
-            else onCreate(name, settings, canApply, graphic)
+            if (editing.id) onChange(editing.id, name, settings, graphic, editing.size)
+            else onCreate(name, settings, canApply, graphic, editing.size)
             setEditing(null)
           }}
           onDelete={editing.id ? () => { onDelete(editing.id!); setEditing(null) } : undefined}

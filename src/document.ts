@@ -566,6 +566,8 @@ export interface ParagraphDecoration {
   look?: ObjectStyleSettings
   /** the drawing of the object style, when it has one: it is what is drawn, `length` wide */
   graphic?: ObjectStyleGraphic
+  /** the size of the object the object style was made from (see ObjectStyleRecord.size) */
+  refSize?: { w: number; h: number }
 }
 
 export interface ParagraphStyleRecord {
@@ -730,6 +732,8 @@ export interface ObjectStyleRecord {
   settings: ObjectStyleSettings
   /** the drawing the style was made from, for the decoration of a paragraph style (missing for a style made from one line, which is drawn from its settings) */
   graphic?: ObjectStyleGraphic
+  /** the size (points) of the object the style was made from: what an edge feather of the style is measured against when it is drawn at another size */
+  size?: { w: number; h: number }
 }
 
 /** Ruler guides: horizontal ('h') lines run across a page, vertical ('v') ones from top to bottom. */

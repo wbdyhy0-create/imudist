@@ -146,6 +146,20 @@ describe('the fade of an object style in a decoration', () => {
     expect(featherMask({ type: 'directional', top: 5, right: 0, bottom: 0, left: 0 }, 1)!.split('linear-gradient').length - 1).toBe(1)
     expect(featherMask(null, 1)).toBeNull()
   })
+
+  it('reaches the same part of every box when the style knows the size of its object: a heading of one line and one of three look alike', () => {
+    const soft = { type: 'basic' as const, radius: 20 }
+    const mask = featherMask(soft, 1, { w: 400, h: 40 })!
+    expect(mask).toContain('50%') // 20 of 40 along the height
+    expect(mask).toContain('5%') // 20 of 400 along the width
+    expect(mask).not.toContain('px)')
+    // without the size it keeps its distance in points
+    expect(featherMask(soft, 1)).toContain('20px')
+    // never deeper than the box
+    expect(featherMask({ type: 'basic', radius: 58 }, 1, { w: 480, h: 39 })).toContain('100%')
+    const vars = decorationVars({ ...deco({ position: 'behind' }), look: { fill: '#000000', feather: soft }, refSize: { w: 400, h: 40 } }, 1)!
+    expect(vars['--deco-mask']).toBe(mask)
+  })
 })
 
 describe('the decoration in the file', () => {

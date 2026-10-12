@@ -139,6 +139,13 @@ describe('object styles in the file', () => {
     expect(opened.shapes[0]?.objectStyleId).toBe('k')
   })
 
+  it('keep the size of the object they were made from', () => {
+    const styles: ObjectStyleRecord[] = [{ id: 's', name: 'עיטור', settings: { fill: '#000000' }, size: { w: 482, h: 39 } }]
+    expect(parseDocument(serializeDocument(contentWith(styles)), 'styles.imudist').objectStyles?.[0]?.size).toEqual({ w: 482, h: 39 })
+    const odd = JSON.stringify({ ...JSON.parse(serializeDocument(contentWith([]))), objectStyles: [{ id: 'a', name: 'a', settings: {}, size: { w: -1, h: 'tall' } }] })
+    expect(parseDocument(odd, 'styles.imudist').objectStyles?.[0]).not.toHaveProperty('size')
+  })
+
   it('keep the drawing of the object they were made from, when it is an SVG of a size', () => {
     const graphic = { svg: "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='5'><path d='M0 0h10v5z'/></svg>", w: 10, h: 5 }
     const opened = parseDocument(serializeDocument(contentWith([{ id: 'g', name: 'עיטור', settings: {}, graphic }])), 'styles.imudist')

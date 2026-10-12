@@ -793,7 +793,10 @@ function parseObjectStyles(value: unknown): ObjectStyleRecord[] {
     const graphic = isObj(raw.graphic) && typeof raw.graphic.svg === 'string' && raw.graphic.svg.length <= 4_000_000 && /^(?:<\?xml[^>]*\?>\s*)?<svg[\s>]/.test(raw.graphic.svg)
       ? { svg: raw.graphic.svg, w: num(raw.graphic.w, 0, 0, 20000), h: num(raw.graphic.h, 0, 0, 20000) }
       : undefined
-    return [{ id: raw.id, name, settings: parseObjectStyleSettings(raw.settings), ...(graphic && graphic.w > 0 && graphic.h > 0 ? { graphic } : {}) }]
+    const size = isObj(raw.size) && typeof raw.size.w === 'number' && typeof raw.size.h === 'number' && raw.size.w > 0 && raw.size.h > 0
+      ? { w: num(raw.size.w, 1, 0.1, 20000), h: num(raw.size.h, 1, 0.1, 20000) }
+      : undefined
+    return [{ id: raw.id, name, settings: parseObjectStyleSettings(raw.settings), ...(graphic && graphic.w > 0 && graphic.h > 0 ? { graphic } : {}), ...(size ? { size } : {}) }]
   })
 }
 

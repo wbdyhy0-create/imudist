@@ -56,13 +56,19 @@ export function decorationLine(look: ObjectStyleSettings, length: number): { wid
  * known when it is laid out: an edge feather keeps its distance in points, a fade along the object is in fractions of the box (exact along
  * its width or its height, the nearest in between for a slanting one).
  */
-export function featherMask(feather: Feather | null | undefined, scale: number): string | null {
+export function featherMask(feather: Feather | null | undefined, scale: number, refSize?: { w: number; h: number }): string | null {
   if (!feather) return null
   if (feather.type === 'basic' || feather.type === 'directional') {
-    const edges: [string, number][] = feather.type === 'basic'
-      ? [['to bottom', feather.radius], ['to left', feather.radius], ['to top', feather.radius], ['to right', feather.radius]]
-      : [['to bottom', feather.top], ['to left', feather.right], ['to top', feather.bottom], ['to right', feather.left]]
-    const layers = edges.filter(([, radius]) => radius > 0).map(([direction, radius]) => `linear-gradient(${direction}, rgba(0,0,0,0) 0px, rgba(0,0,0,1) ${radius * scale}px)`)
+    const edges: [string, number, 'w' | 'h'][] = feather.type === 'basic'
+      ? [['to bottom', feather.radius, 'h'], ['to left', feather.radius, 'w'], ['to top', feather.radius, 'h'], ['to right', feather.radius, 'w']]
+      : [['to bottom', feather.top, 'h'], ['to left', feather.right, 'w'], ['to top', feather.bottom, 'h'], ['to right', feather.left, 'w']]
+    // measured against the size of the object the style was made from, a feather reaches the same part of every box (a heading of one line
+    // is not left with only the edges, and one of three is not left with a solid middle); without that size it keeps its distance in points
+    const layers = edges.filter(([, radius]) => radius > 0).map(([direction, radius, axis]) => {
+      const reference = refSize?.[axis]
+      const depth = reference && reference > 0 ? `${Math.min(100, (radius / reference) * 100)}%` : `${radius * scale}px`
+      return `linear-gradient(${direction}, rgba(0,0,0,0) 0px, rgba(0,0,0,1) ${depth})`
+    })
     return layers.length > 0 ? layers.join(', ') : null
   }
   const dx = feather.x1 - feather.x0
@@ -122,7 +128,7 @@ export function decorationVars(deco: ParagraphDecoration, scale: number, context
   if (!look) return null
   const graphic = deco.graphic && deco.graphic.w > 0 && deco.graphic.h > 0 ? deco.graphic : undefined
   const vars: Record<string, string> = { '--deco-opacity': String(look.opacity ?? 1) }
-  const mask = featherMask(look.feather, scale)
+  const mask = featherMask(look.feather, scale, deco.refSize)
   if (mask) vars['--deco-mask'] = mask
 
   if (deco.position === 'behind') {
@@ -214,7 +220,7 @@ export function decoratedStyles(paragraphStyles: ParagraphStyleRecord[], objectS
     const deco = resolveParagraphStyle(style.id, paragraphStyles).decoration
     if (!deco) continue
     const record = objectStyles.find((candidate) => candidate.id === deco.objectStyleId)
-    if (record) out.set(style.id, { ...deco, look: record.settings, ...(record.graphic ? { graphic: record.graphic } : {}) })
+    if (record) out.set(style.id, { ...deco, look: record.settings, ...(record.graphic ? { graphic: record.graphic } : {}), ...(record.size ? { refSize: record.size } : {}) })
   }
   return out
 }
