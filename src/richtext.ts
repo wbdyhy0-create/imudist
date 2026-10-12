@@ -276,6 +276,7 @@ export interface ParagraphPatch extends ParagraphBox {
   leading?: number
   wordSpacingMin?: number
   wordSpacingMax?: number
+  wordSpacing?: number
   indentLeft?: number
   indentRight?: number
   firstLineIndent?: number
@@ -293,7 +294,7 @@ export interface ParagraphPatch extends ParagraphBox {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || p.wordSpacing !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
 
 /** the room (points, unscaled) a paragraph's fill or line keeps between itself and the text at the sides */
 const BOX_INSET = 3
@@ -302,11 +303,13 @@ const BOX_INSET = 3
 export const paragraphHasBox = (p: ParagraphBox | undefined) => !!p && (!!p.background || (p.borderWidth ?? 0) > 0)
 
 /** CSS for a paragraph block's own fill and line */
-export function paragraphBoxStyle(p: ParagraphBox | undefined, scale: number): { backgroundColor?: string; border?: string } {
+export function paragraphBoxStyle(p: ParagraphBox | undefined, scale: number): { backgroundColor?: string; boxShadow?: string } {
   if (!p) return {}
   return {
     ...(p.background ? { backgroundColor: p.background } : {}),
-    ...((p.borderWidth ?? 0) > 0 ? { border: `${p.borderWidth! * scale}px solid ${p.borderColor ?? '#000000'}` } : {}),
+    // the line is an inset shadow and not a CSS border: a border is rounded to whole device pixels (and is never thinner than one),
+    // so every width from 0.25 to 1.75 pt came out as the same thick line and the arrows of the width field changed nothing
+    ...((p.borderWidth ?? 0) > 0 ? { boxShadow: `inset 0 0 0 ${p.borderWidth! * scale}px ${p.borderColor ?? '#000000'}` } : {}),
   }
 }
 
@@ -438,7 +441,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     }
     if (needsLastLineJustify && end === text.length) block.style.textAlignLast = 'justify'
     if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
-    if (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined) {
+    if (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined || patch?.wordSpacing !== undefined) {
       const paragraphStyle = styleAtChar(runs, pos, DEFAULT_TEXT_STYLE)
       const spacing = wordSpacingPt({ ...DEFAULT_TEXT_STYLE, ...paragraphStyle, align: patch.align ?? baseAlign ?? DEFAULT_TEXT_STYLE.align, ...patch })
       if (spacing) block.style.wordSpacing = `${spacing * scale}px`
@@ -489,6 +492,11 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     if (marker && gapBefore) {
       const leading = patch?.leading ?? opts.baseLeading ?? Math.round(styleAtChar(runs, pos, DEFAULT_TEXT_STYLE).fontSize * 1.25)
       block.style.setProperty('--list-marker-offset', `${paragraphListMarkerOffset(gapBefore * scale, leading, scale)}px`)
+    }
+    // the marker is the size of the text of its paragraph, not of the frame's default size (a style may set a bigger one)
+    if (marker) {
+      const fonts = windowFontsOf(runs, pos, end, scale)
+      if (fonts) block.style.fontSize = `${fonts.main}px`
     }
     const indent = indentOf(paragraph)
     if (indent && isOpening) spacers.push(paraIndent(indent * scale))

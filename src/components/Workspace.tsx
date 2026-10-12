@@ -2390,7 +2390,7 @@ export function Workspace({
     const startParagraph = paraIndexAt(head.text, range.a)
     const endParagraph = paraIndexAt(head.text, Math.max(range.a, range.b - 1))
     const paragraphKeys = [
-      'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight',
+      'leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight',
       'firstLineIndent', 'secondLineIndent', 'align', 'windowIndent', 'windowWords', 'listKind', 'listGap',
       'background', 'borderWidth', 'borderColor',
     ] as const
@@ -2613,7 +2613,7 @@ export function Workspace({
   /** Apply paragraph layout to the selected text, or to the paragraphs shown by the selected frame. */
   const applyParagraphStyle = (
     id: string,
-    patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
+    patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
   ) => {
     const flowPart = flow.get(id)
     const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
@@ -9135,10 +9135,13 @@ export function Workspace({
         ...(scopePatch?.align !== undefined ? { align: scopePatch.align } : {}),
         ...(scopePatch?.wordSpacingMin !== undefined ? { wordSpacingMin: scopePatch.wordSpacingMin } : {}),
         ...(scopePatch?.wordSpacingMax !== undefined ? { wordSpacingMax: scopePatch.wordSpacingMax } : {}),
-        ...(panelSel
+        ...(scopePatch?.wordSpacing !== undefined ? { wordSpacing: scopePatch.wordSpacing } : {}),
+        // the space before / after of the paragraph the caret or the selection is in (a caret alone is enough: the heading it stands in
+        // shows its own spacing, and a change goes to that paragraph)
+        ...(panelParagraphRange
           ? {
-              spaceBefore: panelHead.paraSpaceBefore?.[paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]] ?? panelHead.spaceBefore,
-              spaceAfter: panelHead.paraSpaceAfter?.[paragraphsInRange(panelHead.text, panelSel.a, panelSel.b)[0]] ?? panelHead.spaceAfter,
+              spaceBefore: panelHead.paraSpaceBefore?.[paragraphsInRange(panelHead.text, panelParagraphRange.a, panelParagraphRange.b)[0]] ?? panelHead.spaceBefore,
+              spaceAfter: panelHead.paraSpaceAfter?.[paragraphsInRange(panelHead.text, panelParagraphRange.a, panelParagraphRange.b)[0]] ?? panelHead.spaceAfter,
             }
           : {}),
       }
@@ -9638,7 +9641,7 @@ export function Workspace({
           const keptWindow = paragraphStylePatches[index]?.windowIndent
           const keptWindowWords = paragraphStylePatches[index]?.windowWords
           paragraphStylePatches[index] = {
-            ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
+            ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
             ...(listKind ? { listKind } : {}),
             ...(listKind && listGap !== undefined ? { listGap } : {}),
             ...paragraphBoxOf(resolved),
@@ -9909,7 +9912,7 @@ export function Workspace({
     if ((hardReset || leaving.outlineWidth !== undefined) && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
     if ((hardReset || leaving.outlineColor !== undefined) && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
     const layout = {
-      ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
+      ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
       ...(resolved.listKind ? { listKind: resolved.listKind } : {}),
       ...paragraphBoxOf(resolved),
     } as NonNullable<TextFrame['paragraphStylePatches']>[number]
@@ -10018,7 +10021,7 @@ export function Workspace({
     if (occurrence.kind === 'footnote') {
       const oldBase = footnoteTextStyle(footnoteConfig, paragraphStyles, occurrence.note.paragraphStyleId)
       const nextBase = footnoteTextStyle(footnoteConfig, paragraphStyles, targetId)
-      const styleKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const styleKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
       const styleOverrides = occurrence.note.style
         ? Object.fromEntries(styleKeys.filter((key) => occurrence.note.style![key] !== undefined && occurrence.note.style![key] !== oldBase[key]).map((key) => [key, occurrence.note.style![key]])) as Partial<TextStyle>
         : {}
@@ -10464,6 +10467,7 @@ export function Workspace({
       </div>
 
       <ContextToolbar
+        unit={doc.unit}
         tool={space ? 'hand' : tool}
         sharpness={sharpness}
         onSharpness={changeSharpness}
@@ -10600,7 +10604,7 @@ export function Workspace({
           <select aria-label="יישור טקסט בטבלה" title="יישור" value={toolbarTableText.align} onChange={(event) => applyTableFormatting({ align: event.target.value as TextAlign })}>
             <option value="right">ימין</option><option value="center">מרכז</option><option value="left">שמאל</option><option value="justify">מיושר</option>
           </select>
-          <label className="context-field" title="מרווח אותיות"><span>מרווח אותיות</span><input type="number" step="1" value={toolbarTableText.tracking ?? 0} onChange={(event) => applyTableFormatting({ tracking: Number(event.target.value) })} /></label>
+          <label className="context-field" title="מרווח אותיות (% מגודל הגופן)"><span>מרווח אותיות</span><input type="number" step="1" value={(toolbarTableText.tracking ?? 0) / 10} onChange={(event) => applyTableFormatting({ tracking: Math.round((Number(event.target.value) || 0) * 10) })} /></label>
           <label className="context-field" title="מרווח בין שורות"><span>שורה</span><input type="number" min="0" value={toolbarTableText.leading ?? Math.round(toolbarTableText.fontSize * 1.25)} onChange={(event) => applyTableFormatting({ leading: Number(event.target.value) })} />pt</label>
           <label className="context-field" title="רווח לפני"><span>לפני</span><input type="number" min="0" value={toolbarTableText.spaceBefore ?? 0} onChange={(event) => applyTableFormatting({ spaceBefore: Number(event.target.value) })} /></label>
           <label className="context-field" title="רווח אחרי"><span>אחרי</span><input type="number" min="0" value={toolbarTableText.spaceAfter ?? 0} onChange={(event) => applyTableFormatting({ spaceAfter: Number(event.target.value) })} /></label>
@@ -11521,7 +11525,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
             },
             {
               id: 'character-styles',

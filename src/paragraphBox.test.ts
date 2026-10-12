@@ -12,8 +12,10 @@ describe('a paragraph\'s fill and line', () => {
 
   it('draws the fill, and the line in black unless told otherwise, scaled with the view', () => {
     expect(paragraphBoxStyle({ background: '#ffff00' }, 2)).toEqual({ backgroundColor: '#ffff00' })
-    expect(paragraphBoxStyle({ borderWidth: 1.5 }, 2)).toEqual({ border: '3px solid #000000' })
-    expect(paragraphBoxStyle({ borderWidth: 1, borderColor: '#ff0000' }, 1)).toEqual({ border: '1px solid #ff0000' })
+    expect(paragraphBoxStyle({ borderWidth: 1.5 }, 2)).toEqual({ boxShadow: 'inset 0 0 0 3px #000000' })
+    expect(paragraphBoxStyle({ borderWidth: 1, borderColor: '#ff0000' }, 1)).toEqual({ boxShadow: 'inset 0 0 0 1px #ff0000' })
+    // a hairline keeps its fraction (a CSS border would be rounded to a whole pixel)
+    expect(paragraphBoxStyle({ borderWidth: 0.25 }, 1)).toEqual({ boxShadow: 'inset 0 0 0 0.25px #000000' })
   })
 
   it('keeps the text off the box at the sides, on top of the paragraph\'s own indents', () => {

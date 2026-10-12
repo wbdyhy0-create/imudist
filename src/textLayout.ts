@@ -534,6 +534,16 @@ function paragraphOffset(story: string, index: number): number {
  * they belong to. Never moves `end` to `start` or before: a frame is not emptied for this, the paragraph that is first in
  * its frame has nowhere earlier to go.
  */
+/**
+ * "Keep with next" is for a paragraph that belongs to the one after it (a verse before its text, a heading): when the next
+ * paragraph has the same style (running text after running text) the mark is not chained, or a whole page of body text would
+ * be pulled along. A paragraph without a style id stays as marked.
+ */
+function keepWithNextToOtherStyle(keepWithNext: (number | null)[] | undefined, styleIds: string[] | undefined): (number | null)[] | undefined {
+  if (!keepWithNext?.some(Boolean) || !styleIds?.length) return keepWithNext
+  return keepWithNext.map((flag, index) => (flag && styleIds[index] && styleIds[index] === styleIds[index + 1] ? null : flag))
+}
+
 function adjustForKeepWithNext(
   m: HTMLDivElement,
   story: string,
@@ -610,7 +620,7 @@ function avoidLooseLastLine(
  * than a few dozen words, and this only ever runs once per paragraph, on demand - not during ordinary layout).
  * Uses the paragraph's actual character runs and paragraph-level layout patch, with the story style as fallback.
  */
-export function lastLineWordCount(paragraph: string, style: TextStyle, width: number, runsIn?: Run[], patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax'>): number {
+export function lastLineWordCount(paragraph: string, style: TextStyle, width: number, runsIn?: Run[], patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>): number {
   const words = [...paragraph.matchAll(/\S+/g)]
   if (words.length <= 1) return words.length
   const m = getMeasurer()
@@ -620,6 +630,7 @@ export function lastLineWordCount(paragraph: string, style: TextStyle, width: nu
     ...(patch?.leading !== undefined ? { leading: patch.leading } : {}),
     ...(patch?.wordSpacingMin !== undefined ? { wordSpacingMin: patch.wordSpacingMin } : {}),
     ...(patch?.wordSpacingMax !== undefined ? { wordSpacingMax: patch.wordSpacingMax } : {}),
+    ...(patch?.wordSpacing !== undefined ? { wordSpacing: patch.wordSpacing } : {}),
   }
   configure(m, measureStyle)
   m.style.width = `${Math.max(1, width - (patch?.indentLeft ?? 0) - (patch?.indentRight ?? 0))}px`
@@ -640,7 +651,7 @@ export function lastLineWordCount(paragraph: string, style: TextStyle, width: nu
  * width after the story's own side indents; the paragraph's own indents (`patch.indentLeft/Right`) are the padding of
  * its block (see buildParagraphNodes), so they are not taken off here as well.
  */
-function measurerForParagraph(style: TextStyle, width: number, patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax'>) {
+function measurerForParagraph(style: TextStyle, width: number, patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>) {
   const m = getMeasurer()
   configure(m, {
     ...style,
@@ -648,6 +659,7 @@ function measurerForParagraph(style: TextStyle, width: number, patch?: Paragraph
     ...(patch?.leading !== undefined ? { leading: patch.leading } : {}),
     ...(patch?.wordSpacingMin !== undefined ? { wordSpacingMin: patch.wordSpacingMin } : {}),
     ...(patch?.wordSpacingMax !== undefined ? { wordSpacingMax: patch.wordSpacingMax } : {}),
+    ...(patch?.wordSpacing !== undefined ? { wordSpacing: patch.wordSpacing } : {}),
   })
   m.style.width = `${Math.max(1, width)}px`
   return m
@@ -661,7 +673,7 @@ const withoutWindowOf = <P extends ParagraphPatch>(patch: P | undefined) => (pat
  * short paragraphs alone). The paragraph's own window, if it has one, is left out: the count is for the paragraph as it
  * reads without it.
  */
-export function countParagraphLines(paragraph: string, runs: Run[], style: TextStyle, width: number, patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax'>): number {
+export function countParagraphLines(paragraph: string, runs: Run[], style: TextStyle, width: number, patch?: ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>): number {
   if (!paragraph) return 0
   const plain = withoutWindowOf(patch)
   const m = measurerForParagraph(style, width, plain)
@@ -690,7 +702,7 @@ export function openingWidth(paragraph: string, runs: Run[], style: TextStyle, e
  * `width` is the frame's text width after the story's own side indents. Null when there is no word after the opening
  * ones, or that word does not even fit on the first line.
  */
-export function windowOffset(paragraph: string, runs: Run[], style: TextStyle, width: number, patch: (ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax'>) | undefined, words: number): number | null {
+export function windowOffset(paragraph: string, runs: Run[], style: TextStyle, width: number, patch: (ParagraphPatch & Pick<TextStyle, 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>) | undefined, words: number): number | null {
   const range = openingRange(paragraph, 0, paragraph.length, words)
   if (!range || range.next < 0) return null
   const natural = openingWidth(paragraph, runs, style, range.next)
@@ -809,10 +821,10 @@ export function flowFrames(
     // and the id, size and wrap areas of every frame in the thread
     const reuseSig =
       `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
-      `${style.wordSpacingMin}|${style.wordSpacingMax}|` +
+      `${style.wordSpacingMin}|${style.wordSpacingMax}|${style.wordSpacing}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
-      `${JSON.stringify(head.paraKeepFirstLines)}|${JSON.stringify(head.paraKeepLastLines)}|${JSON.stringify(head.paraKeepWithNext)}|` +
+      `${JSON.stringify(head.paraKeepFirstLines)}|${JSON.stringify(head.paraKeepLastLines)}|${JSON.stringify(head.paraKeepWithNext)}|${JSON.stringify(head.paragraphStyleIds)}|` +
       `${JSON.stringify(head.paragraphStylePatches)}|${JSON.stringify(paragraphStyles)}|${JSON.stringify(footnoteConfig)}|${JSON.stringify([...footnoteReservationOverrides])}|` +
       chain.map((f, i) => `${f.id}:${f.w}:${f.h}:${JSON.stringify(f.textScale)}:${floatsKey(floats[i])}`).join(',')
     const sig = `${reuseSig}|${JSON.stringify(head.footnotes)}|${JSON.stringify(footnoteNumbers ? [...footnoteNumbers] : [])}|${JSON.stringify(chain.map((frame) => [frame.id, footnoteContinuations.get(frame.id)]))}`
@@ -1065,7 +1077,7 @@ export function flowFrames(
           // not steady in the budget cannot be bisected) and cut whole pages short.
           if (!isLast && chosen.end > start) {
             const kept = adjustForKeepLines(m, story, runs, start, chosen.end, chosen.box, floats[i], paraOpts, head.paragraphStylePatches, head.paraKeepFirstLines, head.paraKeepLastLines)
-            const settled = adjustForKeepWithNext(m, story, runs, start, kept, chosen.box, floats[i], paraOpts, head.paragraphStylePatches, head.paraKeepWithNext, head.paraKeepFirstLines)
+            const settled = adjustForKeepWithNext(m, story, runs, start, kept, chosen.box, floats[i], paraOpts, head.paragraphStylePatches, keepWithNextToOtherStyle(head.paraKeepWithNext, head.paragraphStyleIds), head.paraKeepFirstLines)
             if (settled > start) chosen = { ...chosen, end: settled }
           }
           ranges.push({ start, end: chosen.end })

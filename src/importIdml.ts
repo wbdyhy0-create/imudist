@@ -509,7 +509,7 @@ function characterPart(patch: ParagraphPatch): Partial<CharStyle> {
 /** the paragraph-level settings of a patch */
 function paragraphPart(patch: ParagraphPatch): NonNullable<TextFrame['paragraphStylePatches']>[number] {
   const found: Record<string, unknown> = {}
-  for (const field of ['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'wordSpacingMin', 'wordSpacingMax'] as const) {
+  for (const field of ['leading', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing'] as const) {
     if (patch[field] !== undefined) found[field] = patch[field]
   }
   return found as NonNullable<TextFrame['paragraphStylePatches']>[number]

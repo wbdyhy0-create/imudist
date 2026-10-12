@@ -131,8 +131,8 @@ export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Pr
           </label>
           {smartTracking && (
             <div className="dlg-cols">
-              <Field label="כיווץ (1/1000 em)">
-                <NumberField value={tracking} min={-100} max={0} onChange={setTracking} />
+              <Field label="כיווץ (% מגודל הגופן)">
+                <NumberField value={tracking / 10} suffix="%" step={1} min={-10} max={0} onChange={(v) => setTracking(Math.round(v * 10))} />
               </Field>
               <Field label="עד כמה מילים בשורה">
                 <NumberField value={maxWords} min={1} max={5} onChange={setMaxWords} />

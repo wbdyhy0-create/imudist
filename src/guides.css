@@ -20,7 +20,8 @@
 .swatch-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .swatch-chip { position: relative; width: 20px; height: 20px; border-radius: 50%; border: 2px solid transparent; outline: 1px solid var(--border-strong); cursor: pointer; }
 .swatch-chip.on { border-color: var(--bg-raised); outline: 2px solid #fff; }
-.swatch-chip.custom { background: conic-gradient(#f66, #fd6, #6f8, #6df, #86f, #f6d, #f66); overflow: hidden; }
+/* "other colour" is a square, the ready colours are circles */
+.swatch-chip.custom { background: conic-gradient(#f66, #fd6, #6f8, #6df, #86f, #f6d, #f66); overflow: hidden; border-radius: 3px; }
 .swatch-chip.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
 
 .modal.wide { width: min(520px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; max-height: calc(100vh - 32px); overflow: auto; }

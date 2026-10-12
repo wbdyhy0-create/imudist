@@ -1,4 +1,5 @@
 import { descendantsOf, resolveCharacterPatch, resolvedRecords } from './characterStyleTree'
+import { tintHex } from './colorModels'
 import type { CharacterStyleRecord, CharacterStyleSettings, CharStyle, FootnoteLayoutConfig, ParagraphBox, ParagraphStyleRecord, Run, TextFrame } from './document'
 import { footnoteTextStyle, updateFootnoteParagraphStyle } from './footnoteLayout'
 import { applyNestedStyles } from './nestedStyles'
@@ -12,7 +13,7 @@ import { applyParagraphLook, charStyleOf, normalizeRuns, paraIndexAt, restyleRan
 
 /** the character-level settings of a paragraph style that its paragraphs show (kept in step with the editor's list) */
 const CHAR_LOOK_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking', 'baselineShift', 'color', 'outlineColor', 'outlineWidth'] as const
-const PARAGRAPH_LOOK_KEYS = ['leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'] as const
+const PARAGRAPH_LOOK_KEYS = ['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'] as const
 const RUN_KEYS = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
 
 export interface StyleEnv {
@@ -20,12 +21,22 @@ export interface StyleEnv {
 }
 
 /** a style with what it is based on folded in */
-export function resolveParagraphStyle(id: string, source: ParagraphStyleRecord[], seen = new Set<string>()): ParagraphStyleRecord['patch'] {
+function mergedParagraphStyle(id: string, source: ParagraphStyleRecord[], seen: Set<string>): ParagraphStyleRecord['patch'] {
   if (seen.has(id)) return {}
   const style = source.find((candidate) => candidate.id === id)
   if (!style) return {}
   const nextSeen = new Set(seen).add(id)
-  return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
+  return { ...(style.basedOnId ? mergedParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
+}
+
+/**
+ * The look a paragraph style gives, what it is based on included. Its tint (גוון, per cent) lightens the text colour toward white:
+ * done once, on the whole merged look, so a style based on another one tints the colour it inherits and a tint is never applied twice.
+ */
+export function resolveParagraphStyle(id: string, source: ParagraphStyleRecord[], seen = new Set<string>()): ParagraphStyleRecord['patch'] {
+  const merged = mergedParagraphStyle(id, source, seen)
+  if (merged.tint === undefined || merged.tint >= 100 || !merged.color || !/^#[0-9a-f]{6}$/i.test(merged.color)) return merged
+  return { ...merged, color: tintHex(merged.color, merged.tint) }
 }
 
 /** a style's fill and line, as a paragraph carries them (a line needs a width; its colour defaults to black) */

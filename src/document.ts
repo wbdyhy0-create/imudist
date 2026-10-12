@@ -264,6 +264,8 @@ export interface TextStyle extends CharStyle {
    * (missing = 90–120, the usual range); ordinary (non-justified) text always keeps the normal 100% */
   wordSpacingMin?: number
   wordSpacingMax?: number
+  /** the wanted space between words, per cent of the normal one (100 = normal); every alignment, and a justified paragraph adds its minimum / maximum on top of it */
+  wordSpacing?: number
   /**
    * Paragraph spacing and indents: these belong to the whole story (like `align`/`leading`), not to an individual
    * paragraph within it — a story with several paragraphs (separated by "\n") applies one shared setting to all of
@@ -340,47 +342,41 @@ export function paraLineHeightOf(style: TextStyle): number | undefined {
  * wraps lines shorter/longer than the real render actually can, silently mis-measuring a frame's fit.
  */
 export function wordSpacingPt(style: TextStyle): number {
-  if (style.align !== 'justify' && style.align !== 'justifyCenter') return 0
-  const min = style.wordSpacingMin ?? 90
-  const max = style.wordSpacingMax ?? 120
-  const percent = (min + max) / 2
+  const justified = style.align === 'justify' || style.align === 'justifyCenter'
+  // the wanted spacing of any paragraph; a justified one has the middle of its minimum and maximum on top of it
+  const percent = (style.wordSpacing ?? 100) - 100 + (justified ? ((style.wordSpacingMin ?? 90) + (style.wordSpacingMax ?? 120)) / 2 - 100 : 0)
   // a typical space is about a quarter of an em; word-spacing is an amount ADDED to it, not a multiplier
-  return ((percent - 100) / 100) * 0.25 * style.fontSize
+  return (percent / 100) * 0.25 * style.fontSize
 }
 
 /**
  * The gap after the "\n" ending each paragraph of `text` (one entry per paragraph, so `paraGaps(...)[i]` is the
  * gap after paragraph `i` — the last paragraph has no entry, since there's nothing after it to gap from; its own
  * trailing space, if any, is the frame's own padding-bottom, same as the story-wide spaceAfter always was).
- * Resolves, per paragraph boundary: when only one side of the break asks for space - that paragraph's own
- * `spaceAfter` override, or else the NEXT paragraph's own `spaceBefore` override - that is the gap, so setting a
- * paragraph's spaceAfter pushes the paragraph after it away, and setting a paragraph's spaceBefore pushes it away
- * from the one before it, the two independent controls asked for. When BOTH sides ask for space (e.g. a paragraph
- * style bakes a spaceAfter into every paragraph it's applied to, and the next paragraph's own style also has a
- * spaceBefore), the two demands collapse into one gap the way professional layout tools and CSS margins both do: the LARGER of the
- * two, not whichever happens to come first - otherwise a paragraph's own spaceAfter (however it got set) would
- * permanently drown out any spaceBefore the paragraph after it is ever given. Else the story's own `spaceAfter`.
- * (Paragraph 0's own spaceBefore, if set, has nowhere "before" it to attach to within this per-"\n" mechanism —
- * same as the story-wide spaceBefore, it becomes the first frame's own padding-top instead; see frames.ts's
- * `insetBox` / TextFrameView.tsx.)
+ * Per paragraph boundary the two add up: the gap is the space AFTER of the paragraph above (its own override, else the story's
+ * `spaceAfter`) plus the space BEFORE of the paragraph below (its own override), so setting a paragraph's spaceAfter pushes
+ * the paragraph after it away, and setting a paragraph's spaceBefore pushes that paragraph down from the one above it, each
+ * independently and on top of the other, as in the layout programs. (Paragraph 0's own spaceBefore has nothing "before" it:
+ * the paragraph that opens a frame sits against the frame's edge - see `frameSpaceBefore`.)
  */
 export function paraGaps(style: TextStyle, frame: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[] }, text: string): (number | undefined)[] {
   const count = (text.match(/\n/g) ?? []).length + 1
   const out: (number | undefined)[] = []
   for (let i = 0; i < count - 1; i++) {
-    const after = frame.paraSpaceAfter?.[i]
-    const before = frame.paraSpaceBefore?.[i + 1]
-    const gap = after != null && before != null ? Math.max(after, before) : (after ?? before ?? (style.spaceAfter ?? DEFAULT_SPACE_AFTER))
+    const after = frame.paraSpaceAfter?.[i] ?? style.spaceAfter ?? DEFAULT_SPACE_AFTER
+    const before = frame.paraSpaceBefore?.[i + 1] ?? 0
+    const gap = after + before
     out.push(gap > 0 ? (effectiveLeading(style)) + gap : undefined)
   }
   return out
 }
 
-/** The story's own leading space: paragraph 0's own `spaceBefore` override if set, else the story-wide one. This
- *  is the first frame's padding-top (see frames.ts's `insetBox` / TextFrameView.tsx) — paragraph 0 has no
- *  paragraph before it for `paraGaps`' per-"\n" mechanism to attach a gap to. */
-export function frameSpaceBefore(style: TextStyle, frame: { paraSpaceBefore?: (number | null)[] }): number {
-  return frame.paraSpaceBefore?.[0] ?? style.spaceBefore ?? 0
+/** The space above the story's first line (the first frame's padding-top): none. A paragraph's "space before" is a gap between it
+ *  and the paragraph above it, so the one that opens a frame - or a page - sits against the frame's own edge (its margins / grid). */
+export function frameSpaceBefore(_style: TextStyle, _frame: { paraSpaceBefore?: (number | null)[] }): number {
+  // "space before" is a gap between two paragraphs: the paragraph that opens a frame (or a page) sits against the frame's own edge
+  // (its margins / grid) and does not get it, as in the layout programs. The same holds for a paragraph that starts a later frame.
+  return 0
 }
 
 /** The story's own trailing space: the LAST paragraph's own `spaceAfter` override if set, else the story-wide one.
@@ -450,7 +446,7 @@ export interface TextFrame extends TextStyle {
    * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
    * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
    */
-  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   /** hidden in the Layers panel: not drawn, and not exported (its text still takes its place in the story) */
@@ -533,7 +529,7 @@ export interface ParagraphStyleRecord {
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
 }
 
 /** The only paragraph style every new document starts with; part of `DocContent`, saved with the file. */

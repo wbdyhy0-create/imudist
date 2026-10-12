@@ -27,7 +27,7 @@ interface Props {
   onCharStyle: (patch: Partial<CharStyle>) => void
   sizeMixed?: boolean
   onSizeStep?: (delta: number) => void
-  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
+  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
   onArrange: (op: ArrangeOp) => void
   onLink: () => void
   onUnlink: () => void
@@ -48,7 +48,7 @@ export function ParagraphTextControls({
   onChange,
 }: {
   style: TextStyle
-  onChange: (patch: Partial<Pick<TextStyle, 'align' | 'wordSpacingMin' | 'wordSpacingMax'>>) => void
+  onChange: (patch: Partial<Pick<TextStyle, 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
 }) {
   return (
     <>
@@ -161,7 +161,7 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep, onLead
               </Labeled>
             )}
             <Labeled label="ריווח בין אותיות (Tracking)">
-              <NumberField value={style.tracking} step={5} min={-500} max={500} onChange={(v) => onCharStyle({ tracking: v })} />
+              <NumberField value={style.tracking / 10} suffix="%" step={1} min={-50} max={50} onChange={(v) => onCharStyle({ tracking: Math.round(v * 10) })} />
             </Labeled>
             {afterTracking}
             {samples && (

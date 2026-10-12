@@ -27,7 +27,7 @@ export interface PlacedText {
   paragraphStyleIds?: string[]
   /** Display names matching paragraphStyleIds, kept as a stable fallback when local ids change. */
   paragraphStyleNames?: string[]
-  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
   tocPageReferences?: TocPageReference[]
   tocFootnoteReferences?: TocFootnoteReference[]
   /** Word footnotes, anchored to marker offsets in the imported story. */

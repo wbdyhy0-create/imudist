@@ -385,7 +385,9 @@ function RichText({
         const patch = paragraphPatches?.[paragraph.index]
         const marker = paragraph.index > startParaIndex || atParaStart ? paragraphListMarker(paragraphPatches, paragraph.index) : undefined
         const isJustified = (patch?.align ?? baseAlign) === 'justify' || (patch?.align ?? baseAlign) === 'justifyCenter'
-        const wordSpacing = isJustified && (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined) ? `${((((patch.wordSpacingMin ?? 90) + (patch.wordSpacingMax ?? 120)) / 2 - 100) * 0.25 * baseFontSize) / 100}px` : undefined
+        // the same sum as document.ts's wordSpacingPt: the wanted spacing, and for a justified paragraph its minimum / maximum on top
+        const spacingPercent = (patch?.wordSpacing ?? 100) - 100 + (isJustified ? (((patch?.wordSpacingMin ?? 90) + (patch?.wordSpacingMax ?? 120)) / 2 - 100) : 0)
+        const wordSpacing = patch && (patch.wordSpacingMin !== undefined || patch.wordSpacingMax !== undefined || patch.wordSpacing !== undefined) ? `${(spacingPercent * 0.25 * baseFontSize) / 100}px` : undefined
         const continues = continuesParagraphAtEnd && paragraph === paragraphNodes[paragraphNodes.length - 1] && (patch?.align ?? baseAlign) === 'justify'
         // the same rule as richtext.ts's buildParagraphNodes: a window only opens a paragraph that starts here, and the
         // spacer closing the previous paragraph sits on its first line (so the floated band starts that much lower)
@@ -393,7 +395,9 @@ function RichText({
         const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
         const windowFonts: WindowFonts | undefined = windowWidth && paragraph.sizes.size > 0 ? { opening: paragraph.opening, main: [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] } : undefined
         const markerOffset = marker ? paragraphListMarkerOffset(windowGap, patch?.leading ?? baseLeading, scale) : 0
-        const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px` } as CSSProperties : {}
+        // the marker has the size of the text of its paragraph (the frame's own size can be smaller than a style's), so it lies level with the line
+        const markerSize = marker && paragraph.sizes.size > 0 ? [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined
+        const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px`, ...(markerSize ? { fontSize: `${markerSize}px` } : {}) } as CSSProperties : {}
         return <div key={`paragraph-${paragraph.index}`} className={tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
       })}
     </>

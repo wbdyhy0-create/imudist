@@ -4,7 +4,7 @@ import { CharControls, Group, Labeled, ParagraphTextControls, TextShadowGroup } 
 import { NumberField } from './NumberField'
 
 type SpacingPatch = Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>
-type ParagraphPatch = Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>
+type ParagraphPatch = Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>
 type KeepLinesPatch = Partial<{ first: number; last: number }>
 
 interface Props {

@@ -7,6 +7,7 @@ export const styleOf = (f: TextFrame): TextStyle => ({
   leading: f.leading,
   wordSpacingMin: f.wordSpacingMin,
   wordSpacingMax: f.wordSpacingMax,
+  wordSpacing: f.wordSpacing,
   spaceBefore: f.spaceBefore,
   spaceAfter: f.spaceAfter,
   indentLeft: f.indentLeft,

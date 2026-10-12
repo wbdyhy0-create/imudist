@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { BLEND_MODES, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { BLEND_MODES, DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
 import { SHARPNESS_LEVELS } from '../sharpness'
 import { FillPicker } from './FillPicker'
 import { ALIGNS } from './PropertiesPanel'
@@ -8,6 +8,8 @@ import type { ToolId } from './Toolbox'
 import type { ArrangeOp } from '../stacking'
 import { useFontCatalog } from '../fonts'
 import { FontPicker } from './FontPicker'
+import { NumberField } from './NumberField'
+import type { Unit } from '../units'
 
 /** the choice of how an object is mixed with what is under it */
 const blendSelect = (value: BlendMode | undefined, onChange: (mode: BlendMode | undefined) => void) => (
@@ -64,7 +66,9 @@ interface Props {
   onTextScale?: (axis: 'x' | 'y', percent: number) => void
   onAlign?: (align: TextAlign) => void
   onLeading?: (value: number) => void
-  onParagraphStyle?: (patch: Partial<Pick<TextFrame, 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>) => void
+  /** the unit of the document: the indents are shown in it, as in the paragraph panel and the style dialog */
+  unit?: Unit
+  onParagraphStyle?: (patch: Partial<Pick<TextFrame, 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'wordSpacing'>>) => void
   onParagraphSpacing?: (patch: Partial<Pick<TextFrame, 'spaceBefore' | 'spaceAfter'>>) => void
   children?: ReactNode
 }
@@ -86,7 +90,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   eraser: 'מחק',
 }
 
-export function ContextToolbar({ tool, sharpness, onSharpness, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, unit, sharpness, onSharpness, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? 'כלי'
   const char = (textStyle ?? tableText ?? frame) as CharStyle
   const fontCatalog = useFontCatalog()
@@ -191,10 +195,8 @@ export function ContextToolbar({ tool, sharpness, onSharpness, shape, image, fra
           <button className={'context-command' + (char.weight >= 600 ? ' active' : '')} title="מודגש" onClick={() => onCharStyle?.({ weight: char.weight >= 600 ? 400 : 700 })}>B</button>
           <button className={'context-command' + (char.italic ? ' active' : '')} title="נטוי" onClick={() => onCharStyle?.({ italic: !char.italic })}>I</button>
           {fontSizeControl}
-          <div className="context-align-buttons" role="group" aria-label="יישור">
-            {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
-          </div>
-          <label className="context-field" title="מרווח אותיות"><span>מרווח אותיות</span><input type="number" step="1" value={char.tracking} onChange={(event) => onCharStyle?.({ tracking: Number(event.target.value) })} /></label>
+          <label className="context-field" title="מרווח אותיות (% מגודל הגופן)"><span>מרווח אותיות</span><input type="number" step="1" value={char.tracking / 10} onChange={(event) => onCharStyle?.({ tracking: Math.round((Number(event.target.value) || 0) * 10) })} /></label>
+          <label className="context-field" title="מרווח מילים (% מהרווח הרגיל, 100 = רגיל)"><span>מרווח מילים</span><input type="number" step="10" min="0" max="500" value={para.wordSpacing ?? 100} onChange={(event) => { const value = Number(event.target.value); if (event.target.value !== '' && Number.isFinite(value)) onParagraphStyle?.({ wordSpacing: Math.min(500, Math.max(0, value)) }) }} /></label>
           <div className="context-opacity-control">
             <button
               type="button"
@@ -220,18 +222,18 @@ export function ContextToolbar({ tool, sharpness, onSharpness, shape, image, fra
               </label>
             )}
           </div>
-          {onBlendMode && blendSelect(frame.blendMode, onBlendMode)}
           <label className="context-field" title="מרווח שורות"><span>מרווח שורות</span><input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? para.leading : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />pt</label>
-          <label className="context-field" title="קנה מידה אופקי של הטקסט"><span>רוחב</span><input aria-label="קנה מידה אופקי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.x ?? 1) * 100)} onChange={(event) => onTextScale?.('x', Number(event.target.value))} />%</label>
-          <label className="context-field" title="קנה מידה אנכי של הטקסט"><span>גובה</span><input aria-label="קנה מידה אנכי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.y ?? 1) * 100)} onChange={(event) => onTextScale?.('y', Number(event.target.value))} />%</label>
+          <label className="context-field" title="קנה מידה אופקי של הטקסט"><span>רוחב תו</span><input aria-label="קנה מידה אופקי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.x ?? 1) * 100)} onChange={(event) => onTextScale?.('x', Number(event.target.value))} />%</label>
+          <label className="context-field" title="קנה מידה אנכי של הטקסט"><span>גובה תו</span><input aria-label="קנה מידה אנכי של הטקסט" type="number" min="10" max="1000" value={Math.round((frame.textScale?.y ?? 1) * 100)} onChange={(event) => onTextScale?.('y', Number(event.target.value))} />%</label>
         </div>
-        <div className="context-paragraph-controls" aria-label="מאפייני פסקה">
-          <label title="רווח לפני">לפני<input type="number" value={para.spaceBefore ?? 0} onChange={(event) => onParagraphSpacing?.({ spaceBefore: Number(event.target.value) })} /></label>
-          <label title="רווח אחרי">אחרי<input type="number" value={para.spaceAfter ?? 0} onChange={(event) => onParagraphSpacing?.({ spaceAfter: Number(event.target.value) })} /></label>
-          <label title="הזחה מימין">ימין<input type="number" value={para.indentRight ?? 0} onChange={(event) => onParagraphStyle?.({ indentRight: Number(event.target.value) })} /></label>
-          <label title="הזחה משמאל">שמאל<input type="number" value={para.indentLeft ?? 0} onChange={(event) => onParagraphStyle?.({ indentLeft: Number(event.target.value) })} /></label>
-          <label title="הזחת שורה ראשונה">ראשונה<input type="number" value={para.firstLineIndent ?? 0} onChange={(event) => onParagraphStyle?.({ firstLineIndent: Number(event.target.value) })} /></label>
-          <label title="הזחת שורה שנייה">שנייה<input type="number" value={frame.secondLineIndent ?? 0} onChange={(event) => onParagraphStyle?.({ secondLineIndent: Number(event.target.value) })} /></label>
+        <div className="context-paragraph-controls" aria-label="הזחות הפסקה">
+          <div className="context-align-buttons" role="group" aria-label="יישור">
+            {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
+          </div>
+          <div className="context-field" title="הזחה מימין"><span>הזחה מימין</span><NumberField value={para.indentRight ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(indentRight) => onParagraphStyle?.({ indentRight })} /></div>
+          <div className="context-field" title="הזחה משמאל"><span>הזחה משמאל</span><NumberField value={para.indentLeft ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(indentLeft) => onParagraphStyle?.({ indentLeft })} /></div>
+          <div className="context-field" title="הזחה מלמעלה: הרווח שלפני הפסקה, שדוחף אותה כלפי מטה מהפסקה שמעליה"><span>הזחה מלמעלה</span><NumberField value={para.spaceBefore ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceBefore) => onParagraphSpacing?.({ spaceBefore })} /></div>
+          <div className="context-field" title="הזחה מלמטה: הרווח שאחרי הפסקה, שדוחף את הפסקה שמתחתיה כלפי מטה"><span>הזחה מלמטה</span><NumberField value={para.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceAfter) => onParagraphSpacing?.({ spaceAfter })} /></div>
         </div>
       </>}
       {(tool === 'pen' || tool === 'pencil' || tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'polygon') && !shape && (

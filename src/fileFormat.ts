@@ -313,7 +313,7 @@ const rotationOf = (raw: Record<string, unknown>): { rotation?: number } =>
 const groupOf = (raw: Record<string, unknown>): { groupId?: string } => typeof raw.groupId === 'string' && raw.groupId ? { groupId: raw.groupId } : {}
 const layerIdOf = (raw: Record<string, unknown>): { layerId?: string } => typeof raw.layerId === 'string' && raw.layerId.length > 0 && raw.layerId.length <= 64 ? { layerId: raw.layerId } : {}
 /** leading, word-spacing bounds and paragraph spacing/indents: optional, belong to the whole story, not per-run */
-type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
+type ParagraphFields = Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>
 /** hidden or locked in the Layers panel, and the name given there: the same for every kind of object */
 const itemFlagsOf = (raw: Record<string, unknown>): { hidden?: true; locked?: true } => ({
   ...(raw.hidden === true ? { hidden: true as const } : {}),
@@ -343,6 +343,7 @@ const paragraphStyleOf = (raw: Record<string, unknown>): Partial<ParagraphFields
   ...(typeof raw.leading === 'number' && Number.isFinite(raw.leading) ? { leading: num(raw.leading, 0, 0, MAX_PAGE_PT) } : {}),
   ...(typeof raw.wordSpacingMin === 'number' && Number.isFinite(raw.wordSpacingMin) ? { wordSpacingMin: num(raw.wordSpacingMin, 90, 10, 100) } : {}),
   ...(typeof raw.wordSpacingMax === 'number' && Number.isFinite(raw.wordSpacingMax) ? { wordSpacingMax: num(raw.wordSpacingMax, 120, 100, 500) } : {}),
+  ...(typeof raw.wordSpacing === 'number' && Number.isFinite(raw.wordSpacing) ? { wordSpacing: num(raw.wordSpacing, 100, 0, 500) } : {}),
   ...(typeof raw.spaceBefore === 'number' && Number.isFinite(raw.spaceBefore) ? { spaceBefore: num(raw.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
   ...(typeof raw.spaceAfter === 'number' && Number.isFinite(raw.spaceAfter) ? { spaceAfter: num(raw.spaceAfter, 0, 0, MAX_PAGE_PT) } : {}),
   ...(typeof raw.indentLeft === 'number' && Number.isFinite(raw.indentLeft) ? { indentLeft: num(raw.indentLeft, 0, 0, MAX_PAGE_PT) } : {}),

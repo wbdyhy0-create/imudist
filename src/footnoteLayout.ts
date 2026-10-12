@@ -64,7 +64,7 @@ export function footnoteDividerHeight(config: FootnoteLayoutConfig, styles: Para
 
 export function updateFootnoteParagraphStyle(note: FootnoteItem, previous: TextStyle, next: TextStyle): FootnoteItem {
   const charKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
-  const styleKeys = [...charKeys, 'align', 'leading', 'wordSpacingMin', 'wordSpacingMax', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'secondLineIndent'] as const
+  const styleKeys = [...charKeys, 'align', 'leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'secondLineIndent'] as const
   const changedKeys = styleKeys.filter((key) => previous[key] !== next[key])
   const changedCharKeys = charKeys.filter((key) => previous[key] !== next[key])
   const style = note.style ? { ...note.style } : undefined

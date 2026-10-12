@@ -251,8 +251,8 @@ function CharacterStyleDialog({ styles, initial, onSave, onDelete, onClose }: Di
             <option value="no">לא נטוי</option>
           </select>
         </Setting>
-        <Setting label="מרווח בין אותיות" on={patch.tracking !== undefined} inherited={has('tracking')} onToggle={toggle('tracking', inherited.tracking ?? 0)}>
-          <input className="select table-dialog-number" type="number" min={-1000} max={1000} step={5} value={shown('tracking', 0)} onChange={(e) => set({ tracking: Math.min(1000, Math.max(-1000, Number(e.target.value) || 0)) })} />
+        <Setting label="מרווח בין אותיות (% מגודל הגופן)" on={patch.tracking !== undefined} inherited={has('tracking')} onToggle={toggle('tracking', inherited.tracking ?? 0)}>
+          <input className="select table-dialog-number" type="number" min={-100} max={100} step={1} value={shown('tracking', 0) / 10} onChange={(e) => set({ tracking: Math.min(1000, Math.max(-1000, Math.round((Number(e.target.value) || 0) * 10))) })} />
         </Setting>
         <Setting label="הסטת קו בסיס (pt)" on={patch.baselineShift !== undefined} inherited={has('baselineShift')} onToggle={toggle('baselineShift', inherited.baselineShift ?? 3)}>
           <input className="select table-dialog-number" type="number" min={-99} max={99} step={0.5} value={shown('baselineShift', 3)} onChange={(e) => set({ baselineShift: Math.min(99, Math.max(-99, Number(e.target.value) || 0)) })} />

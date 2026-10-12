@@ -10,6 +10,8 @@ interface Props {
   unit?: Unit
   /** replaces the unit's short name in the display (e.g. "pt" for font sizes, which are px == pt) */
   unitLabel?: string
+  /** a text shown after a plain number (e.g. "%"); it is accepted when typed and left out when not */
+  suffix?: string
   /** how much the arrows and the up / down keys change the value, in the displayed unit (default: 1 mm, 0.1 cm / in) */
   step?: number
   min?: number
@@ -24,7 +26,7 @@ interface Props {
 
 const STEP: Record<Unit, number> = { px: 1, mm: 1, cm: 0.1, in: 0.1 }
 
-export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, step: stepSize, min = 0, max = Infinity, mixed = false, onStep, live = false }: Props) {
+export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, suffix, step: stepSize, min = 0, max = Infinity, mixed = false, onStep, live = false }: Props) {
   // non-null while the user is typing
   const [text, setText] = useState<string | null>(null)
   const display = mixed
@@ -33,12 +35,18 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
       ? unitLabel
         ? `${formatNumber(fromPt(value, unit))} ${unitLabel}`
         : formatLength(value, unit)
-      : String(value)
+      : `${value}${suffix ?? ''}`
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
 
+  const parse = (raw: string): number | null => {
+    if (!suffix || unit) return parseFieldValue(raw, unit, unitLabel)
+    const found = /^\s*(-?\d+(?:[.,]\d+)?)\s*$/.exec(raw.split(suffix).join(''))
+    return found ? Number.parseFloat(found[1]!.replace(',', '.')) : null
+  }
+
   const commit = (raw: string) => {
-    const parsed = parseFieldValue(raw, unit, unitLabel)
+    const parsed = parse(raw)
     if (parsed !== null) onChange(clamp(parsed))
   }
 
@@ -87,7 +95,7 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
         onChange={(e) => {
           setText(e.target.value)
           if (live) {
-            const parsed = parseFieldValue(e.target.value, unit, unitLabel)
+            const parsed = parse(e.target.value)
             if (parsed !== null) onChange(clamp(parsed))
           }
         }}
