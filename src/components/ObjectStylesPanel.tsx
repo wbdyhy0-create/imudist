@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { BLEND_MODES, type BlendMode, type LineArrow, type ObjectStyleGraphic, type ObjectStyleRecord, type ObjectStyleSettings } from '../document'
+import { BLEND_MODES, type BlendMode, type Feather, type LineArrow, type ObjectStyleGraphic, type ObjectStyleRecord, type ObjectStyleSettings } from '../document'
 import { LINE_ARROWS, LINE_PROFILES } from '../lineProfile'
+import { objectStyleVisible } from '../objectStyles'
 import { ContextMenu } from './ContextMenu'
 
 interface Props {
@@ -13,8 +14,10 @@ interface Props {
   onApply: (id: string | null) => void
   /** what the first selected object looks like, in the terms of a style; null when no picture or shape is selected */
   onSelectionLook: () => ObjectStyleSettings | null
-  /** the drawing of the selected objects (an ornament, a picture, several shapes), for a decoration; missing for one line or nothing */
-  onSelectionGraphic: () => ObjectStyleGraphic | undefined
+  /** what the first object that follows the style looks like now (null: none does) */
+  onFollowerLook: (id: string) => ObjectStyleSettings | null
+  /** the drawing of the selected objects (an ornament, a picture, several shapes), for a decoration; missing for one line, one plain rectangle or nothing */
+  onSelectionGraphic: () => Promise<ObjectStyleGraphic | undefined>
   onCreate: (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic) => void
   onChange: (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void
   onDelete: (id: string) => void
@@ -35,6 +38,7 @@ const NAMES: Record<keyof ObjectStyleSettings, string> = {
   opacity: 'שקיפות',
   blendMode: 'מצב מיזוג',
   shadow: 'צללית',
+  feather: 'דהייה וקצוות רכים',
   arrowStart: 'ראש חץ בהתחלה',
   arrowEnd: 'ראש חץ בסוף',
   lineWidths: 'עובי לאורך הקו',
@@ -63,7 +67,7 @@ export function objectStyleSwatch(settings: ObjectStyleSettings, graphic?: Objec
 
 type Editing = { id: string | null; name: string; settings: ObjectStyleSettings; graphic?: ObjectStyleGraphic }
 
-export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onSelectionGraphic, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
+export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onFollowerLook, onSelectionGraphic, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
   const [editing, setEditing] = useState<Editing | null>(null)
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -82,9 +86,10 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
       if (!styles.some((style) => style.name === name)) return name
     }
   }
-  const fromSelection = () => {
+  const fromSelection = async () => {
     const look = onSelectionLook()
-    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic: look ? onSelectionGraphic() : undefined })
+    const graphic = look ? await onSelectionGraphic() : undefined
+    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic })
   }
   return (
     <section className="paragraph-styles-panel props-panel object-styles-panel" aria-label="סגנונות אובייקט" dir="rtl">
@@ -94,7 +99,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
           <button className="icon-button" aria-label="הגדר מחדש לפי האובייקט הנבחר" title="הגדר מחדש לפי האובייקט הנבחר&#10;בחרו סגנון ואובייקט שנראה כמו שרוצים. הסגנון וכל האובייקטים שבו יתעדכנו." disabled={!targetStyle || !canApply} onMouseDown={(event) => event.preventDefault()} onClick={() => targetStyle && onRedefine(targetStyle.id)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4.6 9a7.5 7.5 0 0 1 13-2L20 9M4 17v-5h5M19.4 15a7.5 7.5 0 0 1-13 2L4 15" /></svg>
           </button>
-          <button className="icon-button" aria-label="סגנון אובייקט חדש" title="סגנון חדש מהאובייקט הנבחר&#10;בלי בחירה, נפתח סגנון חדש להגדרה." onMouseDown={(event) => event.preventDefault()} onClick={fromSelection}>+</button>
+          <button className="icon-button" aria-label="סגנון אובייקט חדש" title="סגנון חדש מהאובייקט הנבחר&#10;בלי בחירה, נפתח סגנון חדש להגדרה." onMouseDown={(event) => event.preventDefault()} onClick={() => void fromSelection()}>+</button>
         </div>
       </div>
       <p className="muted">
@@ -141,6 +146,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
                 {style.name}
                 {style.id === selection.styleId && selection.modified && <span className="style-modified" title="באובייקט יש שינויים ידניים מעל הסגנון. לחיצה על הסגנון מחילה אותו מחדש."> +</span>}
               </span>
+              {!objectStyleVisible(style) && <span className="object-style-empty" title="בסגנון אין מילוי, קו או ציור, ולכן כעיטור הוא לא מצייר כלום. אפשר להגדיר אותו מחדש לפי אובייקט.">ריק</span>}
               <span className="object-style-count" title="כמה אובייקטים במסמך עם הסגנון">{usage[style.id] ?? 0}</span>
             </button>
             <button className="icon-button" aria-label={`עריכת ${style.name}`} title="עריכת הסגנון" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic })}>✎</button>
@@ -171,6 +177,8 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
       {editing && (
         <ObjectStyleDialog
           initial={editing}
+          reference={editing.id ? onFollowerLook(editing.id) ?? (canApply ? onSelectionLook() : null) : onSelectionLook()}
+          onApply={editing.id ? (name, settings, graphic) => onChange(editing.id!, name, settings, graphic) : undefined}
           onSave={(name, settings, graphic) => {
             if (editing.id) onChange(editing.id, name, settings, graphic)
             else onCreate(name, settings, canApply, graphic)
@@ -184,31 +192,62 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
   )
 }
 
-/** a setting row: ticked = the style sets it, unticked = the object keeps the look it has */
+/**
+ * A setting row: ticked = the style sets it, unticked = the object keeps the look it has. Touching what is in an unticked row ticks it:
+ * a control that does nothing when it is pressed looks like a dialog that is not connected to the object.
+ */
 function Setting({ label, on, onToggle, children }: { label: string; on: boolean; onToggle: (on: boolean) => void; children: ReactNode }) {
   return (
     <div className="table-dialog-row">
       <label className="dlg-check"><input type="checkbox" checked={on} onChange={(event) => onToggle(event.target.checked)} />{label}</label>
-      <div className={'character-style-setting' + (on ? '' : ' off')} aria-disabled={!on}>{children}</div>
+      <div className={'character-style-setting object-style-setting' + (on ? '' : ' off')} onPointerDownCapture={() => { if (!on) onToggle(true) }} onKeyDownCapture={() => { if (!on) onToggle(true) }}>
+        {children}
+      </div>
     </div>
   )
 }
 
 const pct = (value: number) => Math.round(value * 100)
 
-function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Editing; onSave: (name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void; onDelete?: () => void; onClose: () => void }) {
+/** what a feather is, in a few words (it is set on the object with the feather tools; the style holds it as it is) */
+const featherText = (feather: Feather | null): string =>
+  !feather ? 'ללא' : feather.type === 'basic' ? `קצוות רכים, ${Math.round(feather.radius * 10) / 10} pt מכל צד` : feather.type === 'directional' ? 'קצוות רכים, לפי צד' : 'דהייה (שקיפות מדורגת) לאורך האובייקט'
+
+interface DialogProps {
+  initial: Editing
+  /** what an object that follows the style (or the selected one, for a new style) looks like now: the values the unticked rows show */
+  reference: ObjectStyleSettings | null
+  onSave: (name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void
+  /** gives the objects the settings as they are, and keeps the dialog open (only a style that exists) */
+  onApply?: (name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void
+  onDelete?: () => void
+  onClose: () => void
+}
+
+function ObjectStyleDialog({ initial, reference, onSave, onApply, onDelete, onClose }: DialogProps) {
   const [name, setName] = useState(initial.name)
   const [keepGraphic, setKeepGraphic] = useState(true)
   const graphic = keepGraphic ? initial.graphic : undefined
   const [settings, setSettings] = useState<ObjectStyleSettings>(initial.settings)
-  const set = (next: ObjectStyleSettings) => setSettings((current) => ({ ...current, ...next }))
+  const [applied, setApplied] = useState(false)
+  const set = (next: ObjectStyleSettings) => {
+    setApplied(false)
+    setSettings((current) => ({ ...current, ...next }))
+  }
   const has = (key: keyof ObjectStyleSettings) => key in settings
-  const unset = (key: keyof ObjectStyleSettings) => setSettings((current) => {
-    const next = { ...current }
-    delete next[key]
-    return next
-  })
-  const toggle = <K extends keyof ObjectStyleSettings>(key: K, value: ObjectStyleSettings[K]) => (on: boolean) => (on ? set({ [key]: value }) : unset(key))
+  const unset = (key: keyof ObjectStyleSettings) => {
+    setApplied(false)
+    setSettings((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
+  /** the value a setting shows: the style's own, else what the object has now, else a plain value */
+  const shown = <K extends keyof ObjectStyleSettings>(key: K, fallback: NonNullable<ObjectStyleSettings[K]> | null): ObjectStyleSettings[K] =>
+    (key in settings ? settings[key] : reference && key in reference ? reference[key] : fallback) as ObjectStyleSettings[K]
+  const toggle = <K extends keyof ObjectStyleSettings>(key: K, fallback: NonNullable<ObjectStyleSettings[K]> | null) => (on: boolean) =>
+    (on ? set({ [key]: shown(key, fallback) } as ObjectStyleSettings) : unset(key))
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -216,65 +255,74 @@ function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Ed
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-  const shadow = settings.shadow
-  const profileId = settings.lineWidths ? LINE_PROFILES.find((profile) => profile.widths.every((value, index) => Math.abs(value - settings.lineWidths![index]) < 0.005))?.id ?? '' : 'even'
-  const colorCell = (key: 'fill' | 'stroke', fallback: string) => {
-    const value = settings[key]
-    return (
-      <>
-        <input type="color" aria-label={NAMES[key]} value={value ?? fallback} disabled={value === null} onChange={(event) => set({ [key]: event.target.value })} />
-        <label className="dlg-check"><input type="checkbox" checked={value === null} onChange={(event) => set({ [key]: event.target.checked ? null : fallback })} />ללא</label>
-      </>
-    )
-  }
+
+  const fill = shown('fill', '#d9dde3')
+  const stroke = shown('stroke', '#1f2937')
+  const strokeWidth = shown('strokeWidth', 1) ?? 1
+  const radius = shown('radius', 0) ?? 0
+  const opacity = shown('opacity', 1) ?? 1
+  const shadow = shown('shadow', null) ?? null
+  const lineWidths = shown('lineWidths', null)
+  const profileId = lineWidths ? LINE_PROFILES.find((profile) => profile.widths.every((value, index) => Math.abs(value - lineWidths[index]) < 0.005))?.id ?? '' : 'even'
+  const colorCell = (key: 'fill' | 'stroke', value: string | null | undefined, fallback: string) => (
+    <>
+      <input type="color" aria-label={NAMES[key]} value={value ?? fallback} disabled={value === null} onChange={(event) => set({ [key]: event.target.value })} />
+      <label className="dlg-check"><input type="checkbox" checked={value === null} onChange={(event) => set({ [key]: event.target.checked ? null : fallback })} />ללא</label>
+    </>
+  )
   const arrowSelect = (key: 'arrowStart' | 'arrowEnd') => (
-    <select className="select" aria-label={NAMES[key]} value={settings[key] ?? ''} onChange={(event) => set({ [key]: (event.target.value || null) as LineArrow | null })}>
+    <select className="select" aria-label={NAMES[key]} value={shown(key, null) ?? ''} onChange={(event) => set({ [key]: (event.target.value || null) as LineArrow | null })}>
       <option value="">ללא</option>
       {LINE_ARROWS.map((arrow) => <option key={arrow.id} value={arrow.id}>{arrow.label}</option>)}
     </select>
   )
+  const settingsNow = () => ({ ...settings })
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal table-dialog wide" role="dialog" aria-modal="true" aria-label="אפשרויות סגנון אובייקט" dir="rtl">
+    <div className="modal-backdrop object-style-floating">
+      <div className="modal table-dialog wide" role="dialog" aria-modal="false" aria-label="אפשרויות סגנון אובייקט" dir="rtl">
         <h2>{initial.id ? 'אפשרויות סגנון אובייקט' : 'סגנון אובייקט חדש'}</h2>
-        <div className="object-style-preview" aria-hidden="true"><span style={{ ...objectStyleSwatch(settings, graphic), width: graphic ? 200 : 120, height: 54, display: 'block' }} /></div>
+        <div className="object-style-preview" aria-hidden="true"><span style={{ ...objectStyleSwatch({ ...settings, fill: settings.fill ?? (fill as string | null | undefined) ?? undefined }, graphic), width: graphic ? 200 : 120, height: 54, display: 'block' }} /></div>
         {initial.graphic && (
           <label className="dlg-check" title="הציור של האובייקטים שממנם נוצר הסגנון: זה מה שמצויר כשהסגנון משמש עיטור בסגנון פסקה">
-            <input type="checkbox" checked={keepGraphic} onChange={(event) => setKeepGraphic(event.target.checked)} />
+            <input type="checkbox" checked={keepGraphic} onChange={(event) => { setApplied(false); setKeepGraphic(event.target.checked) }} />
             לשמור את הציור של האובייקט (לעיטור בסגנון פסקה)
           </label>
         )}
         <label className="field-label table-dialog-field">שם הסגנון
           <input className="select" value={name} autoFocus onChange={(event) => setName(event.target.value)} />
         </label>
-        <p className="muted">מה שמסומן הוא מה שהסגנון קובע, ושינוי בו מגיע לכל האובייקטים שבו. מה שלא מסומן נשאר באובייקט כפי שהוא.</p>
+        <p className="muted">מה שמסומן הוא מה שהסגנון קובע, ושינוי בו מגיע לכל האובייקטים שבו. מה שלא מסומן נשאר באובייקט כפי שהוא. נגיעה בהגדרה שלא מסומנת מסמנת אותה. „החל” מעדכן את האובייקטים בלי לסגור את החלון.</p>
         <fieldset className="object-style-group"><legend>מילוי וקו</legend>
-          <Setting label={NAMES.fill} on={has('fill')} onToggle={toggle('fill', '#d9dde3')}>{colorCell('fill', '#d9dde3')}</Setting>
-          <Setting label={NAMES.stroke} on={has('stroke')} onToggle={toggle('stroke', '#1f2937')}>{colorCell('stroke', '#1f2937')}</Setting>
+          <Setting label={NAMES.fill} on={has('fill')} onToggle={toggle('fill', '#d9dde3')}>{colorCell('fill', fill as string | null | undefined, '#d9dde3')}</Setting>
+          <Setting label={NAMES.stroke} on={has('stroke')} onToggle={toggle('stroke', '#1f2937')}>{colorCell('stroke', stroke as string | null | undefined, '#1f2937')}</Setting>
           <Setting label={`${NAMES.strokeWidth} (pt)`} on={has('strokeWidth')} onToggle={toggle('strokeWidth', 1)}>
-            <input className="select table-dialog-number" type="number" min={0} max={200} step={0.25} value={settings.strokeWidth ?? 1} onChange={(event) => set({ strokeWidth: Math.max(0, Number(event.target.value) || 0) })} />
+            <input className="select table-dialog-number" type="number" min={0} max={200} step={0.25} value={strokeWidth} onChange={(event) => set({ strokeWidth: Math.max(0, Number(event.target.value) || 0) })} />
           </Setting>
           <Setting label={NAMES.strokeDash} on={has('strokeDash')} onToggle={toggle('strokeDash', 'solid')}>
-            <select className="select" aria-label={NAMES.strokeDash} value={settings.strokeDash ?? 'solid'} onChange={(event) => set({ strokeDash: event.target.value === 'dashed' ? 'dashed' : 'solid' })}>
+            <select className="select" aria-label={NAMES.strokeDash} value={shown('strokeDash', 'solid') ?? 'solid'} onChange={(event) => set({ strokeDash: event.target.value === 'dashed' ? 'dashed' : 'solid' })}>
               <option value="solid">רציף</option>
               <option value="dashed">מקווקו</option>
             </select>
           </Setting>
           <Setting label={`${NAMES.radius} (pt)`} on={has('radius')} onToggle={toggle('radius', 6)}>
-            <input className="select table-dialog-number" type="number" min={0} max={500} step={1} value={settings.radius ?? 0} onChange={(event) => set({ radius: Math.max(0, Number(event.target.value) || 0) })} />
+            <input className="select table-dialog-number" type="number" min={0} max={500} step={1} value={radius} onChange={(event) => set({ radius: Math.max(0, Number(event.target.value) || 0) })} />
           </Setting>
         </fieldset>
         <fieldset className="object-style-group"><legend>שקיפות וצללית</legend>
           <Setting label={`${NAMES.opacity} (%)`} on={has('opacity')} onToggle={toggle('opacity', 1)}>
-            <input type="range" min={0} max={100} value={pct(settings.opacity ?? 1)} aria-label={NAMES.opacity} onChange={(event) => set({ opacity: Number(event.target.value) / 100 })} />
-            <span className="muted">{pct(settings.opacity ?? 1)}%</span>
+            <input type="range" min={0} max={100} value={pct(opacity)} aria-label={NAMES.opacity} onChange={(event) => set({ opacity: Number(event.target.value) / 100 })} />
+            <span className="muted">{pct(opacity)}%</span>
           </Setting>
           <Setting label={NAMES.blendMode} on={has('blendMode')} onToggle={toggle('blendMode', null)}>
-            <select className="select" aria-label={NAMES.blendMode} value={settings.blendMode ?? ''} onChange={(event) => set({ blendMode: (event.target.value || null) as BlendMode | null })}>
+            <select className="select" aria-label={NAMES.blendMode} value={shown('blendMode', null) ?? ''} onChange={(event) => set({ blendMode: (event.target.value || null) as BlendMode | null })}>
               <option value="">רגיל</option>
               {BLEND_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
             </select>
+          </Setting>
+          <Setting label={NAMES.feather} on={has('feather')} onToggle={toggle('feather', null)}>
+            <span className="muted">{featherText(shown('feather', null) ?? null)}</span>
+            <label className="dlg-check"><input type="checkbox" checked={!shown('feather', null)} onChange={(event) => set({ feather: event.target.checked ? null : reference?.feather ?? null })} />ללא</label>
           </Setting>
           <Setting label={NAMES.shadow} on={has('shadow')} onToggle={toggle('shadow', null)}>
             <label className="dlg-check"><input type="checkbox" checked={!!shadow} onChange={(event) => set({ shadow: event.target.checked ? { offsetX: 0, offsetY: 6, color: '#000000', opacity: 0.4 } : null })} />יש צללית</label>
@@ -301,7 +349,10 @@ function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Ed
           </Setting>
         </fieldset>
         <div className="modal-buttons">
-          <button className="btn primary" onClick={() => onSave(name.trim() || initial.name, settings, graphic)}>אישור</button>
+          <button className="btn primary" onClick={() => onSave(name.trim() || initial.name, settingsNow(), graphic)}>אישור</button>
+          {onApply && (
+            <button className="btn" title="מעדכן את האובייקטים שבסגנון ומשאיר את החלון פתוח" onClick={() => { onApply(name.trim() || initial.name, settingsNow(), graphic); setApplied(true) }}>{applied ? 'הוחל ✓' : 'החל'}</button>
+          )}
           <button className="btn" onClick={onClose}>ביטול</button>
           {onDelete && <button className="btn danger" onClick={onDelete}>מחיקת הסגנון</button>}
         </div>

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ImageFrame, ObjectStyleRecord, ShapeFrame } from './document'
 import { defaultDocSettings } from './document'
 import { parseDocument, serializeDocument } from './fileFormat'
-import { applyToImage, applyToShape, lookOfImage, lookOfShape, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from './objectStyles'
+import { applyToImage, applyToShape, lookOfImage, lookOfShape, objectStyleOverrides, objectStyleVisible, uniqueObjectStyleName, withoutObjectStyle } from './objectStyles'
 import type { DocContent } from './pages'
 
 const rect = (extra: Partial<ShapeFrame> = {}): ShapeFrame => ({ id: 's', kind: 'rect', x: 0, y: 0, w: 100, h: 60, fill: '#ff0000', stroke: null, strokeWidth: 0, ...extra }) as ShapeFrame
@@ -26,8 +26,18 @@ describe('the look of an object, as a style', () => {
     expect(look).not.toHaveProperty('radius')
   })
 
-  it('is only opacity, mixing and shadow for a picture', () => {
-    expect(Object.keys(lookOfImage(picture({ opacity: 0.8 }))).sort()).toEqual(['blendMode', 'opacity', 'shadow'])
+  it('is only opacity, mixing, shadow and feather for a picture', () => {
+    expect(Object.keys(lookOfImage(picture({ opacity: 0.8 }))).sort()).toEqual(['blendMode', 'feather', 'opacity', 'shadow'])
+  })
+
+  it('holds the fade (feather) of a shape, and gives it to another', () => {
+    const fade = { type: 'gradient' as const, x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] }
+    const look = lookOfShape(rect({ feather: fade }))
+    expect(look.feather).toEqual(fade)
+    const other = applyToShape(rect(), look, 'st')
+    expect(other.feather).toEqual(fade)
+    expect(applyToShape(other, { feather: null })).not.toHaveProperty('feather')
+    expect(lookOfShape(rect()).feather).toBeNull()
   })
 })
 
@@ -83,6 +93,22 @@ describe('what an object changed on top of its style', () => {
   })
 })
 
+describe('a style that draws something', () => {
+  it('has a drawing, a fill, a line, a shadow or a line with heads', () => {
+    expect(objectStyleVisible({ settings: { fill: '#112233' } })).toBe(true)
+    expect(objectStyleVisible({ settings: { stroke: '#112233', strokeWidth: 2 } })).toBe(true)
+    expect(objectStyleVisible({ settings: { arrowEnd: 'triangle' } })).toBe(true)
+    expect(objectStyleVisible({ settings: { shadow: { offsetX: 1, offsetY: 2, color: '#000000', opacity: 0.3 } } })).toBe(true)
+    expect(objectStyleVisible({ settings: {}, graphic: { svg: '<svg/>', w: 1, h: 1 } })).toBe(true)
+  })
+
+  it('is not one that holds only how see-through it is, how it mixes and no shadow (a style made from a picture, before pictures kept their drawing)', () => {
+    expect(objectStyleVisible({ settings: { opacity: 1, blendMode: null, shadow: null } })).toBe(false)
+    expect(objectStyleVisible({ settings: { fill: null, stroke: null } })).toBe(false)
+    expect(objectStyleVisible({ settings: { stroke: '#112233', strokeWidth: 0 } })).toBe(false)
+  })
+})
+
 describe('names of styles', () => {
   const styles: ObjectStyleRecord[] = [{ id: 'a', name: 'כרטיס', settings: {} }, { id: 'b', name: 'כרטיס 2', settings: {} }]
   it('are never the same as another style', () => {
@@ -107,7 +133,7 @@ describe('object styles in the file', () => {
   })
 
   it('come back with their settings, and so does the style an object follows', () => {
-    const styles: ObjectStyleRecord[] = [{ id: 'k', name: 'כרטיס', settings: { fill: '#112233', stroke: null, radius: 6, opacity: 0.8, shadow: { offsetX: 1, offsetY: 4, color: '#000000', opacity: 0.35 }, arrowEnd: 'triangle', lineWidths: [1, 0.5, 0] } }]
+    const styles: ObjectStyleRecord[] = [{ id: 'k', name: 'כרטיס', settings: { fill: '#112233', stroke: null, radius: 6, opacity: 0.8, shadow: { offsetX: 1, offsetY: 4, color: '#000000', opacity: 0.35 }, feather: { type: 'gradient', x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] }, arrowEnd: 'triangle', lineWidths: [1, 0.5, 0] } }]
     const opened = parseDocument(serializeDocument(contentWith(styles, [rect({ objectStyleId: 'k' })])), 'styles.imudist')
     expect(opened.objectStyles).toEqual(styles)
     expect(opened.shapes[0]?.objectStyleId).toBe('k')

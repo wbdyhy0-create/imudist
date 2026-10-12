@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { DEFAULT_SPACE_AFTER, type CharacterStyleRecord, type ObjectStyleRecord, type ParagraphStyleRecord } from '../document'
+import { MAX_GRAPHIC_SVG, objectStyleVisible } from '../objectStyles'
 import { NestedStylesEditor } from './NestedStylesEditor'
 import { NumberField } from './NumberField'
 import { ALIGNS, Group, Labeled } from './PropertiesPanel'
@@ -175,10 +176,18 @@ export function ParagraphStylesPanel({ styles, unit, shown = true, onApply, onCh
                   <Labeled label="סגנון האובייקט">
                     <select className="select" value={deco.objectStyleId} onChange={(event) => edit({ decoration: { ...deco, objectStyleId: event.target.value } })}>
                       {!known && <option value={deco.objectStyleId}>(הסגנון נמחק)</option>}
-                      {objectStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+                      {objectStyles.map((style) => <option key={style.id} value={style.id}>{objectStyleVisible(style) ? style.name : `${style.name} (ריק)`}</option>)}
                     </select>
                   </Labeled>
                   {!known && <p className="muted">סגנון האובייקט נמחק, ולכן אין עיטור. בחרו סגנון אחר.</p>}
+                  {record && !objectStyleVisible(record) && (
+                    <p className="paragraph-style-pending">
+                      <span>בסגנון „{record.name}” אין מילוי, קו או ציור, ולכן אין מה לצייר בעיטור. בחרו את האובייקט שרוצים לראות ליד הכותרות, ובלשונית „סגנונות אובייקט” סמנו את הסגנון ולחצו „הגדר מחדש לפי האובייקט הנבחר”, או צרו ממנו סגנון חדש.</span>
+                    </p>
+                  )}
+                  {record?.graphic && record.graphic.svg.length > MAX_GRAPHIC_SVG && (
+                    <p className="paragraph-style-pending"><span>הציור של הסגנון גדול מדי להצגה כעיטור. צרו את הסגנון מחדש מהאובייקט.</span></p>
+                  )}
                   <Labeled label="מיקום">
                     <select className="select" value={deco.position} onChange={(event) => edit({ decoration: { ...deco, position: event.target.value === 'below' ? 'below' : event.target.value === 'behind' ? 'behind' : 'above' } })}>
                       <option value="above">מעל הפסקה</option>

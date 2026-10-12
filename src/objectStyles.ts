@@ -8,11 +8,11 @@ import type { ImageFrame, ObjectStyleRecord, ObjectStyleSettings, ShapeFrame } f
 
 /** every setting a style can hold, in the order the panel shows them */
 export const OBJECT_STYLE_KEYS: (keyof ObjectStyleSettings)[] = [
-  'fill', 'fillGradient', 'stroke', 'strokeWidth', 'strokeDash', 'strokeCap', 'radius', 'opacity', 'blendMode', 'shadow', 'arrowStart', 'arrowEnd', 'lineWidths',
+  'fill', 'fillGradient', 'stroke', 'strokeWidth', 'strokeDash', 'strokeCap', 'radius', 'opacity', 'blendMode', 'shadow', 'feather', 'arrowStart', 'arrowEnd', 'lineWidths',
 ]
 
 /** what a picture can take of a style: the rest means nothing to it */
-export const IMAGE_STYLE_KEYS: (keyof ObjectStyleSettings)[] = ['opacity', 'blendMode', 'shadow']
+export const IMAGE_STYLE_KEYS: (keyof ObjectStyleSettings)[] = ['opacity', 'blendMode', 'shadow', 'feather']
 
 /** the settings that belong to lines only */
 const LINE_KEYS: (keyof ObjectStyleSettings)[] = ['arrowStart', 'arrowEnd', 'lineWidths']
@@ -20,7 +20,7 @@ const LINE_KEYS: (keyof ObjectStyleSettings)[] = ['arrowStart', 'arrowEnd', 'lin
 /** the settings a shape of this kind takes */
 export function shapeStyleKeys(shape: Pick<ShapeFrame, 'kind'>): (keyof ObjectStyleSettings)[] {
   if (shape.kind === 'line') return OBJECT_STYLE_KEYS.filter((key) => key !== 'fill' && key !== 'fillGradient' && key !== 'radius')
-  if (shape.kind === 'table') return ['opacity', 'blendMode', 'shadow']
+  if (shape.kind === 'table') return ['opacity', 'blendMode', 'shadow', 'feather']
   return OBJECT_STYLE_KEYS.filter((key) => !LINE_KEYS.includes(key) && (key !== 'radius' || shape.kind === 'rect'))
 }
 
@@ -43,6 +43,7 @@ export function lookOfShape(shape: ShapeFrame): ObjectStyleSettings {
       case 'opacity': out.opacity = shape.opacity ?? 1; break
       case 'blendMode': out.blendMode = shape.blendMode ?? null; break
       case 'shadow': out.shadow = shadowOf(shape); break
+      case 'feather': out.feather = shape.feather ?? null; break
       case 'arrowStart': out.arrowStart = shape.arrowStart ?? null; break
       case 'arrowEnd': out.arrowEnd = shape.arrowEnd ?? null; break
       case 'lineWidths': out.lineWidths = shape.lineWidths ?? null; break
@@ -52,7 +53,7 @@ export function lookOfShape(shape: ShapeFrame): ObjectStyleSettings {
 }
 
 export function lookOfImage(image: ImageFrame): ObjectStyleSettings {
-  return { opacity: image.opacity ?? 1, blendMode: image.blendMode ?? null, shadow: shadowOf(image) }
+  return { opacity: image.opacity ?? 1, blendMode: image.blendMode ?? null, shadow: shadowOf(image), feather: image.feather ?? null }
 }
 
 type Shadowed = { shadowOffsetX?: number; shadowOffsetY?: number; shadowOffset?: number; shadowColor?: string; shadowOpacity?: number }
@@ -89,6 +90,7 @@ export function applyToShape(shape: ShapeFrame, settings: ObjectStyleSettings, s
       case 'opacity': set('opacity', settings.opacity !== undefined && settings.opacity < 1 ? Math.max(0, settings.opacity) : undefined); break
       case 'blendMode': set('blendMode', settings.blendMode ?? undefined); break
       case 'shadow': out = withShadow(out, settings.shadow ?? null); break
+      case 'feather': set('feather', settings.feather ?? undefined); break
       case 'arrowStart': set('arrowStart', settings.arrowStart ?? undefined); break
       case 'arrowEnd': set('arrowEnd', settings.arrowEnd ?? undefined); break
       case 'lineWidths': set('lineWidths', settings.lineWidths ?? undefined); break
@@ -109,6 +111,10 @@ export function applyToImage(image: ImageFrame, settings: ObjectStyleSettings, s
     else delete out.blendMode
   }
   if ('shadow' in settings) out = withShadow(out, settings.shadow ?? null)
+  if ('feather' in settings) {
+    if (settings.feather) out.feather = settings.feather
+    else delete out.feather
+  }
   if (styleId) out.objectStyleId = styleId
   return out
 }
@@ -146,3 +152,16 @@ export function withoutObjectStyle<T extends { objectStyleId?: string }>(object:
   const { objectStyleId: _id, ...rest } = object
   return rest as T
 }
+
+/**
+ * Does the style draw anything when it is a decoration: a drawing, a fill, a line, a shadow, or a line with heads? A style made from
+ * a picture before pictures kept their drawing holds only its see-through and mixing - nothing to draw.
+ */
+export function objectStyleVisible(style: Pick<ObjectStyleRecord, 'settings' | 'graphic'>): boolean {
+  if (style.graphic) return true
+  const s = style.settings
+  return !!s.fill || !!s.fillGradient || !!s.feather || (!!s.stroke && (s.strokeWidth ?? 1) > 0) || !!s.arrowStart || !!s.arrowEnd || !!s.lineWidths || (!!s.shadow && s.shadow.opacity > 0)
+}
+
+/** a drawing too big to be a decoration: it is read through a CSS value, which Chromium cuts at about 2 MB */
+export const MAX_GRAPHIC_SVG = 1_200_000

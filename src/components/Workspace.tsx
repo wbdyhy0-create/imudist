@@ -166,7 +166,7 @@ import { StyleManagerPanel } from './StyleManagerPanel'
 import { ObjectStylesPanel } from './ObjectStylesPanel'
 import { decorationPatches, withDecorations } from '../decorations'
 import { boundsOfItems, buildSvg, type SvgItem } from '../svgBuild'
-import { applyToImage, applyToShape, lookOfImage, lookOfShape, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from '../objectStyles'
+import { applyToImage, applyToShape, lookOfImage, lookOfShape, MAX_GRAPHIC_SVG, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from '../objectStyles'
 import { AnchorHandles } from './AnchorHandles'
 import { PathTextEditor } from './PathTextEditor'
 import { CORNER_HANDLE_OFFSET, MIN_CORNER_HANDLES, ShapeFrameView, type PathPeg } from './ShapeFrameView'
@@ -6055,7 +6055,7 @@ export function Workspace({
    * The drawing of the selected shapes and pictures, back to front: what a decoration in an object style made from them draws (an
    * ornament, a picture, several shapes). One line or one plain rectangle is not drawn this way: it is drawn from its settings.
    */
-  const objectStyleGraphic = (): ObjectStyleGraphic | undefined => {
+  const objectStyleGraphic = async (): Promise<ObjectStyleGraphic | undefined> => {
     const targets = objectStyleTargets()
     const items: (SvgItem & { id: string })[] = [
       ...targets.shapes.map((shape) => ({ kind: 'shape' as const, shape, id: shape.id })),
@@ -6067,11 +6067,42 @@ export function Workspace({
     const box = boundsOfItems(items)
     if (!box || box.w <= 0 || box.h <= 0) return undefined
     try {
-      const { svg } = buildSvg(items, assets, box)
-      return svg.length > 3_000_000 ? undefined : { svg, w: box.w, h: box.h }
+      // pictures go in no bigger than a decoration needs (1000 px): the drawing is read through a CSS value of at most about 2 MB
+      const small: Record<string, Asset> = { ...assets }
+      const used = new Set<string>()
+      for (const item of items) {
+        if (item.kind === 'image') used.add(item.image.assetId)
+        else if (item.shape.image) used.add(item.shape.image.assetId)
+      }
+      for (const id of used) {
+        const asset = assets[id]
+        if (!asset || (Math.max(asset.width, asset.height) <= 1000 && asset.dataUrl.length < 300_000)) continue
+        const source = await new Promise<HTMLImageElement | null>((resolve) => {
+          const picture = new window.Image()
+          picture.onload = () => resolve(picture)
+          picture.onerror = () => resolve(null)
+          picture.src = asset.dataUrl
+        })
+        if (!source || source.naturalWidth < 1 || source.naturalHeight < 1) continue
+        const k = Math.min(1, 1000 / Math.max(source.naturalWidth, source.naturalHeight))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(source.naturalWidth * k))
+        canvas.height = Math.max(1, Math.round(source.naturalHeight * k))
+        canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height)
+        small[id] = { ...asset, dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height }
+      }
+      const { svg } = buildSvg(items, small, box)
+      return svg.length > MAX_GRAPHIC_SVG ? undefined : { svg, w: box.w, h: box.h }
     } catch {
       return undefined
     }
+  }
+  /** what the first object that follows the style looks like now: what the dialog of the style shows for what the style does not set */
+  const followerLook = (id: string): ObjectStyleSettings | null => {
+    const shape = shapes.find((candidate) => candidate.objectStyleId === id)
+    if (shape) return lookOfShape(shape)
+    const image = images.find((candidate) => candidate.objectStyleId === id)
+    return image ? lookOfImage(image) : null
   }
   /** the style (or none: they keep the look they have) given to every selected shape and picture */
   const applyObjectStyle = (styleId: string | null) => {
@@ -6145,7 +6176,7 @@ export function Workspace({
     })
   }
   /** the style takes what the first selected object looks like, for the settings it already holds */
-  const redefineObjectStyle = (id: string) => {
+  const redefineObjectStyle = async (id: string) => {
     const record = objectStyles.find((style) => style.id === id)
     const look = objectStyleLook()
     if (!record || !look) return
@@ -6154,7 +6185,7 @@ export function Workspace({
       if (key in look) (settings as Record<string, unknown>)[key] = look[key]
     }
     // the drawing follows the object too (none when the object has none)
-    changeObjectStyle(id, record.name, settings, objectStyleGraphic())
+    changeObjectStyle(id, record.name, settings, await objectStyleGraphic())
   }
   const selectObjectsOfStyle = (id: string) => {
     const ids = [...shapes, ...images].filter((object) => object.objectStyleId === id).map((object) => object.id)
@@ -12137,7 +12168,7 @@ export function Workspace({
             {
               id: 'object-styles',
               label: 'סגנונות אובייקט',
-              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onSelectionGraphic={objectStyleGraphic} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
+              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onFollowerLook={followerLook} onSelectionGraphic={objectStyleGraphic} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
             },
             {
               id: 'style-manager',

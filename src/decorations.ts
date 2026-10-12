@@ -1,4 +1,4 @@
-import type { ObjectStyleRecord, ObjectStyleSettings, ParagraphDecoration, ParagraphStyleRecord, TextAlign, TextFrame } from './document'
+import type { Feather, ObjectStyleRecord, ObjectStyleSettings, ParagraphDecoration, ParagraphStyleRecord, TextAlign, TextFrame } from './document'
 import { isProfiledLine, lineOutline, lineOutlinePath } from './lineProfile'
 import { headFrames } from './frames'
 import { resolveParagraphStyle, styleIdOf } from './styleApply'
@@ -51,6 +51,40 @@ export function decorationLine(look: ObjectStyleSettings, length: number): { wid
   return { width: length, height, svg }
 }
 
+/**
+ * The fade of a feather as a CSS mask (a list of gradients), in the terms of the box and not of its size, since the box of a heading is only
+ * known when it is laid out: an edge feather keeps its distance in points, a fade along the object is in fractions of the box (exact along
+ * its width or its height, the nearest in between for a slanting one).
+ */
+export function featherMask(feather: Feather | null | undefined, scale: number): string | null {
+  if (!feather) return null
+  if (feather.type === 'basic' || feather.type === 'directional') {
+    const edges: [string, number][] = feather.type === 'basic'
+      ? [['to bottom', feather.radius], ['to left', feather.radius], ['to top', feather.radius], ['to right', feather.radius]]
+      : [['to bottom', feather.top], ['to left', feather.right], ['to top', feather.bottom], ['to right', feather.left]]
+    const layers = edges.filter(([, radius]) => radius > 0).map(([direction, radius]) => `linear-gradient(${direction}, rgba(0,0,0,0) 0px, rgba(0,0,0,1) ${radius * scale}px)`)
+    return layers.length > 0 ? layers.join(', ') : null
+  }
+  const dx = feather.x1 - feather.x0
+  const dy = feather.y1 - feather.y0
+  const length = Math.hypot(dx, dy)
+  if (!Number.isFinite(length) || length < 1e-6 || feather.points.length === 0) return null
+  const position = (offset: number): number => {
+    if (Math.abs(dx) < 1e-6) return (feather.y0 + offset * dy) * 100
+    if (Math.abs(dy) < 1e-6) return (feather.x0 + offset * dx) * 100
+    const ux = dx / length
+    const uy = dy / length
+    const lineLength = Math.abs(ux) + Math.abs(uy) // the box taken as a square: the line through it, for the angle of the fade
+    return (((feather.x0 - 0.5) * ux + (feather.y0 - 0.5) * uy + lineLength / 2 + offset * length) / lineLength) * 100
+  }
+  const angle = Math.abs(dx) < 1e-6 ? '180deg' : Math.abs(dy) < 1e-6 ? '90deg' : `${(Math.atan2(dx, -dy) * 180) / Math.PI}deg`
+  const stops = feather.points
+    .map((point) => ({ at: position(point.offset), opacity: point.opacity }))
+    .sort((a, b) => a.at - b.at)
+    .map((stop) => `rgba(0,0,0,${stop.opacity}) ${Math.round(stop.at * 100) / 100}%`)
+  return `linear-gradient(${angle}, ${stops.join(', ')})`
+}
+
 /** the fill, the line, the corners and the shadow of an object style as one box (a bar, or what is behind a heading) */
 function boxVars(look: ObjectStyleSettings, scale: number): Record<string, string> {
   const shadows: string[] = []
@@ -88,6 +122,8 @@ export function decorationVars(deco: ParagraphDecoration, scale: number, context
   if (!look) return null
   const graphic = deco.graphic && deco.graphic.w > 0 && deco.graphic.h > 0 ? deco.graphic : undefined
   const vars: Record<string, string> = { '--deco-opacity': String(look.opacity ?? 1) }
+  const mask = featherMask(look.feather, scale)
+  if (mask) vars['--deco-mask'] = mask
 
   if (deco.position === 'behind') {
     // behind the heading: the drawing (or the fill and the line of the style) is stretched over the box of the text, which is as wide as
@@ -100,7 +136,8 @@ export function decorationVars(deco: ParagraphDecoration, scale: number, context
     vars['--deco-ms'] = placement[0]
     vars['--deco-me'] = placement[1]
     vars['--deco-pad'] = `${Math.max(0, deco.gap) * scale}px`
-    vars['--deco-top'] = `${Math.max(0, context.gapBefore ?? 0) * scale}px`
+    // the space that opens the paragraph is the margin of the box, not a spacer inside it: the text has the same room above as below
+    vars['--deco-mt'] = `${Math.max(0, context.gapBefore ?? 0) * scale}px`
     if (graphic) {
       vars['--deco-bg'] = stretchedDrawing(graphic.svg)
       vars['--deco-radius'] = '0'

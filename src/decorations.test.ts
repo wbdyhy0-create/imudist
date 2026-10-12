@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decorationClass, decorationLine, decorationPatches, decorationVars, decoratedStyles, withDecorations } from './decorations'
+import { decorationClass, decorationLine, decorationPatches, decorationVars, decoratedStyles, featherMask, withDecorations } from './decorations'
 import type { ObjectStyleRecord, ParagraphDecoration, ParagraphStyleRecord, TextFrame } from './document'
 import { DEFAULT_TEXT_STYLE, defaultDocSettings } from './document'
 import { parseDocument, serializeDocument } from './fileFormat'
@@ -103,7 +103,7 @@ describe('how a decoration is drawn', () => {
     expect(centred['--deco-ms']).toBe('auto')
     expect(centred['--deco-me']).toBe('auto')
     expect(centred['--deco-pad']).toBe('10px')
-    expect(centred['--deco-top']).toBe('8px') // not over the gap that opens the paragraph
+    expect(centred['--deco-mt']).toBe('8px') // the gap that opens the paragraph is outside the box, so the text has the same room above and below
     expect(centred['--deco-bg']).toBe('#c0392b')
     expect(centred['--deco-radius']).toBe('4px')
     expect(centred).not.toHaveProperty('--deco-height') // the box is the text's own: no height of its own, nor a length
@@ -127,6 +127,24 @@ describe('how a decoration is drawn', () => {
     expect(decorationClass({ ...deco({ position: 'below' }), look: bar.settings })).toBe('para-deco-below')
     expect(decorationClass(deco())).toBeUndefined()
     expect(decorationVars(deco(), 1)).toBeNull()
+  })
+})
+
+describe('the fade of an object style in a decoration', () => {
+  it('is a vertical fade in the terms of the box: the same for a heading of any height', () => {
+    const fade = { type: 'gradient' as const, x0: 0.5, y0: 0, x1: 0.5, y1: 1, points: [{ offset: 0, opacity: 1 }, { offset: 1, opacity: 0 }] }
+    expect(featherMask(fade, 1)).toBe('linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)')
+    const vars = decorationVars({ ...deco({ position: 'behind' }), look: { fill: '#e3e3e3', feather: fade } }, 1)!
+    expect(vars['--deco-mask']).toBe(featherMask(fade, 1))
+  })
+
+  it('is a horizontal one along the width, and edges keep their distance in points', () => {
+    expect(featherMask({ type: 'gradient', x0: 0, y0: 0.5, x1: 1, y1: 0.5, points: [{ offset: 0, opacity: 0 }, { offset: 1, opacity: 1 }] }, 1)).toContain('90deg')
+    const edges = featherMask({ type: 'basic', radius: 6 }, 2)!
+    expect(edges.split('linear-gradient').length - 1).toBe(4)
+    expect(edges).toContain('12px')
+    expect(featherMask({ type: 'directional', top: 5, right: 0, bottom: 0, left: 0 }, 1)!.split('linear-gradient').length - 1).toBe(1)
+    expect(featherMask(null, 1)).toBeNull()
   })
 })
 

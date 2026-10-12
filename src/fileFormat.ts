@@ -769,6 +769,11 @@ function parseObjectStyleSettings(v: unknown): ObjectStyleSettings {
       opacity: num(s.shadow.opacity, 0, 0, 1),
     }
   }
+  if (s.feather === null) out.feather = null
+  else if (isObj(s.feather)) {
+    const feather = parseFeather(s.feather).feather
+    if (feather) out.feather = feather
+  }
   for (const key of ['arrowStart', 'arrowEnd'] as const) {
     if (s[key] === null) out[key] = null
     else if (cleanLineArrow(s[key])) out[key] = cleanLineArrow(s[key])!

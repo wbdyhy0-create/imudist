@@ -704,6 +704,8 @@ export interface ObjectStyleSettings {
   blendMode?: BlendMode | null
   /** a drop shadow; null = none */
   shadow?: { offsetX: number; offsetY: number; color: string; opacity: number } | null
+  /** soft edges, or a fade along the object (an opacity gradient); null = none */
+  feather?: Feather | null
   /** a line's arrow heads and the way its thickness changes along it; null = none */
   arrowStart?: LineArrow | null
   arrowEnd?: LineArrow | null
