@@ -271,6 +271,11 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                     </Labeled>
                   </div>
 
+                  <label className="dlg-check" title="תיבות הטקסט, התמונות והצורות של כל עמוד גדלות או קטנות ביחס לגודל העמוד ולשוליים: עמוד PDF שיובא ממלא את השטח שבין השוליים גם אחרי השינוי">
+                    <input type="checkbox" checked={resizeTextFrames} onChange={(event) => setResizeTextFrames(event.target.checked)} />
+                    התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים
+                  </label>
+
                   {custom > 0 && (
                     <div className="custom-note">
                       <span>{custom === 1 ? 'עמוד אחד' : `${custom} עמודים`} בגודל שונה משאר המסמך.</span>
@@ -306,7 +311,7 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                   )}
                   <label className="dlg-check">
                     <input type="checkbox" checked={resizeTextFrames} onChange={(event) => setResizeTextFrames(event.target.checked)} />
-                    התאם תיבות טקסט לשוליים החדשים
+                    התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים
                   </label>
                   <div className="setup-row">
                     <Labeled label="עמודות בעמוד">

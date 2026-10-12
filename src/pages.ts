@@ -411,26 +411,28 @@ export function movePage(c: DocContent, from: number, to: number): DocContent | 
   return remapContent(c, remapDoc(c.doc, c.doc.pages, map), map)
 }
 
-/** Replace the document's settings (size, margins, page count …); objects stay on their pages. */
+/**
+ * Replace the document's settings (size, margins, page count …); objects stay on their pages.
+ *
+ * The text frames, the pictures and the shapes of every page follow the box between the margins: what lay in a part of the old box lies in
+ * the same part of the new one, as wide and as high in proportion. A picture that filled the box (the page of an imported PDF) fills
+ * the new one, and an A4 page made A5 takes its contents with it.
+ */
 function resizePrimaryTextFrames(original: DocContent, remapped: DocContent, next: DocSettings): DocContent {
   const oldRects = pageRects(original.doc)
   const newRects = pageRects(next)
-  const originalById = new Map(original.frames.map((frame) => [frame.id, frame]))
-  const resized = remapped.frames.map((frame) => {
-    const source = originalById.get(frame.id)
-    if (!source) return frame
+  const oldPages = computeLayout(original.doc).spreads.flatMap((spread) => spread.pages)
+  const newPages = computeLayout(next).spreads.flatMap((spread) => spread.pages)
+  /** where a box of the original document goes, in proportion to the margins of its page; null when it cannot be told */
+  const follow = (source: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } | null => {
     const page = ownerPage(oldRects, source.x + source.w / 2, source.y + source.h / 2)
     const oldRect = oldRects[page]
     const newRect = newRects[page]
-    if (!oldRect || !newRect) return frame
-    const layout = computeLayout(original.doc)
-    const pageInfo = layout.spreads.flatMap((spread) => spread.pages).find((candidate) => candidate.index === page)
-    if (!pageInfo) return frame
-    const oldMargins = pageMargins(original.doc, pageInfo.side, page)
-    const newLayout = computeLayout(next)
-    const newPageInfo = newLayout.spreads.flatMap((spread) => spread.pages).find((candidate) => candidate.index === page)
-    if (!newPageInfo) return frame
-    const newMargins = pageMargins(next, newPageInfo.side, page)
+    const oldInfo = oldPages.find((candidate) => candidate.index === page)
+    const newInfo = newPages.find((candidate) => candidate.index === page)
+    if (!oldRect || !newRect || !oldInfo || !newInfo) return null
+    const oldMargins = pageMargins(original.doc, oldInfo.side, page)
+    const newMargins = pageMargins(next, newInfo.side, page)
     const oldContentW = Math.max(1, oldRect.w - oldMargins.left - oldMargins.right)
     const oldContentH = Math.max(1, oldRect.h - oldMargins.top - oldMargins.bottom)
     const newContentW = Math.max(1, newRect.w - newMargins.left - newMargins.right)
@@ -438,14 +440,27 @@ function resizePrimaryTextFrames(original: DocContent, remapped: DocContent, nex
     const scaleX = newContentW / oldContentW
     const scaleY = newContentH / oldContentH
     return {
-      ...frame,
       x: newRect.x + newMargins.left + (source.x - (oldRect.x + oldMargins.left)) * scaleX,
       y: newRect.y + newMargins.top + (source.y - (oldRect.y + oldMargins.top)) * scaleY,
-      w: Math.max(1, source.w * scaleX),
-      h: Math.max(1, source.h * scaleY),
+      w: source.w * scaleX,
+      h: source.h * scaleY,
     }
-  })
-  return { ...remapped, frames: resized }
+  }
+  const resizeAll = <T extends { id: string; x: number; y: number; w: number; h: number }>(items: T[], originals: T[], minSide: (source: T) => number): T[] => {
+    const byId = new Map(originals.map((item) => [item.id, item]))
+    return items.map((item) => {
+      const source = byId.get(item.id)
+      const box = source ? follow(source) : null
+      return source && box ? { ...item, x: box.x, y: box.y, w: Math.max(minSide(source), box.w), h: Math.max(minSide(source), box.h) } : item
+    })
+  }
+  return {
+    ...remapped,
+    frames: resizeAll(remapped.frames, original.frames, () => 1),
+    // a line may have no width or no height at all: it keeps having none
+    images: resizeAll(remapped.images, original.images, () => 1),
+    shapes: resizeAll(remapped.shapes, original.shapes, (source) => (source.w > 0 && source.h > 0 ? 1 : 0)),
+  }
 }
 
 function resizeParentObjects(c: DocContent, next: DocSettings): DocContent {
