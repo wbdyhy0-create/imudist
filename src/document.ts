@@ -274,7 +274,7 @@ export interface TextStyle extends CharStyle {
    * last frame) — not between every internal paragraph break.
    */
   spaceBefore?: number
-  /** missing = `DEFAULT_SPACE_AFTER`, so a new story always has some breathing room without the user setting it */
+  /** missing = `DEFAULT_SPACE_AFTER`: none, the paragraphs of a new story stand next to each other like running text until a gap is asked for */
   spaceAfter?: number
   /** indent from the frame's own left/right edges (points); physical sides, not logical/RTL-relative */
   indentLeft?: number
@@ -287,7 +287,7 @@ export interface TextStyle extends CharStyle {
 }
 
 /** `spaceAfter` when a story doesn't set its own (~2.5mm): every new story gets some paragraph spacing for free. */
-export const DEFAULT_SPACE_AFTER = 7
+export const DEFAULT_SPACE_AFTER = 0
 
 export const DEFAULT_TEXT_STYLE: TextStyle = {
   fontFamily: getLastUsedFontFamily(),

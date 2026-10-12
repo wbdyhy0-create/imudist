@@ -95,7 +95,7 @@ import {
   type TocPageReference,
 } from '../document'
 import { editRangeInStory, reportIsViewOf } from '../oversetCaret'
-import { isTyping } from '../dom'
+import { isTextEditor, isTyping } from '../dom'
 import { HANDLES, ROTATE_CORNERS, angleOf, chainOf, dragBox, dragBoxUniform, headFrames, insetBox, linkFrames, normalizeDeg, removeFrame, rotateVec, styleOf, unlinkBefore, type Box, type HandleId, type RotateCorner } from '../frames'
 import type { PlacedImage } from '../importImage'
 import { countWords, type ImportedCharacterStyle, type ImportedParagraphStyle, type PlacedText } from '../importText'
@@ -118,6 +118,7 @@ import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, zOfImage, zOfShape, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
+import { resolveParagraphStyle as resolveSharedParagraphStyle } from '../styleApply'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
@@ -1465,6 +1466,10 @@ export function Workspace({
         if (leaving.tracking !== undefined && charPatch.tracking === undefined) charPatch.tracking = 0
         if (leaving.outlineWidth !== undefined && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
         if (leaving.outlineColor !== undefined && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
+        const storyLook = charStyleOf(head) as unknown as Record<string, unknown>
+        for (const key of ['fontFamily', 'fontSize', 'color'] as const) {
+          if (leaving[key] !== undefined && charPatch[key] === undefined) (charPatch as Record<string, unknown>)[key] = storyLook[key]
+        }
         runs = styleRange(runs, from, from + 1, charPatch)
       }
     }
@@ -2469,12 +2474,15 @@ export function Workspace({
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
     const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const caret = !sel && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
     const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) })
+    const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
     onFramesChange(
       frames.map((f) => {
         if (sel) return f.id === head.id ? { ...f, runs: styleRange(runs, sel.a, sel.b, patch) } : f
+        if (caret) return f.id === head.id ? { ...f, runs: styleRange(runs, caretFrom, caretTo, patch) } : f
         if (f.id === head.id) return applyWholeStyle(f)
         return chainIds.has(f.id) ? { ...f, ...patch } : f
       }),
@@ -2491,12 +2499,16 @@ export function Workspace({
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
-    const sel = editingId === id && textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    // no `editingId` condition: the arrows of the toolbar take the focus out of the text, and the selection is still the scope
+    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    const caret = !sel && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
+    const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const clampSize = (size: number) => Math.min(999, Math.max(1, size + delta))
     onFramesChange(
       frames.map((f) => {
         if (sel) return f.id === head.id ? { ...f, runs: restyleRange(runs, sel.a, sel.b, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
+        if (caret) return f.id === head.id ? { ...f, runs: restyleRange(runs, caretFrom, caretTo, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
         if (!chainIds.has(f.id)) return f
         return { ...f, fontSize: clampSize(f.fontSize), ...(f.id === head.id ? { runs: restyleRange(runs, 0, head.text.length, (style) => ({ fontSize: clampSize(style.fontSize) })) } : {}) }
       }),
@@ -4178,7 +4190,8 @@ export function Workspace({
   }
   /** the menu's Copy / Cut: there is no clipboard event, so the marker text is written to the system clipboard here */
   const copyToClipboard = async (cut: boolean) => {
-    const token = copyObjects(cut)
+    const selectedText = clipOps.current.textClip(cut)
+    const token = selectedText !== undefined ? selectedText : copyObjects(cut)
     if (!token) return
     try {
       await navigator.clipboard?.writeText(token)
@@ -5149,11 +5162,40 @@ export function Workspace({
   }, [])
 
   // Ctrl+C / Ctrl+X / Ctrl+V on objects: the browser's own copy, cut and paste events, so the keys work like everywhere else
-  const clipOps = useRef({ copy: copyObjects, paste: pasteEntry })
-  clipOps.current = { copy: copyObjects, paste: pasteEntry }
+  const clipOps = useRef({ copy: copyObjects, paste: pasteEntry, textClip: (_cut: boolean): string | null | undefined => undefined, cutText: (): boolean => false })
+  clipOps.current = {
+    copy: copyObjects,
+    paste: pasteEntry,
+    // Ctrl+X on selected text: the same path as Edit > Cut, which cuts exactly the selection (the editor's own cut event could
+    // take more than that when its idea of the selection and the story's differed)
+    cutText: () => {
+      if (!textSel || textSel.a === textSel.b || !flow.get(textSel.headId)) return false
+      void copyToClipboard(true)
+      return true
+    },
+    // text being edited: copy/cut act on the selected text and never on the frame that holds it (undefined = no text is being edited)
+    textClip: (cut: boolean) => {
+      if (editingId === null && !textSel) return undefined
+      if (!textSel || textSel.a === textSel.b) return null
+      const text = flow.get(textSel.headId)?.story.slice(textSel.a, textSel.b)
+      if (!text) return null
+      if (cut) applyEdit(textSel.headId, textSel.a, textSel.b, '')
+      return text
+    },
+  }
   useEffect(() => {
     const onCopyOrCut = (e: ClipboardEvent) => {
       if (isTyping(e.target)) return // text being edited (or a field): the normal copy of the text
+      const selectedText = clipOps.current.textClip(e.type === 'cut')
+      if (selectedText !== undefined) {
+        if (selectedText) {
+          e.preventDefault()
+          e.clipboardData?.setData('text/plain', selectedText)
+        }
+        return
+      }
+      const domSelection = window.getSelection()
+      if (domSelection && !domSelection.isCollapsed && domSelection.anchorNode?.parentElement?.closest('.rich-editor')) return // highlighted text is never the whole frame
       const token = clipOps.current.copy(e.type === 'cut')
       if (!token) return // no object selected: leave the event alone
       e.preventDefault()
@@ -5169,10 +5211,20 @@ export function Workspace({
       e.stopImmediatePropagation()
       if (entry) clipOps.current.paste(entry)
     }
+    // capture: before the editor sees the key (and its native cut)
+    const onCutKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.code !== 'KeyX' && e.key.toLowerCase() !== 'x')) return
+      if (isTyping(e.target) && !isTextEditor(e.target)) return // a field: its own cut
+      if (!clipOps.current.cutText()) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('keydown', onCutKey, true)
     window.addEventListener('copy', onCopyOrCut)
     window.addEventListener('cut', onCopyOrCut)
     window.addEventListener('paste', onPaste, true) // capture: before the program's other paste handler
     return () => {
+      window.removeEventListener('keydown', onCutKey, true)
       window.removeEventListener('copy', onCopyOrCut)
       window.removeEventListener('cut', onCopyOrCut)
       window.removeEventListener('paste', onPaste, true)
@@ -9251,13 +9303,7 @@ export function Workspace({
     ...(look.borderWidth ? { borderWidth: look.borderWidth, borderColor: look.borderColor ?? '#000000' } : {}),
   })
 
-  const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => {
-    if (seen.has(id)) return {}
-    const style = source.find((candidate) => candidate.id === id)
-    if (!style) return {}
-    const nextSeen = new Set(seen).add(id)
-    return { ...(style.basedOnId ? resolveParagraphStyle(style.basedOnId, source, nextSeen) : {}), ...style.patch }
-  }
+  const resolveParagraphStyle = (id: string, source = paragraphStyles, seen = new Set<string>()): ParagraphStyleRecord['patch'] => resolveSharedParagraphStyle(id, source, seen)
 
   // ── character styles ────────────────────────────────────────────────────────
   /** the character styles with what each is based on already folded in: what the functions that write a style into text want */
@@ -9514,7 +9560,9 @@ export function Workspace({
   // a ref, not state: the automatic reset below settles within the render that triggers it, so it never needs one of its
   // own; the explicit "אישור" action does change what the NEXT render should show without anything else changing, so
   // it also bumps this plain counter to ask for that render
-  const paragraphBaselineRef = useRef<{ key: string; look: string } | null>(null)
+  // one baseline per paragraph (and style), kept while the caret goes elsewhere: coming back to a paragraph that was changed still
+  // shows its change. The number of paragraphs is part of the key, so adding or removing one starts the baselines afresh.
+  const paragraphBaselinesRef = useRef(new Map<string, string>())
   const [, bumpOverrideBaseline] = useState(0)
   // panelRange already falls back to the whole story for a merely-selected frame (see above), so a frame's "+" works
   // the same whether you are inside its text editing a word or just have it selected with the Selection tool
@@ -9525,23 +9573,34 @@ export function Workspace({
     overrideParagraphs && panelHead && typeof highlightedStyleId === 'string'
       ? overrideParagraphs.map((index) => JSON.stringify(paragraphOverrides(panelHead, index, resolveParagraphStyle(highlightedStyleId)))).join('|')
       : null
-  const overrideKey = overrideParagraphs && panelHead ? `${panelHead.id}:${overrideParagraphs.join(',')}:${highlightedStyleId}` : null
+  const overrideKey = overrideParagraphs && panelHead ? `${panelHead.id}:${panelHead.text.split('\n').length}:${overrideParagraphs.join(',')}:${highlightedStyleId}` : null
   // the tracked paragraph or its style just changed: this render's baseline is its current look, so it starts clean
-  if (overrideKey !== paragraphBaselineRef.current?.key) paragraphBaselineRef.current = overrideKey && overrideLook !== null ? { key: overrideKey, look: overrideLook } : null
-  const styleHasOverrides = !!overrideKey && overrideLook !== paragraphBaselineRef.current?.look
+  if (overrideKey && overrideLook !== null && !paragraphBaselinesRef.current.has(overrideKey)) {
+    paragraphBaselinesRef.current.set(overrideKey, overrideLook)
+    if (paragraphBaselinesRef.current.size > 300) paragraphBaselinesRef.current.delete(paragraphBaselinesRef.current.keys().next().value as string)
+  }
+  const styleHasOverrides = !!overrideKey && overrideLook !== null && paragraphBaselinesRef.current.get(overrideKey) !== overrideLook
 
-  /** "אישור": stop flagging the paragraph's current look as pending - accept it as is, without making a new style */
+  /**
+   * "אישור": the paragraph's own changes become part of its style - the style is redefined from them (the settings window of
+   * the style shows them, and the other paragraphs of the style follow, as with any change of a style) - and the paragraph
+   * stops being flagged
+   */
   const commitParagraphOverrides = () => {
-    if (overrideKey && overrideLook !== null) {
-      paragraphBaselineRef.current = { key: overrideKey, look: overrideLook }
-      bumpOverrideBaseline((n) => n + 1)
-    }
+    if (!panelHead || !overrideParagraphs || typeof highlightedStyleId !== 'string') return
+    const base = resolveParagraphStyle(highlightedStyleId)
+    const found = overrideParagraphs.map((index) => paragraphOverrides(panelHead, index, base)).find((changes) => Object.keys(changes).length > 0)
+    if (found) changeParagraphStyle(highlightedStyleId, { patch: found })
+    // the paragraph now looks as its style says: the baseline is taken afresh from that
+    if (overrideKey) paragraphBaselinesRef.current.delete(overrideKey)
+    bumpOverrideBaseline((n) => n + 1)
   }
   /** "ביטול": put the paragraph(s) back exactly as their style defines them, discarding what was done since the baseline */
   const discardParagraphOverrides = () => {
     if (!panelHead || !overrideParagraphs || typeof highlightedStyleId !== 'string') return
     let next: TextFrame = panelHead
     for (const index of overrideParagraphs) next = restyleParagraphs(next, [index], highlightedStyleId, highlightedStyleId, false, paragraphStyles, true)
+    if (overrideKey) paragraphBaselinesRef.current.delete(overrideKey)
     onFramesChange(frames.map((frame) => (frame.id === panelHead.id ? next : frame)), `paragraph-style-discard:${highlightedStyleId}`)
   }
 
@@ -9911,6 +9970,12 @@ export function Workspace({
     if ((hardReset || leaving.tracking !== undefined) && charPatch.tracking === undefined) charPatch.tracking = 0
     if ((hardReset || leaving.outlineWidth !== undefined) && charPatch.outlineWidth === undefined) charPatch.outlineWidth = 0
     if ((hardReset || leaving.outlineColor !== undefined) && charPatch.outlineColor === undefined) charPatch.outlineColor = '#000000'
+    // the font, the size and the colour too: a heading's size must not stay when the paragraph goes back to a style that sets none
+    // (they return to the story's own look)
+    const storyLook = charStyleOf(frame) as unknown as Record<string, unknown>
+    for (const key of ['fontFamily', 'fontSize', 'color'] as const) {
+      if ((hardReset || leaving[key] !== undefined) && charPatch[key] === undefined) (charPatch as Record<string, unknown>)[key] = storyLook[key]
+    }
     const layout = {
       ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
       ...(resolved.listKind ? { listKind: resolved.listKind } : {}),

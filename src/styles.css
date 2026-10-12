@@ -488,6 +488,8 @@ svg { display: block; }
 .paragraph-style-modal-head { cursor: move; user-select: none; }
 /* banner in the paragraph-style modal: the highlighted style's text has changes of its own pending accept/discard */
 .paragraph-style-pending { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 7px 10px; background: rgba(61, 139, 255, 0.12); border: 1px solid var(--accent-line); border-radius: 5px; color: #fff; font-size: 12px; }
+/* a small blue circle on the style the paragraph under the caret is in, when the paragraph has changes of its own */
+.style-dot { display: inline-block; width: 8px; height: 8px; margin-inline-start: 7px; border-radius: 50%; background: var(--accent-line); vertical-align: middle; }
 .paragraph-style-pending-actions { display: flex; gap: 6px; flex: none; }
 .paragraph-style-modal-layout { display: flex; min-height: 420px; direction: rtl; }
 .paragraph-style-categories { width: 150px; flex: none; display: flex; flex-direction: column; gap: 1px; padding: 4px; border-inline-start: 1px solid var(--border); background: #4b4b4b; }

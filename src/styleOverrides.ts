@@ -8,7 +8,7 @@ type Look = ParagraphStyleRecord['patch']
 const CHAR_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'color', 'tracking'] as const
 const CHAR_PLAIN: Partial<Record<(typeof CHAR_KEYS)[number], number | boolean>> = { weight: 400, italic: false, tracking: 0 }
 /** and the paragraph ones */
-const LAYOUT_KEYS = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+const LAYOUT_KEYS = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'wordSpacing'] as const
 
 const same = (a: unknown, b: unknown) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 0.01 : a === b)
 
@@ -33,6 +33,7 @@ function actualLayout(head: TextFrame, index: number): Record<(typeof LAYOUT_KEY
     indentLeft: own?.indentLeft ?? head.indentLeft,
     indentRight: own?.indentRight ?? head.indentRight,
     firstLineIndent: own?.firstLineIndent ?? head.firstLineIndent,
+    wordSpacing: own?.wordSpacing ?? head.wordSpacing,
   }
 }
 
@@ -60,18 +61,24 @@ function paragraphRuns(head: TextFrame, index: number) {
  */
 export function paragraphOverrides(head: TextFrame, index: number, style: Look): Look {
   const out: Record<string, unknown> = {}
+  // what a style says nothing of is the story's own look: a size or a colour changed on a paragraph whose style sets none is a change too
+  const story = head as unknown as Record<string, unknown>
   for (const run of paragraphRuns(head, index)) {
     for (const key of CHAR_KEYS) {
       if (key in out) continue
-      const expected = style[key] ?? CHAR_PLAIN[key]
+      const expected = style[key] ?? CHAR_PLAIN[key] ?? story[key]
       const actual = run.style[key]
-      if (expected !== undefined && actual !== undefined && !same(actual, expected)) out[key] = actual
+      // a colour of the text's own, where nothing sets one, differs from "none" as well
+      if (actual !== undefined && (expected !== undefined || key === 'color') && !same(actual, expected)) out[key] = actual
     }
   }
   const actual = actualLayout(head, index)
   for (const key of LAYOUT_KEYS) {
-    const expected = style[key]
-    if (expected !== undefined && actual[key] !== undefined && !same(actual[key], expected)) out[key] = actual[key]
+    const expected = style[key] ?? story[key]
+    const value = actual[key]
+    if (value === undefined) continue
+    // nothing set anywhere: an indent or a space of 0 is the same as none
+    if (expected === undefined ? value !== 0 : !same(value, expected)) out[key] = value
   }
   return out as Look
 }

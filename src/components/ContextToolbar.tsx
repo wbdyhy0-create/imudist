@@ -230,6 +230,7 @@ export function ContextToolbar({ tool, unit, sharpness, onSharpness, shape, imag
           <div className="context-align-buttons" role="group" aria-label="יישור">
             {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
           </div>
+          <div className="context-field" title="הרווח בין הפסקה לפסקה שאחריה (אותו ערך כמו „הזחה מלמטה” ו„רווח אחרי” בסגנון הפסקה)"><span>מרווח בין פסקאות</span><NumberField value={para.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceAfter) => onParagraphSpacing?.({ spaceAfter })} /></div>
           <div className="context-field" title="הזחה מימין"><span>הזחה מימין</span><NumberField value={para.indentRight ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(indentRight) => onParagraphStyle?.({ indentRight })} /></div>
           <div className="context-field" title="הזחה משמאל"><span>הזחה משמאל</span><NumberField value={para.indentLeft ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(indentLeft) => onParagraphStyle?.({ indentLeft })} /></div>
           <div className="context-field" title="הזחה מלמעלה: הרווח שלפני הפסקה, שדוחף אותה כלפי מטה מהפסקה שמעליה"><span>הזחה מלמעלה</span><NumberField value={para.spaceBefore ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceBefore) => onParagraphSpacing?.({ spaceBefore })} /></div>
