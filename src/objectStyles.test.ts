@@ -113,6 +113,18 @@ describe('object styles in the file', () => {
     expect(opened.shapes[0]?.objectStyleId).toBe('k')
   })
 
+  it('keep the drawing of the object they were made from, when it is an SVG of a size', () => {
+    const graphic = { svg: "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='5'><path d='M0 0h10v5z'/></svg>", w: 10, h: 5 }
+    const opened = parseDocument(serializeDocument(contentWith([{ id: 'g', name: 'עיטור', settings: {}, graphic }])), 'styles.imudist')
+    expect(opened.objectStyles?.[0]?.graphic).toEqual(graphic)
+    const odd = JSON.stringify({ ...JSON.parse(serializeDocument(contentWith([]))), objectStyles: [
+      { id: 'a', name: 'a', settings: {}, graphic: { svg: '<script>alert(1)</script>', w: 10, h: 5 } },
+      { id: 'b', name: 'b', settings: {}, graphic: { svg: "<svg xmlns='http://www.w3.org/2000/svg'/>", w: 0, h: 5 } },
+    ] })
+    const cleaned = parseDocument(odd, 'styles.imudist')
+    expect(cleaned.objectStyles?.map((style) => style.graphic)).toEqual([undefined, undefined])
+  })
+
   it('drop what is not understood', () => {
     const opened = parseDocument(serializeDocument(contentWith([
       { id: 'x', name: '  ', settings: { fill: 'red', stroke: '#abcdef', strokeWidth: 'thick', strokeCap: 'zigzag', blendMode: 'color-dodge', arrowEnd: 'rocket', shadow: { opacity: 0.2, color: 'blue' } } },

@@ -81,6 +81,47 @@ describe('how a decoration is drawn', () => {
     expect(line.svg).toContain('<path')
   })
 
+  it('is the drawing of the object style when it has one: as wide as asked, in the proportions of the drawing', () => {
+    const graphic = { svg: "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='60'><path d='M0 0h300v60z'/></svg>", w: 300, h: 60 }
+    const natural = decorationVars({ ...deco(), look: {}, graphic }, 1)!
+    expect(natural['--deco-width']).toBe('300px')
+    expect(natural['--deco-height']).toBe('auto')
+    expect(natural['--deco-ratio']).toBe('300 / 60')
+    expect(natural['--deco-bg']).toContain('data:image/svg+xml')
+    const asked = decorationVars({ ...deco({ length: 120 }), look: {}, graphic }, 2)!
+    expect(asked['--deco-width']).toBe('240px')
+    expect(decorationClass({ ...deco(), graphic })).toBe('para-deco-above')
+    // the drawing is carried from the object style into the decoration
+    const withGraphic: ObjectStyleRecord = { ...bar, graphic }
+    expect(decoratedStyles(styles, [withGraphic]).get('head')?.graphic).toBe(graphic)
+  })
+
+  it('behind the heading: the fill of the style, or its drawing, over the box of the text, which is as big as the text', () => {
+    const behind = { ...deco({ position: 'behind', gap: 5, length: 99, height: 9 }), look: bar.settings }
+    const centred = decorationVars(behind, 2, { align: 'center', gapBefore: 4 })!
+    expect(centred['--deco-fit']).toBe('fit-content') // as wide as the longest line of the heading
+    expect(centred['--deco-ms']).toBe('auto')
+    expect(centred['--deco-me']).toBe('auto')
+    expect(centred['--deco-pad']).toBe('10px')
+    expect(centred['--deco-top']).toBe('8px') // not over the gap that opens the paragraph
+    expect(centred['--deco-bg']).toBe('#c0392b')
+    expect(centred['--deco-radius']).toBe('4px')
+    expect(centred).not.toHaveProperty('--deco-height') // the box is the text's own: no height of its own, nor a length
+    // aligned to the start (the right) it stays there; a justified heading is as wide as the column
+    expect(decorationVars(behind, 1, { align: 'right' })!['--deco-ms']).toBe('0')
+    expect(decorationVars(behind, 1, { align: 'right' })!['--deco-me']).toBe('auto')
+    expect(decorationVars(behind, 1, { align: 'left' })!['--deco-ms']).toBe('auto')
+    expect(decorationVars(behind, 1, { align: 'left' })!['--deco-me']).toBe('0')
+    expect(decorationVars(behind, 1, { align: 'justify' })!['--deco-fit']).toBe('auto')
+    // a drawing is stretched over the box: it does not keep its own proportions there
+    const graphic = { svg: "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='60' viewBox='0 0 300 60'><path d='M0 0h300v60z'/></svg>", w: 300, h: 60 }
+    const drawn = decorationVars({ ...behind, graphic }, 1)!
+    const encoded = /data:image\/svg\+xml,([^"]+)/.exec(drawn['--deco-bg'])?.[1] ?? ''
+    expect(decodeURIComponent(encoded)).toContain('preserveAspectRatio="none"')
+    expect(drawn['--deco-bg']).toContain('100% 100%')
+    expect(decorationClass(behind)).toBe('para-deco-behind')
+  })
+
   it('has a class by where it goes, and none without a look', () => {
     expect(decorationClass({ ...deco(), look: bar.settings })).toBe('para-deco-above')
     expect(decorationClass({ ...deco({ position: 'below' }), look: bar.settings })).toBe('para-deco-below')

@@ -38,6 +38,7 @@ import {
   DEFAULT_SPACE_AFTER,
   ANCHOR_MARKER,
   type AnchoredObject,
+  type ObjectStyleGraphic,
   type ObjectStyleRecord,
   type ObjectStyleSettings,
   FOOTNOTE_MARKER,
@@ -164,6 +165,7 @@ import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStyl
 import { StyleManagerPanel } from './StyleManagerPanel'
 import { ObjectStylesPanel } from './ObjectStylesPanel'
 import { decorationPatches, withDecorations } from '../decorations'
+import { boundsOfItems, buildSvg, type SvgItem } from '../svgBuild'
 import { applyToImage, applyToShape, lookOfImage, lookOfShape, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from '../objectStyles'
 import { AnchorHandles } from './AnchorHandles'
 import { PathTextEditor } from './PathTextEditor'
@@ -6049,6 +6051,28 @@ export function Workspace({
     if (targets.images[0]) return lookOfImage(targets.images[0])
     return null
   }
+  /**
+   * The drawing of the selected shapes and pictures, back to front: what a decoration in an object style made from them draws (an
+   * ornament, a picture, several shapes). One line or one plain rectangle is not drawn this way: it is drawn from its settings.
+   */
+  const objectStyleGraphic = (): ObjectStyleGraphic | undefined => {
+    const targets = objectStyleTargets()
+    const items: (SvgItem & { id: string })[] = [
+      ...targets.shapes.map((shape) => ({ kind: 'shape' as const, shape, id: shape.id })),
+      ...targets.images.map((image) => ({ kind: 'image' as const, image, id: image.id })),
+    ].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+    if (items.length === 0) return undefined
+    // one line, one plain rectangle: the style is their look (a bar or a line), drawn at the size the decoration says
+    if (items.length === 1 && items[0].kind === 'shape' && (items[0].shape.kind === 'line' || (items[0].shape.kind === 'rect' && !items[0].shape.image))) return undefined
+    const box = boundsOfItems(items)
+    if (!box || box.w <= 0 || box.h <= 0) return undefined
+    try {
+      const { svg } = buildSvg(items, assets, box)
+      return svg.length > 3_000_000 ? undefined : { svg, w: box.w, h: box.h }
+    } catch {
+      return undefined
+    }
+  }
   /** the style (or none: they keep the look they have) given to every selected shape and picture */
   const applyObjectStyle = (styleId: string | null) => {
     const targets = objectStyleTargets()
@@ -6060,8 +6084,8 @@ export function Workspace({
       images: images.map((image) => (ids.has(image.id) ? (record ? applyToImage(image, record.settings, record.id) : withoutObjectStyle(image)) : image)),
     }, `object-style:${styleId ?? 'none'}`)
   }
-  const createObjectStyle = (name: string, settings: ObjectStyleSettings, apply: boolean) => {
-    const record: ObjectStyleRecord = { id: newFrameId(), name: uniqueObjectStyleName(objectStyles, name), settings }
+  const createObjectStyle = (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic) => {
+    const record: ObjectStyleRecord = { id: newFrameId(), name: uniqueObjectStyleName(objectStyles, name), settings, ...(graphic ? { graphic } : {}) }
     const targets = apply ? objectStyleTargets() : { shapes: [], images: [] }
     const ids = new Set([...targets.shapes, ...targets.images].map((object) => object.id))
     const withStyle = {
@@ -6076,9 +6100,13 @@ export function Workspace({
     }
   }
   /** a style changed: every object that follows it takes the new settings, on the pages and on the parent pages */
-  const changeObjectStyle = (id: string, name: string, settings: ObjectStyleSettings) => {
+  const changeObjectStyle = (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => {
     if (!objectStyles.some((style) => style.id === id)) return
-    const nextStyles = objectStyles.map((style) => (style.id === id ? { ...style, name: uniqueObjectStyleName(objectStyles.filter((other) => other.id !== id), name), settings } : style))
+    const nextStyles = objectStyles.map((style) => {
+      if (style.id !== id) return style
+      const { graphic: _old, ...rest } = style
+      return { ...rest, name: uniqueObjectStyleName(objectStyles.filter((other) => other.id !== id), name), settings, ...(graphic ? { graphic } : {}) }
+    })
     const follow = (object: { objectStyleId?: string }) => object.objectStyleId === id
     const nextShapes = shapes.some(follow) ? shapes.map((shape) => (follow(shape) ? applyToShape(shape, settings, id) : shape)) : undefined
     const nextImages = images.some(follow) ? images.map((image) => (follow(image) ? applyToImage(image, settings, id) : image)) : undefined
@@ -6125,7 +6153,8 @@ export function Workspace({
     for (const key of Object.keys(record.settings) as (keyof ObjectStyleSettings)[]) {
       if (key in look) (settings as Record<string, unknown>)[key] = look[key]
     }
-    changeObjectStyle(id, record.name, settings)
+    // the drawing follows the object too (none when the object has none)
+    changeObjectStyle(id, record.name, settings, objectStyleGraphic())
   }
   const selectObjectsOfStyle = (id: string) => {
     const ids = [...shapes, ...images].filter((object) => object.objectStyleId === id).map((object) => object.id)
@@ -12108,7 +12137,7 @@ export function Workspace({
             {
               id: 'object-styles',
               label: 'סגנונות אובייקט',
-              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
+              content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onSelectionGraphic={objectStyleGraphic} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
             },
             {
               id: 'style-manager',

@@ -162,7 +162,10 @@ export function ParagraphStylesPanel({ styles, unit, shown = true, onApply, onCh
         <p className="muted">פס, קו או חץ שמצויר מעל הפסקה או מתחתיה, בעיצוב של סגנון אובייקט. שינוי בסגנון האובייקט מתעדכן בכל הפסקאות שבסגנון הזה.</p>
         {(() => {
           const deco = active.patch.decoration
-          const known = !!deco && objectStyles.some((style) => style.id === deco.objectStyleId)
+          const record = deco ? objectStyles.find((style) => style.id === deco.objectStyleId) : undefined
+          const known = !!record
+          // a style made from an ornament, a picture or several shapes is that drawing, as wide as `length` says
+          const drawing = !!record?.graphic
           return (
             <>
               <label className="page-bar-check"><input type="checkbox" checked={!!deco} disabled={!deco && objectStyles.length === 0} onChange={(event) => edit({ decoration: event.target.checked ? { objectStyleId: objectStyles[0].id, position: 'above', height: 3, gap: 6, length: 0, align: 'start' } : undefined })} />הצמד עיטור לפסקאות בסגנון</label>
@@ -177,17 +180,21 @@ export function ParagraphStylesPanel({ styles, unit, shown = true, onApply, onCh
                   </Labeled>
                   {!known && <p className="muted">סגנון האובייקט נמחק, ולכן אין עיטור. בחרו סגנון אחר.</p>}
                   <Labeled label="מיקום">
-                    <select className="select" value={deco.position} onChange={(event) => edit({ decoration: { ...deco, position: event.target.value === 'below' ? 'below' : 'above' } })}>
+                    <select className="select" value={deco.position} onChange={(event) => edit({ decoration: { ...deco, position: event.target.value === 'below' ? 'below' : event.target.value === 'behind' ? 'behind' : 'above' } })}>
                       <option value="above">מעל הפסקה</option>
                       <option value="below">מתחת לפסקה</option>
+                      <option value="behind">מאחורי הכותרת (מתחת לטקסט, בגודלו)</option>
                     </select>
                   </Labeled>
+                  {deco.position === 'behind' ? (
+                    <Labeled label="שוליים סביב הטקסט"><NumberField value={deco.gap} unit={unit} min={0} max={500} onChange={(gap) => edit({ decoration: { ...deco, gap } })} /></Labeled>
+                  ) : (<>
                   <div className="grid2">
-                    <Labeled label="עובי הפס"><NumberField value={deco.height} unit={unit} min={0.25} max={500} onChange={(height) => edit({ decoration: { ...deco, height } })} /></Labeled>
+                    {!drawing && <Labeled label="עובי הפס"><NumberField value={deco.height} unit={unit} min={0.25} max={500} onChange={(height) => edit({ decoration: { ...deco, height } })} /></Labeled>}
                     <Labeled label="רווח מהטקסט"><NumberField value={deco.gap} unit={unit} min={0} max={500} onChange={(gap) => edit({ decoration: { ...deco, gap } })} /></Labeled>
                   </div>
                   <div className="grid2">
-                    <Labeled label="אורך (0 = כל הרוחב)"><NumberField value={deco.length} unit={unit} min={0} max={5000} onChange={(length) => edit({ decoration: { ...deco, length } })} /></Labeled>
+                    <Labeled label={drawing ? 'רוחב הציור (0 = הרוחב המקורי)' : 'אורך (0 = כל הרוחב)'}><NumberField value={deco.length} unit={unit} min={0} max={5000} onChange={(length) => edit({ decoration: { ...deco, length } })} /></Labeled>
                     <Labeled label="יישור">
                       <select className="select" value={deco.align} onChange={(event) => edit({ decoration: { ...deco, align: event.target.value === 'center' ? 'center' : event.target.value === 'end' ? 'end' : 'start' } })}>
                         <option value="start">בתחילת השורה</option>
@@ -196,7 +203,14 @@ export function ParagraphStylesPanel({ styles, unit, shown = true, onApply, onCh
                       </select>
                     </Labeled>
                   </div>
-                  <p className="muted">עובי הפס משמש לפס רגיל. קו עם ראשי חץ או עובי משתנה מצויר באורך שנקבע כאן (כשהוא 0: 240 נק׳) ובעובי של הקו עצמו.</p>
+                  </>)}
+                  <p className="muted">
+                    {deco.position === 'behind'
+                      ? 'העיטור נמתח על התיבה של הטקסט, אז לכל כותרת יש עיטור בגודל שלה: כותרת צרה או רחבה, שורה אחת או כמה. הוא מצטרף ליישור הכותרת, והשוליים מרחיבים אותו מעבר לטקסט.'
+                      : drawing
+                      ? 'הסגנון נוצר מציור (קישוט, תמונה או כמה צורות): הוא מצויר ביחס שלו ולא רחב מהעמודה.'
+                      : 'עובי הפס משמש לפס רגיל. קו עם ראשי חץ או עובי משתנה מצויר באורך שנקבע כאן (כשהוא 0: 240 נק׳) ובעובי של הקו עצמו.'}
+                  </p>
                 </>
               )}
             </>

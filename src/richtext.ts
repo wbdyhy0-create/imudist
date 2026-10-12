@@ -481,7 +481,10 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     // a decoration above opens a paragraph that starts here; one below closes a paragraph that ends here (both are
     // pseudo-elements of the block: they hold no characters, so no count of characters sees them)
     const decoration = patch?.decoration
-    const decoVars = decoration && !marker && (decoration.position === 'below' ? nl >= 0 : pos > 0 || !!opts.atParaStart) ? decorationVars(decoration, scale) : null
+    // (behind the text it covers every fragment of the paragraph: a heading that goes over two frames has its box in both)
+    const decoWanted = decoration && !marker && (decoration.position === 'below' ? nl >= 0 : decoration.position === 'above' ? pos > 0 || !!opts.atParaStart : true)
+    const decoGapBefore = pos > 0 ? (opts.paraGaps ? opts.paraGaps[paragraph - 1] : opts.paraLineHeight) ?? 0 : 0
+    const decoVars = decoration && decoWanted ? decorationVars(decoration, scale, { align: patch?.align ?? baseAlign, gapBefore: decoGapBefore }) : null
     if (decoration && decoVars) {
       block.classList.add(decorationClass(decoration)!)
       for (const [name, value] of Object.entries(decoVars)) block.style.setProperty(name, value)

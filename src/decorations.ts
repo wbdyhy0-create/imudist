@@ -1,11 +1,11 @@
-import type { ObjectStyleRecord, ObjectStyleSettings, ParagraphDecoration, ParagraphStyleRecord, TextFrame } from './document'
+import type { ObjectStyleRecord, ObjectStyleSettings, ParagraphDecoration, ParagraphStyleRecord, TextAlign, TextFrame } from './document'
 import { isProfiledLine, lineOutline, lineOutlinePath } from './lineProfile'
 import { headFrames } from './frames'
 import { resolveParagraphStyle, styleIdOf } from './styleApply'
 
 /**
- * The decoration of a paragraph style (עיטור): a bar, a rule or a line with arrow heads, drawn above or below every
- * paragraph in the style, in the look of an object style. What is saved is only which object style, where and how big;
+ * The decoration of a paragraph style (עיטור): a bar, a rule, a line with arrow heads or a drawing, drawn above, below or
+ * behind every paragraph in the style, in the look of an object style. What is saved is only which object style, where and how big;
  * the look is read from the object style whenever the text is drawn or measured, so a change of the object style
  * reaches every heading at once.
  */
@@ -51,19 +51,79 @@ export function decorationLine(look: ObjectStyleSettings, length: number): { wid
   return { width: length, height, svg }
 }
 
+/** the fill, the line, the corners and the shadow of an object style as one box (a bar, or what is behind a heading) */
+function boxVars(look: ObjectStyleSettings, scale: number): Record<string, string> {
+  const shadows: string[] = []
+  // the line is an inset shadow, like the line of a paragraph's own box: a border would be rounded to whole device pixels
+  if (look.stroke && (look.strokeWidth ?? 1) > 0) shadows.push(`inset 0 0 0 ${(look.strokeWidth ?? 1) * scale}px ${look.stroke}`)
+  if (look.shadow && look.shadow.opacity > 0) {
+    const blur = Math.hypot(look.shadow.offsetX, look.shadow.offsetY) * 0.35 * (1 - look.shadow.opacity)
+    const channel = (from: number) => parseInt(look.shadow!.color.slice(from, from + 2), 16) || 0
+    shadows.push(`${look.shadow.offsetX * scale}px ${look.shadow.offsetY * scale}px ${blur * scale}px rgba(${channel(1)}, ${channel(3)}, ${channel(5)}, ${look.shadow.opacity})`)
+  }
+  return {
+    '--deco-bg': look.fillGradient ? gradientCss(look.fillGradient) : look.fill ?? 'transparent',
+    '--deco-radius': `${(look.radius ?? 0) * scale}px`,
+    '--deco-shadow': shadows.length > 0 ? shadows.join(', ') : 'none',
+  }
+}
+
+/** a drawing as a CSS background, stretched over the box it fills (its own proportions are not kept: it takes the box's) */
+const stretchedDrawing = (svg: string) => `url("data:image/svg+xml,${encodeURIComponent(svg.replace('<svg ', '<svg preserveAspectRatio="none" '))}") center / 100% 100% no-repeat`
+
+/** what the paragraph block is told about itself, for a decoration that follows it */
+export interface DecorationContext {
+  /** the alignment of the paragraph's text: a decoration behind a heading sits where the heading's text does */
+  align?: TextAlign
+  /** points: the space the paragraph's opening gap puts above its first line, inside the block (the decoration does not cover it) */
+  gapBefore?: number
+}
+
 /**
- * The CSS custom properties a paragraph block gets for its decoration (`.para-deco-above::before` / `.para-deco-below::after`
- * in styles.css read them): size, space, alignment and look. `scale` is the zoom (1 when measuring).
+ * The CSS custom properties a paragraph block gets for its decoration (`.para-deco-above::before` / `.para-deco-below::after` /
+ * `.para-deco-behind::before` in styles.css read them): size, space, alignment and look. `scale` is the zoom (1 when measuring).
  */
-export function decorationVars(deco: ParagraphDecoration, scale: number): Record<string, string> | null {
-  const look = deco.look
+export function decorationVars(deco: ParagraphDecoration, scale: number, context: DecorationContext = {}): Record<string, string> | null {
+  const look = deco.look ?? (deco.graphic ? {} : undefined)
   if (!look) return null
-  const alignStart = deco.align === 'start'
-  const vars: Record<string, string> = {
-    '--deco-gap': `${Math.max(0, deco.gap) * scale}px`,
-    '--deco-ms': alignStart ? '0' : 'auto',
-    '--deco-me': deco.align === 'end' ? '0' : 'auto',
-    '--deco-opacity': String(look.opacity ?? 1),
+  const graphic = deco.graphic && deco.graphic.w > 0 && deco.graphic.h > 0 ? deco.graphic : undefined
+  const vars: Record<string, string> = { '--deco-opacity': String(look.opacity ?? 1) }
+
+  if (deco.position === 'behind') {
+    // behind the heading: the drawing (or the fill and the line of the style) is stretched over the box of the text, which is as wide as
+    // its longest line (as wide as the column for a justified paragraph) and as high as its lines - so every heading has its own size
+    const align = context.align
+    const full = align === 'justify' || align === 'justifyCenter'
+    vars['--deco-fit'] = full ? 'auto' : 'fit-content'
+    // in a right-to-left column the start is the right: a heading aligned there stays there, one aligned left or centred follows it
+    const placement = full ? ['0', '0'] : align === 'center' ? ['auto', 'auto'] : align === 'left' ? ['auto', '0'] : ['0', 'auto']
+    vars['--deco-ms'] = placement[0]
+    vars['--deco-me'] = placement[1]
+    vars['--deco-pad'] = `${Math.max(0, deco.gap) * scale}px`
+    vars['--deco-top'] = `${Math.max(0, context.gapBefore ?? 0) * scale}px`
+    if (graphic) {
+      vars['--deco-bg'] = stretchedDrawing(graphic.svg)
+      vars['--deco-radius'] = '0'
+      vars['--deco-shadow'] = 'none'
+    } else {
+      Object.assign(vars, boxVars(look, scale))
+    }
+    return vars
+  }
+
+  vars['--deco-gap'] = `${Math.max(0, deco.gap) * scale}px`
+  vars['--deco-ms'] = deco.align === 'start' ? '0' : 'auto'
+  vars['--deco-me'] = deco.align === 'end' ? '0' : 'auto'
+  if (graphic) {
+    // the drawing of the object style itself: as wide as asked (its own width when not), never wider than the column, in its own proportions
+    const width = deco.length > 0 ? deco.length : graphic.w
+    vars['--deco-width'] = `${width * scale}px`
+    vars['--deco-height'] = 'auto'
+    vars['--deco-ratio'] = `${graphic.w} / ${graphic.h}`
+    vars['--deco-bg'] = `url("data:image/svg+xml,${encodeURIComponent(graphic.svg)}") center / 100% 100% no-repeat`
+    vars['--deco-radius'] = '0'
+    vars['--deco-shadow'] = 'none'
+    return vars
   }
   if (isLineLook(look)) {
     const line = decorationLine(look, deco.length > 0 ? deco.length : DEFAULT_LINE_LENGTH)
@@ -74,24 +134,15 @@ export function decorationVars(deco: ParagraphDecoration, scale: number): Record
     vars['--deco-shadow'] = 'none'
     return vars
   }
-  const shadows: string[] = []
-  // the line is an inset shadow, like the line of a paragraph's own box: a border would be rounded to whole device pixels
-  if (look.stroke && (look.strokeWidth ?? 1) > 0) shadows.push(`inset 0 0 0 ${(look.strokeWidth ?? 1) * scale}px ${look.stroke}`)
-  if (look.shadow && look.shadow.opacity > 0) {
-    const blur = Math.hypot(look.shadow.offsetX, look.shadow.offsetY) * 0.35 * (1 - look.shadow.opacity)
-    const channel = (from: number) => parseInt(look.shadow!.color.slice(from, from + 2), 16) || 0
-    shadows.push(`${look.shadow.offsetX * scale}px ${look.shadow.offsetY * scale}px ${blur * scale}px rgba(${channel(1)}, ${channel(3)}, ${channel(5)}, ${look.shadow.opacity})`)
-  }
   vars['--deco-width'] = deco.length > 0 ? `${deco.length * scale}px` : 'auto'
   vars['--deco-height'] = `${Math.max(0.25, deco.height) * scale}px`
-  vars['--deco-bg'] = look.fillGradient ? gradientCss(look.fillGradient) : look.fill ?? 'transparent'
-  vars['--deco-radius'] = `${(look.radius ?? 0) * scale}px`
-  vars['--deco-shadow'] = shadows.length > 0 ? shadows.join(', ') : 'none'
+  Object.assign(vars, boxVars(look, scale))
   return vars
 }
 
 /** the class a paragraph block gets for its decoration */
-export const decorationClass = (deco: ParagraphDecoration | undefined): string | undefined => (deco?.look ? (deco.position === 'below' ? 'para-deco-below' : 'para-deco-above') : undefined)
+export const decorationClass = (deco: ParagraphDecoration | undefined): string | undefined =>
+  deco?.look || deco?.graphic ? (deco.position === 'below' ? 'para-deco-below' : deco.position === 'behind' ? 'para-deco-behind' : 'para-deco-above') : undefined
 
 /**
  * The paragraph patches of a story with the decoration of every paragraph's style written in (and the look of the object
@@ -126,7 +177,7 @@ export function decoratedStyles(paragraphStyles: ParagraphStyleRecord[], objectS
     const deco = resolveParagraphStyle(style.id, paragraphStyles).decoration
     if (!deco) continue
     const record = objectStyles.find((candidate) => candidate.id === deco.objectStyleId)
-    if (record) out.set(style.id, { ...deco, look: record.settings })
+    if (record) out.set(style.id, { ...deco, look: record.settings, ...(record.graphic ? { graphic: record.graphic } : {}) })
   }
   return out
 }

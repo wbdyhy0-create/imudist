@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { BLEND_MODES, type BlendMode, type LineArrow, type ObjectStyleRecord, type ObjectStyleSettings } from '../document'
+import { BLEND_MODES, type BlendMode, type LineArrow, type ObjectStyleGraphic, type ObjectStyleRecord, type ObjectStyleSettings } from '../document'
 import { LINE_ARROWS, LINE_PROFILES } from '../lineProfile'
 import { ContextMenu } from './ContextMenu'
 
@@ -13,8 +13,10 @@ interface Props {
   onApply: (id: string | null) => void
   /** what the first selected object looks like, in the terms of a style; null when no picture or shape is selected */
   onSelectionLook: () => ObjectStyleSettings | null
-  onCreate: (name: string, settings: ObjectStyleSettings, apply: boolean) => void
-  onChange: (id: string, name: string, settings: ObjectStyleSettings) => void
+  /** the drawing of the selected objects (an ornament, a picture, several shapes), for a decoration; missing for one line or nothing */
+  onSelectionGraphic: () => ObjectStyleGraphic | undefined
+  onCreate: (name: string, settings: ObjectStyleSettings, apply: boolean, graphic?: ObjectStyleGraphic) => void
+  onChange: (id: string, name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void
   onDelete: (id: string) => void
   /** the style becomes what the first selected object looks like (the settings it already holds) */
   onRedefine: (id: string) => void
@@ -39,7 +41,10 @@ const NAMES: Record<keyof ObjectStyleSettings, string> = {
 }
 
 /** how a style looks as a small box: its fill, its line, its corners, its shadow and its see-through */
-export function objectStyleSwatch(settings: ObjectStyleSettings): CSSProperties {
+export function objectStyleSwatch(settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic): CSSProperties {
+  if (graphic) {
+    return { background: `url("data:image/svg+xml,${encodeURIComponent(graphic.svg)}") center / contain no-repeat`, border: '1px solid transparent', opacity: settings.opacity ?? 1 }
+  }
   const gradient = settings.fillGradient
   const shadow = settings.shadow
   const lineOnly = settings.fill === undefined && settings.stroke === undefined && !gradient && settings.arrowEnd !== undefined
@@ -56,9 +61,9 @@ export function objectStyleSwatch(settings: ObjectStyleSettings): CSSProperties 
   }
 }
 
-type Editing = { id: string | null; name: string; settings: ObjectStyleSettings }
+type Editing = { id: string | null; name: string; settings: ObjectStyleSettings; graphic?: ObjectStyleGraphic }
 
-export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
+export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelectionLook, onSelectionGraphic, onCreate, onChange, onDelete, onRedefine, onSelectObjects }: Props) {
   const [editing, setEditing] = useState<Editing | null>(null)
   const [query, setQuery] = useState('')
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -79,7 +84,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
   }
   const fromSelection = () => {
     const look = onSelectionLook()
-    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 } })
+    setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic: look ? onSelectionGraphic() : undefined })
   }
   return (
     <section className="paragraph-styles-panel props-panel object-styles-panel" aria-label="סגנונות אובייקט" dir="rtl">
@@ -129,16 +134,16 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
                 setFound(null)
                 if (canApply) onApply(style.id)
               }}
-              onDoubleClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings })}
+              onDoubleClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic })}
             >
-              <span className="object-style-swatch" style={objectStyleSwatch(style.settings)} aria-hidden="true" />
+              <span className="object-style-swatch" style={objectStyleSwatch(style.settings, style.graphic)} aria-hidden="true" />
               <span className="style-sample">
                 {style.name}
                 {style.id === selection.styleId && selection.modified && <span className="style-modified" title="באובייקט יש שינויים ידניים מעל הסגנון. לחיצה על הסגנון מחילה אותו מחדש."> +</span>}
               </span>
               <span className="object-style-count" title="כמה אובייקטים במסמך עם הסגנון">{usage[style.id] ?? 0}</span>
             </button>
-            <button className="icon-button" aria-label={`עריכת ${style.name}`} title="עריכת הסגנון" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings })}>✎</button>
+            <button className="icon-button" aria-label={`עריכת ${style.name}`} title="עריכת הסגנון" onMouseDown={(event) => event.preventDefault()} onClick={() => setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic })}>✎</button>
           </div>
         ))}
         {shown.length === 0 && styles.length > 0 && <span className="muted">אין סגנון בשם הזה.</span>}
@@ -149,7 +154,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            { label: 'עריכת הסגנון…', onClick: () => { const style = styles.find((s) => s.id === menu.id); if (style) setEditing({ id: style.id, name: style.name, settings: style.settings }) } },
+            { label: 'עריכת הסגנון…', onClick: () => { const style = styles.find((s) => s.id === menu.id); if (style) setEditing({ id: style.id, name: style.name, settings: style.settings, graphic: style.graphic }) } },
             { label: 'בחר את כל האובייקטים בסגנון', onClick: () => setFound({ id: menu.id, count: onSelectObjects(menu.id) }) },
             { separator: true },
             { label: 'מחק את הסגנון', onClick: () => onDelete(menu.id) },
@@ -166,9 +171,9 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
       {editing && (
         <ObjectStyleDialog
           initial={editing}
-          onSave={(name, settings) => {
-            if (editing.id) onChange(editing.id, name, settings)
-            else onCreate(name, settings, canApply)
+          onSave={(name, settings, graphic) => {
+            if (editing.id) onChange(editing.id, name, settings, graphic)
+            else onCreate(name, settings, canApply, graphic)
             setEditing(null)
           }}
           onDelete={editing.id ? () => { onDelete(editing.id!); setEditing(null) } : undefined}
@@ -191,8 +196,10 @@ function Setting({ label, on, onToggle, children }: { label: string; on: boolean
 
 const pct = (value: number) => Math.round(value * 100)
 
-function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Editing; onSave: (name: string, settings: ObjectStyleSettings) => void; onDelete?: () => void; onClose: () => void }) {
+function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Editing; onSave: (name: string, settings: ObjectStyleSettings, graphic?: ObjectStyleGraphic) => void; onDelete?: () => void; onClose: () => void }) {
   const [name, setName] = useState(initial.name)
+  const [keepGraphic, setKeepGraphic] = useState(true)
+  const graphic = keepGraphic ? initial.graphic : undefined
   const [settings, setSettings] = useState<ObjectStyleSettings>(initial.settings)
   const set = (next: ObjectStyleSettings) => setSettings((current) => ({ ...current, ...next }))
   const has = (key: keyof ObjectStyleSettings) => key in settings
@@ -231,7 +238,13 @@ function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Ed
     <div className="modal-backdrop">
       <div className="modal table-dialog wide" role="dialog" aria-modal="true" aria-label="אפשרויות סגנון אובייקט" dir="rtl">
         <h2>{initial.id ? 'אפשרויות סגנון אובייקט' : 'סגנון אובייקט חדש'}</h2>
-        <div className="object-style-preview" aria-hidden="true"><span style={{ ...objectStyleSwatch(settings), width: 120, height: 54, display: 'block' }} /></div>
+        <div className="object-style-preview" aria-hidden="true"><span style={{ ...objectStyleSwatch(settings, graphic), width: graphic ? 200 : 120, height: 54, display: 'block' }} /></div>
+        {initial.graphic && (
+          <label className="dlg-check" title="הציור של האובייקטים שממנם נוצר הסגנון: זה מה שמצויר כשהסגנון משמש עיטור בסגנון פסקה">
+            <input type="checkbox" checked={keepGraphic} onChange={(event) => setKeepGraphic(event.target.checked)} />
+            לשמור את הציור של האובייקט (לעיטור בסגנון פסקה)
+          </label>
+        )}
         <label className="field-label table-dialog-field">שם הסגנון
           <input className="select" value={name} autoFocus onChange={(event) => setName(event.target.value)} />
         </label>
@@ -288,7 +301,7 @@ function ObjectStyleDialog({ initial, onSave, onDelete, onClose }: { initial: Ed
           </Setting>
         </fieldset>
         <div className="modal-buttons">
-          <button className="btn primary" onClick={() => onSave(name.trim() || initial.name, settings)}>אישור</button>
+          <button className="btn primary" onClick={() => onSave(name.trim() || initial.name, settings, graphic)}>אישור</button>
           <button className="btn" onClick={onClose}>ביטול</button>
           {onDelete && <button className="btn danger" onClick={onDelete}>מחיקת הסגנון</button>}
         </div>

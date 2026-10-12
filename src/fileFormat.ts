@@ -417,7 +417,7 @@ const parseDecoration = (v: unknown): ParagraphDecoration | undefined => {
   if (!isObj(v) || typeof v.objectStyleId !== 'string' || !v.objectStyleId || v.objectStyleId.length > 120) return undefined
   return {
     objectStyleId: v.objectStyleId,
-    position: v.position === 'below' ? 'below' : 'above',
+    position: v.position === 'below' ? 'below' : v.position === 'behind' ? 'behind' : 'above',
     height: num(v.height, 2, 0.25, 500),
     gap: num(v.gap, 4, 0, 500),
     length: num(v.length, 0, 0, 5000),
@@ -785,7 +785,10 @@ function parseObjectStyles(value: unknown): ObjectStyleRecord[] {
     if (!isObj(raw) || typeof raw.id !== 'string' || !raw.id || raw.id.length > 120 || ids.has(raw.id)) return []
     ids.add(raw.id)
     const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 120) : 'סגנון אובייקט'
-    return [{ id: raw.id, name, settings: parseObjectStyleSettings(raw.settings) }]
+    const graphic = isObj(raw.graphic) && typeof raw.graphic.svg === 'string' && raw.graphic.svg.length <= 4_000_000 && /^(?:<\?xml[^>]*\?>\s*)?<svg[\s>]/.test(raw.graphic.svg)
+      ? { svg: raw.graphic.svg, w: num(raw.graphic.w, 0, 0, 20000), h: num(raw.graphic.h, 0, 0, 20000) }
+      : undefined
+    return [{ id: raw.id, name, settings: parseObjectStyleSettings(raw.settings), ...(graphic && graphic.w > 0 && graphic.h > 0 ? { graphic } : {}) }]
   })
 }
 

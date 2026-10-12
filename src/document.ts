@@ -554,7 +554,8 @@ export interface ParagraphBox {
 export interface ParagraphDecoration {
   /** the object style (ObjectStyleRecord) it is drawn in */
   objectStyleId: string
-  position: 'above' | 'below'
+  /** above or below the paragraph, or behind it: stretched over the box of its text, so each heading has its own size */
+  position: 'above' | 'below' | 'behind'
   /** points: how thick a bar is (a line has the thickness of its own stroke and arrow heads) */
   height: number
   /** points: the room between the decoration and the text */
@@ -563,6 +564,8 @@ export interface ParagraphDecoration {
   length: number
   align: 'start' | 'center' | 'end'
   look?: ObjectStyleSettings
+  /** the drawing of the object style, when it has one: it is what is drawn, `length` wide */
+  graphic?: ObjectStyleGraphic
 }
 
 export interface ParagraphStyleRecord {
@@ -707,11 +710,24 @@ export interface ObjectStyleSettings {
   lineWidths?: [number, number, number] | null
 }
 
+/**
+ * The drawing of the objects an object style was made from (an ornament, a picture, several shapes): an SVG, one unit a point.
+ * A decoration in this style is that drawing.
+ */
+export interface ObjectStyleGraphic {
+  svg: string
+  /** its size in points */
+  w: number
+  h: number
+}
+
 /** A named look for objects (סגנון אובייקט): the Object Styles panel. */
 export interface ObjectStyleRecord {
   id: string
   name: string
   settings: ObjectStyleSettings
+  /** the drawing the style was made from, for the decoration of a paragraph style (missing for a style made from one line, which is drawn from its settings) */
+  graphic?: ObjectStyleGraphic
 }
 
 /** Ruler guides: horizontal ('h') lines run across a page, vertical ('v') ones from top to bottom. */

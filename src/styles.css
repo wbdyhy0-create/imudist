@@ -1315,6 +1315,9 @@ svg { display: block; }
 .object-style-shadow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 
 /* עיטור של סגנון פסקה (decorations.ts): פס, קו או חץ מעל הפסקה או מתחתיה - אלמנטים מדומים של הפסקה, בלי תווים בתוכם */
-.para-deco-above::before, .para-deco-below::after { content: ''; display: block; box-sizing: border-box; width: var(--deco-width, auto); height: var(--deco-height, 2px); margin-inline-start: var(--deco-ms, 0); margin-inline-end: var(--deco-me, 0); background: var(--deco-bg, transparent); border-radius: var(--deco-radius, 0); box-shadow: var(--deco-shadow, none); opacity: var(--deco-opacity, 1); pointer-events: none; }
+.para-deco-above::before, .para-deco-below::after { content: ''; display: block; box-sizing: border-box; width: var(--deco-width, auto); height: var(--deco-height, 2px); margin-inline-start: var(--deco-ms, 0); margin-inline-end: var(--deco-me, 0); background: var(--deco-bg, transparent); border-radius: var(--deco-radius, 0); box-shadow: var(--deco-shadow, none); opacity: var(--deco-opacity, 1); max-width: 100%; aspect-ratio: var(--deco-ratio, auto); pointer-events: none; }
 .para-deco-above::before { margin-bottom: var(--deco-gap, 0); }
 .para-deco-below::after { margin-top: var(--deco-gap, 0); }
+/* עיטור מאחורי הכותרת: הציור (או המילוי והקו) נמתח על התיבה של הטקסט עצמו, אז לכל כותרת יש עיטור בגודל שלה */
+.para-deco-behind { position: relative; isolation: isolate; width: var(--deco-fit, fit-content); max-width: 100%; margin-inline-start: var(--deco-ms, 0); margin-inline-end: var(--deco-me, auto); padding-block: var(--deco-pad, 0); }
+.para-deco-behind::before { content: ''; position: absolute; z-index: -1; inset-block: var(--deco-top, 0) 0; inset-inline: calc(-1 * var(--deco-pad, 0px)); background: var(--deco-bg, transparent); border-radius: var(--deco-radius, 0); box-shadow: var(--deco-shadow, none); opacity: var(--deco-opacity, 1); pointer-events: none; }
