@@ -24,3 +24,20 @@ export function trialStatus(now: number, expiresAt: number, lastSeen: number | n
   if (lastSeen !== null && now < lastSeen - CLOCK_TOLERANCE_MS) return 'clock-changed'
   return 'ok'
 }
+
+/** The length of a test counted from its first start, in days, from the text written into the build (`VITE_TRIAL_DAYS`): null when there is none. */
+export function trialDays(raw: unknown): number | null {
+  if (typeof raw !== 'string' || raw.trim() === '') return null
+  const days = Number(raw)
+  return Number.isFinite(days) && days > 0 ? days : 0
+}
+
+/**
+ * The end of a test that runs for `days` from its first start (`started`, null when it could not be kept: then it is over at once,
+ * so that a computer that forgets the start does not run for ever). `fixedEnd` is the end written into the build, if there is one:
+ * the earlier of the two counts.
+ */
+export function trialEndFromStart(days: number, started: number | null, fixedEnd: number | null): number {
+  const end = started === null || days <= 0 ? 0 : started + days * 24 * 60 * 60 * 1000
+  return fixedEnd === null ? end : Math.min(end, fixedEnd)
+}

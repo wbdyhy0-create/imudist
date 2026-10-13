@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { isTauri } from '../fileio'
-import { trialExpiry, trialStatus, type TrialStatus } from '../trial'
+import { trialDays, trialEndFromStart, trialExpiry, trialStatus, type TrialStatus } from '../trial'
 import { localeTag, t } from '../i18n'
 
 const CONSENT_KEY = 'imudist.trial-consent'
 const SEEN_KEY = 'imudist.trial-seen'
+const START_KEY = 'imudist.trial-start'
 const RECHECK_MS = 5 * 60 * 1000
 
 const readNumber = (key: string): number | null => {
@@ -119,7 +120,18 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
 
 /** Wraps the app: an ordinary build shows it as it is; a build for testing asks for the agreement first and stops on its end date. */
 export function TrialGate({ children }: { children: ReactNode }) {
-  const expiresAt = useMemo(() => trialExpiry(import.meta.env.VITE_TRIAL_EXPIRES), [])
+  const expiresAt = useMemo(() => {
+    const fixedEnd = trialExpiry(import.meta.env.VITE_TRIAL_EXPIRES)
+    const days = trialDays(import.meta.env.VITE_TRIAL_DAYS)
+    if (days === null) return fixedEnd
+    // a test counted from its first start: the start is kept on this computer, and what cannot be kept ends the test
+    let started = readNumber(START_KEY)
+    if (started === null) {
+      write(START_KEY, String(Date.now()))
+      started = readNumber(START_KEY)
+    }
+    return trialEndFromStart(days, started, fixedEnd)
+  }, [])
   if (expiresAt === null) return <>{children}</>
   return <TrialShell expiresAt={expiresAt}>{children}</TrialShell>
 }

@@ -11,10 +11,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
+          - { runner: macos-latest, target: aarch64-apple-darwin, variant: full, trial_days: '' }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: full, trial_days: '' }
+          - { runner: macos-latest, target: aarch64-apple-darwin, variant: trial, trial_days: '180' }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: trial, trial_days: '180' }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -36,10 +36,19 @@ jobs:
 
       - run: npm ci
 
+      # the trial variant stops working 180 days after its first start (VITE_TRIAL_DAYS, see src/trial.ts)
       - run: npx tauri build --target ${{ matrix.target }} --bundles app,dmg
+        env:
+          VITE_TRIAL_DAYS: ${{ matrix.trial_days }}
+
+      - name: Mark the trial installer in its name
+        if: matrix.variant == 'trial'
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+          for f in *.dmg; do mv "$f" "${f%.dmg}-trial.dmg"; done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: imudist-mac-${{ matrix.target }}
+          name: imudist-mac-${{ matrix.variant }}-${{ matrix.target }}
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error

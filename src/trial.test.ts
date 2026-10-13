@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { trialExpiry, trialStatus } from './trial'
+import { trialDays, trialEndFromStart, trialExpiry, trialStatus } from './trial'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -44,5 +44,31 @@ describe('whether a build for testing is still on', () => {
 
   it('is over, whatever the clock was set to, once the end date has passed', () => {
     expect(trialStatus(end + DAY, end, end + 10 * DAY)).toBe('expired')
+  })
+})
+
+describe('a test counted in days from its first start', () => {
+  it('has no length for a build that does not ask for one, and is read as a positive number of days', () => {
+    expect(trialDays(undefined)).toBeNull()
+    expect(trialDays('')).toBeNull()
+    expect(trialDays('180')).toBe(180)
+    expect(trialDays('soon')).toBe(0)
+    expect(trialDays('-5')).toBe(0)
+  })
+
+  it('ends the given days after the start', () => {
+    const start = Date.UTC(2026, 0, 1)
+    expect(trialEndFromStart(180, start, null)).toBe(start + 180 * DAY)
+  })
+
+  it('ends at once when the start could not be kept or the length is no good', () => {
+    expect(trialEndFromStart(180, null, null)).toBe(0)
+    expect(trialEndFromStart(0, Date.now(), null)).toBe(0)
+  })
+
+  it('ends at the earlier of the days and the end written into the build', () => {
+    const start = Date.UTC(2026, 0, 1)
+    expect(trialEndFromStart(180, start, start + 10 * DAY)).toBe(start + 10 * DAY)
+    expect(trialEndFromStart(180, start, start + 400 * DAY)).toBe(start + 180 * DAY)
   })
 })
