@@ -41,6 +41,9 @@ jobs:
         env:
           VITE_TRIAL_DAYS: ${{ matrix.trial_days }}
 
+      - name: Check the app signature
+        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/${{ matrix.target }}/release/bundle/macos/Imudist.app
+
       - name: Mark the trial installer in its name
         if: matrix.variant == 'trial'
         run: |

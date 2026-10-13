@@ -25,3 +25,7 @@ dist-ssr
 
 # a separate cargo build folder used to verify the exported app
 src-tauri/target-export-verify
+
+# installers downloaded from the build
+*.zip
+*.dmg
