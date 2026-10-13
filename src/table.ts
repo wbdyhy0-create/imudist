@@ -17,8 +17,19 @@ export interface TableStroke {
   width: number
 }
 
+/** how the result of a formula is written: digits after the point (missing = as many as there are), thousands separators, and text around it */
+export interface FormulaFormat {
+  decimals?: number
+  thousands?: boolean
+  prefix?: string
+  suffix?: string
+}
+
 export interface TableCell {
   text: string
+  /** a formula ("=SUM(A1:A3)"): `text` holds its result, written again whenever the table changes; typing in the cell takes the formula away */
+  formula?: string
+  formulaFormat?: FormulaFormat
   /** this cell is the origin of a merge covering this many columns / rows (missing = 1); the cells it covers are blank */
   colSpan?: number
   rowSpan?: number
@@ -89,6 +100,8 @@ export interface TableData {
   style: TableStyle
   /** false = left to right; missing = right to left */
   rtl?: boolean
+  /** a calculation table: its cells can hold formulas (a checkbox of the table options); only such a table has them */
+  calculation?: boolean
 }
 
 export const MAX_TABLE_ROWS = 500
@@ -375,7 +388,12 @@ export function unmergeAt(t: TableData, r: number, c: number): TableData | null 
 export function setCellText(t: TableData, r: number, c: number, text: string): TableData {
   const [or, oc] = ownerGrid(t)[r]?.[c] ?? [r, c]
   if (!t.cells[or] || t.cells[or][oc].text === text) return t
-  return { ...t, cells: t.cells.map((row, i) => (i === or ? row.map((cell, j) => (j === oc ? { ...cell, text } : cell)) : row)) }
+  // what is typed over the result of a formula is plain text from then on
+  const typed = (cell: TableCell): TableCell => {
+    const { formula: _formula, formulaFormat: _format, ...rest } = cell
+    return { ...rest, text }
+  }
+  return { ...t, cells: t.cells.map((row, i) => (i === or ? row.map((cell, j) => (j === oc ? typed(cell) : cell)) : row)) }
 }
 
 /** a setting on every real cell of the range (grown to whole merged cells); a value of undefined takes the setting away */
@@ -724,6 +742,10 @@ function readColorOrNull(v: unknown, fallback: string | null): string | null {
   return v === null ? null : isColor(v) ? v : fallback
 }
 
+export function sanitizeTableStyle(v: unknown): TableStyle {
+  return readStyle(v)
+}
+
 function readStyle(v: unknown): TableStyle {
   const d = defaultTableStyle()
   if (!v || typeof v !== 'object') return d
@@ -787,6 +809,18 @@ function readCell(v: unknown): TableCell {
   if (typeof c.weight === 'number') cell.weight = num(c.weight, 100, 900, 400)
   if (typeof c.italic === 'boolean') cell.italic = c.italic
   if (isColor(c.color)) cell.color = c.color
+  if (typeof c.formula === 'string' && c.formula.startsWith('=') && c.formula.length <= 500) {
+    cell.formula = c.formula
+    if (c.formulaFormat && typeof c.formulaFormat === 'object') {
+      const f = c.formulaFormat as Record<string, unknown>
+      const format: FormulaFormat = {}
+      if (typeof f.decimals === 'number' && Number.isFinite(f.decimals)) format.decimals = Math.min(10, Math.max(0, Math.round(f.decimals)))
+      if (f.thousands === true) format.thousands = true
+      if (typeof f.prefix === 'string' && f.prefix) format.prefix = f.prefix.slice(0, 20)
+      if (typeof f.suffix === 'string' && f.suffix) format.suffix = f.suffix.slice(0, 20)
+      if (Object.keys(format).length) cell.formulaFormat = format
+    }
+  }
   return cell
 }
 
@@ -810,6 +844,8 @@ export function sanitizeTable(raw: unknown): TableData | null {
     style: readStyle(t.style),
   }
   if (t.rtl === false) data.rtl = false
+  // a table that has formulas is a calculation table, whatever the file says (files from before the checkbox)
+  if (t.calculation === true || cells.some((row) => row.some((cell) => cell.formula !== undefined))) data.calculation = true
   // spans that run past the grid or over each other are cut back to what the grid can hold
   return rebuild(data, rows, cols, originsOf(data), {})
 }

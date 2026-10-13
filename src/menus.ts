@@ -256,6 +256,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           ],
         },
         doc('תוכן עניינים…', '', (ws) => ws.insertTableOfContents()),
+        doc('רצף סגנונות פסקה…', '', (ws) => ws.openParagraphSequences()),
         sep,
         doc('יתומים, אלמנות וכיווץ…', '', (ws) => ws.openSmartLayout()),
         { label: 'ייבוא סגנונות פסקה ותו…', disabled: !c.hasDoc, onClick: c.importParagraphStyles },
@@ -264,6 +265,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'אובייקט',
       items: [
+        doc('ספריית עיצובים…', '', (ws) => ws.openDesignLibrary()),
+        sep,
         {
           label: 'כלי אובייקט',
           submenu: [
@@ -351,6 +354,10 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         doc('מיזוג תאים', '', (ws) => ws.tableCommand('merge')),
         doc('ביטול מיזוג תאים', '', (ws) => ws.tableCommand('unmerge')),
+        sep,
+        doc('מיון…', '', (ws) => ws.tableCommand('sort')),
+        doc('נוסחה בתא…', '', (ws) => ws.tableCommand('formula')),
+        doc('הסרת הנוסחה מהתא', '', (ws) => ws.tableCommand('remove-formula')),
       ],
     },
     {

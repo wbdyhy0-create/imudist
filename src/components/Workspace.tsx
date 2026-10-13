@@ -85,7 +85,9 @@ import {
   type ExtrudeSettings,
   type CharacterStyleSettings,
   type TextAlign,
+  type NestedStyleRule,
   type ParagraphBox,
+  type ParagraphSequence,
   type TextFrame,
   type TextStyle,
   PAGE_NUMBER_MARKER,
@@ -165,6 +167,7 @@ import { ParagraphStylesPanel, type ParagraphStyleRecord } from './ParagraphStyl
 import { StyleManagerPanel } from './StyleManagerPanel'
 import { ObjectStylesPanel } from './ObjectStylesPanel'
 import { decorationPatches, withDecorations } from '../decorations'
+import { withStyleLayers } from '../styleLayers'
 import { boundsOfItems, buildSvg, type SvgItem } from '../svgBuild'
 import { applyToImage, applyToShape, lookOfImage, lookOfShape, MAX_GRAPHIC_SVG, objectStyleOverrides, uniqueObjectStyleName, withoutObjectStyle } from '../objectStyles'
 import { AnchorHandles } from './AnchorHandles'
@@ -180,12 +183,20 @@ import { LayersPanel } from './LayersPanel'
 import { TocDialog } from './TocDialog'
 import { InsertTableDialog, type InsertTableOptions } from './InsertTableDialog'
 import { CharacterStylesPanel } from './CharacterStylesPanel'
-import { applyNestedStyles } from '../nestedStyles'
+import { applyNestedStyles, detectNestedRules } from '../nestedStyles'
 import { descendantsOf, ownSettings, resolveCharacterPatch, resolvedRecords, withoutCharacterStyle } from '../characterStyleTree'
 import { TableOptionsDialog } from './TableOptionsDialog'
 import { CellOptionsDialog, type CellPatch } from './CellOptionsDialog'
 import type { TableSelection } from './TableView'
-import { createTable, deleteCols, deleteRows, expandRange, insertCols, insertRows, mergeRange, originsOf, patchCells, resolveCell, scaleTable, tableCols, tableRows, unmergeAt, type TableCell, type TableData } from '../table'
+import { createTable, expandRange, mergeRange, originsOf, patchCells, resolveCell, scaleTable, tableCols, tableRows, unmergeAt, type FormulaFormat, type TableCell, type TableData } from '../table'
+import { clearCellFormula, deleteColsKeepingFormulas, deleteRowsKeepingFormulas, insertColsKeepingFormulas, insertRowsKeepingFormulas, recalcTable, setCellFormula, withoutFormulas } from '../tableFormulas'
+import { sortTable, type SortOptions } from '../tableSort'
+import { TableFormulaDialog } from './TableFormulaDialog'
+import { ParagraphSequenceDialog } from './ParagraphSequenceDialog'
+import { DesignLibraryDialog, type DesignResult } from './DesignLibraryDialog'
+import { applyDesignToTable, captureTable, captureText, objectSettingsFor, type DesignPartId, type DesignRecord } from '../designs'
+import { assignSequence } from '../paragraphSequences'
+import { TableSortDialog } from './TableSortDialog'
 import { layoutOfShape } from '../tableLayout'
 import { PageToolBar } from './PageToolBar'
 import { PropertiesPanel } from './PropertiesPanel'
@@ -321,7 +332,7 @@ const stepZoom = (z: number, dir: 1 | -1) =>
 /** the settings a character style can hold, as keys of a text's look */
 const CHAR_LOOK_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking', 'baselineShift', 'color', 'outlineColor', 'outlineWidth'] as const satisfies readonly (keyof CharacterStyleSettings)[]
 
-export type TableOp = 'select-row' | 'select-column' | 'select-table' | 'row-above' | 'row-below' | 'col-start' | 'col-end' | 'delete-row' | 'delete-col' | 'merge' | 'unmerge' | 'options' | 'cell-options'
+export type TableOp = 'select-row' | 'select-column' | 'select-table' | 'row-above' | 'row-below' | 'col-start' | 'col-end' | 'delete-row' | 'delete-col' | 'merge' | 'unmerge' | 'options' | 'cell-options' | 'sort' | 'formula' | 'remove-formula'
 
 export interface WorkspaceHandle {
   /** show a problem of the preflight check: select what it is about and bring it to the middle of the view */
@@ -382,6 +393,8 @@ export interface WorkspaceHandle {
   /** open the footnote palette at the footnote/endnote placement converter */
   openFootnoteEndnoteConverter: () => void
   insertTableOfContents: () => void
+  openParagraphSequences: () => void
+  openDesignLibrary: () => void
   firstWordStyler: () => void
   windowText: () => void
   /** table: open the dialog that adds one */
@@ -665,8 +678,9 @@ export function Workspace({
   // Safe when stale (e.g. after a resize instead of a text edit): flowFrames only reuses a frame's cached range when
   // its own full signature (size, floats, style...) still matches too, and re-verifies the reused text didn't change.
   const dirtyOffsetRef = useRef<number | undefined>(undefined)
-  // the frames as they are laid out and drawn: the decoration of the paragraph styles written into the patches of the stories (never saved)
-  const layoutFrames = useMemo(() => withDecorations(frames, paragraphStyles, objectStyles), [frames, paragraphStyles, objectStyles])
+  // the frames as they are laid out and drawn: the decoration of the paragraph styles written into the patches of the stories, and their
+  // style layers (Latin letters in Hebrew text...) written into the runs (never saved)
+  const layoutFrames = useMemo(() => withStyleLayers(withDecorations(frames, paragraphStyles, objectStyles), paragraphStyles, characterStyles), [frames, paragraphStyles, objectStyles, characterStyles])
   const layoutById = useMemo(() => new Map(layoutFrames.map((frame) => [frame.id, frame])), [layoutFrames])
   const primaryFrameIds = useMemo(() => primaryTextFrameOrder(doc, frames), [doc, frames])
   const sharedFootnoteGroups = useMemo(() => primaryTextFramePageGroups(doc, frames), [doc, frames])
@@ -1195,11 +1209,16 @@ export function Workspace({
   const [footnoteConverterFocus, setFootnoteConverterFocus] = useState<'inline' | 'placement'>('inline')
   const [footnoteConverterFocusRequest, setFootnoteConverterFocusRequest] = useState(0)
   const [tocDialogOpen, setTocDialogOpen] = useState(false)
+  const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
+  const [designDialogOpen, setDesignDialogOpen] = useState(false)
   const [firstWordDialog, setFirstWordDialog] = useState(false)
   const [windowTextDialog, setWindowTextDialog] = useState(false)
   const [insertTableOpen, setInsertTableOpen] = useState(false)
   const [tableOptionsOpen, setTableOptionsOpen] = useState(false)
+  const [tableOptionsHint, setTableOptionsHint] = useState<string | null>(null)
   const [cellOptionsOpen, setCellOptionsOpen] = useState(false)
+  const [tableSortOpen, setTableSortOpen] = useState(false)
+  const [tableFormulaOpen, setTableFormulaOpen] = useState(false)
   /** the cells picked in the selected table */
   const [tableSel, setTableSel] = useState<(TableSelection & { id: string }) | null>(null)
   const [tableMenu, setTableMenu] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -1471,7 +1490,7 @@ export function Workspace({
   const commitStory = (headId: string, text: string, runs: Run[], abs: number, key: string, paraOverrides?: { paraSpaceBefore?: (number | null)[]; paraSpaceAfter?: (number | null)[]; paraKeepFirstLines?: (number | null)[]; paraKeepLastLines?: (number | null)[]; paraKeepWithNext?: (number | null)[] } & Pick<TextFrame, 'paragraphStyleIds' | 'paragraphStyleNames' | 'paragraphStylePatches' | 'footnotes'>, dirtyOffset?: number) => {
     dirtyOffsetRef.current = dirtyOffset
     const next = frames.map((f) => (f.id === headId ? { ...f, text, runs, ...paraOverrides } : f))
-    const nf = flowFrames(withDecorations(next, paragraphStyles, objectStyles), images, doc.footnotes, undefined, new Map(), paragraphStyles, dirtyOffset)
+    const nf = flowFrames(withStyleLayers(withDecorations(next, paragraphStyles, objectStyles), paragraphStyles, characterStyles), images, doc.footnotes, undefined, new Map(), paragraphStyles, dirtyOffset)
     const chain = chainOf(next, headId)
     const target =
       chain.find((f) => abs < nf.get(f.id)!.end) ?? chain.find((f) => nf.get(f.id)!.end >= text.length) ?? chain[chain.length - 1]
@@ -3017,8 +3036,10 @@ export function Workspace({
   }
 
   /** a new version of a table: its height follows from the text, so it is set together with it */
-  const commitTable = (id: string, table: TableData, key?: string) =>
-    onShapesChange(shapes.map((sh) => (sh.id === id && sh.kind === 'table' ? { ...sh, table, h: layoutOfShape({ table, w: sh.w })?.height ?? sh.h } : sh)), key)
+  const commitTable = (id: string, table: TableData, key?: string) => {
+    const calculated = recalcTable(table) // the formulas of the table are worked out again with every change
+    onShapesChange(shapes.map((sh) => (sh.id === id && sh.kind === 'table' ? { ...sh, table: calculated, h: layoutOfShape({ table: calculated, w: sh.w })?.height ?? sh.h } : sh)), key)
+  }
 
   const tableUiFor = (sh: ShapeFrame, active: boolean) => {
     const layout = layoutOfShape(sh)
@@ -3040,7 +3061,8 @@ export function Workspace({
   const insertTableShape = (options: InsertTableOptions) => {
     const page = pageSize(doc, selectedPage)
     const width = Math.round(page.w * 0.7)
-    const table = createTable({ rows: options.rows, cols: options.cols, headerRows: options.headerRows, footerRows: options.footerRows, width, cellGapX: options.cellGapX, cellGapY: options.cellGapY, cellRadius: options.cellRadius, headerContinuous: options.headerContinuous })
+    const created = createTable({ rows: options.rows, cols: options.cols, headerRows: options.headerRows, footerRows: options.footerRows, width, cellGapX: options.cellGapX, cellGapY: options.cellGapY, cellRadius: options.cellRadius, headerContinuous: options.headerContinuous })
+    const table: TableData = options.calculation ? { ...created, calculation: true } : created
     const height = layoutOfShape({ table, w: width })?.height ?? 100
     const viewport = vpRef.current
     const box = viewport?.getBoundingClientRect()
@@ -3079,18 +3101,37 @@ export function Workspace({
       setTableSel({ id: sh.id, ...range, editing: false })
       return
     }
-    if (op === 'options') return setTableOptionsOpen(true)
+    if (op === 'options') {
+      setTableOptionsHint(null)
+      return setTableOptionsOpen(true)
+    }
+    if (op === 'sort') return setTableSortOpen(true)
+    if (op === 'formula') {
+      if (!(tableSel && tableSel.id === sh.id)) return
+      if (!t.calculation) {
+        // a formula needs a calculation table: the options are opened with the checkbox in view
+        setTableOptionsHint('נוסחאות פועלות בטבלת חישוב. סמנו „טבלת חישוב”, לחצו „החלה”, ואז בחרו שוב „נוסחה בתא”.')
+        return setTableOptionsOpen(true)
+      }
+      return setTableFormulaOpen(true)
+    }
+    if (op === 'remove-formula') {
+      const spot = tableSel && tableSel.id === sh.id ? expandRange(t, tableSel) : null
+      const cleared = spot ? clearCellFormula(t, spot.r0, spot.c0) : t
+      if (cleared !== t) commitTable(sh.id, cleared, 'table-op:remove-formula')
+      return
+    }
     if (op === 'cell-options') return tableSel && tableSel.id === sh.id ? setCellOptionsOpen(true) : undefined
     const area = tableSel && tableSel.id === sh.id ? expandRange(t, tableSel) : null
     let next: TableData | null = null
     let pick: { r: number; c: number } | null = null
-    if (op === 'row-above') { const at = area ? area.r0 : 0; next = insertRows(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
-    else if (op === 'row-below') { const at = area ? area.r1 + 1 : tableRows(t); next = insertRows(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
-    else if (op === 'col-start') { const at = area ? area.c0 : 0; next = insertCols(t, at); pick = { r: area?.r0 ?? 0, c: at } }
-    else if (op === 'col-end') { const at = area ? area.c1 + 1 : tableCols(t); next = insertCols(t, at); pick = { r: area?.r0 ?? 0, c: at } }
+    if (op === 'row-above') { const at = area ? area.r0 : 0; next = insertRowsKeepingFormulas(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
+    else if (op === 'row-below') { const at = area ? area.r1 + 1 : tableRows(t); next = insertRowsKeepingFormulas(t, at); pick = { r: at, c: area?.c0 ?? 0 } }
+    else if (op === 'col-start') { const at = area ? area.c0 : 0; next = insertColsKeepingFormulas(t, at); pick = { r: area?.r0 ?? 0, c: at } }
+    else if (op === 'col-end') { const at = area ? area.c1 + 1 : tableCols(t); next = insertColsKeepingFormulas(t, at); pick = { r: area?.r0 ?? 0, c: at } }
     else if (!area) return
-    else if (op === 'delete-row') { next = deleteRows(t, area.r0, area.r1); pick = { r: Math.min(area.r0, tableRows(t) - (area.r1 - area.r0 + 1) - 1), c: area.c0 } }
-    else if (op === 'delete-col') { next = deleteCols(t, area.c0, area.c1); pick = { r: area.r0, c: Math.min(area.c0, tableCols(t) - (area.c1 - area.c0 + 1) - 1) } }
+    else if (op === 'delete-row') { next = deleteRowsKeepingFormulas(t, area.r0, area.r1); pick = { r: Math.min(area.r0, tableRows(t) - (area.r1 - area.r0 + 1) - 1), c: area.c0 } }
+    else if (op === 'delete-col') { next = deleteColsKeepingFormulas(t, area.c0, area.c1); pick = { r: area.r0, c: Math.min(area.c0, tableCols(t) - (area.c1 - area.c0 + 1) - 1) } }
     else if (op === 'merge') { next = mergeRange(t, area); pick = { r: area.r0, c: area.c0 } }
     else if (op === 'unmerge') { next = unmergeAt(t, area.r0, area.c0); pick = { r: area.r0, c: area.c0 } }
     if (!next || next === t) return
@@ -3099,6 +3140,30 @@ export function Workspace({
       const origin = originsOf(next).find((o) => o.r0 <= pick.r && o.r1 >= pick.r && o.c0 <= pick.c && o.c1 >= pick.c)
       if (origin) setTableSel({ id: sh.id, r0: origin.r0, c0: origin.c0, r1: origin.r1, c1: origin.c1, editing: false })
     }
+  }
+
+  /** the table sorted as the dialog asked; returns what went wrong, or null when it was sorted */
+  const applyTableSort = (options: SortOptions): string | null => {
+    const sh = selectedTable()
+    if (!sh) return 'לא נבחרה טבלה'
+    const outcome = sortTable(sh.table, options)
+    if (!outcome.ok) return outcome.reason === 'merged' ? 'אי אפשר למיין טבלה שיש בה תאים ממוזגים באזור שנבחר. בטלו את המיזוג או בחרו אזור אחר.' : 'אין מה למיין: צריך לפחות שתי שורות בגוף הטבלה, ועמודה אחת שנבחרה.'
+    if (outcome.table !== sh.table) commitTable(sh.id, outcome.table, 'table-sort')
+    setTableSortOpen(false)
+    return null
+  }
+
+  /** a formula put in the cell that is selected; returns what is wrong with it, or null when it went in */
+  const applyTableFormula = (source: string, format: FormulaFormat | undefined): string | null => {
+    const sh = selectedTable()
+    const area = sh && tableSel && tableSel.id === sh.id ? expandRange(sh.table, tableSel) : null
+    if (!sh || !area) return 'לא נבחר תא'
+    if (!sh.table.calculation) return 'הטבלה אינה טבלת חישוב. סמנו „טבלת חישוב” באפשרויות הטבלה.'
+    const outcome = setCellFormula(sh.table, area.r0, area.c0, source, format)
+    if (!outcome.ok) return outcome.problem
+    commitTable(sh.id, outcome.table, 'table-formula')
+    setTableFormulaOpen(false)
+    return null
   }
 
   const applyCellPatch = (patch: CellPatch) => {
@@ -4993,7 +5058,7 @@ export function Workspace({
       const { prepareExport } = await import('../pdfExport')
       const { outlineFrame, MAX_OUTLINE_LETTERS } = await import('../textOutlines')
       const { PICTURE_REASONS } = await import('../vectorText')
-      const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, objectStyles, sections })
+      const prepared = prepareExport({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, objectStyles, characterStyles, sections })
       const made: ShapeFrame[] = []
       for (const frame of frames.filter((candidate) => ids.has(candidate.id))) {
         const outcome = await outlineFrame(prepared, frame, newFrameId)
@@ -5099,6 +5164,8 @@ export function Workspace({
       setFootnoteConverterOpen(true)
     },
     insertTableOfContents: () => setTocDialogOpen(true),
+    openParagraphSequences: () => setSequenceDialogOpen(true),
+    openDesignLibrary: () => setDesignDialogOpen(true),
     firstWordStyler: () => setFirstWordDialog(true),
     windowText: () => setWindowTextDialog(true),
     insertTable: () => setInsertTableOpen(true),
@@ -10109,6 +10176,177 @@ export function Workspace({
     for (const index of indexes) next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', id)
     onFramesChange(frames.map((frame) => (frame.id === head.id ? next : frame)), `paragraph-style-selection:${head.id}`)
   }
+  /** the story the paragraph sequences work on: the selected frame's, with the paragraphs selected in it (or all of them) */
+  const sequenceTarget = () => {
+    const selected = selectedId ? frames.find((frame) => frame.id === selectedId) : undefined
+    const head = selected ? chainOf(frames, selected.id)[0] : undefined
+    if (!head || !head.text) return null
+    const hasSelection = !!textSel && textSel.headId === head.id && textSel.a !== textSel.b
+    const range = hasSelection ? { a: Math.min(textSel!.a, textSel!.b), b: Math.max(textSel!.a, textSel!.b) } : { a: 0, b: head.text.length }
+    return { head, hasSelection, indexes: paragraphsInRange(head.text, range.a, range.b), all: paragraphsInRange(head.text, 0, head.text.length) }
+  }
+
+  // ── ספריית עיצובים: the look of what is selected, kept and given again ──
+  /** what the selection holds, by kind: the story of a selected text frame, shapes, pictures and tables */
+  const designSelection = () => {
+    const ids = new Set(selectedObjectIds())
+    const firstText = frames.find((frame) => ids.has(frame.id))
+    const head = firstText ? chainOf(frames, firstText.id)[0] : undefined
+    const chosenShapes = shapes.filter((shape) => ids.has(shape.id))
+    return {
+      head: head && head.text ? head : undefined,
+      shapes: chosenShapes,
+      plain: chosenShapes.filter((shape) => shape.kind !== 'table'),
+      tables: chosenShapes.filter((shape): shape is ShapeFrame & { table: TableData } => shape.kind === 'table' && !!shape.table),
+      images: images.filter((image) => ids.has(image.id)),
+    }
+  }
+
+  const saveDesigns = (list: DesignRecord[]) => {
+    if (editingParentId || previewMode) return
+    pageOps.commit({ doc: { ...doc, designs: list.length ? list : undefined } })
+  }
+
+  /** the parts of a design the selection can give: its look as an object, its text and its table */
+  const designFromSelection = (): Pick<DesignRecord, 'object' | 'text' | 'table'> => {
+    const sel = designSelection()
+    const first = sel.plain[0] ?? sel.images[0] ?? sel.tables[0]
+    const object = first ? ('kind' in first ? lookOfShape(first) : lookOfImage(first)) : undefined
+    const text = sel.head ? captureText(sel.head, paragraphStyles) : undefined
+    const table = sel.tables[0] ? captureTable(sel.tables[0].table) : undefined
+    return { ...(object && Object.keys(object).length ? { object } : {}), ...(text ? { text } : {}), ...(table ? { table } : {}) }
+  }
+
+  const createDesign = (name: string): DesignResult => {
+    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר ליצור עיצוב כאן.' }
+    const parts = designFromSelection()
+    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: 'בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.' }
+    const existing = new Set((doc.designs ?? []).map((design) => design.name))
+    let unique = name
+    for (let n = 2; existing.has(unique); n++) unique = `${name} ${n}`
+    saveDesigns([...(doc.designs ?? []), { id: newFrameId(), name: unique, ...parts }])
+    return { ok: true, message: `העיצוב „${unique}” נוצר.` }
+  }
+
+  const updateDesign = (id: string): DesignResult => {
+    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר לעדכן עיצוב כאן.' }
+    const parts = designFromSelection()
+    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: 'בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.' }
+    saveDesigns((doc.designs ?? []).map((design) => (design.id === id ? { ...design, ...parts } : design)))
+    return { ok: true, message: 'העיצוב עודכן מהבחירה.' }
+  }
+
+  /** the chosen parts of a design given to what is selected: each part to what it fits */
+  const applyDesign = (id: string, partIds: DesignPartId[]): DesignResult => {
+    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר להחיל עיצוב כאן.' }
+    const design = (doc.designs ?? []).find((item) => item.id === id)
+    if (!design) return { ok: false, message: 'העיצוב לא נמצא.' }
+    const chosen = new Set(partIds)
+    const sel = designSelection()
+    let nextShapes = shapes
+    let nextImages = images
+    let nextFrames = frames
+    const gone: string[] = []
+    // the look of an object: shapes and lines, tables (what a table takes of it) and pictures
+    const settings = objectSettingsFor(design, chosen)
+    if (Object.keys(settings).length > 0) {
+      const shapeIds = new Set(sel.shapes.map((shape) => shape.id))
+      const imageIds = new Set(sel.images.map((image) => image.id))
+      if (shapeIds.size + imageIds.size > 0) {
+        nextShapes = nextShapes.map((shape) => (shapeIds.has(shape.id) ? applyToShape(shape, settings) : shape))
+        nextImages = nextImages.map((image) => (imageIds.has(image.id) ? applyToImage(image, settings) : image))
+      } else gone.push('אובייקט')
+    }
+    // the look of a table
+    if (design.table && [...chosen].some((part) => part.startsWith('table:'))) {
+      const tableIds = new Set(sel.tables.map((shape) => shape.id))
+      if (tableIds.size > 0) {
+        nextShapes = nextShapes.map((shape) => {
+          if (!tableIds.has(shape.id) || shape.kind !== 'table' || !shape.table) return shape
+          const table = recalcTable(applyDesignToTable(shape.table, design, chosen))
+          return { ...shape, table, h: layoutOfShape({ table, w: shape.w })?.height ?? shape.h }
+        })
+      } else gone.push('טבלה')
+    }
+    // the styles of a text: the paragraph styles by place, then the nested styles of their openings
+    if (design.text && (chosen.has('text:sequence') || chosen.has('text:nested'))) {
+      const head = sel.head
+      if (head) {
+        let next: TextFrame = head
+        const known = new Set(paragraphStyles.map((style) => style.id))
+        if (chosen.has('text:sequence') && design.text.sequence) {
+          const given = assignSequence(head.text.split('\n'), { ...design.text.sequence, skipEmpty: true })
+          given.forEach((styleId, index) => {
+            if (styleId && known.has(styleId)) next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', styleId)
+          })
+        }
+        if (chosen.has('text:nested') && design.text.nested?.length) {
+          const rulesOf = new Map(design.text.nested.map((item) => [item.styleId, item.rules]))
+          let runs = normalizeRuns(next.text, next.runs, next)
+          let offset = 0
+          const current = next
+          current.text.split('\n').forEach((paragraph, index) => {
+            const start = offset
+            offset += paragraph.length + 1
+            const rules = rulesOf.get(paragraphStyleIdOf(current, index) ?? '')
+            if (rules) runs = applyNestedStyles(current.text, runs, start, start + paragraph.length, rules, resolvedChars, (at) => paragraphLookAt(current, at))
+          })
+          next = { ...next, runs }
+        }
+        nextFrames = frames.map((frame) => (frame.id === head.id ? next : frame))
+      } else gone.push('טקסט')
+    }
+    if (nextFrames === frames && nextShapes === shapes && nextImages === images) {
+      return { ok: false, message: gone.length ? `בבחירה אין ${gone.join(' או ')} שהחלקים שנבחרו מתאימים להם.` : 'לא נבחרו חלקים להחלה.' }
+    }
+    commitMultiObjectChange({ ...(nextFrames !== frames ? { frames: nextFrames } : {}), ...(nextShapes !== shapes ? { shapes: nextShapes } : {}), ...(nextImages !== images ? { images: nextImages } : {}) }, `design:${id}`)
+    return { ok: true, message: gone.length ? `העיצוב הוחל. לא היה בבחירה: ${gone.join(', ')}.` : 'העיצוב הוחל על הבחירה.' }
+  }
+
+  /** the nested style rules the selected paragraphs (or the whole story) show in the way their openings are styled */
+  const detectNestedFromSelection = (): { rules: NestedStyleRule[]; paragraphs: number } | null => {
+    const target = sequenceTarget()
+    if (!target) return null
+    const text = target.head.text
+    const runs = normalizeRuns(text, target.head.runs, target.head)
+    const examples = (target.hasSelection ? target.indexes : target.all)
+      .map((index) => paragraphBounds(text, index))
+      .map(([a, b]) => ({ text: text.slice(a, b), runs: sliceRuns(runs, a, b) }))
+      .filter((paragraph) => paragraph.text.trim() !== '')
+    return { rules: detectNestedRules(examples), paragraphs: examples.length }
+  }
+
+  /** a paragraph sequence given to the paragraphs selected (or to the whole story); returns what went wrong, or null */
+  const applyParagraphSequence = (sequences: ParagraphSequence[], sequenceId: string, scope: 'selection' | 'story'): string | null => {
+    if (editingParentId || previewMode) return 'אי אפשר להחיל רצף כאן.'
+    const target = sequenceTarget()
+    const sequence = sequences.find((item) => item.id === sequenceId)
+    if (!target || !sequence) return 'בחרו תיבת טקסט עם טקסט.'
+    const indexes = scope === 'selection' && target.hasSelection ? target.indexes : target.all
+    const paragraphs = target.head.text.split('\n')
+    const given = assignSequence(indexes.map((index) => paragraphs[index] ?? ''), sequence)
+    const known = new Set(paragraphStyles.map((style) => style.id))
+    let next: TextFrame = target.head
+    let changed = 0
+    indexes.forEach((index, place) => {
+      const styleId = given[place]
+      if (!styleId || !known.has(styleId)) return
+      next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', styleId)
+      changed++
+    })
+    if (changed === 0) return 'הרצף ריק או שהסגנונות שבו נמחקו: אין מה להחיל.'
+    pageOps.commit({ doc: { ...doc, sequences: sequences.length ? sequences : undefined }, frames: frames.map((frame) => (frame.id === target.head.id ? next : frame)) })
+    setSequenceDialogOpen(false)
+    return null
+  }
+
+  const saveParagraphSequences = (sequences: ParagraphSequence[]): string | null => {
+    if (editingParentId || previewMode) return 'אי אפשר לשמור רצפים כאן.'
+    pageOps.commit({ doc: { ...doc, sequences: sequences.length ? sequences : undefined } })
+    setSequenceDialogOpen(false)
+    return null
+  }
+
   const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
     const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
     onParagraphStylesChange(nextStyles)
@@ -11406,7 +11644,7 @@ export function Workspace({
                   <ShapeFrameView shape={sh} zoom={zoom} tx={tx} ty={ty} z={parentShadowZ} selected={false} locked showEdge={false} onPointerDown={(event) => overrideParentItem('shape', sh, event)} tableUi={sh.kind === 'table' ? tableUiFor(sh, false) : undefined} />
                 </div>
               ))}
-              {parentShadows.frames.map((f) => {
+              {withStyleLayers(parentShadows.frames, paragraphStyles, characterStyles).map((f) => {
                 const style = styleOf(f)
                 const runs = normalizeRuns(f.text, f.runs, f)
                 return (
@@ -12171,7 +12409,7 @@ export function Workspace({
             {
               id: 'paragraph-styles',
               label: 'סגנונות פסקה',
-              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} objectStyles={objectStyles} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
+              content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} objectStyles={objectStyles} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} onDetectNested={detectNestedFromSelection} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
             },
             {
               id: 'character-styles',
@@ -12282,6 +12520,43 @@ export function Workspace({
           onClose={() => setFootnoteConverterOpen(false)}
         />
       )}
+      {designDialogOpen && (() => {
+        const held = designSelection()
+        return (
+          <DesignLibraryDialog
+            designs={doc.designs ?? []}
+            nameOf={(id) => paragraphStyles.find((style) => style.id === id)?.name ?? '(סגנון שנמחק)'}
+            selection={{ object: held.plain.length + held.images.length + held.tables.length > 0, text: !!held.head, table: held.tables.length > 0 }}
+            onCreate={createDesign}
+            onUpdate={updateDesign}
+            onRename={(id, name) => saveDesigns((doc.designs ?? []).map((design) => (design.id === id ? { ...design, name } : design)))}
+            onDelete={(id) => saveDesigns((doc.designs ?? []).filter((design) => design.id !== id))}
+            onApply={applyDesign}
+            onClose={() => setDesignDialogOpen(false)}
+          />
+        )
+      })()}
+      {sequenceDialogOpen && (() => {
+        const target = sequenceTarget()
+        const known = new Set(paragraphStyles.map((style) => style.id))
+        const paragraphs = target ? target.head.text.split('\n') : []
+        const example = (target && target.hasSelection ? target.indexes : target?.all ?? [])
+          .filter((index) => (paragraphs[index] ?? '').trim() !== '')
+          .map((index) => (target ? paragraphStyleIdOf(target.head, index) ?? '' : ''))
+          .filter((id) => known.has(id))
+        return (
+          <ParagraphSequenceDialog
+            sequences={doc.sequences ?? []}
+            styles={paragraphStyles}
+            exampleIds={example}
+            storyParagraphs={target ? target.all.length : 0}
+            hasSelection={!!target?.hasSelection}
+            onSave={saveParagraphSequences}
+            onApply={applyParagraphSequence}
+            onClose={() => setSequenceDialogOpen(false)}
+          />
+        )
+      })()}
       {tocDialogOpen && (
         <TocDialog styles={paragraphStyles} initial={doc.toc} onConfirm={createTableOfContents} onClose={() => setTocDialogOpen(false)} />
       )}
@@ -12291,7 +12566,32 @@ export function Workspace({
       {insertTableOpen && <InsertTableDialog onConfirm={insertTableShape} onClose={() => setInsertTableOpen(false)} />}
       {tableOptionsOpen && (() => {
         const sh = selectedTable()
-        return sh ? <TableOptionsDialog table={sh.table} onApply={(table) => { commitTable(sh.id, table, 'table-options'); setTableOptionsOpen(false) }} onClose={() => setTableOptionsOpen(false)} /> : null
+        return sh ? <TableOptionsDialog table={sh.table} hint={tableOptionsHint ?? undefined} onApply={(table) => { commitTable(sh.id, table, 'table-options'); setTableOptionsOpen(false); setTableOptionsHint(null) }} onClose={() => { setTableOptionsOpen(false); setTableOptionsHint(null) }} /> : null
+      })()}
+      {tableSortOpen && (() => {
+        const sh = selectedTable()
+        const area = sh && tableSel && tableSel.id === sh.id ? expandRange(sh.table, tableSel) : null
+        return sh ? <TableSortDialog table={sh.table} selection={area} onApply={applyTableSort} onClose={() => setTableSortOpen(false)} /> : null
+      })()}
+      {tableFormulaOpen && (() => {
+        const sh = selectedTable()
+        const area = sh && tableSel && tableSel.id === sh.id ? expandRange(sh.table, tableSel) : null
+        const cell = sh && area ? sh.table.cells[area.r0][area.c0] : null
+        return sh && area && cell ? (
+          <TableFormulaDialog
+            table={sh.table}
+            row={area.r0}
+            col={area.c0}
+            formula={cell.formula}
+            format={cell.formulaFormat}
+            onApply={applyTableFormula}
+            onRemove={() => {
+              commitTable(sh.id, clearCellFormula(sh.table, area.r0, area.c0), 'table-op:remove-formula')
+              setTableFormulaOpen(false)
+            }}
+            onClose={() => setTableFormulaOpen(false)}
+          />
+        ) : null
       })()}
       {cellOptionsOpen && (() => {
         const sh = selectedTable()
@@ -12443,6 +12743,11 @@ export function Workspace({
             { separator: true },
             { label: 'מיזוג תאים', disabled: !area || (area.r0 === area.r1 && area.c0 === area.c1), onClick: () => { close(); runTableOp('merge') } },
             { label: 'ביטול מיזוג תאים', disabled: !canUnmerge, onClick: () => { close(); runTableOp('unmerge') } },
+            { separator: true },
+            { label: 'מיון…', onClick: () => { close(); runTableOp('sort') } },
+            { label: 'נוסחה בתא…', disabled: !area, onClick: () => { close(); runTableOp('formula') } },
+            { label: 'טבלת חישוב', checked: !!sh.table.calculation, onClick: () => { close(); commitTable(sh.id, sh.table.calculation ? (({ calculation: _off, ...rest }) => withoutFormulas(rest))(sh.table) : { ...sh.table, calculation: true }, 'table-calculation') } },
+            { label: 'הסרת הנוסחה מהתא', disabled: !area || sh.table.cells[area.r0]?.[area.c0]?.formula === undefined, onClick: () => { close(); runTableOp('remove-formula') } },
           ]}
         />
       })()}

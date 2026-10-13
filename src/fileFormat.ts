@@ -33,6 +33,9 @@ import {
   type CharacterStyleRecord,
   type CharacterStyleSettings,
   type NestedStyleRule,
+  type ParagraphSequence,
+  type StyleLayerRule,
+  type StyleLayerWhen,
   type CharStyle,
   type DocSettings,
   type ExtrudeSettings,
@@ -76,7 +79,8 @@ import { normalizeDeg } from './frames'
 import { isSharpness, MAX_BLUR } from './sharpness'
 import type { DocContent, ParentOverride } from './pages'
 import { repairBasedOn } from './characterStyleTree'
-import { sanitizeTable } from './table'
+import { sanitizeTable, sanitizeTableStyle } from './table'
+import type { DesignRecord } from './designs'
 import { normalizeRuns } from './story'
 import type { Unit } from './units'
 
@@ -193,6 +197,62 @@ function parsePageSizes(v: unknown): (PageSize | null)[] {
   ).map((z) => (z && z.w > 0 && z.h > 0 ? z : null))
 }
 
+/** the paragraph sequences of a document: at most 30, each with at most 40 styles in a part (a style that is gone is skipped when it is applied) */
+function parseSequences(value: unknown): { sequences?: ParagraphSequence[] } {
+  if (!Array.isArray(value)) return {}
+  const used = new Set<string>()
+  const list: ParagraphSequence[] = []
+  for (const raw of value) {
+    if (!isObj(raw) || list.length >= 30) continue
+    let id = str(raw.id, '').slice(0, 60)
+    if (!id || used.has(id)) id = `sequence-${list.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    const steps = (part: unknown) => (Array.isArray(part) ? part.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 40).map((item) => item.slice(0, 100)) : [])
+    list.push({ id, name: str(raw.name, `רצף ${list.length + 1}`).slice(0, 80), start: steps(raw.start), middle: steps(raw.middle), end: steps(raw.end), ...(raw.skipEmpty === false ? { skipEmpty: false } : {}) })
+  }
+  return list.length ? { sequences: list } : {}
+}
+
+/** the library of designs: at most 40, each part cleaned like the thing it is a copy of (an object style's settings, a table's style) */
+function parseDesigns(value: unknown): { designs?: DesignRecord[] } {
+  if (!Array.isArray(value)) return {}
+  const used = new Set<string>()
+  const list: DesignRecord[] = []
+  for (const raw of value) {
+    if (!isObj(raw) || list.length >= 40) continue
+    let id = str(raw.id, '').slice(0, 60)
+    if (!id || used.has(id)) id = `design-${list.length}-${Math.random().toString(36).slice(2, 8)}`
+    used.add(id)
+    const design: DesignRecord = { id, name: str(raw.name, `עיצוב ${list.length + 1}`).slice(0, 80) }
+    if (isObj(raw.object)) {
+      const settings = parseObjectStyleSettings(raw.object)
+      if (Object.keys(settings).length) design.object = settings
+    }
+    if (isObj(raw.text)) {
+      const steps = (part: unknown) => (Array.isArray(part) ? part.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 40).map((item) => item.slice(0, 100)) : [])
+      const text: NonNullable<DesignRecord['text']> = {}
+      if (isObj(raw.text.sequence)) {
+        const sequence = { start: steps(raw.text.sequence.start), middle: steps(raw.text.sequence.middle), end: steps(raw.text.sequence.end) }
+        if (sequence.start.length + sequence.middle.length + sequence.end.length > 0) text.sequence = sequence
+      }
+      if (Array.isArray(raw.text.nested)) {
+        const nested = raw.text.nested.flatMap((item) => {
+          if (!isObj(item) || typeof item.styleId !== 'string' || !item.styleId) return []
+          const rules = parseNestedRules(item.rules).nested
+          return rules?.length ? [{ styleId: item.styleId.slice(0, 100), rules }] : []
+        }).slice(0, 20)
+        if (nested.length) text.nested = nested
+      }
+      if (text.sequence || text.nested) design.text = text
+    }
+    if (isObj(raw.table) && isObj(raw.table.style)) {
+      design.table = { style: sanitizeTableStyle(raw.table.style), headerRows: int(raw.table.headerRows, 0, 0, 50), footerRows: int(raw.table.footerRows, 0, 0, 50) }
+    }
+    if (design.object || design.text || design.table) list.push(design)
+  }
+  return list.length ? { designs: list } : {}
+}
+
 function parseTocConfig(value: unknown): TocConfig | undefined {
   if (!isObj(value) || !Array.isArray(value.levels)) return undefined
   const levels = value.levels.flatMap((raw) => isObj(raw) && typeof raw.sourceStyleId === 'string' && raw.sourceStyleId
@@ -251,6 +311,8 @@ function parseSettings(v: unknown, name: string): DocSettings {
     slug: sidesOf(v.slug, d.slug),
     footnotes: parseFootnoteConfig(v.footnotes),
     toc: parseTocConfig(v.toc),
+    ...parseSequences(v.sequences),
+    ...parseDesigns(v.designs),
     parentItemsAbovePageContent: bool(v.parentItemsAbovePageContent, d.parentItemsAbovePageContent ?? false),
   }
   const clean = normalizeSizes(settings)
@@ -505,6 +567,29 @@ function parseNestedRules(v: unknown): { nested?: NestedStyleRule[] } {
   return rules.length ? { nested: rules } : {}
 }
 
+const STYLE_LAYER_WHEN: readonly StyleLayerWhen[] = ['latin', 'hebrew', 'arabic', 'cyrillic', 'greek', 'digits', 'all', 'custom']
+
+/** a paragraph style's style layers: at most 20, each pointing at character styles by id (a style that is gone is skipped when they are drawn) */
+function parseStyleLayers(v: unknown): { layers?: StyleLayerRule[] } {
+  if (!Array.isArray(v)) return {}
+  const rules: StyleLayerRule[] = []
+  for (const raw of v) {
+    if (!isObj(raw) || rules.length >= 20) continue
+    const styleId = str(raw.styleId, '').slice(0, 100)
+    if (!styleId || typeof raw.when !== 'string' || !STYLE_LAYER_WHEN.includes(raw.when as StyleLayerWhen)) continue
+    const when = raw.when as StyleLayerWhen
+    const pattern = typeof raw.pattern === 'string' ? raw.pattern.slice(0, 300) : ''
+    if (when === 'custom' && !pattern.trim()) continue
+    rules.push({
+      styleId,
+      when,
+      ...(when === 'custom' ? { pattern } : {}),
+      ...(typeof raw.onlyWithStyleId === 'string' && raw.onlyWithStyleId ? { onlyWithStyleId: raw.onlyWithStyleId.slice(0, 100) } : {}),
+    })
+  }
+  return rules.length ? { layers: rules } : {}
+}
+
 function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
   if (!Array.isArray(v)) return DEFAULT_PARAGRAPH_STYLES
   const used = new Set<string>()
@@ -521,6 +606,7 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
       ...(typeof raw.nextStyleId === 'string' && raw.nextStyleId ? { nextStyleId: raw.nextStyleId } : {}),
       patch: parseParagraphStylePatch(raw.patch),
       ...parseNestedRules(raw.nested),
+      ...parseStyleLayers(raw.layers),
     })
   }
   if (styles.length === 0) return DEFAULT_PARAGRAPH_STYLES

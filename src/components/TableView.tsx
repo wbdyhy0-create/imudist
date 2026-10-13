@@ -368,6 +368,7 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
           <div
             key={`${o.r0}:${o.c0}`}
             className="table-cell"
+            title={o.cell.formula}
             style={{
               left: px(rect.left),
               top: px(rect.top),

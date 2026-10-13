@@ -248,6 +248,7 @@ export default function App() {
     assets: current.assets,
     paragraphStyles: current.paragraphStyles,
     objectStyles: current.objectStyles,
+    characterStyles: current.characterStyles,
     sections: current.sections,
     parents: current.parents,
     pageParents: current.pageParents,
@@ -259,7 +260,7 @@ export default function App() {
     if ((dialog !== 'export' && dialog !== 'separations') || !doc) return null
     return exportContentOf(exportSourceOf(session))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialog, doc, session.frames, session.images, session.shapes, session.layerOrder, session.layers, session.assets, session.paragraphStyles, session.sections, session.parents, session.pageParents, session.parentOverrides])
+  }, [dialog, doc, session.frames, session.images, session.shapes, session.layerOrder, session.layers, session.assets, session.paragraphStyles, session.characterStyles, session.sections, session.parents, session.pageParents, session.parentOverrides])
 
   const exportCurrentPagePng = useCallback(async () => {
     const current = sessionRef.current

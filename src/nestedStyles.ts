@@ -92,3 +92,80 @@ export function applyNestedStyles(
   }
   return next
 }
+
+// ── finding the rules in an example ──
+
+/** the characters that end a styled opening in text: the ones a person marks "what comes before" with */
+const OPENING_DELIMITERS = [':', '	', ',', '–', '—', '-', ';', '.', '|', ')', '־', '׃', '/', '•']
+
+/** the rule that gives `styleId` to text[from, to): by the delimiter that ends it, else by its words, else by its letters; null when none reproduces it */
+function ruleForPiece(text: string, from: number, to: number, styleId: string): NestedStyleRule | null {
+  let end = to
+  while (end > from && /\s/.test(text[end - 1])) end--
+  if (end <= from) return null
+  const occurrences = (a: number, b: number, delimiter: string) => text.slice(a, b).split(delimiter).length - 1
+  const candidates: NestedStyleRule[] = []
+  const last = text[end - 1]
+  if (OPENING_DELIMITERS.includes(last)) candidates.push({ styleId, unit: 'delimiter', count: occurrences(from, end, last), delimiter: last, inclusive: true })
+  const after = /^\s*(.)/.exec(text.slice(end))
+  if (after && OPENING_DELIMITERS.includes(after[1])) {
+    const at = text.indexOf(after[1], end)
+    candidates.push({ styleId, unit: 'delimiter', count: occurrences(from, at, after[1]) + 1, delimiter: after[1], inclusive: false })
+  }
+  const words = text.slice(from, end).trim().split(/\s+/).filter(Boolean).length
+  if (words > 0) candidates.push({ styleId, unit: 'words', count: words, inclusive: false })
+  candidates.push({ styleId, unit: 'letters', count: end - from, inclusive: false })
+  for (const candidate of candidates) {
+    const found = ruleEnd(text, from, candidate)
+    if (found === null) continue
+    let reached = found
+    while (reached > from && /\s/.test(text[reached - 1])) reached--
+    if (reached === end) return candidate
+  }
+  return null
+}
+
+/** the leading pieces of a paragraph that have a character style: where each ends, up to the first piece that has none */
+function leadingStyledPieces(runs: Run[]): { styleId: string; end: number }[] {
+  const pieces: { styleId: string; end: number }[] = []
+  let at = 0
+  for (const run of runs) {
+    const styleId = run.style.charStyleId
+    if (!styleId) break
+    at += run.len
+    const last = pieces[pieces.length - 1]
+    if (last && last.styleId === styleId) last.end = at
+    else pieces.push({ styleId, end: at })
+  }
+  return pieces
+}
+
+/**
+ * The nested style rules an example paragraph shows: the character styles its opening has, one after the other, each as the delimiter
+ * that ends it ("up to the colon"), else as a number of words, else as a number of letters. With several paragraphs the rules most of
+ * them agree on are taken (a heading of one word and of three words both end at the colon). Pieces after the first that has no
+ * character style are not part of it: the rules of a paragraph style follow one another without a gap.
+ */
+export function detectNestedRules(paragraphs: { text: string; runs: Run[] }[], maxRules = 3): NestedStyleRule[] {
+  const tally = new Map<string, { rules: NestedStyleRule[]; count: number }>()
+  for (const paragraph of paragraphs) {
+    const rules: NestedStyleRule[] = []
+    let cursor = 0
+    for (const piece of leadingStyledPieces(paragraph.runs).slice(0, maxRules)) {
+      const rule = ruleForPiece(paragraph.text, cursor, piece.end, piece.styleId)
+      if (!rule) break
+      const end = ruleEnd(paragraph.text, cursor, rule)
+      if (end === null) break
+      rules.push(rule)
+      cursor = end
+    }
+    if (rules.length === 0) continue
+    const key = JSON.stringify(rules)
+    const known = tally.get(key)
+    if (known) known.count++
+    else tally.set(key, { rules, count: 1 })
+  }
+  let best: { rules: NestedStyleRule[]; count: number } | null = null
+  for (const entry of tally.values()) if (!best || entry.count > best.count) best = entry
+  return best ? best.rules : []
+}

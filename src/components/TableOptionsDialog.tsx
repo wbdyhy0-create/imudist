@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useFontCatalog } from '../fonts'
 import { setHeaderFooter, tableRows, type CellVAlign, type TableData, type TableStroke, type TableStyle } from '../table'
+import { withoutFormulas } from '../tableFormulas'
 import type { TextAlign } from '../document'
 import { FontPicker } from './FontPicker'
 
 interface Props {
   table: TableData
+  /** why the dialog was opened, when it was not by the user asking for the options (a formula was asked for in a table that cannot have one) */
+  hint?: string
   onApply: (table: TableData) => void
   onClose: () => void
 }
@@ -55,7 +58,9 @@ function FillField({ label, value, onChange }: { label: string; value: string | 
   )
 }
 
-export function TableOptionsDialog({ table, onApply, onClose }: Props) {
+export function TableOptionsDialog({ table, hint, onApply, onClose }: Props) {
+  const [calculation, setCalculation] = useState(table.calculation === true)
+  const hasFormulas = table.cells.some((row) => row.some((cell) => cell.formula !== undefined))
   const [style, setStyle] = useState<TableStyle>(table.style)
   const [headerRows, setHeaderRows] = useState(table.headerRows)
   const [footerRows, setFooterRows] = useState(table.footerRows)
@@ -70,12 +75,25 @@ export function TableOptionsDialog({ table, onApply, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const apply = () => onApply(setHeaderFooter({ ...table, style }, headerRows, footerRows))
+  const apply = () => {
+    const sized = setHeaderFooter({ ...table, style }, headerRows, footerRows)
+    if (calculation) return onApply({ ...sized, calculation: true })
+    // a table that is not a calculation table has no formulas: what they showed stays as text
+    const { calculation: _was, ...plain } = sized
+    onApply(withoutFormulas(plain))
+  }
 
   return (
     <div className="modal-backdrop">
       <div className="modal table-dialog wide" role="dialog" aria-modal="true" aria-label="אפשרויות טבלה" dir="rtl">
         <h2>אפשרויות טבלה</h2>
+
+        {hint && <p className="muted" role="status">{hint}</p>}
+        <h3 className="window-text-section">סוג הטבלה</h3>
+        <label className="dlg-check" title="בטבלת חישוב אפשר לכתוב בתאים נוסחאות (סכום, ממוצע ועוד), והתוצאות מתעדכנות מעצמן">
+          <input type="checkbox" checked={calculation} onChange={(e) => setCalculation(e.target.checked)} />טבלת חישוב (נוסחאות בתאים)
+        </label>
+        {!calculation && hasFormulas && <p className="muted">הנוסחאות שבטבלה יוסרו, והתוצאות שלהן יישארו בתאים כטקסט.</p>}
 
         <h3 className="window-text-section">שורות</h3>
         <div className="table-dialog-grid">

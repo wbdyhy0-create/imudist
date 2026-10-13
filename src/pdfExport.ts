@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type DocSettings, type Feather, type ImageFrame, type ObjectStyleRecord, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type CharacterStyleRecord, type DocSettings, type Feather, type ImageFrame, type ObjectStyleRecord, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
 import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteReferenceLook, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
@@ -11,6 +11,7 @@ import { imageGeometry, shapePath } from './shapes'
 import { buildTableDom, layoutOfShape } from './tableLayout'
 import { flowFrames, flowFramesWithFootnoteContinuation, type FrameFlow } from './textLayout'
 import { withDecorations } from './decorations'
+import { withStyleLayers } from './styleLayers'
 import { floatsFor } from './wrap'
 import { isTauri } from './fileio'
 import { hexToRgb, linearGradientLine } from './colorModels'
@@ -906,6 +907,8 @@ export interface ExportContent {
   paragraphStyles: ParagraphStyleRecord[]
   /** the object styles: what the decorations of the paragraph styles are drawn in */
   objectStyles?: ObjectStyleRecord[]
+  /** the character styles: what the style layers of the paragraph styles give */
+  characterStyles?: CharacterStyleRecord[]
   sections: PageSection[]
 }
 
@@ -937,7 +940,7 @@ export function prepareExport(content: ExportContent): PreparedExport {
     if (frames.some((frame, index) => frame !== content.frames[index])) source = { ...content, frames }
   }
   // the decoration of the paragraph styles goes into the patches of the stories: what is laid out and drawn has it (it is not saved)
-  const decoratedFrames = withDecorations(source.frames, source.paragraphStyles, content.objectStyles ?? [])
+  const decoratedFrames = withStyleLayers(withDecorations(source.frames, source.paragraphStyles, content.objectStyles ?? []), source.paragraphStyles, content.characterStyles ?? [])
   if (decoratedFrames !== source.frames) source = { ...source, frames: decoratedFrames }
   const primaryFrameIds = primaryTextFrameOrder(source.doc, source.frames)
   const sharedFootnoteGroups = primaryTextFramePageGroups(source.doc, source.frames)
@@ -989,7 +992,7 @@ export async function frameLetters(prepared: PreparedExport, frameId: string): P
 }
 
 /** What a document is made of, as `exportContentOf` takes it: its own content and its parent (master) pages. */
-export type ExportSource = Pick<DocContent, 'doc' | 'frames' | 'images' | 'shapes' | 'assets' | 'paragraphStyles' | 'sections' | 'layerOrder' | 'layers' | 'parents' | 'pageParents' | 'parentOverrides' | 'objectStyles'>
+export type ExportSource = Pick<DocContent, 'doc' | 'frames' | 'images' | 'shapes' | 'assets' | 'paragraphStyles' | 'sections' | 'layerOrder' | 'layers' | 'parents' | 'pageParents' | 'parentOverrides' | 'objectStyles' | 'characterStyles'>
 
 /**
  * A document as the export draws it: its own objects, with what every page shows of its parent (master) pages mixed in
@@ -1009,6 +1012,7 @@ export function exportContentOf(source: ExportSource): ExportContent {
     assets: source.assets,
     paragraphStyles: source.paragraphStyles,
     ...(source.objectStyles?.length ? { objectStyles: source.objectStyles } : {}),
+    ...(source.characterStyles?.length ? { characterStyles: source.characterStyles } : {}),
     sections: source.sections,
   }
   if (!source.pageParents.some(Boolean)) return own

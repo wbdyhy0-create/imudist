@@ -215,6 +215,9 @@
 .character-style-setting.off { opacity: 0.4; pointer-events: none; }
 .nested-styles-editor { display: flex; flex-direction: column; gap: 10px; }
 .nested-rule { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; }
+.sequence-dialog { width: min(640px, 94vw); max-height: 92vh; overflow-y: auto; }
+.sequence-step { display: flex; align-items: center; gap: 6px; }
+.sequence-step .select { flex: 1; min-width: 0; }
 .style-modified { margin-inline-start: 4px; color: var(--accent-line); font-weight: 700; }
 .paragraph-style-row.focused:not(.active) { box-shadow: inset 3px 0 0 var(--accent-line); }
 .character-style-head-actions { display: flex; align-items: center; gap: 4px; }

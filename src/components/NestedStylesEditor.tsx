@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { CharacterStyleRecord, NestedStyleRule } from '../document'
 import { NESTED_UNITS } from '../nestedStyles'
 
@@ -7,10 +8,22 @@ interface Props {
   onChange: (rules: NestedStyleRule[]) => void
   /** gives the rules to every paragraph that is in the style now */
   onApply: () => void
+  /** the rules the paragraphs selected in the text show (null when no text is selected) */
+  onDetect?: () => { rules: NestedStyleRule[]; paragraphs: number } | null
 }
 
 /** the nested styles of a paragraph style: character styles given automatically to the opening of its paragraphs */
-export function NestedStylesEditor({ rules, characterStyles, onChange, onApply }: Props) {
+export function NestedStylesEditor({ rules, characterStyles, onChange, onApply, onDetect }: Props) {
+  const [detected, setDetected] = useState<string | null>(null)
+  const detect = () => {
+    const found = onDetect?.()
+    if (!found) return setDetected('בחרו תיבת טקסט, או סמנו פסקאות שהפתיחה שלהן מעוצבת בסגנון תו.')
+    const known = new Set(characterStyles.map((style) => style.id))
+    const usable = found.rules.filter((rule) => known.has(rule.styleId))
+    if (usable.length === 0) return setDetected('לא נמצא סגנון תו בתחילת הפסקאות שנבדקו.')
+    onChange(usable)
+    setDetected(`זוהו ${usable.length} כללים מ-${found.paragraphs} פסקאות. אפשר לתקן אותם כאן.`)
+  }
   const change = (index: number, patch: Partial<NestedStyleRule>) => onChange(rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
   const add = () => {
     const first = characterStyles[0]
@@ -57,8 +70,10 @@ export function NestedStylesEditor({ rules, characterStyles, onChange, onApply }
       })}
       <div className="modal-buttons">
         <button className="btn" disabled={characterStyles.length === 0} onClick={add}>הוספת כלל</button>
+        {onDetect && <button className="btn" onClick={detect} title="קורא את סגנונות התו שבתחילת הפסקאות של הטקסט שנבחר ויוצר מהם כללים">זיהוי מהטקסט המסומן</button>}
         <button className="btn primary" disabled={rules.length === 0} onClick={onApply}>החל על כל הפסקאות בסגנון</button>
       </div>
+      {detected && <p className="muted" role="status">{detected}</p>}
     </div>
   )
 }

@@ -11,6 +11,8 @@ export interface InsertTableOptions {
   cellGapY: number
   cellRadius: number
   headerContinuous: boolean
+  /** a calculation table: its cells can hold formulas */
+  calculation: boolean
 }
 
 interface Props {
@@ -31,6 +33,7 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
   const [roundedCells, setRoundedCells] = useState(false)
   const [cellRadius, setCellRadius] = useState(6)
   const [headerContinuous, setHeaderContinuous] = useState(true)
+  const [calculation, setCalculation] = useState(false)
   const options = (): InsertTableOptions => {
     const r = clamp(rows, 1, MAX_TABLE_ROWS)
     const header = clamp(headerRows, 0, r)
@@ -45,6 +48,7 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
       cellGapY: layout === 'separated' ? gap(cellGapY) : 0,
       cellRadius: layout === 'separated' && roundedCells ? Math.min(100, Math.max(0, cellRadius)) : 0,
       headerContinuous: layout === 'separated' && headerRows > 0 && headerContinuous,
+      calculation,
     }
   }
 
@@ -67,6 +71,9 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
       <form className="modal table-dialog" role="dialog" aria-modal="true" aria-label="הוספת טבלה" dir="rtl" onSubmit={(e) => { e.preventDefault(); onConfirm(options()) }}>
         <h2>הוספת טבלה</h2>
         <p className="muted">הטבלה נוצרת באמצע העמוד. אפשר להוסיף ולמחוק שורות ועמודות אחר כך, מתפריט טבלה.</p>
+        <label className="dlg-check" title="בטבלת חישוב אפשר לכתוב בתאים נוסחאות (סכום, ממוצע ועוד), והתוצאות מתעדכנות מעצמן">
+          <input type="checkbox" checked={calculation} onChange={(e) => setCalculation(e.target.checked)} />טבלת חישוב (נוסחאות בתאים)
+        </label>
         <label className="field-label table-dialog-field">סידור תאים
           <select className="select" value={layout} onChange={(e) => setLayout(e.target.value as InsertTableOptions['layout'])}>
             <option value="continuous">טבלה רגילה, תאים צמודים</option>

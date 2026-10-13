@@ -102,10 +102,18 @@ export function mergeCharacterStyles(current: CharacterStyleRecord[], imported: 
   return { styles: [...current, ...remapped], idMap }
 }
 
-/** paragraph styles whose nested rules point at character styles by their old ids, pointed at the new ones */
+/** paragraph styles whose nested rules and style layers point at character styles by their old ids, pointed at the new ones */
 export function remapNestedStyles(styles: ParagraphStyleRecord[], idMap: ReadonlyMap<string, string>): ParagraphStyleRecord[] {
   if (idMap.size === 0) return styles
-  return styles.map((style) => (style.nested?.length ? { ...style, nested: style.nested.map((rule) => ({ ...rule, styleId: idMap.get(rule.styleId) ?? rule.styleId })) } : style))
+  const moved = (id: string) => idMap.get(id) ?? id
+  return styles.map((style) => {
+    if (!style.nested?.length && !style.layers?.length) return style
+    return {
+      ...style,
+      ...(style.nested?.length ? { nested: style.nested.map((rule) => ({ ...rule, styleId: moved(rule.styleId) })) } : {}),
+      ...(style.layers?.length ? { layers: style.layers.map((rule) => ({ ...rule, styleId: moved(rule.styleId), ...(rule.onlyWithStyleId ? { onlyWithStyleId: moved(rule.onlyWithStyleId) } : {}) })) } : {}),
+    }
+  })
 }
 
 /** the settings of a style that its base does not already give it the same value for: what is really its own */

@@ -1,3 +1,4 @@
+import type { DesignRecord } from './designs'
 import { PAGE_PRESETS, toPt, type Unit } from './units'
 import type { TableData } from './table'
 import { getLastUsedFontFamily } from './fontPreference'
@@ -199,8 +200,26 @@ export interface DocSettings {
   slug: Sides
   footnotes?: FootnoteLayoutConfig
   toc?: TocConfig
+  /** paragraph sequences: which paragraph style each paragraph of a story gets by its place (see `ParagraphSequence`) */
+  sequences?: ParagraphSequence[]
+  /** the library of designs by example: the look of an object, a text and a table kept under a name (see `DesignRecord`) */
+  designs?: DesignRecord[]
   /** show parent-page objects above document-page objects, matching a higher shared layer, as in professional layout tools */
   parentItemsAbovePageContent?: boolean
+}
+
+/**
+ * A paragraph sequence (רצף פסקאות): the paragraph styles of a run of paragraphs by their place in it. The first paragraphs get the
+ * styles of `start` in order, the last ones those of `end`, and the ones between them go through `middle` over and over.
+ */
+export interface ParagraphSequence {
+  id: string
+  name: string
+  start: string[]
+  middle: string[]
+  end: string[]
+  /** empty paragraphs are not counted and keep their style (missing = true) */
+  skipEmpty?: boolean
 }
 
 /** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
@@ -536,7 +555,26 @@ export interface NestedStyleRule {
   inclusive: boolean
 }
 
-/** a paragraph's own box: a fill behind it and/or a line around it (the line exists only when orderWidth is above 0; its colour defaults to black) */
+/** what a style layer looks for in a paragraph: a script (language family), numbers, every character, or a pattern of the user's own */
+export type StyleLayerWhen = 'latin' | 'hebrew' | 'arabic' | 'cyrillic' | 'greek' | 'digits' | 'all' | 'custom'
+
+/**
+ * One rule of a paragraph style's style layers (שכבות סגנון): whatever in the paragraph is of the kind `when` (Latin letters inside
+ * Hebrew text, say) is given the character style `styleId` ON TOP of what it has - the settings the style names win, the rest stays.
+ * It is worked out when the text is laid out and drawn, never written into the text, so it follows every edit and never collides
+ * with the character styles the text has itself.
+ */
+export interface StyleLayerRule {
+  /** the character style to give */
+  styleId: string
+  when: StyleLayerWhen
+  /** when 'custom': a regular expression */
+  pattern?: string
+  /** only the part that already has this character style is given the new one ("what is bold also gets...") */
+  onlyWithStyleId?: string
+}
+
+/** a paragraph's own box: a fill behind it and/or a line around it (the line exists only when borderWidth is above 0; its colour defaults to black) */
 export interface ParagraphBox {
   background?: string
   borderColor?: string
@@ -575,6 +613,8 @@ export interface ParagraphStyleRecord {
   name: string
   /** nested styles: character styles given automatically to the opening of every paragraph in this style */
   nested?: NestedStyleRule[]
+  /** style layers: character styles given, on top, to what is of a kind in the paragraph (a style based on this one has them too, unless it has its own) */
+  layers?: StyleLayerRule[]
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string

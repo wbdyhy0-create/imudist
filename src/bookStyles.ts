@@ -63,6 +63,11 @@ const paragraphTarget = (master: ParagraphStyleRecord[], ids: Map<string, string
     basedOnId: style.basedOnId ? ids.get(style.basedOnId) : undefined,
     nextStyleId: style.nextStyleId ? ids.get(style.nextStyleId) : undefined,
     nested: style.nested?.map((rule) => ({ ...rule, styleId: characterIds.get(rule.styleId) ?? rule.styleId })),
+    layers: style.layers?.map((rule) => ({
+      ...rule,
+      styleId: characterIds.get(rule.styleId) ?? rule.styleId,
+      ...(rule.onlyWithStyleId ? { onlyWithStyleId: characterIds.get(rule.onlyWithStyleId) ?? rule.onlyWithStyleId } : {}),
+    })),
   }))
 
 const sameRecord = (a: object, b: object) => stableJson({ ...a, id: undefined }) === stableJson({ ...b, id: undefined })
