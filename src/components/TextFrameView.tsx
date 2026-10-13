@@ -15,6 +15,7 @@ import { RichEditor, type SelRequest } from './RichEditor'
 import { footnoteBlockWidth, footnoteLabelParts, type FootnotePlacement } from '../footnoteLayout'
 import { featherMaskStyles } from '../feather'
 import type { RichTextClipboard } from '../richTextClipboard'
+import { t } from '../i18n'
 
 /**
  * Text split at spaces/paragraph breaks into plain strings plus `.mark-space`/`.mark-para` spans (see styles.css).
@@ -435,7 +436,7 @@ export function TextFrameView(p: Props) {
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, EXTERNAL_PAGE_NUMBER_MARKER, '1')
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, 'א')
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, LETTER_PAGE_NUMBER_MARKER, 'א')
-    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, RUNNING_HEADER_MARKER, 'כותרת')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, RUNNING_HEADER_MARKER, t('כותרת'))
     masterDisplay.runs = normalizeRuns(masterDisplay.text, masterDisplay.runs, style)
   }
   const hasNext = frame.next !== null
@@ -668,8 +669,8 @@ export function TextFrameView(p: Props) {
               <button
                 type="button"
                 className="footnote-width-handle"
-                title="גרירה לצמצום או להרחבת כל מסגרות הערות השוליים"
-                aria-label="רוחב כל מסגרות הערות השוליים"
+                title={t('גרירה לצמצום או להרחבת כל מסגרות הערות השוליים')}
+                aria-label={t('רוחב כל מסגרות הערות השוליים')}
                 style={{ left: `${frame.w - footnoteBlockWidth(resizeWidthBasis, footnoteWidthScale)}px` }}
                 onPointerDown={beginFootnoteWidthDrag}
                 onPointerMove={moveFootnoteWidthDrag}
@@ -697,7 +698,7 @@ export function TextFrameView(p: Props) {
                   key={`${note.id}:${fragmentOffset}`}
                   className={'footnote-item' + (showFootnoteFrame ? ' footnote-frame-visible' : '') + (p.footnoteSelection?.allNotes ? ' footnote-all-selected' : '')}
                   data-footnote-frame-id={note.id}
-                  title="לחיצה לעריכת הערת השוליים"
+                  title={t('לחיצה לעריכת הערת השוליים')}
                   onPointerDown={(event) => {
                     event.stopPropagation()
                     if (event.button === 0) p.onFootnoteSelectionStart?.(note.id)
@@ -778,7 +779,7 @@ export function TextFrameView(p: Props) {
       {showIn && (
         <div
           className={'port port-in' + (p.hasPrev ? ' linked' : '')}
-          title={p.hasPrev ? 'נתק מהתיבה הקודמת' : 'כניסת טקסט'}
+          title={p.hasPrev ? t('נתק מהתיבה הקודמת') : t('כניסת טקסט')}
           onPointerDown={p.onInPortDown}
         >
           {p.hasPrev && '‹'}
@@ -787,7 +788,7 @@ export function TextFrameView(p: Props) {
       {showOut && (
         <div
           className={'port port-out' + (hasNext ? ' linked' : '') + (p.overflow ? ' overflow' : '') + (p.armed ? ' armed' : '')}
-          title={p.overflow ? 'יש טקסט שלא נכנס — לחץ וחבר לתיבה נוספת' : hasNext ? 'הטקסט ממשיך בתיבה הבאה' : 'לחץ כדי לחבר לתיבה נוספת'}
+          title={p.overflow ? t('יש טקסט שלא נכנס — לחץ וחבר לתיבה נוספת') : hasNext ? t('הטקסט ממשיך בתיבה הבאה') : t('לחץ כדי לחבר לתיבה נוספת')}
           onPointerDown={p.onOutPortDown}
         >
           {p.overflow ? '+' : hasNext ? '‹' : ''}
@@ -795,7 +796,7 @@ export function TextFrameView(p: Props) {
       )}
 
       {selected && showEdge && HANDLES.map((h) => <div key={h} className={'handle ' + h} onPointerDown={(e) => p.onHandleDown(h, e)} />)}
-      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => p.onRotateDown(c, e)} />)}
+      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title={t('גרור כדי לסובב (Shift: קפיצות של 45°)')} onPointerDown={(e) => p.onRotateDown(c, e)} />)}
     </div>
   )
 }

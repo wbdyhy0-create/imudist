@@ -58,7 +58,7 @@ export function ExtrudeDialog({ initial, frontColor, hasDepth, corner: initialCo
         role="dialog"
         aria-modal="true"
         aria-label="עומק תלת־ממדי"
-        dir="rtl"
+       
         onSubmit={(event) => {
           event.preventDefault()
           apply()

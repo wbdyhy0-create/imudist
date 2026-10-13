@@ -124,7 +124,7 @@ export function FindReplacePanel({ seed, hasSelection, revision, summarize, capt
       className="find-panel"
       role="dialog"
       aria-label="חיפוש והחלפה"
-      dir="rtl"
+     
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.stopPropagation()

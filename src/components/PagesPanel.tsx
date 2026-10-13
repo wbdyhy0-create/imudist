@@ -6,6 +6,7 @@ import { pageMargins, type SpreadLayout } from '../layout'
 import { ownerPage, pageRects } from '../pages'
 import { ContextMenu } from './ContextMenu'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 export type InsertWhere = 'after' | 'before' | 'end' | 'beside'
 
@@ -94,19 +95,19 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
 
   return (
-    <section className="pages-panel" aria-label="עמודים">
+    <section className="pages-panel" aria-label={t('עמודים')}>
       {/* the head and the controls stay put while the thumbnails scroll under them */}
       <div className="pages-top">
       <div className="pages-head">
-        <button className={'pages-menu-button' + (menuOpen ? ' on' : '')} aria-label="אפשרויות עמודים" aria-expanded={menuOpen} title="אפשרויות עמודים" onClick={() => setMenuOpen((open) => !open)}>☰</button>
+        <button className={'pages-menu-button' + (menuOpen ? ' on' : '')} aria-label={t('אפשרויות עמודים')} aria-expanded={menuOpen} title={t('אפשרויות עמודים')} onClick={() => setMenuOpen((open) => !open)}>☰</button>
         <h2 className="props-title">
-          עמודים <span className="muted">({doc.pages})</span>
+          {t('עמודים')} <span className="muted">({doc.pages})</span>
         </h2>
-        <div className="pages-view" role="group" aria-label="תצוגת העמודים">
+        <div className="pages-view" role="group" aria-label={t('תצוגת העמודים')}>
           <button
             className={!doc.rowsCustom && doc.perRow === 1 ? 'on' : ''}
             aria-pressed={!doc.rowsCustom && doc.perRow === 1}
-            title="עמוד אחד בכל שורה — העמודים זה מתחת לזה"
+            title={t('עמוד אחד בכל שורה — העמודים זה מתחת לזה')}
             onClick={() => onView(1)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -117,7 +118,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           <button
             className={!doc.rowsCustom && doc.perRow === 2 ? 'on' : ''}
             aria-pressed={!doc.rowsCustom && doc.perRow === 2}
-            title="עמודים זוגיים — שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה"
+            title={t('עמודים זוגיים — שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה')}
             onClick={() => onView(2)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -131,17 +132,17 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
       </div>
 
       <div className="parents-section pages-parents-visible">
-        <div className="field-label">עמודי אב</div>
+        <div className="field-label">{t('עמודי אב')}</div>
         <div className="parents-list">
           <div className="parent-row parent-none-row">
             <button
               className="parent-name parent-none"
               draggable
-              title="גרור אל עמוד כדי להסיר ממנו את עמוד האב (בעמוד מתוך בחירה מרובה - מכל העמודים הנבחרים)"
+              title={t('גרור אל עמוד כדי להסיר ממנו את עמוד האב (בעמוד מתוך בחירה מרובה - מכל העמודים הנבחרים)')}
               onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('application/x-imudist-parent', 'none') }}
             >
               <span className="parent-page-icon" aria-hidden="true" />
-              עמוד ללא אב
+              {t('עמוד ללא אב')}
             </button>
           </div>
           {parents.map((p) => (
@@ -150,7 +151,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                 className={'parent-name' + (p.id === activeParentId ? ' active' : '')}
                 draggable
                 aria-pressed={p.id === activeParentId}
-                title={`${p.name} — לחיצה מסמנת אותו כברירת המחדל לעמודים חדשים, לחיצה כפולה לעריכה`}
+                title={t('{n1} — לחיצה מסמנת אותו כברירת המחדל לעמודים חדשים, לחיצה כפולה לעריכה', { n1: p.name })}
                 onClick={() => onSelectParent(p.id)}
                 onDoubleClick={() => onEditParent(p.id)}
                 onDragStart={(event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('application/x-imudist-parent', p.id) }}
@@ -161,51 +162,51 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                 </span>
                 {p.name}
               </button>
-              <button className="icon-button" aria-label={`מחק את עמוד האב ${p.name}`} title="מחק עמוד אב" onClick={() => onDeleteParent(p.id)}>⌫</button>
+              <button className="icon-button" aria-label={t('מחק את עמוד האב {n1}', { n1: p.name })} title={t('מחק עמוד אב')} onClick={() => onDeleteParent(p.id)}>⌫</button>
             </div>
           ))}
-          {parents.length === 0 && <p className="muted">אין עדיין עמודי אב.</p>}
+          {parents.length === 0 && <p className="muted">{t('אין עדיין עמודי אב.')}</p>}
         </div>
       </div>
 
-      {menuOpen && <div className="pages-menu" role="menu" aria-label="אפשרויות עמודים">
-      <div className="pages-controls" role="group" aria-label="הוספה ומחיקה">
+      {menuOpen && <div className="pages-menu" role="menu" aria-label={t('אפשרויות עמודים')}>
+      <div className="pages-controls" role="group" aria-label={t('הוספה ומחיקה')}>
         <div className="grid2">
           <div className="field">
-            <div className="field-label">כמות</div>
-            <NumberField value={count} min={1} max={99} onChange={setCount} ariaLabel="כמות עמודים להוספה" />
+            <div className="field-label">{t('כמות')}</div>
+            <NumberField value={count} min={1} max={99} onChange={setCount} ariaLabel={t('כמות עמודים להוספה')} />
           </div>
           <div className="field">
-            <div className="field-label">מיקום</div>
+            <div className="field-label">{t('מיקום')}</div>
             <select className="select" value={where} onChange={(e) => setWhere(e.target.value as InsertWhere)}>
-              <option value="after">אחרי העמוד הנבחר</option>
-              <option value="before">לפני העמוד הנבחר</option>
-              <option value="beside">בצד העמוד הנבחר (באותה שורה)</option>
-              <option value="end">בסוף המסמך</option>
+              <option value="after">{t('אחרי העמוד הנבחר')}</option>
+              <option value="before">{t('לפני העמוד הנבחר')}</option>
+              <option value="beside">{t('בצד העמוד הנבחר (באותה שורה)')}</option>
+              <option value="end">{t('בסוף המסמך')}</option>
             </select>
           </div>
         </div>
         <div className="props-buttons">
           <button className="btn small primary" onClick={() => onInsert(count, where)} disabled={!canEditPages || doc.pages >= 9999}>
-            הוסף עמודים
+            {t('הוסף עמודים')}
           </button>
-          <button className="btn small" onClick={onDelete} disabled={!canEditPages || !canDelete} title={selectedPages.length > 1 ? 'מחק את העמודים הנבחרים ואת מה שעליהם' : 'מחק את העמוד הנבחר ואת התיבות שעליו'}>
-            {selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים` : 'מחק עמוד'}
+          <button className="btn small" onClick={onDelete} disabled={!canEditPages || !canDelete} title={selectedPages.length > 1 ? t('מחק את העמודים הנבחרים ואת מה שעליהם') : t('מחק את העמוד הנבחר ואת התיבות שעליו')}>
+            {selectedPages.length > 1 ? t('מחק {n1} עמודים', { n1: selectedPages.length }) : t('מחק עמוד')}
           </button>
         </div>
       </div>
 
       <div className="parents-section">
-        <div className="field-label">עמודי אב</div>
+        <div className="field-label">{t('עמודי אב')}</div>
         <button className="btn small" onClick={onCreateParent}>
-          עמוד אב חדש
+          {t('עמוד אב חדש')}
         </button>
         {parents.length > 0 && (
           <div className="parents-apply">
             <label className="field-label">
-              שיוך העמוד הנבחר לעמוד אב
+              {t('שיוך העמוד הנבחר לעמוד אב')}
               <select className="select" value={selectedParentId || applyParentId} onChange={(e) => { setApplyParentId(e.target.value); onApplyParent(e.target.value || null) }}>
-                <option value="">ללא</option>
+                <option value="">{t('ללא')}</option>
                 {parents.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -213,39 +214,39 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                 ))}
               </select>
             </label>
-            <button className="btn small" disabled={!selectedParentId} onClick={onDetachParent} title="שומר את מה שמופיע כרגע על העמוד, אבל מפסיק לעדכן אותו לפי עמוד האב">
-              נתק מעמוד אב
+            <button className="btn small" disabled={!selectedParentId} onClick={onDetachParent} title={t('שומר את מה שמופיע כרגע על העמוד, אבל מפסיק לעדכן אותו לפי עמוד האב')}>
+              {t('נתק מעמוד אב')}
             </button>
           </div>
         )}
       </div>
 
       <div className="parents-section">
-        <div className="field-label">מקטעי מספור עמודים</div>
+        <div className="field-label">{t('מקטעי מספור עמודים')}</div>
         <div className="parents-list">
           {sortedSections.map((s) => (
             <div className="parent-row" key={s.id}>
               <button
                 className="parent-name"
-                title="לחיצה לעריכת המקטע"
+                title={t('לחיצה לעריכת המקטע')}
                 onClick={() => setSectionDialog({ id: s.id, startPage: s.startPage, format: s.format, prefix: s.prefix })}
               >
                 <span className="parent-prefix">{pageNumberLabel([s], s.startPage, doc.startPage)}</span>
-                {`מעמוד ${s.startPage + 1} — ${NUMBER_FORMAT_LABELS[s.format]}`}
+                {t('מעמוד {n1} — {n2}', { n1: s.startPage + 1, n2: NUMBER_FORMAT_LABELS[s.format] })}
               </button>
-              <button className="icon-button" aria-label="מחק מקטע" title="מחק מקטע" onClick={() => onSectionsChange(sections.filter((x) => x.id !== s.id))}>
+              <button className="icon-button" aria-label={t('מחק מקטע')} title={t('מחק מקטע')} onClick={() => onSectionsChange(sections.filter((x) => x.id !== s.id))}>
                 ⌫
               </button>
             </div>
           ))}
-          {sections.length === 0 && <p className="muted">כל המסמך ממוספר ברצף אחיד, לפי "מספר עמוד ראשון" בהגדרות המסמך.</p>}
+          {sections.length === 0 && <p className="muted">{t('כל המסמך ממוספר ברצף אחיד, לפי "מספר עמוד ראשון" בהגדרות המסמך.')}</p>}
         </div>
         <button
           className="btn small"
           disabled={doc.pages === 0}
           onClick={() => setSectionDialog({ id: null, startPage: Math.min(selectedPages[0] ?? 0, doc.pages - 1), format: 'decimal', prefix: '' })}
         >
-          מקטע חדש
+          {t('מקטע חדש')}
         </button>
       </div>
       </div>}
@@ -267,7 +268,7 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                     key={p.index}
                     className={'thumb' + (selectedPages.includes(p.index) ? ' sel' : '')}
                     draggable
-                    title={`עמוד ${pageNumberLabel(sections, p.index, doc.startPage)} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה`}
+                    title={t('עמוד {n1} — גרור כדי לשנות את הסדר, Shift לבחירת טווח, Ctrl להוספה לבחירה', { n1: pageNumberLabel(sections, p.index, doc.startPage) })}
                     aria-pressed={selectedPages.includes(p.index)}
                     onClick={(e) => onSelect(p.index, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey })}
                     onContextMenu={(e) => {
@@ -354,11 +355,11 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
           onClose={() => setCtxMenu(null)}
           items={[
             {
-              label: 'הוספת עמודים…',
+              get label() { return t('הוספת עמודים…') },
               onClick: () => setInsertDialog({ pageIndex: ctxMenu.pageIndex, count: 1, where: 'after', master: pageParents[ctxMenu.pageIndex] ?? '' }),
             },
             {
-              label: selectedPages.length > 1 ? `מחק ${selectedPages.length} עמודים נבחרים` : 'מחק עמוד נבחר',
+              label: selectedPages.length > 1 ? t('מחק {n1} עמודים נבחרים', { n1: selectedPages.length }) : t('מחק עמוד נבחר'),
               disabled: !canDelete,
               onClick: onDelete,
             },
@@ -368,27 +369,27 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
       {insertDialog && (
         <div className="modal-backdrop">
-          <div className="modal" role="dialog" aria-modal="true" aria-label="הוספת עמודים">
-            <h2>הוספת עמודים</h2>
+          <div className="modal" role="dialog" aria-modal="true" aria-label={t('הוספת עמודים')}>
+            <h2>{t('הוספת עמודים')}</h2>
             <div className="grid2">
               <div className="field">
-                <div className="field-label">כמות</div>
-                <NumberField value={insertDialog.count} min={1} max={99} onChange={(v) => setInsertDialog({ ...insertDialog, count: v })} ariaLabel="כמות עמודים להוספה" />
+                <div className="field-label">{t('כמות')}</div>
+                <NumberField value={insertDialog.count} min={1} max={99} onChange={(v) => setInsertDialog({ ...insertDialog, count: v })} ariaLabel={t('כמות עמודים להוספה')} />
               </div>
               <div className="field">
-                <div className="field-label">מיקום</div>
+                <div className="field-label">{t('מיקום')}</div>
                 <select className="select" value={insertDialog.where} onChange={(e) => setInsertDialog({ ...insertDialog, where: e.target.value as InsertWhere })}>
-                  <option value="after">אחרי העמוד הנבחר</option>
-                  <option value="before">לפני העמוד הנבחר</option>
-                  <option value="beside">בצד העמוד הנבחר (באותה שורה)</option>
-                  <option value="end">בסוף המסמך</option>
+                  <option value="after">{t('אחרי העמוד הנבחר')}</option>
+                  <option value="before">{t('לפני העמוד הנבחר')}</option>
+                  <option value="beside">{t('בצד העמוד הנבחר (באותה שורה)')}</option>
+                  <option value="end">{t('בסוף המסמך')}</option>
                 </select>
               </div>
             </div>
             <div className="field">
-              <div className="field-label">מאסטר</div>
+              <div className="field-label">{t('מאסטר')}</div>
               <select className="select" value={insertDialog.master} onChange={(e) => setInsertDialog({ ...insertDialog, master: e.target.value })}>
-                <option value="">ללא</option>
+                <option value="">{t('ללא')}</option>
                 {parents.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -404,10 +405,10 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                   setInsertDialog(null)
                 }}
               >
-                הוסף עמודים
+                {t('הוסף עמודים')}
               </button>
               <button className="btn" onClick={() => setInsertDialog(null)}>
-                ביטול
+                {t('ביטול')}
               </button>
             </div>
           </div>
@@ -416,21 +417,21 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
 
       {sectionDialog && (
         <div className="modal-backdrop">
-          <div className="modal" role="dialog" aria-modal="true" aria-label="מקטע מספור">
-            <h2>{sectionDialog.id ? 'עריכת מקטע מספור' : 'מקטע מספור חדש'}</h2>
+          <div className="modal" role="dialog" aria-modal="true" aria-label={t('מקטע מספור')}>
+            <h2>{sectionDialog.id ? t('עריכת מקטע מספור') : t('מקטע מספור חדש')}</h2>
             <div className="grid2">
               <div className="field">
-                <div className="field-label">מעמוד</div>
+                <div className="field-label">{t('מעמוד')}</div>
                 <NumberField
                   value={sectionDialog.startPage + 1}
                   min={1}
                   max={Math.max(1, doc.pages)}
                   onChange={(v) => setSectionDialog({ ...sectionDialog, startPage: v - 1 })}
-                  ariaLabel="העמוד שממנו מתחיל המקטע"
+                  ariaLabel={t('העמוד שממנו מתחיל המקטע')}
                 />
               </div>
               <div className="field">
-                <div className="field-label">סגנון מספור</div>
+                <div className="field-label">{t('סגנון מספור')}</div>
                 <select className="select" value={sectionDialog.format} onChange={(e) => setSectionDialog({ ...sectionDialog, format: e.target.value as NumberFormat })}>
                   {(Object.keys(NUMBER_FORMAT_LABELS) as NumberFormat[]).map((f) => (
                     <option key={f} value={f}>
@@ -441,16 +442,16 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
               </div>
             </div>
             <div className="field">
-              <div className="field-label">קידומת (רשות)</div>
+              <div className="field-label">{t('קידומת (רשות)')}</div>
               <input
                 className="text-input"
                 type="text"
                 value={sectionDialog.prefix}
                 onChange={(e) => setSectionDialog({ ...sectionDialog, prefix: e.target.value })}
-                placeholder="למשל: נספח "
+                placeholder={t('למשל: נספח')}
               />
             </div>
-            <p className="muted">העמוד הראשון של המקטע יוצג כ־"{sectionDialog.prefix}{pageNumberLabel([{ ...sectionDialog, id: '' }], sectionDialog.startPage, doc.startPage)}".</p>
+            <p className="muted">{t('העמוד הראשון של המקטע יוצג כ־"{label}".', { label: sectionDialog.prefix + pageNumberLabel([{ ...sectionDialog, id: '' }], sectionDialog.startPage, doc.startPage) })}</p>
             <div className="modal-buttons">
               <button
                 className="btn primary"
@@ -462,10 +463,10 @@ export function PagesPanel({ doc, frames, images, shapes, spreads, currentSpread
                   setSectionDialog(null)
                 }}
               >
-                שמירה
+                {t('שמירה')}
               </button>
               <button className="btn" onClick={() => setSectionDialog(null)}>
-                ביטול
+                {t('ביטול')}
               </button>
             </div>
           </div>

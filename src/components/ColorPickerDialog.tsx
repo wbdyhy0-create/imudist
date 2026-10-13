@@ -115,7 +115,7 @@ export function ColorPickerDialog({ initial, target, onApply, onClose }: Props) 
 
   return (
     <div className="color-dialog-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="color-dialog" role="dialog" aria-modal="true" aria-label="בחירת צבע" dir="rtl" style={{ transform: `translate(${position.x}px, ${position.y}px)` }}>
+      <div className="color-dialog" role="dialog" aria-modal="true" aria-label="בחירת צבע" style={{ transform: `translate(${position.x}px, ${position.y}px)` }}>
         <div className="color-dialog-head" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><h2>בחירת צבע</h2><button className="setup-x" onClick={onClose} aria-label="סגור">×</button></div>
         <div className="color-dialog-body">
           <div className="color-dialog-preview">

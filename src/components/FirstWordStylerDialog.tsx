@@ -23,7 +23,7 @@ export function FirstWordStylerDialog({ styles, characterStyles, onApply, hasSel
   const chosen = decode(target)
   return (
     <div className="modal-backdrop">
-      <div className="modal" role="dialog" aria-modal="true" aria-label="עיצוב מילה ראשונה" dir="rtl">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="עיצוב מילה ראשונה">
         <h2>עיצוב מילה ראשונה</h2>
         <label className="field-label">החל על פסקאות בסגנון
           <select className="select" value={sourceId} onChange={(event) => setSourceId(event.target.value)}>

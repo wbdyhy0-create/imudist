@@ -10,6 +10,7 @@ import { normalizeRuns } from '../story'
 import { dropShadowFilter } from '../shadow'
 import type { CellRange, TableData, TableLayout } from '../table'
 import { TableView, type TableSelection } from './TableView'
+import { t } from '../i18n'
 
 /** the picture's corner handles, while its own content (not the frame) is being resized */
 const CONTENT_CORNERS = ['nw', 'ne', 'se', 'sw'] as const
@@ -349,7 +350,7 @@ export function ShapeFrameView({
           <div
             key={i}
             className="handle line-end"
-            title="גרור כדי להזיז את קצה הקו (Shift: זווית ישרה, ב-45°)"
+            title={t('גרור כדי להזיז את קצה הקו (Shift: זווית ישרה, ב-45°)')}
             style={{ left, top }}
             onPointerDown={(e) => onLineEndDown?.(i as 0 | 1, e)}
           />
@@ -357,26 +358,26 @@ export function ShapeFrameView({
       {showHandles && isLine && onLineWidthDown && (() => {
         const pos = shape.lineWidthPos ?? 0.5
         const [x0, y0, x1, y1] = shape.flip ? [0, h, w, 0] : [0, 0, w, h]
-        return <div className="handle line-width" title="גרור לאורך הקו כדי להזיז את המקום העבה, ולמעלה או למטה כדי לעבות או לדקק את הקו" style={{ left: x0 + (x1 - x0) * pos, top: y0 + (y1 - y0) * pos }} onPointerDown={(e) => onLineWidthDown(e, 1)} />
+        return <div className="handle line-width" title={t('גרור לאורך הקו כדי להזיז את המקום העבה, ולמעלה או למטה כדי לעבות או לדקק את הקו')} style={{ left: x0 + (x1 - x0) * pos, top: y0 + (y1 - y0) * pos }} onPointerDown={(e) => onLineWidthDown(e, 1)} />
       })()}
       {showHandles && isLine && onLineWidthDown && (() => {
         const [x0, y0, x1, y1] = shape.flip ? [0, h, w, 0] : [0, 0, w, h]
         const inset = Math.min(0.25, 16 / Math.max(1, Math.hypot(w, h)))
         const edges = shape.lineWidthEdges
-        return ([[0, edges ? edges[0] : inset], [2, 1 - (edges ? edges[1] : inset)]] as const).map(([which, t]) => (
-          <div key={which} className="handle line-width side" title="גרור למעלה או למטה כדי לעבות או לדקק את הקצה, ולאורך הקו כדי להזיז את המקום" style={{ left: x0 + (x1 - x0) * t, top: y0 + (y1 - y0) * t }} onPointerDown={(e) => onLineWidthDown(e, which)} />
+        return ([[0, edges ? edges[0] : inset], [2, 1 - (edges ? edges[1] : inset)]] as const).map(([which, along]) => (
+          <div key={which} className="handle line-width side" title={t('גרור למעלה או למטה כדי לעבות או לדקק את הקצה, ולאורך הקו כדי להזיז את המקום')} style={{ left: x0 + (x1 - x0) * along, top: y0 + (y1 - y0) * along }} onPointerDown={(e) => onLineWidthDown(e, which)} />
         ))
       })()}
       {showHandles && !tableShape &&
-        ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown?.(c, e)} />)}
+        ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title={t('גרור כדי לסובב (Shift: קפיצות של 45°)')} onPointerDown={(e) => onRotateDown?.(c, e)} />)}
 
       {showHandles && pt && info && place && (
         <>
-          <div className="path-peg anchor" title="תחילת הטקסט — גרור כדי להזיז את הטקסט לאורך הקו" style={pegAt(pt.anchor)} onPointerDown={(e) => onPegDown?.('anchor', e)} />
-          <div className="path-peg end" title="סוף הטקסט — גרור כדי לקצר או להאריך את המקום שהטקסט תופס על הקו" style={pegAt(place.endFrac)} onPointerDown={(e) => onPegDown?.('end', e)} />
+          <div className="path-peg anchor" title={t('תחילת הטקסט — גרור כדי להזיז את הטקסט לאורך הקו')} style={pegAt(pt.anchor)} onPointerDown={(e) => onPegDown?.('anchor', e)} />
+          <div className="path-peg end" title={t('סוף הטקסט — גרור כדי לקצר או להאריך את המקום שהטקסט תופס על הקו')} style={pegAt(place.endFrac)} onPointerDown={(e) => onPegDown?.('end', e)} />
           <div
             className={'path-peg flip ' + pt.side}
-            title="גרור פנימה אל הצורה כדי להכניס את הטקסט פנימה, וגרור החוצה כדי להוציא אותו"
+            title={t('גרור פנימה אל הצורה כדי להכניס את הטקסט פנימה, וגרור החוצה כדי להוציא אותו')}
             style={pegAt(place.middleFrac)}
             onPointerDown={(e) => onPegDown?.('flip', e)}
           />
@@ -392,7 +393,7 @@ export function ShapeFrameView({
             <div
               key={i}
               className={'corner-handle' + (hotCorners.includes(i) ? ' hot' : '')}
-              title={together ? 'עגל את כל הפינות (גרור)' : `עגל פינה: ${c.name} (גרור, ועבור על פינות נוספות כדי לבחור גם אותן)`}
+              title={together ? t('עגל את כל הפינות (גרור)') : t('עגל פינה: {corner} (גרור, ועבור על פינות נוספות כדי לבחור גם אותן)', { corner: c.name })}
               style={{ left: c.fx * w + c.sx * at, top: c.fy * h + c.sy * at }}
               onPointerDown={(e) => onCornerDown?.(i, e)}
             />
@@ -401,7 +402,7 @@ export function ShapeFrameView({
 
       {showPoints && (
         <>
-          <div className="direct-move-handle" title="גרור כדי להזיז את האובייקט" style={{ left: w / 2, top: h / 2 }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDirectMove?.(e) }} />
+          <div className="direct-move-handle" title={t('גרור כדי להזיז את האובייקט')} style={{ left: w / 2, top: h / 2 }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onDirectMove?.(e) }} />
           <svg className="curve-handle-lines" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
             {points!.map(({ vertex: v, index: i }) => {
               if (!selectedPoints?.includes(i)) return null
@@ -418,7 +419,7 @@ export function ShapeFrameView({
           </svg>
 
           {showEdges && points!.map(({ vertex, next, index: i }) => (
-            <div key={`edge${i}`} className="edge-handle" title="גרור כדי להוסיף נקודה ולעצב את הקו" style={edgeAt(vertex, next, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
+            <div key={`edge${i}`} className="edge-handle" title={t('גרור כדי להוסיף נקודה ולעצב את הקו')} style={edgeAt(vertex, next, w, h)} onPointerDown={(e) => onEdgeDown?.(i, e)} />
           ))}
 
           {points!.map(({ vertex: v, index: i }) => {
@@ -428,7 +429,7 @@ export function ShapeFrameView({
               <div
                 key={`pt${i}`}
                 className={'point-handle' + (on ? ' on' : '')}
-                title="נקודת עיגון — לחיצה לבחירה וגרירה להזזה (Shift מוסיף לבחירה). לחיצה כפולה הופכת בין פינה חדה לעקומה חלקה. Alt-גרירה ממנה מוציאה ידיות עיצוב."
+                title={t('נקודת עיגון — לחיצה לבחירה וגרירה להזזה (Shift מוסיף לבחירה). לחיצה כפולה הופכת בין פינה חדה לעקומה חלקה. Alt-גרירה ממנה מוציאה ידיות עיצוב.')}
                 style={{ left: p[0] * w, top: p[1] * h }}
                 onPointerDown={(e) => onPointDown?.(i, e)}
               />
@@ -445,7 +446,7 @@ export function ShapeFrameView({
                 <div
                   key={`hi${i}`}
                   className="direction-handle"
-                  title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
+                  title={t('ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת.')}
                   style={{ left: (p[0] + hi[0]) * w, top: (p[1] + hi[1]) * h }}
                   onPointerDown={(e) => { e.stopPropagation(); onHandleGrab?.(i, 'hi', e) }}
                 />,
@@ -456,7 +457,7 @@ export function ShapeFrameView({
                 <div
                   key={`ho${i}`}
                   className="direction-handle"
-                  title="ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת."
+                  title={t('ידית עיצוב עקומה — גרור כדי לשנות את כיוון ועוצמת העקומה. Alt: מזיז רק את הידית הזאת.')}
                   style={{ left: (p[0] + ho[0]) * w, top: (p[1] + ho[1]) * h }}
                   onPointerDown={(e) => { e.stopPropagation(); onHandleGrab?.(i, 'ho', e) }}
                 />,
@@ -470,7 +471,7 @@ export function ShapeFrameView({
         <>
           <div
             className="content-grabber"
-            title="תוכן התמונה — גרור כדי להזיז את התמונה בתוך המסגרת, בלי להזיז את המסגרת עצמה"
+            title={t('תוכן התמונה — גרור כדי להזיז את התמונה בתוך המסגרת, בלי להזיז את המסגרת עצמה')}
             style={{ left: (img!.box.x + img!.box.w / 2) * zoom, top: (img!.box.y + img!.box.h / 2) * zoom }}
             onPointerDown={onContentGrab}
           />
@@ -478,7 +479,7 @@ export function ShapeFrameView({
             <div
               key={c}
               className={'content-handle ' + c}
-              title="גרור כדי לשנות את גודל התמונה בתוך המסגרת"
+              title={t('גרור כדי לשנות את גודל התמונה בתוך המסגרת')}
               style={contentHandleAt(c, img!.box, zoom)}
               onPointerDown={(e) => onContentResize?.(c, e)}
             />

@@ -1,4 +1,5 @@
 import type { RefObject } from 'react'
+import { getLanguage, LANGUAGES, setLanguage } from './i18n'
 import type { MenuDef, MenuItem } from './components/MenuBar'
 import type { WorkspaceHandle } from './components/Workspace'
 import type { RecentEntry } from './recent'
@@ -374,6 +375,12 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'תווים נסתרים', shortcut: 'Ctrl+Shift+8', checked: c.showHiddenChars, onClick: c.toggleHiddenChars },
         sep,
         { label: 'תצוגת הפרדת צבעים…', disabled: !c.hasDoc, onClick: c.separationPreview },
+        sep,
+        {
+          label: 'שפת הממשק',
+          // each language is written in its own letters, whatever the language of the interface
+          submenu: LANGUAGES.map((language) => ({ label: language.name, checked: getLanguage() === language.id, onClick: () => setLanguage(language.id) })),
+        },
         sep,
         {
           label: 'מצב מסך',

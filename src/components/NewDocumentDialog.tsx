@@ -12,6 +12,7 @@ import {
 } from '../document'
 import { PAGE_PRESETS, UNIT_OPTIONS, matchPreset, type PagePreset, type Unit } from '../units'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 interface Props {
   initial: DocSettings
@@ -58,24 +59,24 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
     })
 
   const create = () => {
-    if (!error) onCreate({ ...d, name: setup ? initial.name : d.name.trim() || 'ללא שם' })
+    if (!error) onCreate({ ...d, name: setup ? initial.name : d.name.trim() || t('ללא שם') })
   }
 
   return (
-    <aside className="nd-panel" role="dialog" aria-label={setup ? 'הגדרת מסמך' : 'מסמך חדש'}>
+    <aside className="nd-panel" role="dialog" aria-label={setup ? t('הגדרת מסמך') : t('מסמך חדש')}>
       <div className="nd-scroll">
-        <h2 className="nd-heading">{setup ? 'הגדרת מסמך' : 'פרטי המסמך'}</h2>
+        <h2 className="nd-heading">{setup ? t('הגדרת מסמך') : t('פרטי המסמך')}</h2>
         {!setup && (
           <input
             className="nd-name"
-            aria-label="שם המסמך"
+            aria-label={t('שם המסמך')}
             value={d.name}
             onChange={(e) => patch({ name: e.target.value })}
             onFocus={(e) => e.currentTarget.select()}
           />
         )}
 
-        <div className="field-label">גודל עמוד</div>
+        <div className="field-label">{t('גודל עמוד')}</div>
         <div className="presets">
           {PAGE_PRESETS.map((p) => {
             const [pw, ph] = [p.width, p.height]
@@ -87,7 +88,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
                 onClick={() => pickPreset(p)}
               >
                 <span className="preset-page" style={{ width: pw * scale, height: ph * scale }} />
-                <span>{p.label}</span>
+                <span>{t(p.label)}</span>
               </button>
             )
           })}
@@ -96,12 +97,12 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
             onClick={() => document.getElementById('nd-width')?.focus()}
           >
             <span className="preset-page custom" />
-            <span>מותאם אישית</span>
+            <span>{t('מותאם אישית')}</span>
           </button>
         </div>
 
         <div className="grid2">
-          <Field label="רוחב">
+          <Field label={t('רוחב')}>
             <NumberField
               id="nd-width"
               value={d.width}
@@ -111,43 +112,43 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
               onChange={(v) => patch({ width: v })}
             />
           </Field>
-          <Field label="יחידות">
+          <Field label={t('יחידות')}>
             <select className="select" value={d.unit} onChange={(e) => patch({ unit: e.target.value as Unit })}>
               {UNIT_OPTIONS.map((u) => (
                 <option key={u.value} value={u.value}>
-                  {u.label}
+                  {t(u.label)}
                 </option>
               ))}
             </select>
           </Field>
-          <Field label="גובה">
+          <Field label={t('גובה')}>
             <NumberField value={d.height} unit={d.unit} min={MIN_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => patch({ height: v })} />
           </Field>
           <div />
-          <Field label="כיוון העמוד">
+          <Field label={t('כיוון העמוד')}>
             <div className="toggle-group">
-              <button className={!landscape ? 'on' : ''} title="לאורך" aria-label="לאורך" onClick={() => setOrientation(false)}>
+              <button className={!landscape ? 'on' : ''} title={t('לאורך')} aria-label={t('לאורך')} onClick={() => setOrientation(false)}>
                 <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="1" /></svg>
               </button>
-              <button className={landscape ? 'on' : ''} title="לרוחב" aria-label="לרוחב" onClick={() => setOrientation(true)}>
+              <button className={landscape ? 'on' : ''} title={t('לרוחב')} aria-label={t('לרוחב')} onClick={() => setOrientation(true)}>
                 <svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="1" /></svg>
               </button>
             </div>
           </Field>
-          <Field label="כיוון הכריכה">
+          <Field label={t('כיוון הכריכה')}>
             <div className="toggle-group">
-              <button className={d.binding === 'rtl' ? 'on' : ''} title="מימין לשמאל (עברית)" aria-label="מימין לשמאל" onClick={() => patch({ binding: 'rtl' })}>
+              <button className={d.binding === 'rtl' ? 'on' : ''} title={t('מימין לשמאל (עברית)')} aria-label={t('מימין לשמאל')} onClick={() => patch({ binding: 'rtl' })}>
                 <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="11" rx="1" /><path d="M5 19h14M8 16l-3 3 3 3" /></svg>
               </button>
-              <button className={d.binding === 'ltr' ? 'on' : ''} title="משמאל לימין (אנגלית)" aria-label="משמאל לימין" onClick={() => patch({ binding: 'ltr' })}>
+              <button className={d.binding === 'ltr' ? 'on' : ''} title={t('משמאל לימין (אנגלית)')} aria-label={t('משמאל לימין')} onClick={() => patch({ binding: 'ltr' })}>
                 <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="11" rx="1" /><path d="M5 19h14M16 16l3 3-3 3" /></svg>
               </button>
             </div>
           </Field>
-          <Field label="עמודים">
+          <Field label={t('עמודים')}>
             <NumberField value={d.pages} min={1} max={MAX_PAGES} onChange={(v) => patch({ pages: v })} />
           </Field>
-          <Field label="עמודים בשורה">
+          <Field label={t('עמודים בשורה')}>
             <NumberField
               value={d.perRow}
               min={1}
@@ -155,16 +156,16 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
               onChange={(v) => patch({ perRow: v, rowsCustom: false, pageJoins: [], facingPages: v >= 2 ? d.facingPages : false })}
             />
           </Field>
-          <Field label="דף כפול (עמודים צמודים)">
+          <Field label={t('דף כפול (עמודים צמודים)')}>
             <Check checked={d.facingPages && d.perRow >= 2} onChange={(v) => patch({ facingPages: v, perRow: v ? Math.max(2, d.perRow) : d.perRow })} />
           </Field>
-          <Field label="מספר עמוד ראשון">
+          <Field label={t('מספר עמוד ראשון')}>
             <NumberField value={d.startPage} min={1} max={MAX_PAGES} onChange={(v) => patch({ startPage: v })} />
           </Field>
-          <Field label="תיבות טקסט">
+          <Field label={t('תיבות טקסט')}>
             <select className="select" value={d.primaryTextFrame ? 'auto' : 'manual'} onChange={(e) => patch({ primaryTextFrame: e.target.value === 'auto' })}>
-              <option value="auto">אוטומטית — בכל עמוד</option>
-              <option value="manual">ידנית — עמודים ריקים</option>
+              <option value="auto">{t('אוטומטית — בכל עמוד')}</option>
+              <option value="manual">{t('ידנית — עמודים ריקים')}</option>
             </select>
           </Field>
         </div>
@@ -172,15 +173,15 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
         <hr className="nd-rule" />
 
         <div className="grid2">
-          <Field label="עמודות">
+          <Field label={t('עמודות')}>
             <NumberField value={d.columns} min={1} max={MAX_COLUMNS} onChange={(v) => patch({ columns: v })} />
           </Field>
-          <Field label="מרווח בין עמודות">
+          <Field label={t('מרווח בין עמודות')}>
             <NumberField value={d.gutter} unit={d.unit} min={0} max={MAX_SIDE_PT} onChange={(v) => patch({ gutter: v })} />
           </Field>
         </div>
 
-        <Section title="שוליים">
+        <Section title={t('שוליים')}>
           <SidesEditor
             value={d.margins}
             unit={d.unit}
@@ -191,8 +192,8 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
           />
         </Section>
 
-        <Section title="גלישה ואזור מידע">
-          <div className="sub-label">גלישה (Bleed)</div>
+        <Section title={t('גלישה ואזור מידע')}>
+          <div className="sub-label">{t('גלישה (Bleed)')}</div>
           <SidesEditor
             value={d.bleed}
             unit={d.unit}
@@ -201,7 +202,7 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
             onLink={() => setLinked((l) => ({ ...l, bleed: !l.bleed }))}
             onChange={(side, v) => setSide('bleed', side, v)}
           />
-          <div className="sub-label">אזור מידע (Slug)</div>
+          <div className="sub-label">{t('אזור מידע (Slug)')}</div>
           <SidesEditor
             value={d.slug}
             unit={d.unit}
@@ -220,14 +221,14 @@ export function NewDocumentDialog({ initial, onCreate, onClose, onPreview, mode 
         ) : (
           <label className="check-inline">
             <Check checked={preview} onChange={setPreview} />
-            <span>תצוגה מקדימה</span>
+            <span>{t('תצוגה מקדימה')}</span>
           </label>
         )}
         <button className="btn primary" disabled={!!error} onClick={create}>
-          {setup ? 'אישור' : 'צור'}
+          {setup ? t('אישור') : t('צור')}
         </button>
         <button className="btn outline" onClick={onClose}>
-          סגור
+          {t('סגור')}
         </button>
       </footer>
     </aside>
@@ -280,10 +281,10 @@ export function SidesEditor({
   onChange: (side: keyof Sides, pt: number) => void
 }) {
   const labels: Record<keyof Sides, string> = {
-    top: 'עליון',
-    bottom: 'תחתון',
-    left: facing ? 'פנימי' : 'שמאל',
-    right: facing ? 'חיצוני' : 'ימין',
+    top: t('עליון'),
+    bottom: t('תחתון'),
+    left: facing ? t('פנימי') : t('שמאל'),
+    right: facing ? t('חיצוני') : t('ימין'),
   }
   // The interface is right-to-left, so the first field of a row sits on the right: physical
   // "right" goes before "left", while inside (= left) goes before outside (= right).
@@ -298,7 +299,7 @@ export function SidesEditor({
       <button
         className={'link-btn' + (linked ? ' on' : '')}
         aria-pressed={linked}
-        title={linked ? 'בטל קישור בין כל הערכים' : 'קשר בין כל הערכים'}
+        title={linked ? t('בטל קישור בין כל הערכים') : t('קשר בין כל הערכים')}
         onClick={onLink}
       >
         <svg viewBox="0 0 24 24">

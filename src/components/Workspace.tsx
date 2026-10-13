@@ -28,6 +28,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type Ref,
 } from 'react'
+import { localeTag, t } from '../i18n'
 import {
   DEFAULT_GUIDE_COLOR,
   DEFAULT_FOOTNOTE_CONFIG,
@@ -1248,7 +1249,7 @@ export function Workspace({
       return
     }
     const timer = window.setTimeout(() => {
-      if (!saveCustomBrushes(customBrushes)) setBrushMessage('אין מקום לשמור את המברשות בדפדפן: הן יישארו רק עד סגירת התוכנה.')
+      if (!saveCustomBrushes(customBrushes)) setBrushMessage(t('אין מקום לשמור את המברשות בדפדפן: הן יישארו רק עד סגירת התוכנה.'))
     }, 400)
     return () => window.clearTimeout(timer)
   }, [customBrushes])
@@ -1264,19 +1265,19 @@ export function Workspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, tool])
   const importBrush = async (file: File) => {
-    setBrushMessage('קורא את הקובץ…')
+    setBrushMessage(t('קורא את הקובץ…'))
     const result = await readBrushFile(file)
     if ('error' in result) {
       setBrushMessage(result.error)
       return
     }
     if (customBrushes.length >= MAX_CUSTOM_BRUSHES) {
-      setBrushMessage('אפשר לשמור עד ' + MAX_CUSTOM_BRUSHES + ' מברשות מיובאות. הסירו אחת ונסו שוב.')
+      setBrushMessage(t('אפשר לשמור עד {count} מברשות מיובאות. הסירו אחת ונסו שוב.', { count: MAX_CUSTOM_BRUSHES }))
       return
     }
     changeCustomBrushes((list) => (list.length >= MAX_CUSTOM_BRUSHES ? list : [...list, result.brush]))
     setBrushStyle(result.brush.id)
-    setBrushMessage(result.note ?? `המברשת ”${result.brush.name}” נוספה. אפשר לצייר איתה עכשיו.`)
+    setBrushMessage(result.note ?? t('המברשת ”{n1}” נוספה. אפשר לצייר איתה עכשיו.', { n1: result.brush.name }))
   }
   const [brushSize, setBrushSize] = useState(22)
   const [brushColor, setBrushColor] = useState('#000000')
@@ -1911,7 +1912,7 @@ export function Workspace({
     const pageIndex = Math.min(selectedPage, doc.pages - 1)
     const firstBox = columnBoxes(doc, rects[pageIndex], pageSidesOf(doc)[pageIndex], pageIndex)[0]
     const placed: PlacedText = {
-      name: 'תוכן עניינים',
+      get name() { return t('תוכן עניינים') },
       text: story,
       runs,
       style: DEFAULT_TEXT_STYLE,
@@ -2805,7 +2806,7 @@ export function Workspace({
     const targets: { head: TextFrame; range: NoteRange }[] = []
     if (request.scope === 'document') {
       for (const head of headFrames(frames)) if (!head.tocPageReferences?.length && selectable(head.id)) targets.push({ head, range: null })
-      if (targets.length === 0) return { converted: 0, message: 'אין טקסט במסמך.' }
+      if (targets.length === 0) return { converted: 0, message: t('אין טקסט במסמך.') }
     } else if (textSel && textSel.a !== textSel.b) {
       const head = frames.find((frame) => frame.id === textSel.headId)
       if (head && selectable(head.id)) targets.push({ head, range: { from: Math.min(textSel.a, textSel.b), to: Math.max(textSel.a, textSel.b) } })
@@ -2818,7 +2819,7 @@ export function Workspace({
       }
       for (const head of heads.values()) targets.push({ head, range: null })
     }
-    if (targets.length === 0) return { converted: 0, message: 'אין בחירה. סמנו טקסט או תיבת טקסט, או בחרו „כל המסמך”.' }
+    if (targets.length === 0) return { converted: 0, message: t('אין בחירה. סמנו טקסט או תיבת טקסט, או בחרו „כל המסמך”.') }
     const edited = new Map<string, TextFrame>()
     let converted = 0
     let stopped = false
@@ -2842,8 +2843,8 @@ export function Workspace({
       dirtyOffsetRef.current = undefined
       onFramesChange(frames.map((frame) => edited.get(frame.id) ?? frame), 'footnote-convert')
     }
-    if (stopped) return { converted, message: `הפעולה נעצרה. ${convertedText(converted)}.` }
-    return { converted, ...(converted === 0 ? { message: (request.direction === 'toFootnotes' ? `לא נמצאו הערות בסוגריים ${bracket.label}` : 'לא נמצאו הערות שוליים להמרה') + (request.searchStyleId ? ` בסגנון „${paragraphStyles.find((style) => style.id === request.searchStyleId)?.name ?? ''}”.` : '.') } : {}) }
+    if (stopped) return { converted, message: t('הפעולה נעצרה. {n1}.', { n1: convertedText(converted) }) }
+    return { converted, ...(converted === 0 ? { message: (request.direction === 'toFootnotes' ? t('לא נמצאו הערות בסוגריים {n1}', { n1: bracket.label }) : t('לא נמצאו הערות שוליים להמרה')) + (request.searchStyleId ? ` בסגנון „${paragraphStyles.find((style) => style.id === request.searchStyleId)?.name ?? ''}”.` : '.') } : {}) }
   }
 
   const completeLink = (toId: string) => {
@@ -3145,9 +3146,9 @@ export function Workspace({
   /** the table sorted as the dialog asked; returns what went wrong, or null when it was sorted */
   const applyTableSort = (options: SortOptions): string | null => {
     const sh = selectedTable()
-    if (!sh) return 'לא נבחרה טבלה'
+    if (!sh) return t('לא נבחרה טבלה')
     const outcome = sortTable(sh.table, options)
-    if (!outcome.ok) return outcome.reason === 'merged' ? 'אי אפשר למיין טבלה שיש בה תאים ממוזגים באזור שנבחר. בטלו את המיזוג או בחרו אזור אחר.' : 'אין מה למיין: צריך לפחות שתי שורות בגוף הטבלה, ועמודה אחת שנבחרה.'
+    if (!outcome.ok) return outcome.reason === 'merged' ? t('אי אפשר למיין טבלה שיש בה תאים ממוזגים באזור שנבחר. בטלו את המיזוג או בחרו אזור אחר.') : t('אין מה למיין: צריך לפחות שתי שורות בגוף הטבלה, ועמודה אחת שנבחרה.')
     if (outcome.table !== sh.table) commitTable(sh.id, outcome.table, 'table-sort')
     setTableSortOpen(false)
     return null
@@ -3157,8 +3158,8 @@ export function Workspace({
   const applyTableFormula = (source: string, format: FormulaFormat | undefined): string | null => {
     const sh = selectedTable()
     const area = sh && tableSel && tableSel.id === sh.id ? expandRange(sh.table, tableSel) : null
-    if (!sh || !area) return 'לא נבחר תא'
-    if (!sh.table.calculation) return 'הטבלה אינה טבלת חישוב. סמנו „טבלת חישוב” באפשרויות הטבלה.'
+    if (!sh || !area) return t('לא נבחר תא')
+    if (!sh.table.calculation) return t('הטבלה אינה טבלת חישוב. סמנו „טבלת חישוב” באפשרויות הטבלה.')
     const outcome = setCellFormula(sh.table, area.r0, area.c0, source, format)
     if (!outcome.ok) return outcome.problem
     commitTable(sh.id, outcome.table, 'table-formula')
@@ -3621,7 +3622,7 @@ export function Workspace({
   const releaseCompoundPaths = () => {
     const chosen = selectedObjectIds().filter((id) => shapes.some((shape) => shape.id === id && pieceCount(shape) > 1 && !itemLocks[id]))
     if (chosen.length === 0) {
-      onNotify('בחרו צורה שמורכבת מכמה חלקים (נתיב מורכב), כמו טקסט שהומר לווקטור כצורה אחת.')
+      onNotify(t('בחרו צורה שמורכבת מכמה חלקים (נתיב מורכב), כמו טקסט שהומר לווקטור כצורה אחת.'))
       return
     }
     const gone = new Set(chosen)
@@ -3635,7 +3636,7 @@ export function Workspace({
     commitMultiObjectChange({ shapes: [...shapes.filter((shape) => !gone.has(shape.id)), ...made] }, 'compound:release')
     setMultiSel(made.map((shape) => shape.id))
     setSelectedIdRaw(null)
-    onNotify(`הנתיב המורכב פורק ל-${made.length} צורות מקובצות. לחיצה כפולה על חלק בוחרת אותו לבדו.`)
+    onNotify(t('הנתיב המורכב פורק ל-{n1} צורות מקובצות. לחיצה כפולה על חלק בוחרת אותו לבדו.', { n1: made.length }))
   }
   /** the fronts of the selected solids: the selected shapes that can be drawn out, and the front of a side that was picked */
   const extrudeFronts = (): ShapeFrame[] => {
@@ -3649,11 +3650,11 @@ export function Workspace({
   const extrudeSelection = () => {
     const fronts = extrudeFronts()
     if (fronts.length === 0) {
-      onNotify('בחרו צורה (מלבן, אליפסה, מצולע או צורה מורכבת) כדי להוסיף לה עומק תלת־ממדי.')
+      onNotify(t('בחרו צורה (מלבן, אליפסה, מצולע או צורה מורכבת) כדי להוסיף לה עומק תלת־ממדי.'))
       return
     }
     if (fronts.some((front) => itemLocks[front.id])) {
-      onNotify('הצורה נעולה. שחררו את הנעילה כדי לשנות לה עומק.')
+      onNotify(t('הצורה נעולה. שחררו את הנעילה כדי לשנות לה עומק.'))
       return
     }
     const first = fronts[0]!
@@ -3700,7 +3701,7 @@ export function Workspace({
           // the outline is moved to the plane that was chosen (a shape that was on one is first brought back to the flat outline)
           const laid = isometricShape(source, want === 'side' ? 'flat' : want, from)
           if (!laid) {
-            onNotify('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+            onNotify(t('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.'))
             return
           }
           front = laid
@@ -3715,7 +3716,7 @@ export function Workspace({
           }
           const viewed = viewShape(flat, undefined, clampView(settings.view))
           if (!viewed) {
-            onNotify('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+            onNotify(t('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.'))
             return
           }
           front = viewed
@@ -3743,7 +3744,7 @@ export function Workspace({
         const groupId = front.groupId ?? oldSides.find((side) => side.extrudeOf === front.id)?.groupId ?? newFrameId()
         const result = extrudeSides(front, used, newFrameId, groupId)
         if ('problem' in result) {
-          onNotify(result.problem === 'complex' ? 'הצורה מורכבת מדי כדי להוסיף לה עומק (יותר מדי נקודות או חלקים).' : 'אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.')
+          onNotify(result.problem === 'complex' ? t('הצורה מורכבת מדי כדי להוסיף לה עומק (יותר מדי נקודות או חלקים).') : t('אי אפשר להוסיף עומק לצורה הזו: אין לה קו מתאר סגור.'))
           return
         }
         groups.set(front.id, groupId)
@@ -3776,8 +3777,8 @@ export function Workspace({
       setSelectedId(request.ids[0]!)
     }
     onNotify(settings
-      ? 'נוסף עומק תלת־ממדי. הצדדים הם צורות עצמאיות בקבוצה: לחיצה כפולה על צד בוחרת אותו לבדו, ואפשר לצבוע אותו. לשינוי העומק בחרו שוב את הצורה והפעילו את הפקודה.'
-      : 'העומק הוסר.')
+      ? t('נוסף עומק תלת־ממדי. הצדדים הם צורות עצמאיות בקבוצה: לחיצה כפולה על צד בוחרת אותו לבדו, ואפשר לצבוע אותו. לשינוי העומק בחרו שוב את הצורה והפעילו את הפקודה.')
+      : t('העומק הוסר.'))
   }
   /** the handle of the depth: where the back of the selected solid is (the middle of the front, and the depth in its direction) */
   const depthHandleOf = (): { front: ShapeFrame; cx: number; cy: number; x: number; y: number } | null => {
@@ -4076,10 +4077,10 @@ export function Workspace({
           const midX = f.x + frameWallsNow.left + (f.w - frameWallsNow.left - frameWallsNow.right) / 2
           const midY = f.y + frameWallsNow.top + (f.h - frameWallsNow.top - frameWallsNow.bottom) / 2
           return [
-            { side: 'top' as const, x: midX, y: f.y + frameWallsNow.top, label: 'העובי של הדופן העליונה' },
-            { side: 'bottom' as const, x: midX, y: f.y + f.h - frameWallsNow.bottom, label: 'העובי של הדופן התחתונה' },
-            { side: 'left' as const, x: f.x + frameWallsNow.left, y: midY, label: 'העובי של הדופן השמאלית' },
-            { side: 'right' as const, x: f.x + f.w - frameWallsNow.right, y: midY, label: 'העובי של הדופן הימנית' },
+            { side: 'top' as const, x: midX, y: f.y + frameWallsNow.top, get label() { return t('העובי של הדופן העליונה') } },
+            { side: 'bottom' as const, x: midX, y: f.y + f.h - frameWallsNow.bottom, get label() { return t('העובי של הדופן התחתונה') } },
+            { side: 'left' as const, x: f.x + frameWallsNow.left, y: midY, get label() { return t('העובי של הדופן השמאלית') } },
+            { side: 'right' as const, x: f.x + f.w - frameWallsNow.right, y: midY, get label() { return t('העובי של הדופן הימנית') } },
           ].map((entry) => {
             const [px, py] = layout.toPage(entry.x, entry.y)
             return { ...entry, left: tx + px * zoom, top: ty + py * zoom }
@@ -4098,7 +4099,7 @@ export function Workspace({
           <div
             key={wall.side}
             className={'frame-wall-handle ' + (wall.side === 'top' || wall.side === 'bottom' ? 'vertical' : 'horizontal')}
-            title={wall.label + ' (גרור; Shift: כל הצדדים יחד)'}
+            title={wall.label + t(' (גרור; Shift: כל הצדדים יחד)')}
             style={{ left: wall.left, top: wall.top }}
             onPointerDown={(event) => startFrameWallDrag(event, handle.front.id, wall.side)}
           />
@@ -4107,7 +4108,7 @@ export function Workspace({
           <div
             key={corner.which}
             className="corner-handle frame-corner-handle"
-            title={corner.which === 'outer' ? 'עגל את הפינות החיצוניות של המסגרת (גרור)' : 'עגל את פינות החור של המסגרת (גרור)'}
+            title={corner.which === 'outer' ? t('עגל את הפינות החיצוניות של המסגרת (גרור)') : t('עגל את פינות החור של המסגרת (גרור)')}
             style={{ left: corner.left, top: corner.top }}
             onPointerDown={(event) => startFrameCornerDrag(event, handle.front.id, corner.which)}
           />
@@ -4115,8 +4116,8 @@ export function Workspace({
         <div
           className="extrude-turn-handle"
           role="slider"
-          aria-label="סיבוב תלת־ממדי"
-          title="גרור הצידה כדי לסובב את הגוף סביב הציר האנכי שלו, ולמעלה או למטה כדי לשנות את זווית המבט (Shift: צעדים של 15°). לחיצה כפולה מיישרת אותו מול המבט"
+          aria-label={t('סיבוב תלת־ממדי')}
+          title={t('גרור הצידה כדי לסובב את הגוף סביב הציר האנכי שלו, ולמעלה או למטה כדי לשנות את זווית המבט (Shift: צעדים של 15°). לחיצה כפולה מיישרת אותו מול המבט')}
           style={{ left: turnX, top: turnY }}
           onPointerDown={(event) => startTurnDrag(event, handle.front.id)}
           onDoubleClick={(event) => {
@@ -4130,8 +4131,8 @@ export function Workspace({
           <div
             className="extrude-lean-handle"
             role="slider"
-            aria-label="הטיית החזית"
-            title="גרור כדי להטות את החזית; קרוב לאפס היא מתיישרת (לחיצה כפולה מיישרת מיד)"
+            aria-label={t('הטיית החזית')}
+            title={t('גרור כדי להטות את החזית; קרוב לאפס היא מתיישרת (לחיצה כפולה מיישרת מיד)')}
             style={{ left: lx, top: ly }}
             onPointerDown={(event) => startLeanDrag(event, handle.front.id)}
             onDoubleClick={(event) => {
@@ -4143,8 +4144,8 @@ export function Workspace({
         <div
           className="extrude-handle"
           role="slider"
-          aria-label="עומק וכיוון תלת־ממדי"
-          title="גרור כדי לשנות את העומק ואת הכיוון (Shift: זוויות של 15°)"
+          aria-label={t('עומק וכיוון תלת־ממדי')}
+          title={t('גרור כדי לשנות את העומק ואת הכיוון (Shift: זוויות של 15°)')}
           style={{ left: sx, top: sy }}
           onPointerDown={(event) => startDepthDrag(event, handle.front.id)}
         />
@@ -4193,7 +4194,7 @@ export function Workspace({
     setMultiSel([])
     setSelectedId(front.id)
     if (area) setSelectedPage(pageIndex)
-    onNotify(`נוספה ${SOLID_NAMES[kind]} תלת־ממדית. אפשר לצבוע את הצורה ואת הצדדים, ולשנות את העומק בפקודה „עומק תלת־ממדי”.`)
+    onNotify(t('נוספה {n1} תלת־ממדית. אפשר לצבוע את הצורה ואת הצדדים, ולשנות את העומק בפקודה „עומק תלת־ממדי”.', { n1: SOLID_NAMES[kind] }))
   }
 
   const groupSelectedObjects = () => {
@@ -4412,8 +4413,8 @@ export function Workspace({
       const picture = document.createElement('img')
       picture.onload = () => {
         const assetId = newFrameId()
-        const asset: Asset = { name: 'עוגן.png', mime: 'image/png', dataUrl: anchor.src, width: picture.naturalWidth, height: picture.naturalHeight }
-        const frame: ImageFrame = { id: newFrameId(), label: 'אובייקט מעוגן', x: world.x, y: world.y, w: anchor.w, h: anchor.h, assetId, fit: 'stretch', layerId: creationLayerId }
+        const asset: Asset = { name: t('עוגן.png'), mime: 'image/png', dataUrl: anchor.src, width: picture.naturalWidth, height: picture.naturalHeight }
+        const frame: ImageFrame = { id: newFrameId(), get label() { return t('אובייקט מעוגן') }, x: world.x, y: world.y, w: anchor.w, h: anchor.h, assetId, fit: 'stretch', layerId: creationLayerId }
         pageOps.commit({ assets: { ...assetsRef.current, [assetId]: asset }, images: [...images, frame] })
         setSelectedIdRaw(frame.id)
       }
@@ -4672,7 +4673,7 @@ export function Workspace({
       const { canvas, bounds } = await captureSelection(flattenCandidates)
       const imageAssetId = newFrameId()
       const imageAsset: Asset = {
-        name: `תמונה מאוחדת — ${flattenCandidates.length} אובייקטים.png`,
+        name: t('תמונה מאוחדת — {n1} אובייקטים.png', { n1: flattenCandidates.length }),
         mime: 'image/png',
         dataUrl: canvasDataUrl(canvas),
         width: canvas.width,
@@ -4682,7 +4683,7 @@ export function Workspace({
       const worldOrigin = toWorld(bounds.left, bounds.top)
       const mergedImage: ImageFrame = {
         id: newFrameId(),
-        label: 'תמונה מאוחדת',
+        get label() { return t('תמונה מאוחדת') },
         layerId: topmost.layerId ?? creationLayerId,
         x: worldOrigin.x,
         y: worldOrigin.y,
@@ -4783,7 +4784,7 @@ export function Workspace({
     const topmost = ordered[ordered.length - 1]
     const mergedAssetId = newFrameId()
     const mergedAsset: Asset = {
-      name: `מיזוג — ${loaded.map(({ asset }) => asset.name).join(' + ')}`,
+      name: t('מיזוג — {names}', { names: loaded.map(({ asset }) => asset.name).join(' + ') }),
       mime: 'image/png',
       dataUrl: canvasDataUrl(trimmed.canvas),
       width: trimmed.canvas.width,
@@ -4791,7 +4792,7 @@ export function Workspace({
     }
     const mergedFrame: ImageFrame = {
       id: newFrameId(),
-      label: 'מיזוג תמונות',
+      get label() { return t('מיזוג תמונות') },
       layerId: topmost.layerId ?? creationLayerId,
       x: left + trimmed.left / scale,
       y: top + trimmed.top / scale,
@@ -4967,50 +4968,50 @@ export function Workspace({
   const removeBackgroundFromSelection = () => {
     const image = selectedId ? images.find((candidate) => candidate.id === selectedId) : undefined
     if (!image) {
-      onNotify('בחרו תמונה בעמוד כדי להסיר את הרקע שלה.')
+      onNotify(t('בחרו תמונה בעמוד כדי להסיר את הרקע שלה.'))
       return
     }
     const sourceAsset = assets[image.assetId]
     if (!sourceAsset) {
-      onShowError('הסרת הרקע נכשלה', new Error('קובץ התמונה אינו זמין במסמך.'))
+      onShowError(t('הסרת הרקע נכשלה'), new Error(t('קובץ התמונה אינו זמין במסמך.')))
       return
     }
     if (documentSessionId === null) {
-      onNotify('אי אפשר להסיר רקע במצב תצוגה מקדימה.')
+      onNotify(t('אי אפשר להסיר רקע במצב תצוגה מקדימה.'))
       return
     }
     if (removingBackgroundId !== null) {
-      onNotify('הסרת הרקע כבר מתבצעת.')
+      onNotify(t('הסרת הרקע כבר מתבצעת.'))
       return
     }
     const { id: imageId, assetId: expectedAssetId } = image
     const docId = documentSessionId
     const parentId = editingParentId
     setRemovingBackgroundId(imageId)
-    onNotify('מסיר את הרקע במחשב…')
+    onNotify(t('מסיר את הרקע במחשב…'))
     void removeImageBackground(sourceAsset)
       .then(({ assetId, asset }) => {
         if (!onReplaceImageAsset(docId, parentId, imageId, expectedAssetId, assetId, asset)) {
-          throw new Error('התמונה השתנתה או הוסרה לפני סיום העיבוד, ולכן התוצאה לא הוחלה.')
+          throw new Error(t('התמונה השתנתה או הוסרה לפני סיום העיבוד, ולכן התוצאה לא הוחלה.'))
         }
-        onNotify('הרקע הוסר. אפשר לבטל כדי לחזור לתמונה המקורית.')
+        onNotify(t('הרקע הוסר. אפשר לבטל כדי לחזור לתמונה המקורית.'))
       })
-      .catch((error: unknown) => onShowError('הסרת הרקע נכשלה', error))
+      .catch((error: unknown) => onShowError(t('הסרת הרקע נכשלה'), error))
       .finally(() => setRemovingBackgroundId(null))
   }
 
   const traceImageFromSelection = () => {
     const image = selectedId ? images.find((candidate) => candidate.id === selectedId) : undefined
     if (!image) {
-      onNotify('בחרו תמונה בעמוד כדי להמיר אותה לווקטור.')
+      onNotify(t('בחרו תמונה בעמוד כדי להמיר אותה לווקטור.'))
       return
     }
     if (!assets[image.assetId]) {
-      onShowError('ההמרה לווקטור נכשלה', new Error('קובץ התמונה אינו זמין במסמך.'))
+      onShowError(t('ההמרה לווקטור נכשלה'), new Error(t('קובץ התמונה אינו זמין במסמך.')))
       return
     }
     if (itemLocks[image.id]) {
-      onNotify('התמונה נעולה. שחררו את הנעילה כדי להמיר אותה.')
+      onNotify(t('התמונה נעולה. שחררו את הנעילה כדי להמיר אותה.'))
       return
     }
     setTraceImageId(image.id)
@@ -5022,7 +5023,7 @@ export function Workspace({
     const asset = image ? assets[image.assetId] : undefined
     setTraceImageId(null)
     if (!image || !asset) return
-    const shape = shapeFromTrace(image, request.region, request.result, request.color, newFrameId(), zOfImage(image), `וקטור: ${asset.name}`)
+    const shape = shapeFromTrace(image, request.region, request.result, request.color, newFrameId(), zOfImage(image), t('וקטור: {n1}', { n1: asset.name }))
     const nextImages = request.keepOriginal ? images : images.filter((candidate) => candidate.id !== image.id)
     const nextShapes = [...shapes, shape]
     if (editingParentId) {
@@ -5032,28 +5033,28 @@ export function Workspace({
     }
     setMultiSel([])
     setSelectedId(shape.id)
-    onNotify('התמונה הומרה לצורת ווקטור. אפשר לבטל כדי לחזור לתמונה המקורית.')
+    onNotify(t('התמונה הומרה לצורת ווקטור. אפשר לבטל כדי לחזור לתמונה המקורית.'))
   }
 
   /** the selected text frames (with the rest of their story) become vector shapes: what the letters look like, no longer text */
   const createOutlines = async () => {
     if (editingParentId) {
-      onNotify('אי אפשר להמיר טקסט לווקטור בעמוד אב. עברו לעמוד רגיל.')
+      onNotify(t('אי אפשר להמיר טקסט לווקטור בעמוד אב. עברו לעמוד רגיל.'))
       return
     }
     const chosen = selectedObjectIds().filter((id) => frames.some((frame) => frame.id === id))
     if (chosen.length === 0) {
-      onNotify('בחרו תיבת טקסט כדי להמיר אותה לווקטור.')
+      onNotify(t('בחרו תיבת טקסט כדי להמיר אותה לווקטור.'))
       return
     }
     if (chosen.some((id) => itemLocks[id])) {
-      onNotify('התיבה נעולה. שחררו את הנעילה כדי להמיר אותה לווקטור.')
+      onNotify(t('התיבה נעולה. שחררו את הנעילה כדי להמיר אותה לווקטור.'))
       return
     }
     // a story that goes through several frames is turned all at once: what is left of it would otherwise flow into the frame that stays
     const ids = new Set<string>()
     for (const id of chosen) for (const frame of chainOf(frames, id)) ids.add(frame.id)
-    onNotify('ממיר את הטקסט לווקטור…')
+    onNotify(t('ממיר את הטקסט לווקטור…'))
     try {
       const { prepareExport } = await import('../pdfExport')
       const { outlineFrame, MAX_OUTLINE_LETTERS } = await import('../textOutlines')
@@ -5065,18 +5066,18 @@ export function Workspace({
         if ('shapes' in outcome) {
           made.push(...outcome.shapes)
         } else if (outcome.problem === 'picture') {
-          onNotify(`אי אפשר להמיר את הטקסט הזה לווקטור: ${PICTURE_REASONS[outcome.reason]}.`)
+          onNotify(t('אי אפשר להמיר את הטקסט הזה לווקטור: {n1}.', { n1: PICTURE_REASONS[outcome.reason] }))
           return
         } else if (outcome.problem === 'long') {
-          onNotify(`הטקסט ארוך מדי להמרה לווקטור (${outcome.letters} אותיות, עד ${MAX_OUTLINE_LETTERS}). חלקו אותו לכמה תיבות.`)
+          onNotify(t('הטקסט ארוך מדי להמרה לווקטור ({n1} אותיות, עד {MAX_OUTLINE_LETTERS}). חלקו אותו לכמה תיבות.', { n1: outcome.letters, MAX_OUTLINE_LETTERS }))
           return
         } else if (outcome.problem === 'font') {
-          onNotify('אי אפשר להמיר לווקטור: צורות האותיות של הגופן אינן נגישות.')
+          onNotify(t('אי אפשר להמיר לווקטור: צורות האותיות של הגופן אינן נגישות.'))
           return
         }
       }
       if (made.length === 0) {
-        onNotify('אין בתיבה טקסט שאפשר להמיר לווקטור.')
+        onNotify(t('אין בתיבה טקסט שאפשר להמיר לווקטור.'))
         return
       }
       pageOps.commit({ frames: frames.filter((frame) => !ids.has(frame.id)), shapes: [...shapes, ...made] })
@@ -5087,9 +5088,9 @@ export function Workspace({
         setMultiSel(made.map((shape) => shape.id))
         setSelectedIdRaw(null)
       }
-      onNotify('הטקסט הומר לצורות ווקטור, אות אחת לכל צורה. לבחירת אות בודדת: לחיצה כפולה עליה, או לחיצה עליה בכלי עריכת הנקודות (A). אפשר לבטל עם Ctrl+Z.')
+      onNotify(t('הטקסט הומר לצורות ווקטור, אות אחת לכל צורה. לבחירת אות בודדת: לחיצה כפולה עליה, או לחיצה עליה בכלי עריכת הנקודות (A). אפשר לבטל עם Ctrl+Z.'))
     } catch (error) {
-      onShowError('המרת הטקסט לווקטור נכשלה', error)
+      onShowError(t('המרת הטקסט לווקטור נכשלה'), error)
     }
   }
 
@@ -5525,9 +5526,9 @@ export function Workspace({
     const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)]
     const overlaps = (o: { x: number; y: number; w: number; h: number }) => o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay
     const candidates = [
-      ...visibleFrames.filter((f) => !itemLocks[f.id] && overlaps(f)).map((f) => ({ id: f.id, kind: 'frame' as const, layerId: f.layerId, z: f.z ?? 1, name: 'תיבת טקסט' })),
-      ...visibleImages.filter((im) => !itemLocks[im.id] && overlaps(im)).map((im) => ({ id: im.id, kind: 'image' as const, layerId: im.layerId, z: im.z ?? 0, name: assets[im.assetId]?.name ?? 'תמונה' })),
-      ...visibleShapes.filter((sh) => !itemLocks[sh.id] && overlaps(sh)).map((sh) => ({ id: sh.id, kind: 'shape' as const, layerId: sh.layerId, z: sh.z ?? 1, name: sh.kind === 'path' ? 'נתיב' : 'צורה' })),
+      ...visibleFrames.filter((f) => !itemLocks[f.id] && overlaps(f)).map((f) => ({ id: f.id, kind: 'frame' as const, layerId: f.layerId, z: f.z ?? 1, name: t('תיבת טקסט') })),
+      ...visibleImages.filter((im) => !itemLocks[im.id] && overlaps(im)).map((im) => ({ id: im.id, kind: 'image' as const, layerId: im.layerId, z: im.z ?? 0, name: assets[im.assetId]?.name ?? t('תמונה') })),
+      ...visibleShapes.filter((sh) => !itemLocks[sh.id] && overlaps(sh)).map((sh) => ({ id: sh.id, kind: 'shape' as const, layerId: sh.layerId, z: sh.z ?? 1, name: sh.kind === 'path' ? t('נתיב') : t('צורה') })),
     ]
     if (candidates.length === 0) return null
     const top = candidates.reduce((best, c) => ((rank.get(c.id) ?? 0) > (rank.get(best.id) ?? 0) ? c : best))
@@ -5637,7 +5638,7 @@ export function Workspace({
     magneticTraceRef.current = null
     setMagneticTracePreview(null)
     if (closed.length < 3) {
-      onNotify('לא נוצרה בחירה. עקבו אחרי קצה בתמונה וסגרו אזור גדול יותר.')
+      onNotify(t('לא נוצרה בחירה. עקבו אחרי קצה בתמונה וסגרו אזור גדול יותר.'))
       return
     }
     const selection: MagneticLassoSelection = { ...magneticPreviewOf({ ...trace, points: closed, tail: [] }), loading: false, pointerDown: false, edgeMap }
@@ -5667,21 +5668,21 @@ export function Workspace({
     if (activeTrace) {
       const edgeMap = activeTrace.edgeMap
       if (!edgeMap) {
-        onNotify('הלאסו עדיין מנתח את התמונה. המתינו לסיום הניתוח ואז המשיכו.')
+        onNotify(t('הלאסו עדיין מנתח את התמונה. המתינו לסיום הניתוח ואז המשיכו.'))
         return
       }
       if (!image || !element || image.id !== activeTrace.imageId || image.assetId !== activeTrace.assetId) {
-        onNotify('המשיכו את קו הלאסו על אותה תמונה.')
+        onNotify(t('המשיכו את קו הלאסו על אותה תמונה.'))
         return
       }
       if (itemLocks[image.id] || image.hidden || element.classList.contains('locked')) {
-        onNotify('אי אפשר לערוך תמונה נעולה או מוסתרת.')
+        onNotify(t('אי אפשר לערוך תמונה נעולה או מוסתרת.'))
         return
       }
       const asset = assets[image.assetId]
       const pixel = asset ? imagePixelAt(image, asset, toWorld(event.clientX, event.clientY)) : null
       if (!asset || !pixel) {
-        onNotify('המשיכו על החלק הגלוי של אותה תמונה.')
+        onNotify(t('המשיכו על החלק הגלוי של אותה תמונה.'))
         return
       }
       const first = activeTrace.points[0]
@@ -5710,21 +5711,21 @@ export function Workspace({
       return
     }
     if (!element || !image) {
-      onNotify('כדי להשתמש בלאסו המגנטי, התחילו בלחיצה על תמונה.')
+      onNotify(t('כדי להשתמש בלאסו המגנטי, התחילו בלחיצה על תמונה.'))
       return
     }
     if (itemLocks[image.id] || image.hidden || element.classList.contains('locked')) {
-      onNotify('אי אפשר לערוך תמונה נעולה או מוסתרת.')
+      onNotify(t('אי אפשר לערוך תמונה נעולה או מוסתרת.'))
       return
     }
     const asset = assets[image.assetId]
     if (!asset?.dataUrl) {
-      onShowError('לא ניתן לבחור אזור בתמונה', new Error('נתוני התמונה אינם זמינים במסמך.'))
+      onShowError(t('לא ניתן לבחור אזור בתמונה'), new Error(t('נתוני התמונה אינם זמינים במסמך.')))
       return
     }
     const startPoint = imagePixelAt(image, asset, toWorld(event.clientX, event.clientY))
     if (!startPoint) {
-      onNotify('התחילו על החלק הגלוי של התמונה.')
+      onNotify(t('התחילו על החלק הגלוי של התמונה.'))
       return
     }
     const trace: MagneticLassoTrace = {
@@ -5776,7 +5777,7 @@ export function Workspace({
       if (magneticTraceRef.current !== trace) return
       magneticTraceRef.current = null
       setMagneticTracePreview(null)
-      onShowError('זיהוי הקצוות נכשל', error)
+      onShowError(t('זיהוי הקצוות נכשל'), error)
     })
   }
 
@@ -6059,7 +6060,7 @@ export function Workspace({
       ? paintShapes(shapes, new Set(solids.map((front) => front.id)), colorTarget === 'stroke' ? { ...paint, ...(solids.some((front) => front.strokeWidth === 0) ? { strokeWidth: 0.25 } : {}) } : paint, newFrameId)
       : null
     pageOps.commit({
-      colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: `דגימה ${colorSamples.length + 1}` }],
+      colorSamples: [...colorSamples, { id: globalThis.crypto?.randomUUID?.() ?? `sample-${Date.now()}`, color, label: t('דגימה {n1}', { n1: colorSamples.length + 1 }) }],
       ...(painted && !editingParentId ? { shapes: painted } : {}),
     })
     // on a parent page the shapes are those of the parent
@@ -6321,7 +6322,7 @@ export function Workspace({
       const repaired = repairImageStroke(source, stroke.points, stroke.radius)
       const nextAssetId = newFrameId()
       const nextAsset: Asset = {
-        name: `${asset.name.replace(/\.png$/i, '')} — תיקון.png`,
+        name: t('{n1} — תיקון.png', { n1: asset.name.replace(/\.png$/i, '') }),
         mime: 'image/png',
         dataUrl: canvasDataUrl(repaired),
         width: repaired.width,
@@ -6397,7 +6398,7 @@ export function Workspace({
       const painted = paintImageStroke(source, stroke.points, stroke.radius, stroke.color, stroke.strength)
       const nextAssetId = newFrameId()
       const nextAsset: Asset = {
-        name: `${asset.name.replace(/\.png$/i, '')} — צביעה.png`,
+        name: t('{n1} — צביעה.png', { n1: asset.name.replace(/\.png$/i, '') }),
         mime: 'image/png',
         dataUrl: canvasDataUrl(painted),
         width: painted.width,
@@ -6435,13 +6436,13 @@ export function Workspace({
     const selection = magneticSelectionRef.current
     if (!selection || magneticBusy) return
     if (documentSessionId === null) {
-      onNotify('אי אפשר לערוך תמונות במצב תצוגה מקדימה.')
+      onNotify(t('אי אפשר לערוך תמונות במצב תצוגה מקדימה.'))
       return
     }
     const image = images.find((candidate) => candidate.id === selection.imageId)
     const asset = assetsRef.current[selection.assetId]
     if (!image || image.assetId !== selection.assetId || !asset) {
-      onShowError('הפעולה נכשלה', new Error('התמונה השתנתה או הוסרה לאחר יצירת הבחירה.'))
+      onShowError(t('הפעולה נכשלה'), new Error(t('התמונה השתנתה או הוסרה לאחר יצירת הבחירה.')))
       setMagneticSelection(null)
       magneticSelectionRef.current = null
       setMagneticAdjustMode(null)
@@ -6449,7 +6450,7 @@ export function Workspace({
       return
     }
     if (asset.mime === 'image/gif') {
-      onNotify('הלאסו המגנטי אינו עורך GIF, כדי לשמור על האנימציה. המירו את התמונה ל-PNG או JPEG ונסו שוב.')
+      onNotify(t('הלאסו המגנטי אינו עורך GIF, כדי לשמור על האנימציה. המירו את התמונה ל-PNG או JPEG ונסו שוב.'))
       return
     }
     setMagneticBusy(true)
@@ -6464,18 +6465,18 @@ export function Workspace({
         magneticFillColor,
       )
       const blob = await new Promise<Blob>((resolve, reject) => {
-        output.toBlob((result) => result ? resolve(result) : reject(new Error('לא ניתן ליצור תמונת PNG מהבחירה.')), 'image/png')
+        output.toBlob((result) => result ? resolve(result) : reject(new Error(t('לא ניתן ליצור תמונת PNG מהבחירה.'))), 'image/png')
       })
-      if (blob.size > MAX_IMAGE_BYTES) throw new Error('התמונה שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.')
+      if (blob.size > MAX_IMAGE_BYTES) throw new Error(t('התמונה שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.'))
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
-        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('לא ניתן לקרוא את תמונת PNG שנוצרה.'))
-        reader.onerror = () => reject(reader.error ?? new Error('לא ניתן לקרוא את תמונת PNG שנוצרה.'))
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error(t('לא ניתן לקרוא את תמונת PNG שנוצרה.')))
+        reader.onerror = () => reject(reader.error ?? new Error(t('לא ניתן לקרוא את תמונת PNG שנוצרה.')))
         reader.readAsDataURL(blob)
       })
       const nextAssetId = newFrameId()
-      const baseName = asset.name.replace(/\.[^.]+$/, '') || 'תמונה'
-      const actionName = operation === 'fill' ? 'מילוי' : operation === 'delete' ? 'מחיקה' : 'מסיכה'
+      const baseName = asset.name.replace(/\.[^.]+$/, '') || t('תמונה')
+      const actionName = operation === 'fill' ? t('מילוי') : operation === 'delete' ? t('מחיקה') : t('מסיכה')
       const nextAsset: Asset = {
         name: `${baseName} — ${actionName}.png`,
         mime: 'image/png',
@@ -6484,17 +6485,17 @@ export function Workspace({
         height: output.height,
       }
       if (!onReplaceImageAsset(documentSessionId, editingParentId, image.id, selection.assetId, nextAssetId, nextAsset)) {
-        throw new Error('התמונה השתנתה או הוסרה לפני סיום הפעולה, ולכן התוצאה לא הוחלה.')
+        throw new Error(t('התמונה השתנתה או הוסרה לפני סיום הפעולה, ולכן התוצאה לא הוחלה.'))
       }
       magneticSelectionRef.current = null
       setMagneticSelection(null)
       setSelectedId(image.id)
       activateTool('select')
-      onNotify(operation === 'fill' ? 'האזור הנבחר מולא. אפשר לבטל כדי לחזור לתמונה המקורית.' : operation === 'delete'
-        ? 'האזור הנבחר נמחק. אפשר לבטל כדי לחזור לתמונה המקורית.'
-        : 'נשאר רק האזור הנבחר. אפשר לבטל כדי לחזור לתמונה המקורית.')
+      onNotify(operation === 'fill' ? t('האזור הנבחר מולא. אפשר לבטל כדי לחזור לתמונה המקורית.') : operation === 'delete'
+        ? t('האזור הנבחר נמחק. אפשר לבטל כדי לחזור לתמונה המקורית.')
+        : t('נשאר רק האזור הנבחר. אפשר לבטל כדי לחזור לתמונה המקורית.'))
     } catch (error) {
-      onShowError('עריכת הבחירה נכשלה', error)
+      onShowError(t('עריכת הבחירה נכשלה'), error)
     } finally {
       setMagneticBusy(false)
     }
@@ -6624,8 +6625,8 @@ export function Workspace({
         w: (trimmed.canvas.width / original.width) * box.w,
         h: (trimmed.canvas.height / original.height) * box.h,
       })
-      const remainderFrame = trimmedRemainder ? imageFor(trimmedRemainder.canvas, `שארית — ${target.name}`) : null
-      const pieceFrame = imageFor(trimmedPiece.canvas, `חלק חתוך — ${target.name}`)
+      const remainderFrame = trimmedRemainder ? imageFor(trimmedRemainder.canvas, t('שארית — {n1}', { n1: target.name })) : null
+      const pieceFrame = imageFor(trimmedPiece.canvas, t('חלק חתוך — {n1}', { n1: target.name }))
       const placed = (frame: ImageFrame, box: typeof sourceBox, z: number): ImageFrame => ({ ...frame, ...box, z })
       const nextImages = images.filter((image) => image.id !== (target.kind === 'image' ? target.id : ''))
       const nextShapes = shapes.filter((shape) => shape.id !== (target.kind === 'shape' ? target.id : ''))
@@ -10218,29 +10219,29 @@ export function Workspace({
   }
 
   const createDesign = (name: string): DesignResult => {
-    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר ליצור עיצוב כאן.' }
+    if (editingParentId || previewMode) return { ok: false, message: t('אי אפשר ליצור עיצוב כאן.') }
     const parts = designFromSelection()
-    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: 'בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.' }
+    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: t('בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.') }
     const existing = new Set((doc.designs ?? []).map((design) => design.name))
     let unique = name
     for (let n = 2; existing.has(unique); n++) unique = `${name} ${n}`
     saveDesigns([...(doc.designs ?? []), { id: newFrameId(), name: unique, ...parts }])
-    return { ok: true, message: `העיצוב „${unique}” נוצר.` }
+    return { ok: true, message: t('העיצוב „{unique}” נוצר.', { unique }) }
   }
 
   const updateDesign = (id: string): DesignResult => {
-    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר לעדכן עיצוב כאן.' }
+    if (editingParentId || previewMode) return { ok: false, message: t('אי אפשר לעדכן עיצוב כאן.') }
     const parts = designFromSelection()
-    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: 'בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.' }
+    if (!parts.object && !parts.text && !parts.table) return { ok: false, message: t('בחרו קודם אובייקט, תיבת טקסט עם טקסט או טבלה.') }
     saveDesigns((doc.designs ?? []).map((design) => (design.id === id ? { ...design, ...parts } : design)))
-    return { ok: true, message: 'העיצוב עודכן מהבחירה.' }
+    return { ok: true, message: t('העיצוב עודכן מהבחירה.') }
   }
 
   /** the chosen parts of a design given to what is selected: each part to what it fits */
   const applyDesign = (id: string, partIds: DesignPartId[]): DesignResult => {
-    if (editingParentId || previewMode) return { ok: false, message: 'אי אפשר להחיל עיצוב כאן.' }
+    if (editingParentId || previewMode) return { ok: false, message: t('אי אפשר להחיל עיצוב כאן.') }
     const design = (doc.designs ?? []).find((item) => item.id === id)
-    if (!design) return { ok: false, message: 'העיצוב לא נמצא.' }
+    if (!design) return { ok: false, message: t('העיצוב לא נמצא.') }
     const chosen = new Set(partIds)
     const sel = designSelection()
     let nextShapes = shapes
@@ -10255,7 +10256,7 @@ export function Workspace({
       if (shapeIds.size + imageIds.size > 0) {
         nextShapes = nextShapes.map((shape) => (shapeIds.has(shape.id) ? applyToShape(shape, settings) : shape))
         nextImages = nextImages.map((image) => (imageIds.has(image.id) ? applyToImage(image, settings) : image))
-      } else gone.push('אובייקט')
+      } else gone.push(t('אובייקט'))
     }
     // the look of a table
     if (design.table && [...chosen].some((part) => part.startsWith('table:'))) {
@@ -10266,7 +10267,7 @@ export function Workspace({
           const table = recalcTable(applyDesignToTable(shape.table, design, chosen))
           return { ...shape, table, h: layoutOfShape({ table, w: shape.w })?.height ?? shape.h }
         })
-      } else gone.push('טבלה')
+      } else gone.push(t('טבלה'))
     }
     // the styles of a text: the paragraph styles by place, then the nested styles of their openings
     if (design.text && (chosen.has('text:sequence') || chosen.has('text:nested'))) {
@@ -10294,13 +10295,13 @@ export function Workspace({
           next = { ...next, runs }
         }
         nextFrames = frames.map((frame) => (frame.id === head.id ? next : frame))
-      } else gone.push('טקסט')
+      } else gone.push(t('טקסט'))
     }
     if (nextFrames === frames && nextShapes === shapes && nextImages === images) {
-      return { ok: false, message: gone.length ? `בבחירה אין ${gone.join(' או ')} שהחלקים שנבחרו מתאימים להם.` : 'לא נבחרו חלקים להחלה.' }
+      return { ok: false, message: gone.length ? t('בבחירה אין {n1} שהחלקים שנבחרו מתאימים להם.', { n1: gone.join(t(' או ')) }) : t('לא נבחרו חלקים להחלה.') }
     }
     commitMultiObjectChange({ ...(nextFrames !== frames ? { frames: nextFrames } : {}), ...(nextShapes !== shapes ? { shapes: nextShapes } : {}), ...(nextImages !== images ? { images: nextImages } : {}) }, `design:${id}`)
-    return { ok: true, message: gone.length ? `העיצוב הוחל. לא היה בבחירה: ${gone.join(', ')}.` : 'העיצוב הוחל על הבחירה.' }
+    return { ok: true, message: gone.length ? t('העיצוב הוחל. לא היה בבחירה: {n1}.', { n1: gone.join(', ') }) : t('העיצוב הוחל על הבחירה.') }
   }
 
   /** the nested style rules the selected paragraphs (or the whole story) show in the way their openings are styled */
@@ -10318,10 +10319,10 @@ export function Workspace({
 
   /** a paragraph sequence given to the paragraphs selected (or to the whole story); returns what went wrong, or null */
   const applyParagraphSequence = (sequences: ParagraphSequence[], sequenceId: string, scope: 'selection' | 'story'): string | null => {
-    if (editingParentId || previewMode) return 'אי אפשר להחיל רצף כאן.'
+    if (editingParentId || previewMode) return t('אי אפשר להחיל רצף כאן.')
     const target = sequenceTarget()
     const sequence = sequences.find((item) => item.id === sequenceId)
-    if (!target || !sequence) return 'בחרו תיבת טקסט עם טקסט.'
+    if (!target || !sequence) return t('בחרו תיבת טקסט עם טקסט.')
     const indexes = scope === 'selection' && target.hasSelection ? target.indexes : target.all
     const paragraphs = target.head.text.split('\n')
     const given = assignSequence(indexes.map((index) => paragraphs[index] ?? ''), sequence)
@@ -10334,14 +10335,14 @@ export function Workspace({
       next = restyleParagraphs(next, [index], paragraphStyleIdOf(next, index) ?? '', styleId)
       changed++
     })
-    if (changed === 0) return 'הרצף ריק או שהסגנונות שבו נמחקו: אין מה להחיל.'
+    if (changed === 0) return t('הרצף ריק או שהסגנונות שבו נמחקו: אין מה להחיל.')
     pageOps.commit({ doc: { ...doc, sequences: sequences.length ? sequences : undefined }, frames: frames.map((frame) => (frame.id === target.head.id ? next : frame)) })
     setSequenceDialogOpen(false)
     return null
   }
 
   const saveParagraphSequences = (sequences: ParagraphSequence[]): string | null => {
-    if (editingParentId || previewMode) return 'אי אפשר לשמור רצפים כאן.'
+    if (editingParentId || previewMode) return t('אי אפשר לשמור רצפים כאן.')
     pageOps.commit({ doc: { ...doc, sequences: sequences.length ? sequences : undefined } })
     setSequenceDialogOpen(false)
     return null
@@ -10439,7 +10440,7 @@ export function Workspace({
     const head = panelHead
     const range = head && textEditing && textSel && textSel.headId === head.id ? textSel : null
     if (!head || !range) {
-      onParagraphStylesChange([...paragraphStyles, { id, name: `סגנון ${paragraphStyles.length + 1}`, basedOnId: 'body', patch: {} }])
+      onParagraphStylesChange([...paragraphStyles, { id, name: t('סגנון {n1}', { n1: paragraphStyles.length + 1 }), basedOnId: 'body', patch: {} }])
       return
     }
     // from text (as a new style does in professional layout tools): the style takes what the paragraph carries beyond its own style, is based on
@@ -10448,7 +10449,7 @@ export function Workspace({
     const baseId = typeof highlightedStyleId === 'string' ? highlightedStyleId : paragraphStyles[0]?.id
     const base = baseId ? resolveParagraphStyle(baseId) : {}
     const overrides = indexes.map((index) => paragraphOverrides(head, index, base)).find((found) => Object.keys(found).length > 0) ?? {}
-    const created: ParagraphStyleRecord = { id, name: `סגנון ${paragraphStyles.length + 1}`, ...(baseId ? { basedOnId: baseId } : {}), patch: overrides }
+    const created: ParagraphStyleRecord = { id, name: t('סגנון {n1}', { n1: paragraphStyles.length + 1 }), ...(baseId ? { basedOnId: baseId } : {}), patch: overrides }
     const nextStyles = [...paragraphStyles, created]
     onParagraphStylesChange(nextStyles)
     onFramesChange(frames.map((frame) => (frame.id === head.id ? restyleParagraphs(frame, indexes, baseId ?? '', id, true, nextStyles) : frame)), `paragraph-style-create:${id}`)
@@ -10872,7 +10873,7 @@ export function Workspace({
   }
   const createParent = () => {
     const prefix = nextParentPrefix()
-    const parent: ParentPage = { id: newFrameId(), prefix, name: `אב ${prefix}`, w: doc.width, h: doc.height, frames: [], images: [], shapes: [] }
+    const parent: ParentPage = { id: newFrameId(), prefix, name: t('אב {prefix}', { prefix }), w: doc.width, h: doc.height, frames: [], images: [], shapes: [] }
     onParentsChange([...parents, parent])
     onSelectParent(parent.id)
     onEditParent(parent.id)
@@ -11208,54 +11209,54 @@ export function Workspace({
       {(magneticTracePreview || magneticSelection) && (
         <div className="magnetic-lasso-banner" role="status">
           <div className="magnetic-lasso-title">
-            <b>{magneticBusy ? 'מעבד את הבחירה…' : magneticTracePreview ? magneticTracePreview.loading ? 'מנתח את קצוות התמונה…' : 'עקבו אחרי קצה האובייקט: הקו נצמד אליו. לחיצה מציבה עוגן' : magneticAdjustMode ? magneticAdjustMode === 'expand' ? 'מצב פלוס: הניחו את העיגול בתוך הצורה וגררו; הקו נדחף החוצה אל הקצה' : 'מצב מינוס: קרבו את העיגול לקו מבחוץ וגררו; הקו נדחף פנימה אל הקצה' : 'האזור נבחר. בחרו פעולה לתמונה.'}</b>
+            <b>{magneticBusy ? t('מעבד את הבחירה…') : magneticTracePreview ? magneticTracePreview.loading ? t('מנתח את קצוות התמונה…') : t('עקבו אחרי קצה האובייקט: הקו נצמד אליו. לחיצה מציבה עוגן') : magneticAdjustMode ? magneticAdjustMode === 'expand' ? t('מצב פלוס: הניחו את העיגול בתוך הצורה וגררו; הקו נדחף החוצה אל הקצה') : t('מצב מינוס: קרבו את העיגול לקו מבחוץ וגררו; הקו נדחף פנימה אל הקצה') : t('האזור נבחר. בחרו פעולה לתמונה.')}</b>
           </div>
           {magneticSelection && (
             <div className="magnetic-lasso-actions">
               <button
                 className={'btn small' + (magneticAdjustMode === 'expand' ? ' magnetic-adjust-active' : '')}
                 aria-pressed={magneticAdjustMode === 'expand'}
-                title="גררו ליד קו הבחירה כדי להרחיב אותו מקומית"
+                title={t('גררו ליד קו הבחירה כדי להרחיב אותו מקומית')}
                 disabled={magneticBusy}
                 onClick={() => {
                   setMagneticAdjustMode((mode) => mode === 'expand' ? null : 'expand')
                   setMagneticBrushCursor(null)
                 }}
-              >הרחבה (+)</button>
+              >{t('הרחבה (+)')}</button>
               <button
                 className={'btn small' + (magneticAdjustMode === 'contract' ? ' magnetic-adjust-active' : '')}
                 aria-pressed={magneticAdjustMode === 'contract'}
-                title="גררו ליד קו הבחירה כדי לצמצם אותו מקומית"
+                title={t('גררו ליד קו הבחירה כדי לצמצם אותו מקומית')}
                 disabled={magneticBusy}
                 onClick={() => {
                   setMagneticAdjustMode((mode) => mode === 'contract' ? null : 'contract')
                   setMagneticBrushCursor(null)
                 }}
-              >צמצום (−)</button>
+              >{t('צמצום (−)')}</button>
               {magneticAdjustMode && <span className="magnetic-brush-size" aria-live="polite">
-                גודל המברשת: {magneticBrushRadius * 2} פיקסלים · [ הקטנה · ] הגדלה
+                {t('גודל המברשת: {size} פיקסלים · [ הקטנה · ] הגדלה', { size: magneticBrushRadius * 2 })}
               </span>}
-              <label className="magnetic-lasso-color" title="צבע המילוי">
-                צבע מילוי
+              <label className="magnetic-lasso-color" title={t('צבע המילוי')}>
+                {t('צבע מילוי')}
                 <input type="color" value={magneticFillColor} onChange={(event) => setMagneticFillColor(event.target.value)} disabled={magneticBusy} />
               </label>
-              <button className="btn small" disabled={magneticBusy} onClick={() => void applyMagneticSelection('fill')}>מילוי</button>
-              <button className="btn small" disabled={magneticBusy} title="מוחק את הפיקסלים בתוך האזור הנבחר" onClick={() => void applyMagneticSelection('delete')}>מחק אזור</button>
-              <button className="btn small" disabled={magneticBusy} title="משאיר גלוי רק את האזור הנבחר ומסתיר את יתר התמונה" onClick={() => void applyMagneticSelection('mask')}>השאר בחירה (מסיכה)</button>
+              <button className="btn small" disabled={magneticBusy} onClick={() => void applyMagneticSelection('fill')}>{t('מילוי')}</button>
+              <button className="btn small" disabled={magneticBusy} title={t('מוחק את הפיקסלים בתוך האזור הנבחר')} onClick={() => void applyMagneticSelection('delete')}>{t('מחק אזור')}</button>
+              <button className="btn small" disabled={magneticBusy} title={t('משאיר גלוי רק את האזור הנבחר ומסתיר את יתר התמונה')} onClick={() => void applyMagneticSelection('mask')}>{t('השאר בחירה (מסיכה)')}</button>
               <button className="btn small" disabled={magneticBusy} onClick={() => {
                 magneticSelectionRef.current = null
                 setMagneticSelection(null)
                 setMagneticAdjustMode(null)
                 setMagneticBrushCursor(null)
-              }}>סגור בחירה</button>
+              }}>{t('סגור בחירה')}</button>
             </div>
           )}
           <div className="place-hint">
             {magneticTracePreview
-              ? magneticTracePreview.loading ? 'טוען את התמונה ומחשב את הקצוות. אפשר לבטל עם Esc.' : `Backspace מוחק את העוגן האחרון · לחיצה כפולה, Enter או לחיצה על נקודת ההתחלה סוגרים · [ ] משנים את הרוחב (${magneticWidth} פיקסלים) · Esc מבטל.`
+              ? magneticTracePreview.loading ? t('טוען את התמונה ומחשב את הקצוות. אפשר לבטל עם Esc.') : t('Backspace מוחק את העוגן האחרון · לחיצה כפולה, Enter או לחיצה על נקודת ההתחלה סוגרים · [ ] משנים את הרוחב ({magneticWidth} פיקסלים) · Esc מבטל.', { magneticWidth })
               : magneticAdjustMode
-                ? 'העיגול הוא אזור ההשפעה של המברשת. ברגע שהוא נוגע בקו הוא דוחף אותו: פלוס מתוך הצורה החוצה, מינוס מבחוץ פנימה, עד הקצה של האובייקט.'
-              : 'הפעולות משנות את התמונה ומחליפות את קובץ התמונה במסמך; Ctrl+Z מחזיר את המקור.'}
+                ? t('העיגול הוא אזור ההשפעה של המברשת. ברגע שהוא נוגע בקו הוא דוחף אותו: פלוס מתוך הצורה החוצה, מינוס מבחוץ פנימה, עד הקצה של האובייקט.')
+              : t('הפעולות משנות את התמונה ומחליפות את קובץ התמונה במסמך; Ctrl+Z מחזיר את המקור.')}
           </div>
         </div>
       )}
@@ -11266,35 +11267,35 @@ export function Workspace({
             <b>
               <bdi>{placingImages[0].asset.name}</bdi>
             </b>{' '}
-            · {placingImages[0].asset.width}×{placingImages[0].asset.height} פיקסלים
-            {placingImages.length > 1 && <> · עוד {placingImages.length - 1} תמונות בתור</>}
+            · {t('{width}×{height} פיקסלים', { width: placingImages[0].asset.width, height: placingImages[0].asset.height })}
+            {placingImages.length > 1 && <> · {t('עוד {count} תמונות בתור', { count: placingImages.length - 1 })}</>}
           </div>
           <button className="btn small" onClick={() => onPlacingImagesChange([])}>
-            בטל
+            {t('בטל')}
           </button>
-          <div className="place-hint">לחץ על העמוד כדי למקם את התמונה בגודלה המקורי, או גרור מלבן כדי להגדיר את הגודל. Esc = ביטול.</div>
+          <div className="place-hint">{t('לחץ על העמוד כדי למקם את התמונה בגודלה המקורי, או גרור מלבן כדי להגדיר את הגודל. Esc = ביטול.')}</div>
         </div>
       )}
       {placing && (
         <div className="place-banner" role="status">
           <div className="place-title">
-            <b>{placing.name}</b> · {countWords(placing.text).toLocaleString('he-IL')} מילים מוכנות להצבה
+            <b>{placing.name}</b> · {t('{count} מילים מוכנות להצבה', { count: countWords(placing.text).toLocaleString(localeTag()) })}
           </div>
-          <div className="place-modes" role="group" aria-label="אופן הזרימה">
-            <button className={flowMode === 'auto' ? 'on' : ''} title="הטקסט זורם מעמוד לעמוד ומוסיף עמודים לפי הצורך" onClick={() => setFlowMode('auto')}>
-              זרימה אוטומטית
+          <div className="place-modes" role="group" aria-label={t('אופן הזרימה')}>
+            <button className={flowMode === 'auto' ? 'on' : ''} title={t('הטקסט זורם מעמוד לעמוד ומוסיף עמודים לפי הצורך')} onClick={() => setFlowMode('auto')}>
+              {t('זרימה אוטומטית')}
             </button>
-            <button className={flowMode === 'semi' ? 'on' : ''} title="ממלא תיבה ומחכה ללחיצה הבאה" onClick={() => setFlowMode('semi')}>
-              חצי-אוטומטית
+            <button className={flowMode === 'semi' ? 'on' : ''} title={t('ממלא תיבה ומחכה ללחיצה הבאה')} onClick={() => setFlowMode('semi')}>
+              {t('חצי-אוטומטית')}
             </button>
-            <button className={flowMode === 'single' ? 'on' : ''} title="תיבה אחת; מה שלא נכנס נשאר כגלישה" onClick={() => setFlowMode('single')}>
-              תיבה אחת
+            <button className={flowMode === 'single' ? 'on' : ''} title={t('תיבה אחת; מה שלא נכנס נשאר כגלישה')} onClick={() => setFlowMode('single')}>
+              {t('תיבה אחת')}
             </button>
           </div>
           <button className="btn small" onClick={() => onPlacingChange(null)}>
-            סגור
+            {t('סגור')}
           </button>
-          <div className="place-hint">לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.</div>
+          <div className="place-hint">{t('לחץ על העמוד כדי למקם את הטקסט, או גרור מלבן שיגדיר את התיבה. אפשר גם ללחוץ על תיבה ריקה. Shift = חצי-אוטומטית · Alt = אוטומטית · Esc = ביטול.')}</div>
         </div>
       )}
       {tool === 'page' && !previewMode && !space && (
@@ -11319,7 +11320,7 @@ export function Workspace({
               {doc.name}{dirty ? ' *' : ''} @ <bdi dir="ltr">{formatZoom(zoom)}</bdi>
             </span>
             {onClose && (
-              <button className="doc-tab-close" aria-label="סגור מסמך" onClick={onClose}>
+              <button className="doc-tab-close" aria-label={t('סגור מסמך')} onClick={onClose}>
                 ×
               </button>
             )}
@@ -11341,9 +11342,9 @@ export function Workspace({
         tableText={toolbarTableText}
         onFontPreview={(family) => setFontPreview(family && selFrame && !footnoteSel ? { frameId: selFrame.id, family } : null)}
         fontSizeControl={selFrame && toolbarTextStyle ? (
-          <div className="context-font-size-field" role="group" aria-label="גודל גופן">
+          <div className="context-font-size-field" role="group" aria-label={t('גודל גופן')}>
             <NumberField
-              ariaLabel="גודל גופן"
+              ariaLabel={t('גודל גופן')}
               value={toolbarTextStyle.fontSize}
               unit="px"
               unitLabel="pt"
@@ -11408,7 +11409,7 @@ export function Workspace({
             if (!context) return
             const point = whitePointOfBorder(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
             if (point === null) {
-              onNotify('לא נמצא רקע בהיר סביב התמונה: היא לבנה כבר, או שאין לה רקע. אפשר לכוונן את נקודת הלבן ידנית.')
+              onNotify(t('לא נמצא רקע בהיר סביב התמונה: היא לבנה כבר, או שאין לה רקע. אפשר לכוונן את נקודת הלבן ידנית.'))
               return
             }
             updateImage(image.id, { whitePoint: point }, `context-white-point:${image.id}`)
@@ -11433,9 +11434,9 @@ export function Workspace({
           if (selShape) updateShape(selShape.id, { strokeWidth: value }, `context-stroke:${selShape.id}`)
         }}
       >
-      {toolbarTable && toolbarTableText && <div className="context-text-controls table-text-format-controls" role="group" aria-label="עיצוב טקסט בתאים">
-          <div aria-label="גופן הטבלה" title="גופן"><FontPicker className="table-font-picker" value={toolbarTableText.fontFamily} families={fontCatalog.families} onChange={(fontFamily) => applyTableFormatting({ fontFamily })} /></div>
-          <select aria-label="משקל וסגנון הגופן בטבלה" title="משקל וסגנון" value={`${toolbarTableText.weight}|${toolbarTableText.italic ? 1 : 0}`} onChange={(event) => {
+      {toolbarTable && toolbarTableText && <div className="context-text-controls table-text-format-controls" role="group" aria-label={t('עיצוב טקסט בתאים')}>
+          <div aria-label={t('גופן הטבלה')} title={t('גופן')}><FontPicker className="table-font-picker" value={toolbarTableText.fontFamily} families={fontCatalog.families} onChange={(fontFamily) => applyTableFormatting({ fontFamily })} /></div>
+          <select aria-label={t('משקל וסגנון הגופן בטבלה')} title={t('משקל וסגנון')} value={`${toolbarTableText.weight}|${toolbarTableText.italic ? 1 : 0}`} onChange={(event) => {
             const [weight, italic] = event.target.value.split('|')
             applyTableFormatting({ weight: Number(weight), italic: italic === '1' })
           }}>
@@ -11443,17 +11444,17 @@ export function Workspace({
               const faces = fontCatalog.families.find((font) => font.family === toolbarTableText.fontFamily)?.faces ?? []
               const current = `${toolbarTableText.weight}|${toolbarTableText.italic ? 1 : 0}`
               return <>
-                {!faces.some((face) => `${face.weight}|${face.italic ? 1 : 0}` === current) && <option value={current}>{weightName(toolbarTableText.weight)}{toolbarTableText.italic ? ' · נטוי' : ''}</option>}
-                {faces.map((face) => <option key={`${face.weight}|${face.italic}`} value={`${face.weight}|${face.italic ? 1 : 0}`}>{weightName(face.weight)}{face.italic ? ' · נטוי' : ''} ({face.style})</option>)}
+                {!faces.some((face) => `${face.weight}|${face.italic ? 1 : 0}` === current) && <option value={current}>{weightName(toolbarTableText.weight)}{toolbarTableText.italic ? t(' · נטוי') : ''}</option>}
+                {faces.map((face) => <option key={`${face.weight}|${face.italic}`} value={`${face.weight}|${face.italic ? 1 : 0}`}>{weightName(face.weight)}{face.italic ? t(' · נטוי') : ''} ({face.style})</option>)}
               </>
             })()}
           </select>
-          <input aria-label="צבע גופן בטבלה" title="צבע גופן" type="color" value={toolbarTableText.color ?? '#000000'} onChange={(event) => applyTableFormatting({ color: event.target.value })} />
-          <button className={'context-command' + (toolbarTableText.weight >= 600 ? ' active' : '')} title="מודגש" onClick={() => applyTableFormatting({ weight: toolbarTableText.weight >= 600 ? 400 : 700 })}>B</button>
-          <button className={'context-command' + (toolbarTableText.italic ? ' active' : '')} title="נטוי" onClick={() => applyTableFormatting({ italic: !toolbarTableText.italic })}>I</button>
-          <div className="context-font-size-field" role="group" aria-label="גודל גופן">
+          <input aria-label={t('צבע גופן בטבלה')} title={t('צבע גופן')} type="color" value={toolbarTableText.color ?? '#000000'} onChange={(event) => applyTableFormatting({ color: event.target.value })} />
+          <button className={'context-command' + (toolbarTableText.weight >= 600 ? ' active' : '')} title={t('מודגש')} onClick={() => applyTableFormatting({ weight: toolbarTableText.weight >= 600 ? 400 : 700 })}>B</button>
+          <button className={'context-command' + (toolbarTableText.italic ? ' active' : '')} title={t('נטוי')} onClick={() => applyTableFormatting({ italic: !toolbarTableText.italic })}>I</button>
+          <div className="context-font-size-field" role="group" aria-label={t('גודל גופן')}>
             <NumberField
-              ariaLabel="גודל גופן"
+              ariaLabel={t('גודל גופן')}
               value={toolbarTableText.fontSize}
               unit="px"
               unitLabel="pt"
@@ -11464,24 +11465,24 @@ export function Workspace({
               onChange={(fontSize) => applyTableFormatting({ fontSize })}
             />
           </div>
-          <select aria-label="יישור טקסט בטבלה" title="יישור" value={toolbarTableText.align} onChange={(event) => applyTableFormatting({ align: event.target.value as TextAlign })}>
-            <option value="right">ימין</option><option value="center">מרכז</option><option value="left">שמאל</option><option value="justify">מיושר</option>
+          <select aria-label={t('יישור טקסט בטבלה')} title={t('יישור')} value={toolbarTableText.align} onChange={(event) => applyTableFormatting({ align: event.target.value as TextAlign })}>
+            <option value="right">{t('ימין')}</option><option value="center">{t('מרכז')}</option><option value="left">{t('שמאל')}</option><option value="justify">{t('מיושר')}</option>
           </select>
-          <label className="context-field" title="מרווח אותיות (% מגודל הגופן)"><span>מרווח אותיות</span><input type="number" step="1" value={(toolbarTableText.tracking ?? 0) / 10} onChange={(event) => applyTableFormatting({ tracking: Math.round((Number(event.target.value) || 0) * 10) })} /></label>
-          <label className="context-field" title="מרווח בין שורות"><span>שורה</span><input type="number" min="0" value={toolbarTableText.leading ?? Math.round(toolbarTableText.fontSize * 1.25)} onChange={(event) => applyTableFormatting({ leading: Number(event.target.value) })} />pt</label>
-          <label className="context-field" title="רווח לפני"><span>לפני</span><input type="number" min="0" value={toolbarTableText.spaceBefore ?? 0} onChange={(event) => applyTableFormatting({ spaceBefore: Number(event.target.value) })} /></label>
-          <label className="context-field" title="רווח אחרי"><span>אחרי</span><input type="number" min="0" value={toolbarTableText.spaceAfter ?? 0} onChange={(event) => applyTableFormatting({ spaceAfter: Number(event.target.value) })} /></label>
+          <label className="context-field" title={t('מרווח אותיות (% מגודל הגופן)')}><span>{t('מרווח אותיות')}</span><input type="number" step="1" value={(toolbarTableText.tracking ?? 0) / 10} onChange={(event) => applyTableFormatting({ tracking: Math.round((Number(event.target.value) || 0) * 10) })} /></label>
+          <label className="context-field" title={t('מרווח בין שורות')}><span>{t('שורה')}</span><input type="number" min="0" value={toolbarTableText.leading ?? Math.round(toolbarTableText.fontSize * 1.25)} onChange={(event) => applyTableFormatting({ leading: Number(event.target.value) })} />pt</label>
+          <label className="context-field" title={t('רווח לפני')}><span>{t('לפני')}</span><input type="number" min="0" value={toolbarTableText.spaceBefore ?? 0} onChange={(event) => applyTableFormatting({ spaceBefore: Number(event.target.value) })} /></label>
+          <label className="context-field" title={t('רווח אחרי')}><span>{t('אחרי')}</span><input type="number" min="0" value={toolbarTableText.spaceAfter ?? 0} onChange={(event) => applyTableFormatting({ spaceAfter: Number(event.target.value) })} /></label>
         </div>}
         {tool === 'feather' && (
-          <div className="context-feather-controls" role="group" aria-label="החלקת מעבר צבע">
-            <label className="context-feather-toggle"><input type="checkbox" checked={!!selectedFeather} disabled={!selectedFeatherTarget} onChange={(event) => setSelectedFeatherEnabled(event.target.checked)} />החלקה</label>
-            {!selectedFeatherTarget ? <span className="context-tool-hint">בחר אובייקט</span> : <>
+          <div className="context-feather-controls" role="group" aria-label={t('החלקת מעבר צבע')}>
+            <label className="context-feather-toggle"><input type="checkbox" checked={!!selectedFeather} disabled={!selectedFeatherTarget} onChange={(event) => setSelectedFeatherEnabled(event.target.checked)} />{t('החלקה')}</label>
+            {!selectedFeatherTarget ? <span className="context-tool-hint">{t('בחר אובייקט')}</span> : <>
               {selectedFeather?.type !== 'basic' && selectedFeather?.type !== 'directional' ? <>
-                <label className="context-field"><span>התחלה {Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)}%</span><input type="range" aria-label="אטימות התחלה" min={0} max={100} value={Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity(0, Number(event.target.value) / 100)} /></label>
-                <label className="context-field"><span>סוף {Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)}%</span><input type="range" aria-label="אטימות סוף" min={0} max={100} value={Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity((selectedFeather?.points.length ?? 2) - 1, Number(event.target.value) / 100)} /></label>
+                <label className="context-field"><span>{t('התחלה {percent}%', { percent: Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100) })}</span><input type="range" aria-label={t('אטימות התחלה')} min={0} max={100} value={Math.round((selectedFeather?.points[0]?.opacity ?? 1) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity(0, Number(event.target.value) / 100)} /></label>
+                <label className="context-field"><span>{t('סוף {percent}%', { percent: Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100) })}</span><input type="range" aria-label={t('אטימות סוף')} min={0} max={100} value={Math.round((selectedFeather?.points.at(-1)?.opacity ?? 0) * 100)} disabled={!selectedFeather} onChange={(event) => setSelectedFeatherOpacity((selectedFeather?.points.length ?? 2) - 1, Number(event.target.value) / 100)} /></label>
                 <div className="feather-toolbar-ramp" style={{ '--feather-start-opacity': selectedFeather?.points[0]?.opacity ?? 1, '--feather-end-opacity': selectedFeather?.points.at(-1)?.opacity ?? 0 } as CSSProperties} aria-hidden="true" />
-              </> : <span className="context-tool-hint">לעריכת סוג זה, השתמש במאפייני האובייקט</span>}
-              <button className="context-command danger" disabled={!selectedFeather} onClick={() => selectedFeatherTarget && commitFeather(selectedFeatherTarget, null)}>הסר החלקה</button>
+              </> : <span className="context-tool-hint">{t('לעריכת סוג זה, השתמש במאפייני האובייקט')}</span>}
+              <button className="context-command danger" disabled={!selectedFeather} onClick={() => selectedFeatherTarget && commitFeather(selectedFeatherTarget, null)}>{t('הסר החלקה')}</button>
             </>}
           </div>
         )}
@@ -11496,9 +11497,9 @@ export function Workspace({
           const opacityMixed = opacityValues.some((value) => Math.abs(value - opacityValues[0]) > 0.001)
           const hasSelectedGroup = selectedObjectIds().some((id) => !!objectGroupId(id))
           return (
-            <div className="context-multi-selection" role="group" aria-label="פעולות לבחירה מרובה">
+            <div className="context-multi-selection" role="group" aria-label={t('פעולות לבחירה מרובה')}>
               <span className="context-divider" />
-              <span className="context-multi-count">{multiSel.length} נבחרו</span>
+              <span className="context-multi-count">{t('{count} נבחרו', { count: multiSel.length })}</span>
               <MultiSelectionToolbar
                 count={selectedIds.size}
                 shapes={selectedShapes}
@@ -11519,7 +11520,7 @@ export function Workspace({
                 onOpacity={setSelectedObjectsOpacity}
               />
               {selectedShapeCount >= 2 && (
-                <div className="context-multi-operations" role="group" aria-label="בניית צורות">
+                <div className="context-multi-operations" role="group" aria-label={t('בניית צורות')}>
                   {(['unite', 'subtract', 'intersect', 'exclude'] as BoolOp[]).map((op) => (
                     <button key={op} className="context-command" title={BOOL_OP_NAMES[op]} onClick={() => combineSelectedShapes(op)}>
                       {BOOL_OP_NAMES[op]}
@@ -11527,13 +11528,13 @@ export function Workspace({
                   ))}
                 </div>
               )}
-              <button className="context-command" onClick={groupSelectedObjects}>צור גרופ</button>
-              {hasSelectedGroup && <button className="context-command" onClick={ungroupSelectedObjects}>שחרר גרופ</button>}
-              {imageShapeMerge && <button className="context-command" onClick={insertImageIntoShape}>הכנס תמונה לצורה</button>}
-              {canMergeImages && <button className="context-command" onClick={() => void mergeSelectedImages()}>מזג תמונות</button>}
-              {canCreateImage && <button className="context-command" onClick={() => void createImageFromSelection()}>צור תמונה אחת מהנבחרים</button>}
-              {canExportPng && <button className="context-command" onClick={() => void exportSelectedPng()}>ייצא בחירה ל־PNG</button>}
-              <button className="context-command danger" onClick={() => deleteSelection(multiSel, [])}>מחק</button>
+              <button className="context-command" onClick={groupSelectedObjects}>{t('צור גרופ')}</button>
+              {hasSelectedGroup && <button className="context-command" onClick={ungroupSelectedObjects}>{t('שחרר גרופ')}</button>}
+              {imageShapeMerge && <button className="context-command" onClick={insertImageIntoShape}>{t('הכנס תמונה לצורה')}</button>}
+              {canMergeImages && <button className="context-command" onClick={() => void mergeSelectedImages()}>{t('מזג תמונות')}</button>}
+              {canCreateImage && <button className="context-command" onClick={() => void createImageFromSelection()}>{t('צור תמונה אחת מהנבחרים')}</button>}
+              {canExportPng && <button className="context-command" onClick={() => void exportSelectedPng()}>{t('ייצא בחירה ל־PNG')}</button>}
+              <button className="context-command danger" onClick={() => deleteSelection(multiSel, [])}>{t('מחק')}</button>
             </div>
           )
         })()}
@@ -11541,9 +11542,9 @@ export function Workspace({
 
       {editingParentId && (
         <div className="parent-edit-bar">
-          <span>עריכת עמוד אב: {parents.find((p) => p.id === editingParentId)?.name ?? ''}</span>
+          <span>{t('עריכת עמוד אב: {name}', { name: parents.find((p) => p.id === editingParentId)?.name ?? '' })}</span>
           <button className="btn small" onClick={onExitParentEdit}>
-            חזרה למסמך
+            {t('חזרה למסמך')}
           </button>
         </div>
       )}
@@ -11703,7 +11704,7 @@ export function Workspace({
                   }}
                 >
                   {ROTATE_CORNERS.map((c) => (
-                    <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב את הבחירה כולה (Shift: קפיצות של 45°)" onPointerDown={beginGroupRotate} />
+                    <div key={c} className={'rotate-handle ' + c} title={t('גרור כדי לסובב את הבחירה כולה (Shift: קפיצות של 45°)')} onPointerDown={beginGroupRotate} />
                   ))}
                   {HANDLES.map((h) => (
                     <div key={h} className={'handle ' + h} onPointerDown={(e) => beginGroupResize(h, e)} />
@@ -12066,7 +12067,7 @@ export function Workspace({
                           {!guideDrag.remove && (
                             <div className={'guide-tip' + (snap ? ' aligned' : '')} style={tip}>
                               {formatLength(guideDrag.pos, doc.unit)}
-                              {snap && ' · מיושר עם קו עזר אחר'}
+                              {snap && t(' · מיושר עם קו עזר אחר')}
                             </div>
                           )}
                         </>
@@ -12187,7 +12188,7 @@ export function Workspace({
                     style={{ left: tx + pageSnap.span[0] * zoom - 18, top: ty + pageSnap.world * zoom - 1, width: (pageSnap.span[1] - pageSnap.span[0]) * zoom + 36, height: 2 }}
                   />
                   <div className="guide-tip aligned" style={{ left: tx + pageSnap.span[0] * zoom + 8, top: ty + pageSnap.world * zoom + 8 }}>
-                    {formatLength(pageSnap.height, doc.unit)} · אותו גובה כמו העמודים שבצד
+                    {formatLength(pageSnap.height, doc.unit)} · {t('אותו גובה כמו העמודים שבצד')}
                   </div>
                 </>
               )}
@@ -12218,7 +12219,7 @@ export function Workspace({
                           key={edge}
                           className={'margin-edge ' + (edge === 'top' || edge === 'bottom' ? 'h' : 'v')}
                           style={style}
-                          title="גרור כדי לשנות את השוליים של העמוד (Shift = כל הצדדים יחד)"
+                          title={t('גרור כדי לשנות את השוליים של העמוד (Shift = כל הצדדים יחד)')}
                           onPointerDown={(e) => onMarginEdgeDown(edge, e)}
                         />
                       )
@@ -12275,7 +12276,7 @@ export function Workspace({
           panels={[
             {
               id: 'properties',
-              label: 'מאפיינים',
+              get label() { return t('מאפיינים') },
               visible: true,
               content: (
                 <>
@@ -12402,64 +12403,64 @@ export function Workspace({
             },
             {
               id: 'paragraph',
-              label: 'פסקה',
+              get label() { return t('פסקה') },
               visible: true,
               content: <ParagraphPanel frame={selFrame} style={paragraphStyle} textStyle={panelStyle} colorSamples={colorSamples} onCharStyle={(patch) => selFrame && applyCharStyle(selFrame.id, patch)} sizeMixed={panelSizeMixed} onSizeStep={(delta) => selFrame && stepFontSize(selFrame.id, delta)} scope={panelSel ? 'selection' : 'all'} unit={doc.unit} onChange={(patch) => selFrame && applyParagraphStyle(selFrame.id, patch)} onSpacingChange={(patch) => selFrame && applyParaSpacing(selFrame.id, patch)} keepFirstLines={panelHead?.paraKeepFirstLines?.[scopeParagraph ?? 0] ?? 0} keepLastLines={panelHead?.paraKeepLastLines?.[scopeParagraph ?? 0] ?? 0} keepFirstMixed={keepFirstLineValues.size > 1} keepLastMixed={keepLastLineValues.size > 1} onKeepLinesChange={(patch) => selFrame && applyParagraphKeepLines(selFrame.id, patch)} keepWithNext={keepWithNextValues.has(1)} keepWithNextMixed={keepWithNextValues.size > 1} onKeepWithNextChange={(on) => selFrame && applyParagraphKeepWithNext(selFrame.id, on)} />,
             },
             {
               id: 'paragraph-styles',
-              label: 'סגנונות פסקה',
+              get label() { return t('סגנונות פסקה') },
               content: <ParagraphStylesPanel styles={paragraphStyles} unit={doc.unit} objectStyles={objectStyles} shown={dockOpenId === 'paragraph-styles' || floatingDockPanelId === 'paragraph-styles'} highlightId={highlightedStyleId} modified={styleHasOverrides} onApply={applyParagraphStyleToFrame} onChange={changeParagraphStyle} onCreate={createParagraphStyle} onDelete={(id) => deleteParagraphStyle(id)} onDeleteMany={deleteParagraphStyles} onConfirmOverrides={commitParagraphOverrides} onDiscardOverrides={discardParagraphOverrides} characterStyles={characterStyles} onApplyNested={applyNestedStylesCmd} onDetectNested={detectNestedFromSelection} referenceStyleId={doc.footnotes?.referenceStyleId} onReferenceStyleChange={setFootnoteReferenceStyle} />,
             },
             {
               id: 'character-styles',
-              label: 'סגנונות תו',
+              get label() { return t('סגנונות תו') },
               content: <CharacterStylesPanel styles={characterStyles} activeId={activeCharacterStyleId} modified={activeCharacterStyleModified} canApply={!!panelHead || !!footnoteSel} onApply={applyCharacterStyleCmd} onSelectionLook={characterStyleSelectionLook} onCreate={createCharacterStyle} onChange={changeCharacterStyle} onDelete={deleteCharacterStyle} onRedefine={redefineCharacterStyle} onFind={findCharacterStyle} />,
             },
             {
               id: 'object-styles',
-              label: 'סגנונות אובייקט',
+              get label() { return t('סגנונות אובייקט') },
               content: <ObjectStylesPanel styles={objectStyles} selection={objectStyleSelection} usage={objectStyleUsage} onApply={applyObjectStyle} onSelectionLook={objectStyleLook} onFollowerLook={followerLook} onSelectionGraphic={objectStyleGraphic} onSelectionSize={objectStyleSize} onCreate={createObjectStyle} onChange={changeObjectStyle} onDelete={deleteObjectStyle} onRedefine={redefineObjectStyle} onSelectObjects={selectObjectsOfStyle} />,
             },
             {
               id: 'style-manager',
-              label: 'ניהול סגנונות',
+              get label() { return t('ניהול סגנונות') },
               content: <StyleManagerPanel styles={paragraphStyles} onSwap={swapParagraphStyles} onSwapOne={swapOneParagraphStyle} onBatch={batchSwapParagraphStyles} onFindStyle={findParagraphStyle} onTag={applyTagStyle} onFindTag={findTagOccurrence} onSwapOneTag={swapOneTagOccurrence} onClean={(emptyParagraphs) => cleanSpacingCmd(emptyParagraphs ? { spaces: false } : { paragraphs: false })} onListColors={listTextColors} onFindColor={findColorParagraph} onSwapOneColor={swapOneColorParagraph} onSwapColor={swapColorParagraphs} sampleColor={toolbarTextStyle?.color} />,
             },
             {
               id: 'pages',
-              label: 'עמודים',
+              get label() { return t('עמודים') },
               visible: true,
               content: <PagesPanel doc={doc} frames={shownFrames} images={shownImages} shapes={shownShapes} spreads={documentSpreads} currentSpread={Math.min(cur, documentSpreads.length - 1)} selectedPages={selectedPages} onSelect={selectPage} onInsert={insertPages} onInsertWithMaster={insertPages} onDelete={deleteSelectedPage} onMove={movePage} onView={(perRow) => { pageOps.setup({ ...doc, perRow, rowsCustom: false, pageJoins: [] }); window.setTimeout(() => fitSpread(), 80) }} parents={parents} pageParents={pageParents} activeParentId={effectiveActiveParent} onSelectParent={onSelectParent} onCreateParent={createParent} onDeleteParent={deleteParent} onEditParent={onEditParent} onApplyParent={applyParentToSelectedPages} onApplyParentToPage={applyParentToPage} onDetachParent={detachSelectedPagesFromParent} sections={sections} onSectionsChange={onSectionsChange} canEditPages={!editingParentId} />,
             },
             {
               id: 'links',
-              label: 'קישורים',
+              get label() { return t('קישורים') },
               content: <LinksPanel assets={assets} uses={linkUses} available={isTauri} onShow={showLinkedPicture} onUpdate={updateLinks} onRelink={relinkLink} onEmbed={embedLinks} />,
             },
             {
               id: 'color',
-              label: 'צבע',
+              get label() { return t('צבע') },
               content: <ColorToolsPanel tool={colorTool ?? 'color'} shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, `color-tool:${colorTool ?? 'color'}`)} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'gradient',
-              label: 'מעבר צבע',
+              get label() { return t('מעבר צבע') },
               content: <ColorToolsPanel tool="gradient" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:gradient')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'swatches',
-              label: 'דוגמיות',
+              get label() { return t('דוגמיות') },
               content: <ColorToolsPanel tool="swatches" shape={selShape} selectedShapes={selectedPaintShapes} textStyle={toolbarTextStyle} textId={footnoteSel ? `${footnoteSel.headId}:${footnoteSel.noteId}` : panelHead?.id} onTextColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ color }); else if (panelHead) applyCharStyle(panelHead.id, { color }) }} onTextOutlineColor={(color) => { if (footnoteSel) applyFootnoteCharStyle({ outlineColor: color }); else if (panelHead) applyCharStyle(panelHead.id, { outlineColor: color }) }} textColorTarget={textColorTarget} onTextColorTarget={setTextColorTarget} target={colorTarget} onTarget={setColorTarget} onShape={(patch) => applySelectedShapePaint(patch, 'color-tool:swatches')} samples={colorSamples} onSelectBrushColor={setRasterBrushColor} brushColor={rasterBrushColor} brushRadius={eraserRadius} onBrushRadiusChange={setEraserRadius} brushStrength={rasterBrushStrength} onBrushStrengthChange={setRasterBrushStrength} onExitBrush={() => setRasterBrushColor(null)} onStartSampler={startColorSampler} onDeleteSample={deleteColorSample} />,
             },
             {
               id: 'brushes',
-              label: 'מברשות',
+              get label() { return t('מברשות') },
               content: <BrushesPanel style={brushStyle} size={brushSize} color={brushColor} samples={colorSamples} customs={customBrushes} message={brushMessage} onImport={(file) => void importBrush(file)} onRemoveCustom={(id) => { changeCustomBrushes((list) => list.filter((brush) => brush.id !== id)); if (brushStyle === id) setBrushStyle('splatter') }} onChangeCustom={(id, patch) => { const next = customBrushes.map((brush) => (brush.id === id ? { ...brush, ...patch } : brush)); changeCustomBrushes(() => next); restyleSelectedStrokes({}, 'brush-custom', next, id) }} canApply={(selectedId ? [selectedId] : multiSel).some((id) => shapes.some((sh) => sh.id === id && !sh.extrude && !sh.extrudeOf && !sh.image && !itemLocks[id]))} toolActive={tool === 'brush'} sharpness={sharpness} onSharpness={changeSharpness} onStyle={(id) => { setBrushStyle(id); setBrushMessage(null); restyleSelectedStrokes({ style: id }, 'brush-style') }} onSize={(size) => { const next = Math.max(MIN_BRUSH_SIZE, Math.min(MAX_BRUSH_SIZE, Math.round(size))); setBrushSize(next); restyleSelectedStrokes({ size: next }, 'brush-size') }} onColor={(next) => { setBrushColor(next); restyleSelectedStrokes({ color: next }, 'brush-color') }} onApply={applyBrushToSelection} onUseTool={() => activateTool('brush')} />,
             },
             {
               id: 'layers',
-              label: 'שכבות',
+              get label() { return t('שכבות') },
               content: <LayersPanel frames={frames} images={images} shapes={shapes} layerOrder={layerOrder} layers={layers} onLayersChange={changeLayerSetup} onItemOrderChange={reorderLayerItems} onLayerDelete={deleteLayerContents} onItemDelete={(id) => deleteSelection([id], [])} selectedId={selectedId} activeLayerId={activeLayerId} onActiveLayer={setActiveLayerId} onSelect={(id) => { if (selectable(id)) setSelectedId(id) }} onItemChange={changeLayerItem} parentItemsAbovePageContent={doc.parentItemsAbovePageContent ?? false} canChangeParentOrder={!editingParentId && !previewMode} onParentItemsAbovePageContentChange={(above) => { if (!editingParentId && !previewMode) pageOps.commit({ doc: { ...doc, parentItemsAbovePageContent: above } }) }} />,
             },
           ]}
@@ -12484,7 +12485,7 @@ export function Workspace({
         })()}
       {(toolDialog === 'pen' || toolDialog === 'pencil') && (
         <StrokeSettingsDialog
-          toolName={toolDialog === 'pen' ? 'העט' : 'העיפרון'}
+          toolName={toolDialog === 'pen' ? t('העט') : t('העיפרון')}
           value={drawingStrokeWidth}
           unit={doc.unit}
           pencil={toolDialog === 'pencil' ? pencilSettings : undefined}
@@ -12525,7 +12526,7 @@ export function Workspace({
         return (
           <DesignLibraryDialog
             designs={doc.designs ?? []}
-            nameOf={(id) => paragraphStyles.find((style) => style.id === id)?.name ?? '(סגנון שנמחק)'}
+            nameOf={(id) => paragraphStyles.find((style) => style.id === id)?.name ?? t('(סגנון שנמחק)')}
             selection={{ object: held.plain.length + held.images.length + held.tables.length > 0, text: !!held.head, table: held.tables.length > 0 }}
             onCreate={createDesign}
             onUpdate={updateDesign}
@@ -12624,7 +12625,7 @@ export function Workspace({
       )}
       {footnoteDialog && (
         <FootnoteEditorDialog
-          title={footnoteDialog.noteId ? 'עריכת הערת שוליים' : 'הוספת הערת שוליים'}
+          title={footnoteDialog.noteId ? t('עריכת הערת שוליים') : t('הוספת הערת שוליים')}
           initial={footnoteDialog.initial}
           initialRuns={footnoteDialog.initialRuns}
           baseStyle={footnoteTextStyle(footnoteConfig, paragraphStyles)}
@@ -12652,7 +12653,7 @@ export function Workspace({
           x={anchorMenu.left}
           y={anchorMenu.bottom}
           onClose={() => setAnchorMenu(null)}
-          items={[{ label: 'הסר עוגן', onClick: () => { const menu = anchorMenu; setAnchorMenu(null); removeAnchor(menu.id, menu) } }]}
+          items={[{ get label() { return t('הסר עוגן') }, onClick: () => { const menu = anchorMenu; setAnchorMenu(null); removeAnchor(menu.id, menu) } }]}
         />
       )}
       {rulerMenu && (
@@ -12661,7 +12662,7 @@ export function Workspace({
           y={rulerMenu.y}
           onClose={() => setRulerMenu(null)}
           items={[
-            { label: 'יחידות מידה', disabled: true },
+            { get label() { return t('יחידות מידה') }, disabled: true },
             { separator: true },
             ...UNIT_OPTIONS.map((u) => ({ label: u.label, checked: doc.unit === u.value, onClick: () => setRulerUnit(u.value) })),
           ]}
@@ -12679,7 +12680,7 @@ export function Workspace({
               const hasPrevious = frames.some((candidate) => candidate.next === frame.id)
               return [
                 ...(frame.next === null ? [{
-                  label: 'שרשר לתיבה הבאה',
+                  get label() { return t('שרשר לתיבה הבאה') },
                   disabled: !!itemLocks[frame.id],
                   onClick: () => {
                     setSelectedId(frame.id)
@@ -12689,7 +12690,7 @@ export function Workspace({
                   },
                 }] : []),
                 ...(hasPrevious ? [{
-                  label: 'בטל שרשור',
+                  get label() { return t('בטל שרשור') },
                   disabled: !!itemLocks[frame.id],
                   onClick: () => {
                     onFramesChange(unlinkBefore(frames, frame.id))
@@ -12699,18 +12700,18 @@ export function Workspace({
                 ...(frame.next === null || hasPrevious ? [{ separator: true }] : []),
               ]
             })(),
-            ...(objectMenu.sourceShapeId && objectMenu.targetShapeId ? [{ label: 'העתק רוחב וגובה לצורה המסומנת', onClick: () => copyShapeSize(objectMenu.targetShapeId!, objectMenu.sourceShapeId!) }] : []),
+            ...(objectMenu.sourceShapeId && objectMenu.targetShapeId ? [{ get label() { return t('העתק רוחב וגובה לצורה המסומנת') }, onClick: () => copyShapeSize(objectMenu.targetShapeId!, objectMenu.sourceShapeId!) }] : []),
             ...(objectMenu.sourceShapeId ? [{ separator: true }] : []),
             ...(() => {
               const pair = selectedImageShapePair()
-              return pair ? [{ label: 'הכנס תמונה לתוך צורה', disabled: !!itemLocks[pair.image.id] || !!itemLocks[pair.shape.id], onClick: insertSelectedImageIntoShape }] : []
+              return pair ? [{ get label() { return t('הכנס תמונה לתוך צורה') }, disabled: !!itemLocks[pair.image.id] || !!itemLocks[pair.shape.id], onClick: insertSelectedImageIntoShape }] : []
             })(),
-            { label: 'צור גרופ', disabled: selectedObjectIds().length < 2, onClick: groupSelectedObjects },
-            { label: 'שחרר גרופ', disabled: !selectedObjectIds().some((id) => !!objectGroupId(id)), onClick: ungroupSelectedObjects },
+            { get label() { return t('צור גרופ') }, disabled: selectedObjectIds().length < 2, onClick: groupSelectedObjects },
+            { get label() { return t('שחרר גרופ') }, disabled: !selectedObjectIds().some((id) => !!objectGroupId(id)), onClick: ungroupSelectedObjects },
             { separator: true },
-            { label: 'מזג צורות', disabled: selectedObjectIds().length < 2 || selectedObjectIds().some((id) => !shapes.some((shape) => shape.id === id)), onClick: () => combineSelectedShapes('unite') },
-            { label: 'מזג תמונות לשכבה אחת', disabled: !canMergeImages, onClick: () => void mergeSelectedImages() },
-            { label: 'ייצא בחירה ל־PNG', disabled: !canExportPng, onClick: () => void exportSelectedPng() },
+            { get label() { return t('מזג צורות') }, disabled: selectedObjectIds().length < 2 || selectedObjectIds().some((id) => !shapes.some((shape) => shape.id === id)), onClick: () => combineSelectedShapes('unite') },
+            { get label() { return t('מזג תמונות לשכבה אחת') }, disabled: !canMergeImages, onClick: () => void mergeSelectedImages() },
+            { get label() { return t('ייצא בחירה ל־PNG') }, disabled: !canExportPng, onClick: () => void exportSelectedPng() },
           ]}
         />
       )}
@@ -12726,28 +12727,28 @@ export function Workspace({
           y={tableMenu.y}
           onClose={close}
           items={[
-            { label: 'בחר שורה', onClick: () => { close(); runTableOp('select-row') } },
-            { label: 'בחר עמודה', onClick: () => { close(); runTableOp('select-column') } },
-            { label: 'בחר טבלה', onClick: () => { close(); runTableOp('select-table') } },
+            { get label() { return t('בחר שורה') }, onClick: () => { close(); runTableOp('select-row') } },
+            { get label() { return t('בחר עמודה') }, onClick: () => { close(); runTableOp('select-column') } },
+            { get label() { return t('בחר טבלה') }, onClick: () => { close(); runTableOp('select-table') } },
             { separator: true },
-            { label: 'אפשרויות טבלה…', onClick: () => { close(); setTableOptionsOpen(true) } },
-            { label: 'אפשרויות תא…', disabled: !area, onClick: () => { close(); setCellOptionsOpen(true) } },
+            { get label() { return t('אפשרויות טבלה…') }, onClick: () => { close(); setTableOptionsOpen(true) } },
+            { get label() { return t('אפשרויות תא…') }, disabled: !area, onClick: () => { close(); setCellOptionsOpen(true) } },
             { separator: true },
-            { label: 'הוספת שורה מעל', onClick: () => { close(); runTableOp('row-above') } },
-            { label: 'הוספת שורה מתחת', onClick: () => { close(); runTableOp('row-below') } },
-            { label: 'הוספת עמודה בתחילת הבחירה', onClick: () => { close(); runTableOp('col-start') } },
-            { label: 'הוספת עמודה בסוף הבחירה', onClick: () => { close(); runTableOp('col-end') } },
+            { get label() { return t('הוספת שורה מעל') }, onClick: () => { close(); runTableOp('row-above') } },
+            { get label() { return t('הוספת שורה מתחת') }, onClick: () => { close(); runTableOp('row-below') } },
+            { get label() { return t('הוספת עמודה בתחילת הבחירה') }, onClick: () => { close(); runTableOp('col-start') } },
+            { get label() { return t('הוספת עמודה בסוף הבחירה') }, onClick: () => { close(); runTableOp('col-end') } },
             { separator: true },
-            { label: 'מחיקת שורה', disabled: !area || tableRows(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-row') } },
-            { label: 'מחיקת עמודה', disabled: !area || tableCols(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-col') } },
+            { get label() { return t('מחיקת שורה') }, disabled: !area || tableRows(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-row') } },
+            { get label() { return t('מחיקת עמודה') }, disabled: !area || tableCols(sh.table) <= 1, onClick: () => { close(); runTableOp('delete-col') } },
             { separator: true },
-            { label: 'מיזוג תאים', disabled: !area || (area.r0 === area.r1 && area.c0 === area.c1), onClick: () => { close(); runTableOp('merge') } },
-            { label: 'ביטול מיזוג תאים', disabled: !canUnmerge, onClick: () => { close(); runTableOp('unmerge') } },
+            { get label() { return t('מיזוג תאים') }, disabled: !area || (area.r0 === area.r1 && area.c0 === area.c1), onClick: () => { close(); runTableOp('merge') } },
+            { get label() { return t('ביטול מיזוג תאים') }, disabled: !canUnmerge, onClick: () => { close(); runTableOp('unmerge') } },
             { separator: true },
-            { label: 'מיון…', onClick: () => { close(); runTableOp('sort') } },
-            { label: 'נוסחה בתא…', disabled: !area, onClick: () => { close(); runTableOp('formula') } },
-            { label: 'טבלת חישוב', checked: !!sh.table.calculation, onClick: () => { close(); commitTable(sh.id, sh.table.calculation ? (({ calculation: _off, ...rest }) => withoutFormulas(rest))(sh.table) : { ...sh.table, calculation: true }, 'table-calculation') } },
-            { label: 'הסרת הנוסחה מהתא', disabled: !area || sh.table.cells[area.r0]?.[area.c0]?.formula === undefined, onClick: () => { close(); runTableOp('remove-formula') } },
+            { get label() { return t('מיון…') }, onClick: () => { close(); runTableOp('sort') } },
+            { get label() { return t('נוסחה בתא…') }, disabled: !area, onClick: () => { close(); runTableOp('formula') } },
+            { get label() { return t('טבלת חישוב') }, checked: !!sh.table.calculation, onClick: () => { close(); commitTable(sh.id, sh.table.calculation ? (({ calculation: _off, ...rest }) => withoutFormulas(rest))(sh.table) : { ...sh.table, calculation: true }, 'table-calculation') } },
+            { get label() { return t('הסרת הנוסחה מהתא') }, disabled: !area || sh.table.cells[area.r0]?.[area.c0]?.formula === undefined, onClick: () => { close(); runTableOp('remove-formula') } },
           ]}
         />
       })()}

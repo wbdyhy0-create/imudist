@@ -1,6 +1,7 @@
 import { MAX_PAGE_PT, isFacing, customMarginCount, customSizeCount, marginsOf, maxMargin, minPageSize, pageSize, type DocSettings, type Sides } from '../document'
 import { PAGE_PRESETS, matchPreset } from '../units'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 interface Props {
   doc: DocSettings
@@ -28,10 +29,10 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
   const facing = isFacing(doc)
   // the interface is right-to-left, so the first field of the row is on the right
   const marginFields: { key: keyof Sides; label: string }[] = [
-    { key: 'top', label: 'עליון' },
-    { key: 'bottom', label: 'תחתון' },
-    facing ? { key: 'left', label: 'פנימי' } : { key: 'right', label: 'ימין' },
-    facing ? { key: 'right', label: 'חיצוני' } : { key: 'left', label: 'שמאל' },
+    { key: 'top', get label() { return t('עליון') } },
+    { key: 'bottom', get label() { return t('תחתון') } },
+    facing ? { key: 'left', get label() { return t('פנימי') } } : { key: 'right', get label() { return t('ימין') } },
+    facing ? { key: 'right', get label() { return t('חיצוני') } } : { key: 'left', get label() { return t('שמאל') } },
   ]
 
   const orient = (toLandscape: boolean) => {
@@ -43,20 +44,20 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
   }
 
   return (
-    <div className="page-bar" role="group" aria-label="כלי עמוד">
-      <span className="page-bar-badge" title="העמוד שהכלי משנה">
-        {all ? 'כל העמודים' : `עמוד ${doc.startPage + page}`}
+    <div className="page-bar" role="group" aria-label={t('כלי עמוד')}>
+      <span className="page-bar-badge" title={t('העמוד שהכלי משנה')}>
+        {all ? t('כל העמודים') : t('עמוד {n1}', { n1: doc.startPage + page })}
       </span>
       <label className="page-bar-field">
-        <span>רוחב</span>
+        <span>{t('רוחב')}</span>
         <NumberField value={width} unit={doc.unit} min={min.w} max={MAX_PAGE_PT} onChange={(v) => onSize(v, height)} />
       </label>
       <label className="page-bar-field">
-        <span>גובה</span>
+        <span>{t('גובה')}</span>
         <NumberField value={height} unit={doc.unit} min={min.h} max={MAX_PAGE_PT} onChange={(v) => onSize(width, v)} />
       </label>
       <label className="page-bar-field">
-        <span>גודל</span>
+        <span>{t('גודל')}</span>
         <select className="select" value={preset?.id ?? CUSTOM} onChange={(e) => pickPreset(e.target.value)}>
           {PAGE_PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -64,26 +65,26 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
             </option>
           ))}
           <option value={CUSTOM} disabled>
-            מותאם אישית
+            {t('מותאם אישית')}
           </option>
         </select>
       </label>
-      <div className="place-modes" role="group" aria-label="כיוון העמוד">
-        <button className={!landscape ? 'on' : ''} title="עמוד לאורך" onClick={() => orient(false)}>
+      <div className="place-modes" role="group" aria-label={t('כיוון העמוד')}>
+        <button className={!landscape ? 'on' : ''} title={t('עמוד לאורך')} onClick={() => orient(false)}>
           <svg className="orient-icon" viewBox="0 0 12 16" aria-hidden="true">
             <rect x="1" y="1" width="10" height="14" rx="1" fill="none" stroke="currentColor" strokeWidth="1.400" />
           </svg>
-          לאורך
+          {t('לאורך')}
         </button>
-        <button className={landscape ? 'on' : ''} title="עמוד לרוחב" onClick={() => orient(true)}>
+        <button className={landscape ? 'on' : ''} title={t('עמוד לרוחב')} onClick={() => orient(true)}>
           <svg className="orient-icon" viewBox="0 0 16 12" aria-hidden="true">
             <rect x="1" y="1" width="14" height="10" rx="1" fill="none" stroke="currentColor" strokeWidth="1.400" />
           </svg>
-          לרוחב
+          {t('לרוחב')}
         </button>
       </div>
-      <div className="page-bar-margins" role="group" aria-label="שוליים">
-        <b>{all ? 'שוליים (כל העמודים)' : `שוליים של עמוד ${doc.startPage + page}`}</b>
+      <div className="page-bar-margins" role="group" aria-label={t('שוליים')}>
+        <b>{all ? t('שוליים (כל העמודים)') : t('שוליים של עמוד {n1}', { n1: doc.startPage + page })}</b>
         {marginFields.map((f) => (
           <label key={f.key} className="page-bar-field">
             <span>{f.label}</span>
@@ -97,14 +98,14 @@ export function PageToolBar({ doc, page, all, onAll, onSize, onMargins }: Props)
           </label>
         ))}
       </div>
-      <label className="page-bar-check" title="כשהאפשרות פעילה, שינוי הגודל חל על כל עמודי המסמך">
+      <label className="page-bar-check" title={t('כשהאפשרות פעילה, שינוי הגודל חל על כל עמודי המסמך')}>
         <input type="checkbox" checked={all} onChange={(e) => onAll(e.target.checked)} />
-        החל על כל העמודים
+        {t('החל על כל העמודים')}
       </label>
       <span className="muted">
-        לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו. קווי השוליים הכחולים בתוך העמוד ניתנים לגרירה (Shift = כל הצדדים), והם משנים רק את העמוד הנבחר.
-        {custom > 0 ? ` ${custom === 1 ? 'עמוד אחד' : `${custom} עמודים`} בגודל אישי.` : ''}
-        {customMargins > 0 ? ` ${customMargins === 1 ? 'עמוד אחד' : `${customMargins} עמודים`} עם שוליים אישיים.` : ''}
+        {t('לחיצה על עמוד בוחרת אותו, וגרירת הידיות משנה רק אותו. קווי השוליים הכחולים בתוך העמוד ניתנים לגרירה (Shift = כל הצדדים), והם משנים רק את העמוד הנבחר.')}
+        {custom > 0 ? ` ${custom === 1 ? t('עמוד אחד בגודל אישי.') : t('{count} עמודים בגודל אישי.', { count: custom })}` : ''}
+        {customMargins > 0 ? ` ${customMargins === 1 ? t('עמוד אחד עם שוליים אישיים.') : t('{count} עמודים עם שוליים אישיים.', { count: customMargins })}` : ''}
       </span>
     </div>
   )

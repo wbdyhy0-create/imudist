@@ -58,7 +58,7 @@ export function DesignLibraryDialog({ designs, nameOf, selection, onCreate, onUp
 
   return (
     <div className="modal-backdrop">
-      <div className="modal table-dialog design-dialog" role="dialog" aria-modal="true" aria-label="ספריית עיצובים" dir="rtl">
+      <div className="modal table-dialog design-dialog" role="dialog" aria-modal="true" aria-label="ספריית עיצובים">
         <h2>ספריית עיצובים</h2>
         <p className="muted">
           עיצוב נלקח מדוגמה: מעצבים אובייקט, טקסט או טבלה, בוחרים אותם ויוצרים עיצוב. אחר כך אפשר להחיל אותו על דברים אחרים, כולו או חלק ממנו.

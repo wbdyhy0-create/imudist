@@ -9,6 +9,7 @@ import type { Unit } from '../units'
 import { NumberField } from './NumberField'
 import { initialPrintMarks, printMarksOptions } from '../printSheet'
 import { PrintMarksFields } from './PrintMarksFields'
+import { directionOf, t } from '../i18n'
 
 interface Props {
   doc: DocSettings
@@ -21,6 +22,14 @@ interface Props {
   sections: PageSection[]
   onClose: () => void
 }
+
+type ExportTab = 'general' | 'marks' | 'color' | 'vector'
+const TABS: { id: ExportTab; label: string }[] = [
+  { id: 'general', label: 'כללי' },
+  { id: 'marks', label: 'סימני דפוס' },
+  { id: 'color', label: 'צבע' },
+  { id: 'vector', label: 'טקסט וצורות' },
+]
 
 const DPI_OPTIONS = [
   { dpi: 300, label: 'איכות גבוהה להדפסה (300 DPI)' },
@@ -38,6 +47,7 @@ const CMYK_NOTE = 'הצבעים מומרים ל-CMYK בהמרה פשוטה, בל
  *  choice, not a shortcut: it's what actually guarantees the Hebrew text can never come out scrambled), with the
  *  print-shop essentials — page range, bleed + crop marks, picture resolution — and opens the result once it's done. */
 export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, assets, paragraphStyles, sections, onClose }: Props) {
+  const [tab, setTab] = useState<ExportTab>('general')
   const [rangeMode, setRangeMode] = useState<'all' | 'range'>('all')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(doc.pages)
@@ -66,10 +76,10 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
     // (async, multi-page) render below finishes isn't caught by the popup blocker
     const viewWindow = isTauri ? null : window.open('', '_blank')
     if (viewWindow) {
-      viewWindow.document.title = 'מייצא PDF…'
-      viewWindow.document.documentElement.dir = 'rtl'
+      viewWindow.document.title = t('מייצא PDF…')
+      viewWindow.document.documentElement.dir = directionOf()
       viewWindow.document.body.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc;font:14px sans-serif'
-      viewWindow.document.body.textContent = 'מייצא PDF, נא להמתין…'
+      viewWindow.document.body.textContent = t('מייצא PDF, נא להמתין…')
     }
     setBusy({ done: 0, total: rangeMode === 'all' ? doc.pages : clampedTo - clampedFrom + 1 })
     const vectorReport = vectorText ? emptyReport() : undefined
@@ -84,7 +94,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
           vectorText,
           vectorReport,
         },
-        doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם',
+        doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם'),
         (done, total) => setBusy({ done, total }),
         viewWindow,
       )
@@ -97,7 +107,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
       viewWindow?.close()
       console.error('PDF export failed:', error)
       const reason = error instanceof Error ? error.message || error.name : String(error)
-      setError(reason && reason !== '[object Object]' ? `הייצוא נכשל: ${reason}` : 'הייצוא נכשל. נסה שוב.')
+      setError(reason && reason !== '[object Object]' ? t('הייצוא נכשל: {reason}', { reason }) : t('הייצוא נכשל. נסה שוב.'))
     } finally {
       setBusy(null)
     }
@@ -105,91 +115,118 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="ייצוא ל-PDF">
-        <h2>ייצוא ל-PDF</h2>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('ייצוא ל-PDF')}>
+        <h2>{t('ייצוא ל-PDF')}</h2>
 
-        <div className="field">
-          <div className="field-label">טווח עמודים</div>
-          <div className="seg small" role="radiogroup" aria-label="טווח עמודים">
-            <button role="radio" aria-checked={rangeMode === 'all'} className={rangeMode === 'all' ? 'on' : ''} onClick={() => setRangeMode('all')}>
-              כל המסמך
-            </button>
-            <button role="radio" aria-checked={rangeMode === 'range'} className={rangeMode === 'range' ? 'on' : ''} onClick={() => setRangeMode('range')}>
-              טווח עמודים
-            </button>
-          </div>
-        </div>
-        {rangeMode === 'range' && (
-          <div className="dlg-cols">
-            <div className="field">
-              <div className="field-label">מעמוד</div>
-              <NumberField value={from} onChange={setFrom} min={1} max={doc.pages} step={1} />
+        {!result && (
+          <>
+            <div className="export-tabs" role="tablist" aria-label={t('קטגוריות ייצוא')}>
+              {TABS.map((item) => (
+                <button key={item.id} type="button" role="tab" id={`export-tab-${item.id}`} aria-controls={`export-panel-${item.id}`} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} className={tab === item.id ? 'on' : ''} onClick={() => setTab(item.id)}>
+                  {t(item.label)}
+                </button>
+              ))}
             </div>
-            <div className="field">
-              <div className="field-label">עד עמוד</div>
-              <NumberField value={to} onChange={setTo} min={1} max={doc.pages} step={1} />
+
+            <div className="export-pane" role="tabpanel" id={`export-panel-${tab}`} aria-labelledby={`export-tab-${tab}`}>
+              {tab === 'general' && (
+                <>
+                  <div className="field">
+                    <div className="field-label">{t('טווח עמודים')}</div>
+                    <div className="seg small" role="radiogroup" aria-label={t('טווח עמודים')}>
+                      <button role="radio" aria-checked={rangeMode === 'all'} className={rangeMode === 'all' ? 'on' : ''} onClick={() => setRangeMode('all')}>
+                        {t('כל המסמך')}
+                      </button>
+                      <button role="radio" aria-checked={rangeMode === 'range'} className={rangeMode === 'range' ? 'on' : ''} onClick={() => setRangeMode('range')}>
+                        {t('טווח עמודים')}
+                      </button>
+                    </div>
+                  </div>
+                  {rangeMode === 'range' && (
+                    <div className="dlg-cols">
+                      <div className="field">
+                        <div className="field-label">{t('מעמוד')}</div>
+                        <NumberField value={from} onChange={setFrom} min={1} max={doc.pages} step={1} />
+                      </div>
+                      <div className="field">
+                        <div className="field-label">{t('עד עמוד')}</div>
+                        <NumberField value={to} onChange={setTo} min={1} max={doc.pages} step={1} />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="field">
+                    <div className="field-label">{t('איכות תמונות')}</div>
+                    <div className="seg small" role="radiogroup" aria-label={t('איכות תמונות')}>
+                      {DPI_OPTIONS.map((o) => (
+                        <button key={o.dpi} role="radio" aria-checked={dpi === o.dpi} className={dpi === o.dpi ? 'on' : ''} onClick={() => setDpi(o.dpi)}>
+                          {t(o.label)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {dpi === 600 && <p className="muted">{t(HIGH_DPI_NOTE)}</p>}
+
+                  <p className="muted">
+                    {t('כל עמוד נשמר כתמונה חדה ברזולוציה שנבחרה, בדיוק כפי שהוא נראה במסמך — כך שאין תלות בגופנים בזמן ההדפסה, והטקסט העברי לעולם לא יתעוות אצל בית הדפוס.')}
+                  </p>
+                </>
+              )}
+
+              {tab === 'marks' && <PrintMarksFields value={marks} onChange={setMarks} unit={unit} disabled={!!busy} />}
+
+              {tab === 'color' && (
+                <>
+                  <div className="field">
+                    <div className="field-label">{t('מצב צבע')}</div>
+                    <div className="seg small" role="radiogroup" aria-label={t('מצב צבע')}>
+                      {COLOR_MODES.map((o) => (
+                        <button key={o.mode} role="radio" aria-checked={colorMode === o.mode} className={colorMode === o.mode ? 'on' : ''} onClick={() => setColorMode(o.mode)} disabled={!!busy}>
+                          {t(o.label)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {colorMode === 'cmyk' && <p className="muted">{t(CMYK_NOTE)}</p>}
+                </>
+              )}
+
+              {tab === 'vector' && (
+                <>
+                  <label className="page-bar-check">
+                    <input type="checkbox" checked={vectorText} onChange={(e) => setVectorText(e.target.checked)} disabled={!!busy} />
+                    {t('ייצוא וקטורי: טקסט, צורות ותמונות')}
+                  </label>
+                  <p className="muted">
+                    {t('טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות (ב-CMYK גם הצבעים האלה נכתבים ב-CMYK, ושחור בדיו שחור בלבד). תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, מסגרת לאות, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה, כמו קודם.')}
+                  </p>
+                </>
+              )}
             </div>
-          </div>
+          </>
         )}
-
-        <PrintMarksFields value={marks} onChange={setMarks} unit={unit} disabled={!!busy} />
-
-        <div className="field">
-          <div className="field-label">איכות תמונות</div>
-          <div className="seg small" role="radiogroup" aria-label="איכות תמונות">
-            {DPI_OPTIONS.map((o) => (
-              <button key={o.dpi} role="radio" aria-checked={dpi === o.dpi} className={dpi === o.dpi ? 'on' : ''} onClick={() => setDpi(o.dpi)}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {dpi === 600 && <p className="muted">{HIGH_DPI_NOTE}</p>}
-
-        <div className="field">
-          <div className="field-label">מצב צבע</div>
-          <div className="seg small" role="radiogroup" aria-label="מצב צבע">
-            {COLOR_MODES.map((o) => (
-              <button key={o.mode} role="radio" aria-checked={colorMode === o.mode} className={colorMode === o.mode ? 'on' : ''} onClick={() => setColorMode(o.mode)} disabled={!!busy}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {colorMode === 'cmyk' && <p className="muted">{CMYK_NOTE}</p>}
-
-        <label className="page-bar-check">
-          <input type="checkbox" checked={vectorText} onChange={(e) => setVectorText(e.target.checked)} disabled={!!busy} />
-          ייצוא וקטורי: טקסט, צורות ותמונות
-        </label>
-        <p className="muted">
-          טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות (ב-CMYK גם הצבעים האלה נכתבים ב-CMYK, ושחור בדיו שחור בלבד). תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, מסגרת לאות, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה, כמו קודם.
-        </p>
-
-        <p className="muted">
-          כל עמוד נשמר כתמונה חדה ברזולוציה שנבחרה, בדיוק כפי שהוא נראה במסמך — כך שאין תלות בגופנים בזמן ההדפסה, והטקסט העברי לעולם לא יתעוות אצל בית הדפוס.
-        </p>
 
         {error && <p className="muted" style={{ color: '#e5484d' }}>{error}</p>}
         {result && <VectorSummary report={result} />}
         {staleLinks > 0 && (
           <p className="muted" style={{ color: '#e5a000' }}>
-            {staleLinks === 1 ? 'תמונה מקושרת אחת חסרה או שונתה' : `${staleLinks} תמונות מקושרות חסרות או שונו`} בדיסק. הייצוא ישתמש במה שנטען במסמך (לתמונה חסרה - בתצוגה מקדימה באיכות נמוכה). כדאי לעדכן או לקשר מחדש בלוח הקישורים לפני הייצוא.
+            {staleLinks === 1 ? t('תמונה מקושרת אחת חסרה או שונתה') : t('{count} תמונות מקושרות חסרות או שונו', { count: staleLinks })}{' '}
+            {t('בדיסק. הייצוא ישתמש במה שנטען במסמך (לתמונה חסרה - בתצוגה מקדימה באיכות נמוכה). כדאי לעדכן או לקשר מחדש בלוח הקישורים לפני הייצוא.')}
           </p>
         )}
 
         <div className="modal-buttons">
           {result ? (
             <button className="btn primary" onClick={onClose}>
-              סגור
+              {t('סגור')}
             </button>
           ) : (
             <>
               <button className="btn primary" onClick={() => void run()} disabled={!!busy || doc.pages === 0}>
-                {busy ? `מייצא… (${busy.done}/${busy.total})` : 'ייצוא'}
+                {busy ? t('מייצא… ({done}/{total})', { done: busy.done, total: busy.total }) : t('ייצוא')}
               </button>
               <button className="btn" onClick={onClose} disabled={!!busy}>
-                ביטול
+                {t('ביטול')}
               </button>
             </>
           )}
@@ -204,26 +241,35 @@ export function VectorSummary({ report }: { report: VectorReport }) {
   const total = report.text + report.picture
   const reasons = Object.entries(report.reasons) as [PictureReason, number][]
   const shapeReasons = Object.entries(report.shapeReasons) as [ShapePictureReason, number][]
-  const boxes = (count: number) => (count === 1 ? 'תיבה אחת' : `${count} תיבות`)
-  const shapes = (count: number) => (count === 1 ? 'צורה אחת' : `${count} צורות`)
-  /** "one shape came out as a shape" / "3 shapes came out as shapes", with the verb agreeing */
-  const shapesWere = (count: number, done: string, doneMany: string) => (count === 1 ? `צורה אחת ${done}` : `${count} צורות ${doneMany}`)
-  const picturesWere = (count: number, done: string, doneMany: string) => (count === 1 ? `תמונה אחת ${done}` : `${count} תמונות ${doneMany}`)
+  /** a whole sentence for one and another for many, so that each language agrees as it needs to */
+  const counted = (count: number, one: string, many: string) => (count === 1 ? t(one) : t(many, { count }))
+  const boxes = (count: number) => counted(count, 'תיבה אחת', '{count} תיבות')
+  const shapes = (count: number) => counted(count, 'צורה אחת', '{count} צורות')
+  const shapesText = [
+    report.shapes > 0 ? counted(report.shapes, 'צורה אחת יצאה כצורה', '{count} צורות יצאו כצורות') : t('אף צורה לא יצאה כצורה'),
+    report.shapesPicture > 0 ? counted(report.shapesPicture, 'צורה אחת נשארה כתמונה', '{count} צורות נשארו כתמונה') : '',
+  ].filter(Boolean).join(', ')
+  const imagesText = [
+    report.images > 0 ? counted(report.images, 'תמונה אחת הוכנסה כתמונה נפרדת', '{count} תמונות הוכנסו כתמונות נפרדות') : t('אף תמונה לא הוכנסה כתמונה נפרדת'),
+    report.imagesPicture > 0
+      ? `${counted(report.imagesPicture, 'תמונה אחת נשארה חלק מתמונת העמוד', '{count} תמונות נשארו חלק מתמונת העמוד')} ${t('(צל או טשטוש קצוות)')}`
+      : '',
+  ].filter(Boolean).join(', ')
   return (
     <div role="status" className="muted" style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-      <strong>הייצוא הסתיים.</strong>
+      <strong>{t('הייצוא הסתיים.')}</strong>
       <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
         {total === 0 ? (
-          <li>לא היו תיבות טקסט בעמודים שיוצאו.</li>
+          <li>{t('לא היו תיבות טקסט בעמודים שיוצאו.')}</li>
         ) : report.picture === 0 ? (
-          <li>כל תיבות הטקסט ({total}) יצאו כטקסט אמיתי.</li>
+          <li>{t('כל תיבות הטקסט ({total}) יצאו כטקסט אמיתי.', { total })}</li>
         ) : (
           <li>
-            טקסט: {report.text} מתוך {total} תיבות יצאו כטקסט אמיתי, ו-{report.picture} נשארו כתמונה.
+            {t('טקסט: {text} מתוך {total} תיבות יצאו כטקסט אמיתי, ו-{picture} נשארו כתמונה.', { text: report.text, total, picture: report.picture })}
             <ul style={{ margin: 0, paddingInlineStart: 18 }}>
               {reasons.map(([reason, count]) => (
                 <li key={reason}>
-                  {PICTURE_REASONS[reason]}: {boxes(count)}
+                  {t(PICTURE_REASONS[reason])}: {boxes(count)}
                 </li>
               ))}
             </ul>
@@ -231,13 +277,12 @@ export function VectorSummary({ report }: { report: VectorReport }) {
         )}
         {report.shapes + report.shapesPicture > 0 && (
           <li>
-            צורות וקווים: {report.shapes > 0 ? shapesWere(report.shapes, 'יצאה כצורה', 'יצאו כצורות') : 'אף צורה לא יצאה כצורה'}
-            {report.shapesPicture > 0 ? `, ${shapesWere(report.shapesPicture, 'נשארה כתמונה', 'נשארו כתמונה')}` : ''}.
+            {t('צורות וקווים')}: {shapesText}.
             {shapeReasons.length > 0 && (
               <ul style={{ margin: 0, paddingInlineStart: 18 }}>
                 {shapeReasons.map(([reason, count]) => (
                   <li key={reason}>
-                    {SHAPE_PICTURE_REASONS[reason]}: {shapes(count)}
+                    {t(SHAPE_PICTURE_REASONS[reason])}: {shapes(count)}
                   </li>
                 ))}
               </ul>
@@ -246,8 +291,7 @@ export function VectorSummary({ report }: { report: VectorReport }) {
         )}
         {report.images + report.imagesPicture > 0 && (
           <li>
-            תמונות מוצבות: {report.images > 0 ? picturesWere(report.images, 'הוכנסה כתמונה נפרדת', 'הוכנסו כתמונות נפרדות') : 'אף תמונה לא הוכנסה כתמונה נפרדת'}
-            {report.imagesPicture > 0 ? `, ${picturesWere(report.imagesPicture, 'נשארה חלק מתמונת העמוד', 'נשארו חלק מתמונת העמוד')} (צל או טשטוש קצוות)` : ''}.
+            {t('תמונות מוצבות')}: {imagesText}.
           </li>
         )}
       </ul>

@@ -4,6 +4,7 @@ import type { ArrangeOp } from '../stacking'
 import { AlignButtons, type AlignOp } from './AlignButtons'
 import { ArrangeButtons } from './ArrangeButtons'
 import { FillPicker } from './FillPicker'
+import { t } from '../i18n'
 
 interface Props {
   count: number
@@ -66,68 +67,68 @@ export function MultiSelectionToolbar({
     <>
       {shapes.length > 0 && (
         <>
-          <div className="context-object-colors" role="group" aria-label="צבע מילוי וקו מתאר לצורות">
+          <div className="context-object-colors" role="group" aria-label={t('צבע מילוי וקו מתאר לצורות')}>
             <div className="context-swatch-wrap">
               <button
                 type="button"
                 className="context-color-preview context-fill-preview"
-                aria-label="צבע מילוי לצורות"
+                aria-label={t('צבע מילוי לצורות')}
                 aria-expanded={openPalette === 'fill'}
-                title={fillMixed ? 'צבע מילוי מעורב — בחר צבע לכל הצורות' : 'צבע מילוי'}
+                title={fillMixed ? t('צבע מילוי מעורב — בחר צבע לכל הצורות') : t('צבע מילוי')}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setOpenPalette((current) => current === 'fill' ? null : 'fill')}
               >
                 <span className="context-shape-preview context-shape-fill" style={!fillMixed && fill ? { backgroundColor: fill } : undefined} />
               </button>
-              {openPalette === 'fill' && <div className="context-swatch-popover"><FillPicker label="צבע מילוי לצורות" value={fillMixed ? null : fill} samples={colorSamples} onChange={(color) => { onFill(color); setOpenPalette(null) }} /></div>}
+              {openPalette === 'fill' && <div className="context-swatch-popover"><FillPicker label={t('צבע מילוי לצורות')} value={fillMixed ? null : fill} samples={colorSamples} onChange={(color) => { onFill(color); setOpenPalette(null) }} /></div>}
             </div>
             <div className="context-swatch-wrap context-outline-wrap">
               <button
                 type="button"
                 className="context-color-preview context-outline-preview"
-                aria-label="צבע קו מתאר לצורות"
+                aria-label={t('צבע קו מתאר לצורות')}
                 aria-expanded={openPalette === 'stroke'}
-                title={strokeMixed ? 'צבע קו מתאר מעורב — בחר צבע לכל הצורות' : 'צבע קו מתאר'}
+                title={strokeMixed ? t('צבע קו מתאר מעורב — בחר צבע לכל הצורות') : t('צבע קו מתאר')}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setOpenPalette((current) => current === 'stroke' ? null : 'stroke')}
               >
                 <span className="context-shape-preview context-shape-outline" style={{ borderColor: !strokeMixed && stroke ? stroke : '#ffffff', borderWidth: `${Math.min(6, Math.max(1, (strokeWidth || 0.25) * 96 / 72))}px` }} />
               </button>
-              {openPalette === 'stroke' && <div className="context-swatch-popover"><FillPicker label="צבע קו מתאר לצורות" value={strokeMixed ? null : stroke} samples={colorSamples} onChange={(color) => { onStroke(color); setOpenPalette(null) }} /></div>}
+              {openPalette === 'stroke' && <div className="context-swatch-popover"><FillPicker label={t('צבע קו מתאר לצורות')} value={strokeMixed ? null : stroke} samples={colorSamples} onChange={(color) => { onStroke(color); setOpenPalette(null) }} /></div>}
             </div>
-            <div className="context-outline-stepper" role="group" aria-label="עובי קו מתאר">
+            <div className="context-outline-stepper" role="group" aria-label={t('עובי קו מתאר')}>
               <span>{strokeWidthMixed ? '—' : Number(strokeWidth.toFixed(2))}</span>
-              <button type="button" aria-label="הגדל עובי קו מתאר" title="הגדל עובי קו מתאר" onMouseDown={(event) => event.preventDefault()} onClick={() => onStrokeWidthStep(1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="M1 5 4 2 7 5" /></svg></button>
-              <button type="button" aria-label="הקטן עובי קו מתאר" title="הקטן עובי קו מתאר" onMouseDown={(event) => event.preventDefault()} onClick={() => onStrokeWidthStep(-1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="m1 2 3 3 3-3" /></svg></button>
+              <button type="button" aria-label={t('הגדל עובי קו מתאר')} title={t('הגדל עובי קו מתאר')} onMouseDown={(event) => event.preventDefault()} onClick={() => onStrokeWidthStep(1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="M1 5 4 2 7 5" /></svg></button>
+              <button type="button" aria-label={t('הקטן עובי קו מתאר')} title={t('הקטן עובי קו מתאר')} onMouseDown={(event) => event.preventDefault()} onClick={() => onStrokeWidthStep(-1)}><svg viewBox="0 0 8 7" aria-hidden="true"><path d="m1 2 3 3 3-3" /></svg></button>
             </div>
           </div>
-          <div className="context-flip-buttons" role="group" aria-label="היפוך צורות">
-            <button className="context-command" title="היפוך אופקי" onClick={() => onFlipShapes('x')}>⇋</button>
-            <button className="context-command" title="היפוך אנכי" onClick={() => onFlipShapes('y')}>⇵</button>
+          <div className="context-flip-buttons" role="group" aria-label={t('היפוך צורות')}>
+            <button className="context-command" title={t('היפוך אופקי')} onClick={() => onFlipShapes('x')}>⇋</button>
+            <button className="context-command" title={t('היפוך אנכי')} onClick={() => onFlipShapes('y')}>⇵</button>
           </div>
         </>
       )}
       {pureImages && firstImage && (
         <>
-          <div className="context-image-fits" role="group" aria-label="התאמת תמונות">
-            {(['fill', 'fit', 'stretch'] as const).map((fit) => <button key={fit} title={fit === 'fill' ? 'מילוי המסגרות בתמונה' : fit === 'fit' ? 'התאמת התמונות בלי חיתוך' : 'מתיחת התמונות למסגרות'} className={sameFit && firstImage.fit === fit ? 'on' : ''} onClick={() => onFit(fit)}>{fit === 'fill' ? 'מילוי' : fit === 'fit' ? 'התאמה' : 'מתיחה'}</button>)}
+          <div className="context-image-fits" role="group" aria-label={t('התאמת תמונות')}>
+            {(['fill', 'fit', 'stretch'] as const).map((fit) => <button key={fit} title={fit === 'fill' ? t('מילוי המסגרות בתמונה') : fit === 'fit' ? t('התאמת התמונות בלי חיתוך') : t('מתיחת התמונות למסגרות')} className={sameFit && firstImage.fit === fit ? 'on' : ''} onClick={() => onFit(fit)}>{fit === 'fill' ? t('מילוי') : fit === 'fit' ? t('התאמה') : t('מתיחה')}</button>)}
           </div>
-          <div className="context-image-wrap" role="group" aria-label="עטיפת טקסט לתמונות">
-            {(['none', 'around', 'jump'] as const).map((wrap) => <button key={wrap} title={wrap === 'none' ? 'ללא עטיפת טקסט' : wrap === 'around' ? 'טקסט מסביב לתמונות' : 'טקסט מעל ומתחת לתמונות'} className={sameWrap && (firstImage.wrap ?? 'none') === wrap ? 'on' : ''} onClick={() => onWrap(wrap)}>{wrap === 'none' ? 'ללא' : wrap === 'around' ? 'מסביב' : 'קפיצה'}</button>)}
+          <div className="context-image-wrap" role="group" aria-label={t('עטיפת טקסט לתמונות')}>
+            {(['none', 'around', 'jump'] as const).map((wrap) => <button key={wrap} title={wrap === 'none' ? t('ללא עטיפת טקסט') : wrap === 'around' ? t('טקסט מסביב לתמונות') : t('טקסט מעל ומתחת לתמונות')} className={sameWrap && (firstImage.wrap ?? 'none') === wrap ? 'on' : ''} onClick={() => onWrap(wrap)}>{wrap === 'none' ? t('ללא') : wrap === 'around' ? t('מסביב') : t('קפיצה')}</button>)}
           </div>
-          <div className="context-flip-buttons" role="group" aria-label="היפוך תמונות">
-            <button className={'context-command' + (allFlipX ? ' active' : '')} title="היפוך אופקי" onClick={() => onFlipImages('x')}>⇋</button>
-            <button className={'context-command' + (allFlipY ? ' active' : '')} title="היפוך אנכי" onClick={() => onFlipImages('y')}>⇵</button>
+          <div className="context-flip-buttons" role="group" aria-label={t('היפוך תמונות')}>
+            <button className={'context-command' + (allFlipX ? ' active' : '')} title={t('היפוך אופקי')} onClick={() => onFlipImages('x')}>⇋</button>
+            <button className={'context-command' + (allFlipY ? ' active' : '')} title={t('היפוך אנכי')} onClick={() => onFlipImages('y')}>⇵</button>
           </div>
-          <button className="context-command" title="התאם כל מסגרת ליחס התמונה שלה" onClick={onMatchImageFrames}>התאם מסגרות</button>
+          <button className="context-command" title={t('התאם כל מסגרת ליחס התמונה שלה')} onClick={onMatchImageFrames}>{t('התאם מסגרות')}</button>
         </>
       )}
       <ArrangeButtons onArrange={onArrange} compact />
       <AlignButtons onAlign={onAlign} />
-      <label className="context-field" title="שקיפות האובייקטים הנבחרים">
-        <span>שקיפות</span>
-        <input aria-label="שקיפות האובייקטים הנבחרים" type="range" min="0" max="100" value={opacity} onChange={(event) => onOpacity(Number(event.target.value) / 100)} />
-        <span>{opacityMixed ? 'מעורב' : `${opacity}%`}</span>
+      <label className="context-field" title={t('שקיפות האובייקטים הנבחרים')}>
+        <span>{t('שקיפות')}</span>
+        <input aria-label={t('שקיפות האובייקטים הנבחרים')} type="range" min="0" max="100" value={opacity} onChange={(event) => onOpacity(Number(event.target.value) / 100)} />
+        <span>{opacityMixed ? t('מעורב') : `${opacity}%`}</span>
       </label>
     </>
   )

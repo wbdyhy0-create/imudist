@@ -11,6 +11,7 @@ import { CharControls, Group, Labeled } from './PropertiesPanel'
 import { ShadowControls } from './ShadowControls'
 import { FeatherControls } from './FeatherControls'
 import { LINE_PROFILES, MAX_LINE_WIDTH_MULTIPLE, type LineWidths } from '../lineProfile'
+import { t } from '../i18n'
 
 interface Props {
   shape: ShapeFrame
@@ -56,17 +57,17 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
   const maxR = Math.max(0, Math.min(shape.w, shape.h) / 2)
   // physical positions, right column first (the panel is right-to-left): top-right, top-left, bottom-right, bottom-left
   const cornerFields: { corner: number; label: string }[] = [
-    { corner: 1, label: 'ימין למעלה' },
-    { corner: 0, label: 'שמאל למעלה' },
-    { corner: 2, label: 'ימין למטה' },
-    { corner: 3, label: 'שמאל למטה' },
+    { corner: 1, get label() { return t('ימין למעלה') } },
+    { corner: 0, get label() { return t('שמאל למעלה') } },
+    { corner: 2, get label() { return t('ימין למטה') } },
+    { corner: 3, get label() { return t('שמאל למטה') } },
   ]
-  const title = shape.kind === 'rect' ? 'צורות' : shape.kind === 'polygon' ? SIDE_NAMES[shape.sides ?? 6] : SHAPE_NAMES[shape.kind]
+  const title = shape.kind === 'rect' ? t('צורות') : shape.kind === 'polygon' ? SIDE_NAMES[shape.sides ?? 6] : SHAPE_NAMES[shape.kind]
 
   return (
     <aside
       className="props-panel"
-      aria-label="מאפייני צורה"
+      aria-label={t('מאפייני צורה')}
       // buttons must not take the focus away from the text being typed on the outline
       onMouseDown={(e) => {
         if ((e.target as HTMLElement).closest('button')) e.preventDefault()
@@ -74,40 +75,40 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
     >
       <h2 className="props-title">{title}</h2>
 
-      <Group title="מיקום וגודל">
+      <Group title={t('מיקום וגודל')}>
         <div className="grid2">
-          <Labeled label="מיקום X">
+          <Labeled label={t('מיקום X')}>
             <NumberField value={shape.x} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ x: v })} />
           </Labeled>
-          <Labeled label="מיקום Y">
+          <Labeled label={t('מיקום Y')}>
             <NumberField value={shape.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ y: v })} />
           </Labeled>
-          <Labeled label="רוחב">
+          <Labeled label={t('רוחב')}>
             <NumberField value={shape.w} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ w: v })} />
           </Labeled>
           {shape.kind !== 'table' && (
-            <Labeled label="גובה">
+            <Labeled label={t('גובה')}>
               <NumberField value={shape.h} unit={unit} min={shape.kind === 'line' ? 0 : 6} max={MAX_PAGE_PT} onChange={(v) => onGeometry({ h: v })} />
             </Labeled>
           )}
         </div>
         <p className="muted">
           {shape.kind === 'line'
-            ? 'גרור את אחת מנקודות הקצה של הקו כדי להאריך, לקצר או לשנות את זוויתו. Shift שומר על זווית ישרה (קפיצות של 45°).'
+            ? t('גרור את אחת מנקודות הקצה של הקו כדי להאריך, לקצר או לשנות את זוויתו. Shift שומר על זווית ישרה (קפיצות של 45°).')
             : shape.kind === 'table'
-              ? 'גובה הטבלה נקבע לפי הטקסט שבתאים. את רוחב העמודות וגובה השורות משנים בגרירת הקווים שביניהן, והגדרות הקווים והצבעים נמצאות בתפריט טבלה.'
-              : 'Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.'}
+              ? t('גובה הטבלה נקבע לפי הטקסט שבתאים. את רוחב העמודות וגובה השורות משנים בגרירת הקווים שביניהן, והגדרות הקווים והצבעים נמצאות בתפריט טבלה.')
+              : t('Shift בגרירת פינה שומר על היחס בין הרוחב לגובה. Alt מותח לשני הצדדים בשווה.')}
         </p>
         {shape.kind === 'path' && (
           <p className="muted">
-            בעריכת נקודות: גרירת אמצע צלע עם Alt מוסיפה נקודה כזו גם בצלע הנגדית, והשתיים נגררות במקביל (בהשתקפות). בלי Alt משתנה רק הצלע שנגררה.
+            {t('בעריכת נקודות: גרירת אמצע צלע עם Alt מוסיפה נקודה כזו גם בצלע הנגדית, והשתיים נגררות במקביל (בהשתקפות). בלי Alt משתנה רק הצלע שנגררה.')}
           </p>
         )}
       </Group>
 
       {shape.kind === 'polygon' && (
-        <Group title="מספר פינות">
-          <div className="place-modes" role="group" aria-label="מספר פינות">
+        <Group title={t('מספר פינות')}>
+          <div className="place-modes" role="group" aria-label={t('מספר פינות')}>
             {Array.from({ length: MAX_SIDES - MIN_SIDES + 1 }, (_, i) => MIN_SIDES + i).map((n) => (
               <button key={n} className={(shape.sides ?? 6) === n ? 'on' : ''} title={SIDE_NAMES[n]} onClick={() => onChange({ sides: n })}>
                 {n}
@@ -118,7 +119,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
       )}
 
       {shape.kind === 'rect' && (
-        <Group title="עיגול פינות">
+        <Group title={t('עיגול פינות')}>
           <div className="grid2">
             {cornerFields.map((f) => (
               <Labeled key={f.corner} label={f.label}>
@@ -128,90 +129,90 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
           </div>
           <label className="page-bar-check">
             <input type="checkbox" checked={linked} onChange={(e) => onLinkedChange(e.target.checked)} />
-            שנה את כל הפינות יחד
+            {t('שנה את כל הפינות יחד')}
           </label>
           <p className="muted">
             {linked
-              ? 'גרירת אחד הריבועים המסובבים שבפינות מעגלת את כל הפינות. בטל את הסימון כדי לעגל פינות בנפרד.'
-              : 'גרור ידית אחת כדי לעגל רק אותה. בזמן הגרירה העבר את הסמן מעל ידיות נוספות כדי לצרף אותן, ואז כולן יתעגלו יחד. כל ארבע הידיות נשארות מוצגות.'}
+              ? t('גרירת אחד הריבועים המסובבים שבפינות מעגלת את כל הפינות. בטל את הסימון כדי לעגל פינות בנפרד.')
+              : t('גרור ידית אחת כדי לעגל רק אותה. בזמן הגרירה העבר את הסמן מעל ידיות נוספות כדי לצרף אותן, ואז כולן יתעגלו יחד. כל ארבע הידיות נשארות מוצגות.')}
           </p>
           {!linked && cornersPicked && (
             <button type="button" className="btn small" onClick={onPickAllCorners}>
-              בחר את כל הפינות
+              {t('בחר את כל הפינות')}
             </button>
           )}
         </Group>
       )}
 
       {shape.pathText && pathStyle && (
-        <Group title="טקסט על הקו">
+        <Group title={t('טקסט על הקו')}>
           <p className={'scope-hint' + (pathScope === 'selection' ? ' on' : '')}>
-            {pathScope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט שעל הקו. סמן טקסט כדי לשנות רק חלק ממנו.'}
+            {pathScope === 'selection' ? t('השינויים חלים על הטקסט המסומן') : t('השינויים חלים על כל הטקסט שעל הקו. סמן טקסט כדי לשנות רק חלק ממנו.')}
           </p>
           <CharControls style={pathStyle} onCharStyle={onPathChar} />
-          <Labeled label="צד הקו">
-            <div className="seg small" role="radiogroup" aria-label="צד הקו">
+          <Labeled label={t('צד הקו')}>
+            <div className="seg small" role="radiogroup" aria-label={t('צד הקו')}>
               {(['outside', 'inside'] as PathSide[]).map((side) => (
                 <button key={side} role="radio" aria-checked={shape.pathText!.side === side} className={shape.pathText!.side === side ? 'on' : ''} onClick={() => onPathChange({ side })}>
-                  {side === 'outside' ? 'מחוץ לצורה' : 'בתוך הצורה'}
+                  {side === 'outside' ? t('מחוץ לצורה') : t('בתוך הצורה')}
                 </button>
               ))}
             </div>
           </Labeled>
-          <Labeled label="צבע הטקסט">
-            <FillPicker label="צבע הטקסט" value={shape.pathText.color} onChange={(color) => color && onPathChange({ color })} />
+          <Labeled label={t('צבע הטקסט')}>
+            <FillPicker label={t('צבע הטקסט')} value={shape.pathText.color} onChange={(color) => color && onPathChange({ color })} />
           </Labeled>
           <div className="props-buttons" style={{ marginTop: 8 }}>
             <button className="btn small" onClick={onEditPath}>
-              ערוך את הטקסט
+              {t('ערוך את הטקסט')}
             </button>
             <button className="btn small" onClick={onRemovePath}>
-              הסר את הטקסט מהקו
+              {t('הסר את הטקסט מהקו')}
             </button>
           </div>
-          <p className="muted">היתדות על הקו: הצהוב מזיז את הטקסט, הכחול מקצר או מאריך אותו, והעגול שבאמצע מכניס אותו פנימה או מוציא אותו החוצה.</p>
+          <p className="muted">{t('היתדות על הקו: הצהוב מזיז את הטקסט, הכחול מקצר או מאריך אותו, והעגול שבאמצע מכניס אותו פנימה או מוציא אותו החוצה.')}</p>
         </Group>
       )}
 
       {shape.image && (
-        <Group title="התמונה במסגרת">
-          <div className="seg small" role="radiogroup" aria-label="אופן ההתאמה">
+        <Group title={t('התמונה במסגרת')}>
+          <div className="seg small" role="radiogroup" aria-label={t('אופן ההתאמה')}>
             <button role="radio" aria-checked={shape.image.fit !== 'fit'} className={shape.image.fit !== 'fit' ? 'on' : ''} onClick={() => onChange({ image: { assetId: shape.image!.assetId, fit: 'fill' } })}>
-              מלא את המסגרת
+              {t('מלא את המסגרת')}
             </button>
             <button role="radio" aria-checked={shape.image.fit === 'fit'} className={shape.image.fit === 'fit' ? 'on' : ''} onClick={() => onChange({ image: { assetId: shape.image!.assetId, fit: 'fit' } })}>
-              התמונה כולה
+              {t('התמונה כולה')}
             </button>
           </div>
           <p className="muted">
             {shape.image.fit === 'fit'
-              ? 'כל התמונה נכנסת בתוך המסגרת, גם אם נשאר רווח בצדדים.'
-              : 'התמונה נמתחת למידות המסגרת, כך שלא ייחתך ממנה חלק.'}{' '}
-            גרור את העיגול שבאמצע התמונה כדי להזיז אותה, ואת הפינות שלה כדי לשנות את גודלה — עם כלי עריכת הנקודות.
+              ? t('כל התמונה נכנסת בתוך המסגרת, גם אם נשאר רווח בצדדים.')
+              : t('התמונה נמתחת למידות המסגרת, כך שלא ייחתך ממנה חלק.')}{' '}
+            {t('גרור את העיגול שבאמצע התמונה כדי להזיז אותה, ואת הפינות שלה כדי לשנות את גודלה — עם כלי עריכת הנקודות.')}
           </p>
           <div className="props-buttons" style={{ marginTop: 8 }}>
             <button className="btn small" onClick={() => onChange({ image: undefined })}>
-              הסר את התמונה מהמסגרת
+              {t('הסר את התמונה מהמסגרת')}
             </button>
           </div>
         </Group>
       )}
 
       {shape.kind !== 'line' && (
-        <Group title={shape.kind === 'table' ? 'רקע הטבלה' : 'מילוי'}>
-          <FillPicker label={shape.kind === 'table' ? 'צבע הרקע' : 'צבע מילוי'} value={shape.fill} onChange={(fill) => onChange({ fill, fillGradient: undefined })} />
+        <Group title={shape.kind === 'table' ? t('רקע הטבלה') : t('מילוי')}>
+          <FillPicker label={shape.kind === 'table' ? t('צבע הרקע') : t('צבע מילוי')} value={shape.fill} onChange={(fill) => onChange({ fill, fillGradient: undefined })} />
         </Group>
       )}
 
-      {shape.kind !== 'table' && <Group title="קו">
+      {shape.kind !== 'table' && <Group title={t('קו')}>
         <FillPicker
-          label="צבע הקו"
+          label={t('צבע הקו')}
           value={shape.stroke}
           // adding a line to a shape that has none gives it a visible weight
           onChange={(stroke) => onChange(stroke && shape.strokeWidth === 0 ? { stroke, strokeWidth: 1 } : { stroke })}
         />
         <div style={{ marginTop: 8 }}>
-          <Labeled label="עובי הקו (נקודות)">
+          <Labeled label={t('עובי הקו (נקודות)')}>
             {/* line weights are counted in points, in quarter steps: 0.25, 0.5, 0.75, 1, 1.25 … (Shift = ten steps) */}
             <NumberField value={shape.strokeWidth} unit="px" unitLabel="pt" step={0.25} min={0} max={200} onChange={(v) => onChange({ strokeWidth: v })} />
           </Labeled>
@@ -219,30 +220,30 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
       </Group>}
 
       {shape.kind === 'line' && (
-        <Group title="סגנון קו">
-          <Labeled label="תבנית">
-            <div className="seg small" role="radiogroup" aria-label="תבנית הקו">
+        <Group title={t('סגנון קו')}>
+          <Labeled label={t('תבנית')}>
+            <div className="seg small" role="radiogroup" aria-label={t('תבנית הקו')}>
               <button role="radio" aria-checked={!shape.strokeDash} className={!shape.strokeDash ? 'on' : ''} onClick={() => onChange({ strokeDash: undefined })}>
-                רציף
+                {t('רציף')}
               </button>
               <button role="radio" aria-checked={shape.strokeDash === 'dashed'} className={shape.strokeDash === 'dashed' ? 'on' : ''} onClick={() => onChange({ strokeDash: 'dashed' })}>
-                מקווקו
+                {t('מקווקו')}
               </button>
             </div>
           </Labeled>
           <div style={{ marginTop: 8 }}>
-            <Labeled label="קצוות">
-              <div className="seg small" role="radiogroup" aria-label="צורת הקצוות">
+            <Labeled label={t('קצוות')}>
+              <div className="seg small" role="radiogroup" aria-label={t('צורת הקצוות')}>
                 {(['butt', 'round', 'square'] as LineCap[]).map((cap) => (
                   <button
                     key={cap}
                     role="radio"
                     aria-checked={(shape.strokeCap ?? 'butt') === cap}
                     className={(shape.strokeCap ?? 'butt') === cap ? 'on' : ''}
-                    title={cap === 'butt' ? 'קצה חד' : cap === 'round' ? 'קצה עגול' : 'קצה מרובע'}
+                    title={cap === 'butt' ? t('קצה חד') : cap === 'round' ? t('קצה עגול') : t('קצה מרובע')}
                     onClick={() => onChange({ strokeCap: cap === 'butt' ? undefined : cap })}
                   >
-                    {cap === 'butt' ? 'חד' : cap === 'round' ? 'עגול' : 'מרובע'}
+                    {cap === 'butt' ? t('חד') : cap === 'round' ? t('עגול') : t('מרובע')}
                   </button>
                 ))}
               </div>
@@ -254,8 +255,8 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
       {shape.kind === 'line' && <LineProfileControls widths={shape.lineWidths ?? [1, 1, 1]} onChange={(lineWidths) => onChange({ lineWidths })} />}
 
       {(shape.kind === 'line' || shape.kind === 'path') && !!shape.stroke && (
-        <Group title="חדות הקו">
-          <div className="seg small" role="radiogroup" aria-label="חדות הקו">
+        <Group title={t('חדות הקו')}>
+          <div className="seg small" role="radiogroup" aria-label={t('חדות הקו')}>
             {SHARPNESS_LEVELS.map((level) => (
               <button
                 key={level.id}
@@ -275,20 +276,20 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
         </Group>
       )}
 
-      <Group title="טשטוש הצורה">
-        <Labeled label="עוצמה (נקודות)">
+      <Group title={t('טשטוש הצורה')}>
+        <Labeled label={t('עוצמה (נקודות)')}>
           <NumberField value={shape.blur ?? 0} unit="px" unitLabel="pt" step={0.5} min={0} max={MAX_BLUR} onChange={(v) => onChange({ blur: v > 0 ? v : undefined })} />
         </Labeled>
         <p className="muted" style={{ marginTop: 6 }}>
-          בקובץ SVG הטשטוש נשמר כמסנן וקטורי. בייצוא PDF צורה מטושטשת נכתבת כתמונה ברזולוציית הייצוא.
+          {t('בקובץ SVG הטשטוש נשמר כמסנן וקטורי. בייצוא PDF צורה מטושטשת נכתבת כתמונה ברזולוציית הייצוא.')}
         </p>
       </Group>
 
-      <Group title="סדר שכבות">
+      <Group title={t('סדר שכבות')}>
         <ArrangeButtons onArrange={onArrange} />
       </Group>
 
-      <Group title="הצללה">
+      <Group title={t('הצללה')}>
         <ShadowControls
           offsetX={shape.shadowOffsetX ?? 0}
           offsetY={shape.shadowOffsetY ?? shape.shadowOffset ?? DEFAULT_SHADOW_OFFSET}
@@ -301,7 +302,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
         />
       </Group>
 
-      <Group title="טשטוש קצוות (Feather)">
+      <Group title={t('טשטוש קצוות (Feather)')}>
         <FeatherControls
           feather={shape.feather}
           onChange={(feather?: Feather) => onChange({ feather })}
@@ -311,7 +312,7 @@ export function ShapeProperties({ shape, unit, onGeometry, onChange, onUseFeathe
 
       <div className="props-buttons" style={{ marginTop: 10 }}>
         <button className="btn small danger" onClick={onDelete}>
-          מחק צורה
+          {t('מחק צורה')}
         </button>
       </div>
     </aside>
@@ -327,13 +328,13 @@ function LineProfileControls({ widths, onChange }: { widths: LineWidths; onChang
     onChange(same(next, [1, 1, 1]) ? undefined : next)
   }
   const fields = [
-    { index: 0, label: 'בהתחלה' },
-    { index: 1, label: 'באמצע' },
-    { index: 2, label: 'בסוף' },
+    { index: 0, get label() { return t('בהתחלה') } },
+    { index: 1, get label() { return t('באמצע') } },
+    { index: 2, get label() { return t('בסוף') } },
   ]
   return (
-    <Group title="עובי לאורך הקו">
-      <div className="line-profile-presets" role="group" aria-label="צורת העובי לאורך הקו">
+    <Group title={t('עובי לאורך הקו')}>
+      <div className="line-profile-presets" role="group" aria-label={t('צורת העובי לאורך הקו')}>
         {LINE_PROFILES.map((preset) => {
           // a picture of the profile: the outline of a short line with those widths
           const half = (t: number) => {
@@ -362,7 +363,7 @@ function LineProfileControls({ widths, onChange }: { widths: LineWidths; onChang
           </Labeled>
         ))}
       </div>
-      <p className="muted">האחוזים הם מעובי הקו שנקבע למעלה. קו שעובהו משתנה נצבע בצבע הקו, ומיוצא כצורה מלאה.</p>
+      <p className="muted">{t('האחוזים הם מעובי הקו שנקבע למעלה. קו שעובהו משתנה נצבע בצבע הקו, ומיוצא כצורה מלאה.')}</p>
     </Group>
   )
 }

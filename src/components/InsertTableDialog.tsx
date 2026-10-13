@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MAX_TABLE_COLS, MAX_TABLE_ROWS } from '../table'
+import { t } from '../i18n'
 
 export interface InsertTableOptions {
   rows: number
@@ -61,42 +62,42 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
   }, [onClose])
 
   const field = (label: string, value: number, set: (n: number) => void, min: number, max: number) => (
-    <label className="field-label table-dialog-field">{label}
+    <label className="field-label table-dialog-field">{t(label)}
       <input className="select" type="number" min={min} max={max} value={value} onChange={(e) => set(Number(e.target.value))} onFocus={(e) => e.target.select()} />
     </label>
   )
 
   return (
     <div className="modal-backdrop">
-      <form className="modal table-dialog" role="dialog" aria-modal="true" aria-label="הוספת טבלה" dir="rtl" onSubmit={(e) => { e.preventDefault(); onConfirm(options()) }}>
-        <h2>הוספת טבלה</h2>
-        <p className="muted">הטבלה נוצרת באמצע העמוד. אפשר להוסיף ולמחוק שורות ועמודות אחר כך, מתפריט טבלה.</p>
-        <label className="dlg-check" title="בטבלת חישוב אפשר לכתוב בתאים נוסחאות (סכום, ממוצע ועוד), והתוצאות מתעדכנות מעצמן">
-          <input type="checkbox" checked={calculation} onChange={(e) => setCalculation(e.target.checked)} />טבלת חישוב (נוסחאות בתאים)
+      <form className="modal table-dialog" role="dialog" aria-modal="true" aria-label={t('הוספת טבלה')} onSubmit={(e) => { e.preventDefault(); onConfirm(options()) }}>
+        <h2>{t('הוספת טבלה')}</h2>
+        <p className="muted">{t('הטבלה נוצרת באמצע העמוד. אפשר להוסיף ולמחוק שורות ועמודות אחר כך, מתפריט טבלה.')}</p>
+        <label className="dlg-check" title={t('בטבלת חישוב אפשר לכתוב בתאים נוסחאות (סכום, ממוצע ועוד), והתוצאות מתעדכנות מעצמן')}>
+          <input type="checkbox" checked={calculation} onChange={(e) => setCalculation(e.target.checked)} />{t('טבלת חישוב (נוסחאות בתאים)')}
         </label>
-        <label className="field-label table-dialog-field">סידור תאים
+        <label className="field-label table-dialog-field">{t('סידור תאים')}
           <select className="select" value={layout} onChange={(e) => setLayout(e.target.value as InsertTableOptions['layout'])}>
-            <option value="continuous">טבלה רגילה, תאים צמודים</option>
-            <option value="separated">תאים מופרדים עם רווח</option>
+            <option value="continuous">{t('טבלה רגילה, תאים צמודים')}</option>
+            <option value="separated">{t('תאים מופרדים עם רווח')}</option>
           </select>
         </label>
         {layout === 'separated' && <div className="table-dialog-grid">
-          <label className="field-label table-dialog-field">רווח אופקי בין תאים (pt)
+          <label className="field-label table-dialog-field">{t('רווח אופקי בין תאים (pt)')}
             <input className="select" type="number" min={0} max={200} step={0.5} value={cellGapX} onChange={(e) => setCellGapX(Number(e.target.value))} />
           </label>
-          <label className="field-label table-dialog-field">רווח אנכי בין תאים (pt)
+          <label className="field-label table-dialog-field">{t('רווח אנכי בין תאים (pt)')}
             <input className="select" type="number" min={0} max={200} step={0.5} value={cellGapY} onChange={(e) => setCellGapY(Number(e.target.value))} />
           </label>
-          <label className="field-label table-dialog-field">פינות התאים
+          <label className="field-label table-dialog-field">{t('פינות התאים')}
             <select className="select" value={roundedCells ? 'rounded' : 'square'} onChange={(e) => setRoundedCells(e.target.value === 'rounded')}>
-              <option value="square">זוויתיות</option>
-              <option value="rounded">מעוגלות</option>
+              <option value="square">{t('זוויתיות')}</option>
+              <option value="rounded">{t('מעוגלות')}</option>
             </select>
           </label>
-          {roundedCells && <label className="field-label table-dialog-field">רדיוס פינה (pt)
+          {roundedCells && <label className="field-label table-dialog-field">{t('רדיוס פינה (pt)')}
             <input className="select" type="number" min={0} max={100} step={0.5} value={cellRadius} onChange={(e) => setCellRadius(Number(e.target.value))} />
           </label>}
-          {headerRows > 0 && <label className="dlg-check"><input type="checkbox" checked={headerContinuous} onChange={(e) => setHeaderContinuous(e.target.checked)} />כותרת רציפה, כמו בטבלה רגילה</label>}
+          {headerRows > 0 && <label className="dlg-check"><input type="checkbox" checked={headerContinuous} onChange={(e) => setHeaderContinuous(e.target.checked)} />{t('כותרת רציפה, כמו בטבלה רגילה')}</label>}
         </div>}
         <div className="table-dialog-grid">
           {field('שורות', rows, setRows, 1, MAX_TABLE_ROWS)}
@@ -105,8 +106,8 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
           {field('שורות כותרת תחתונה', footerRows, setFooterRows, 0, rows)}
         </div>
         <div className="modal-buttons">
-          <button className="btn primary" type="submit" autoFocus>הוספה</button>
-          <button className="btn" type="button" onClick={onClose}>ביטול</button>
+          <button className="btn primary" type="submit" autoFocus>{t('הוספה')}</button>
+          <button className="btn" type="button" onClick={onClose}>{t('ביטול')}</button>
         </div>
       </form>
     </div>

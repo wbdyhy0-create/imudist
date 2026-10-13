@@ -66,7 +66,7 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
   if (status !== 'ok') {
     return (
       <div className="modal-backdrop">
-        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת הבדיקה הסתיימה" dir="rtl">
+        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת הבדיקה הסתיימה">
           <h2>{status === 'expired' ? 'תוקף גרסת הבדיקה הסתיים' : 'לא ניתן להמשיך'}</h2>
           <p>
             {status === 'expired'
@@ -84,7 +84,7 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
   if (!agreed) {
     return (
       <div className="modal-backdrop">
-        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת בדיקה" dir="rtl">
+        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת בדיקה">
           <h2>גרסת בדיקה</h2>
           <p>גרסה זו של Imudist ניתנת לך לבדיקה והתנסות בלבד.</p>
           <p>בלחיצה על „אני מסכים” אתה מאשר ש:</p>

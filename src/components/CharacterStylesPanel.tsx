@@ -217,7 +217,7 @@ function CharacterStyleDialog({ styles, initial, onSave, onDelete, onClose }: Di
 
   return (
     <div className="modal-backdrop">
-      <div className="modal table-dialog wide" role="dialog" aria-modal="true" aria-label="אפשרויות סגנון תו" dir="rtl">
+      <div className="modal table-dialog wide" role="dialog" aria-modal="true" aria-label="אפשרויות סגנון תו">
         <h2>{initial.id ? 'אפשרויות סגנון תו' : 'סגנון תו חדש'}</h2>
         <label className="field-label table-dialog-field">שם הסגנון
           <input className="select" value={name} autoFocus onChange={(e) => setName(e.target.value)} />

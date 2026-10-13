@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PreflightIssue } from '../preflight'
 import { PreflightButton } from './PreflightPanel'
+import { t } from '../i18n'
 
 interface Props {
   /** what the check found, kept up to date as the document changes */
@@ -26,17 +27,17 @@ export function StatusBar(p: Props) {
     <div className="statusbar">
       <ZoomField zoom={p.zoom} onZoomTo={p.onZoomTo} onFitPage={p.onFitPage} onFitSpread={p.onFitSpread} />
       <div className="page-nav">
-        <button aria-label="עמוד ראשון" disabled={p.spreadIndex <= 0} onClick={() => p.onGo(0)}>
+        <button aria-label={t('עמוד ראשון')} disabled={p.spreadIndex <= 0} onClick={() => p.onGo(0)}>
           <svg viewBox="0 0 12 12"><path d="M3 2v8M9 2 5 6l4 4" /></svg>
         </button>
-        <button aria-label="עמוד קודם" disabled={p.spreadIndex <= 0} onClick={() => p.onGo(p.spreadIndex - 1)}>
+        <button aria-label={t('עמוד קודם')} disabled={p.spreadIndex <= 0} onClick={() => p.onGo(p.spreadIndex - 1)}>
           <svg viewBox="0 0 12 12"><path d="M8 2 4 6l4 4" /></svg>
         </button>
         <PageInput label={p.spreadLabel} onCommit={p.onGoToPage} />
-        <button aria-label="עמוד הבא" disabled={p.spreadIndex >= p.spreadCount - 1} onClick={() => p.onGo(p.spreadIndex + 1)}>
+        <button aria-label={t('עמוד הבא')} disabled={p.spreadIndex >= p.spreadCount - 1} onClick={() => p.onGo(p.spreadIndex + 1)}>
           <svg viewBox="0 0 12 12"><path d="m4 2 4 4-4 4" /></svg>
         </button>
-        <button aria-label="עמוד אחרון" disabled={p.spreadIndex >= p.spreadCount - 1} onClick={() => p.onGo(p.spreadCount - 1)}>
+        <button aria-label={t('עמוד אחרון')} disabled={p.spreadIndex >= p.spreadCount - 1} onClick={() => p.onGo(p.spreadCount - 1)}>
           <svg viewBox="0 0 12 12"><path d="M9 2v8M3 2l4 4-4 4" /></svg>
         </button>
       </div>
@@ -50,7 +51,7 @@ function PageInput({ label, onCommit }: { label: string; onCommit: (n: number) =
   return (
     <input
       className="page-input"
-      aria-label="עמוד" dir="ltr"
+      aria-label={t('עמוד')} dir="ltr"
       value={text ?? label}
       onFocus={(e) => {
         setText(label)
@@ -96,7 +97,7 @@ function ZoomField({ zoom, onZoomTo, onFitPage, onFitSpread }: Pick<Props, 'zoom
   return (
     <div className="zoom-field">
       <input
-        aria-label="זום" dir="ltr"
+        aria-label={t('זום')} dir="ltr"
         value={text ?? formatZoom(zoom)}
         onFocus={(e) => {
           setText(formatZoom(zoom))
@@ -115,7 +116,7 @@ function ZoomField({ zoom, onZoomTo, onFitPage, onFitSpread }: Pick<Props, 'zoom
           }
         }}
       />
-      <button aria-label="רמות זום" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button aria-label={t('רמות זום')} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" /></svg>
       </button>
       {open && (
@@ -134,10 +135,10 @@ function ZoomField({ zoom, onZoomTo, onFitPage, onFitSpread }: Pick<Props, 'zoom
           ))}
           <li className="sep" />
           <li>
-            <button onClick={() => { onFitPage(); setOpen(false) }}>התאם עמוד לחלון</button>
+            <button onClick={() => { onFitPage(); setOpen(false) }}>{t('התאם עמוד לחלון')}</button>
           </li>
           <li>
-            <button onClick={() => { onFitSpread(); setOpen(false) }}>התאם דף כפול לחלון</button>
+            <button onClick={() => { onFitSpread(); setOpen(false) }}>{t('התאם דף כפול לחלון')}</button>
           </li>
         </ul>
       )}

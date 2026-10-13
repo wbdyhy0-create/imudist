@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { TOOL_HINTS, TOOL_TOUR_IDS, TOOLS } from './Toolbox'
+import { t } from '../i18n'
 
 interface TourStep {
   target: string
@@ -9,29 +10,31 @@ interface TourStep {
 }
 
 const PANEL_STEPS: TourStep[] = [
-  { target: 'panel:properties', title: 'מאפיינים', description: 'כאן משנים את המיקום, המידות, המראה והאפשרויות של האובייקט או הטקסט שנבחרו.' },
-  { target: 'panel:paragraph', title: 'פסקה', description: 'כאן מעצבים את הפסקה: יישור, כניסות, רווחים, רשימות ואופן חלוקת הטקסט.' },
-  { target: 'panel:paragraph-styles', title: 'סגנונות פסקה', description: 'יוצרים ומחילים סגנונות פסקה כדי לשמור עיצוב עקבי ולעדכן אותו במקום אחד.' },
-  { target: 'panel:character-styles', title: 'סגנונות תו', description: 'יוצרים ומחילים עיצוב תווים, כגון גופן, צבע, גודל וקו מתאר.' },
-  { target: 'panel:style-manager', title: 'ניהול סגנונות', description: 'מחפשים, מחליפים ומנהלים סגנונות פסקה במסמך.' },
-  { target: 'panel:pages', title: 'עמודים', description: 'מנהלים עמודים ועמודי אב, משנים את סדר העמודים ומגדירים אילו עמודי אב יחולו.' },
-  { target: 'panel:links', title: 'קישורים', description: 'בודקים תמונות מקושרות, מאתרים קבצים חסרים ומעדכנים או מטמיעים קישורים.' },
-  { target: 'panel:color', title: 'צבע', description: 'בוחרים צבע מילוי וקו לאובייקטים ולכיתוב, או דוגמים צבע מהמסמך.' },
-  { target: 'panel:gradient', title: 'מעבר צבע', description: 'יוצרים ומכווננים מעבר צבע למילוי או לקו של אובייקטים.' },
-  { target: 'panel:swatches', title: 'דוגמיות', description: 'שומרים צבעים לשימוש חוזר ומחילים אותם על אובייקטים וטקסט.' },
-  { target: 'panel:layers', title: 'שכבות', description: 'מסדרים אובייקטים בשכבות, משנים את סדרם ומסתירים או נועלים אותם.' },
+  { target: 'panel:properties', get title() { return t('מאפיינים') }, get description() { return t('כאן משנים את המיקום, המידות, המראה והאפשרויות של האובייקט או הטקסט שנבחרו.') } },
+  { target: 'panel:paragraph', get title() { return t('פסקה') }, get description() { return t('כאן מעצבים את הפסקה: יישור, כניסות, רווחים, רשימות ואופן חלוקת הטקסט.') } },
+  { target: 'panel:paragraph-styles', get title() { return t('סגנונות פסקה') }, get description() { return t('יוצרים ומחילים סגנונות פסקה כדי לשמור עיצוב עקבי ולעדכן אותו במקום אחד.') } },
+  { target: 'panel:character-styles', get title() { return t('סגנונות תו') }, get description() { return t('יוצרים ומחילים עיצוב תווים, כגון גופן, צבע, גודל וקו מתאר.') } },
+  { target: 'panel:style-manager', get title() { return t('ניהול סגנונות') }, get description() { return t('מחפשים, מחליפים ומנהלים סגנונות פסקה במסמך.') } },
+  { target: 'panel:pages', get title() { return t('עמודים') }, get description() { return t('מנהלים עמודים ועמודי אב, משנים את סדר העמודים ומגדירים אילו עמודי אב יחולו.') } },
+  { target: 'panel:links', get title() { return t('קישורים') }, get description() { return t('בודקים תמונות מקושרות, מאתרים קבצים חסרים ומעדכנים או מטמיעים קישורים.') } },
+  { target: 'panel:color', get title() { return t('צבע') }, get description() { return t('בוחרים צבע מילוי וקו לאובייקטים ולכיתוב, או דוגמים צבע מהמסמך.') } },
+  { target: 'panel:gradient', get title() { return t('מעבר צבע') }, get description() { return t('יוצרים ומכווננים מעבר צבע למילוי או לקו של אובייקטים.') } },
+  { target: 'panel:swatches', get title() { return t('דוגמיות') }, get description() { return t('שומרים צבעים לשימוש חוזר ומחילים אותם על אובייקטים וטקסט.') } },
+  { target: 'panel:layers', get title() { return t('שכבות') }, get description() { return t('מסדרים אובייקטים בשכבות, משנים את סדרם ומסתירים או נועלים אותם.') } },
 ]
 
 const toolById = new Map(TOOLS.map((tool) => [tool.id, tool]))
-const TOUR_STEPS: TourStep[] = [
+function buildTourSteps(): TourStep[] {
+  return [
   ...TOOL_TOUR_IDS.flatMap((id) => {
     const tool = toolById.get(id)
-    return tool ? [{ target: `tool:${id}`, title: tool.label, description: TOOL_HINTS[id] ?? `הכלי ${tool.label} מאפשר ליצור ולערוך במסמך.` }] : []
+    return tool ? [{ target: `tool:${id}`, title: tool.label, description: TOOL_HINTS[id] ?? t('הכלי {tool} מאפשר ליצור ולערוך במסמך.', { tool: tool.label }) }] : []
   }),
-  { target: 'view:normal', title: 'מצב רגיל', description: 'מציג את המסמך יחד עם מסגרות, קווי עזר וכלי העבודה.' },
-  { target: 'view:preview', title: 'תצוגה מקדימה', description: 'מציגה את העמוד כפי שייראה ללא מסגרות עזר וכלי עריכה.' },
-  ...PANEL_STEPS,
-]
+  { target: 'view:normal', get title() { return t('מצב רגיל') }, get description() { return t('מציג את המסמך יחד עם מסגרות, קווי עזר וכלי העבודה.') } },
+  { target: 'view:preview', get title() { return t('תצוגה מקדימה') }, get description() { return t('מציגה את העמוד כפי שייראה ללא מסגרות עזר וכלי עריכה.') } },
+  ...PANEL_STEPS.map((step) => ({ target: step.target, title: step.title, description: step.description })),
+  ]
+}
 
 interface Props {
   enabled: boolean
@@ -43,7 +46,8 @@ export function GuidedToolTour({ enabled, onComplete }: Props) {
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const cardRef = useRef<HTMLDivElement>(null)
   const highlightedRef = useRef<HTMLElement | null>(null)
-  const step = TOUR_STEPS[stepIndex]
+  const steps = buildTourSteps()
+  const step = steps[stepIndex]
 
   useEffect(() => {
     if (!enabled) {
@@ -115,7 +119,7 @@ export function GuidedToolTour({ enabled, onComplete }: Props) {
   }
 
   const advance = () => {
-    if (stepIndex + 1 < TOUR_STEPS.length) {
+    if (stepIndex + 1 < steps.length) {
       setPosition(null)
       setStepIndex((index) => index + 1)
       return
@@ -124,18 +128,18 @@ export function GuidedToolTour({ enabled, onComplete }: Props) {
   }
 
   return createPortal(
-    <div className="guided-tour-card" role="dialog" aria-label={`סיור בכלים: ${step.title}`} aria-live="polite" ref={cardRef} style={position ? { left: position.left, top: position.top } : undefined}>
+    <div className="guided-tour-card" role="dialog" aria-label={t('סיור בכלים: {title}', { title: step.title })} aria-live="polite" ref={cardRef} style={position ? { left: position.left, top: position.top } : undefined}>
       <div className="guided-tour-heading">
         <strong>{step.title}</strong>
       </div>
       <p>{step.description}</p>
       <div className="guided-tour-footer">
-        <span className="guided-tour-count">כלי {stepIndex + 1} מתוך {TOUR_STEPS.length}</span>
+        <span className="guided-tour-count">{t('כלי {index} מתוך {count}', { index: stepIndex + 1, count: steps.length })}</span>
         <div className="guided-tour-actions">
           <button type="button" className="btn primary" onClick={advance}>
-            {stepIndex + 1 === TOUR_STEPS.length ? 'סיום' : 'המשך'}
+            {stepIndex + 1 === steps.length ? t('סיום') : t('המשך')}
           </button>
-          <button type="button" className="btn" onClick={finish}>סגור</button>
+          <button type="button" className="btn" onClick={finish}>{t('סגור')}</button>
         </div>
       </div>
     </div>,

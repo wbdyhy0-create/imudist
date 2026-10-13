@@ -3,6 +3,7 @@ import { AppLogo } from './AppLogo'
 import type { RecentEntry } from '../recent'
 import { DIGITAL_PRESETS, fromPt, PAGE_PRESETS, type PagePreset, type Unit } from '../units'
 import { recentThumbnail } from '../recentThumbnail'
+import { localeTag, t } from '../i18n'
 
 interface Props {
   appName: string
@@ -17,7 +18,7 @@ interface Props {
 type PresetCategory = 'print' | 'digital'
 
 const formatDate = (ms: number) =>
-  new Date(ms).toLocaleString('he-IL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  new Date(ms).toLocaleString(localeTag(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRecent }: Props) {
   const [category, setCategory] = useState<PresetCategory>('print')
@@ -64,21 +65,21 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRec
       <div className="home-inner">
         <div className="home-title">
           <AppLogo size={50} />
-          <h1>ברוכים הבאים אל {appName}</h1>
+          <h1>{t('ברוכים הבאים אל {name}', { name: appName })}</h1>
         </div>
         <div className="home-actions">
           <button className="btn primary" onClick={onOpen}>
-            ייבוא קובץ
+            {t('ייבוא קובץ')}
           </button>
         </div>
 
-        <h2>התחל מסמך חדש</h2>
-        <div className="home-preset-tabs" role="tablist" aria-label="קטגוריית גודל מסמך">
+        <h2>{t('התחל מסמך חדש')}</h2>
+        <div className="home-preset-tabs" role="tablist" aria-label={t('קטגוריית גודל מסמך')}>
           <button id="home-preset-print-tab" role="tab" aria-selected={category === 'print'} aria-controls="home-preset-panel" className={category === 'print' ? 'on' : ''} onClick={() => setCategory('print')}>
-            הדפסה
+            {t('הדפסה')}
           </button>
           <button id="home-preset-digital-tab" role="tab" aria-selected={category === 'digital'} aria-controls="home-preset-panel" className={category === 'digital' ? 'on' : ''} onClick={() => setCategory('digital')}>
-            דיגיטל ורשתות חברתיות
+            {t('דיגיטל ורשתות חברתיות')}
           </button>
         </div>
         <div id="home-preset-panel" className={'home-presets ' + category} role="tabpanel" aria-labelledby={`home-preset-${category}-tab`}>
@@ -89,30 +90,30 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRec
             const dimensions =
               preset.unit === 'px'
                 ? `${preset.width} × ${preset.height} px`
-                : `${Math.round(fromPt(preset.width, 'mm'))} × ${Math.round(fromPt(preset.height, 'mm'))} מ״מ`
+                : `${Math.round(fromPt(preset.width, 'mm'))} × ${Math.round(fromPt(preset.height, 'mm'))} ${t('מ״מ')}`
             return (
               <button
                 key={preset.id}
                 className="home-card"
-                title={`${preset.label} — ${dimensions}`}
+                title={`${t(preset.label)} — ${dimensions}`}
                 onClick={() => onNew(preset, preset.unit ?? 'mm')}
               >
                 <span className="home-page-preview" style={{ width, height }} aria-hidden="true" />
-                <span className="home-card-label">{preset.label}</span>
+                <span className="home-card-label">{t(preset.label)}</span>
                 <span className="home-card-size">{dimensions}</span>
               </button>
             )
           })}
           <button className="home-card" onClick={() => onNew(undefined, category === 'print' ? 'mm' : 'px')}>
             <span className={'home-page-preview custom' + (category === 'digital' ? ' custom-web' : '')} aria-hidden="true" />
-            <span className="home-card-label">{category === 'print' ? 'מידה מותאמת' : 'אתר / מידה מותאמת'}</span>
-            <span className="home-card-size">{category === 'print' ? 'הזנת מידות' : 'רוחב התחלתי: 1200 px'}</span>
+            <span className="home-card-label">{category === 'print' ? t('מידה מותאמת') : t('אתר / מידה מותאמת')}</span>
+            <span className="home-card-size">{category === 'print' ? t('הזנת מידות') : t('רוחב התחלתי: 1200 px')}</span>
           </button>
         </div>
 
-        <h2>אחרונים</h2>
+        <h2>{t('אחרונים')}</h2>
         {recent.length === 0 ? (
-          <p className="muted">עדיין אין קבצים אחרונים.</p>
+          <p className="muted">{t('עדיין אין קבצים אחרונים.')}</p>
         ) : (
           <ul className="recent-list">
             {recent.map((r) => (
@@ -120,7 +121,7 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRec
                 <button onClick={() => onOpenRecent(r)}>
                   <span className="recent-thumb-wrap">
                     {thumbnails[recentKey(r)] ? (
-                      <img className="recent-thumb" src={thumbnails[recentKey(r)]} alt={`העמוד הראשון במסמך ${r.name}`} />
+                      <img className="recent-thumb" src={thumbnails[recentKey(r)]} alt={t('העמוד הראשון במסמך {name}', { name: r.name })} />
                     ) : (
                       <span className="home-page-preview recent-thumb-placeholder" aria-hidden="true" />
                     )}
@@ -131,8 +132,8 @@ export function Home({ appName, recent, onNew, onOpen, onOpenRecent, onRemoveRec
                 <button
                   className="recent-remove"
                   type="button"
-                  title="הסר מרשימת האחרונים"
-                  aria-label={`הסר את ${r.name} מרשימת האחרונים`}
+                  title={t('הסר מרשימת האחרונים')}
+                  aria-label={t('הסר את {name} מרשימת האחרונים', { name: r.name })}
                   onClick={() => onRemoveRecent(r)}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">

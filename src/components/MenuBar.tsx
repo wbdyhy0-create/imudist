@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { t, useLanguage } from '../i18n'
 import { AppLogo } from './AppLogo'
 import { HelpAssistant } from './HelpAssistant'
 
@@ -20,6 +21,7 @@ export interface MenuDef {
 }
 
 export function MenuBar({ menus }: { menus: MenuDef[] }) {
+  useLanguage() // drawn again when the language changes
   const [open, setOpen] = useState<number | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -49,7 +51,7 @@ export function MenuBar({ menus }: { menus: MenuDef[] }) {
             onClick={() => setOpen(open === i ? null : i)}
             onMouseEnter={() => open !== null && setOpen(i)}
           >
-            {menu.label}
+            {t(menu.label)}
           </button>
           {open === i && <MenuPanel items={menu.items} onDone={() => setOpen(null)} />}
         </div>
@@ -78,7 +80,7 @@ function MenuPanel({ items, onDone, nested }: { items: MenuItem[]; onDone: () =>
             }}
           >
             <span className="menu-check">{item.checked ? '✓' : ''}</span>
-            <span className="menu-text">{item.label}</span>
+            <span className="menu-text">{item.label === undefined ? item.label : t(item.label)}</span>
             {(item.shortcut ?? item.shownShortcut) && (
               <span className="menu-shortcut" dir="ltr">
                 {item.shortcut ?? item.shownShortcut}

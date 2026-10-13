@@ -59,7 +59,7 @@ export function StyleManagerPanel({ styles, onSwap, onSwapOne, onBatch, onFindSt
   const optionList = styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)
 
   return (
-    <section className="style-manager-panel props-panel" aria-label="ניהול סגנונות" dir="rtl">
+    <section className="style-manager-panel props-panel" aria-label="ניהול סגנונות">
       <div className="style-manager-head"><div><h2 className="props-title">ניהול סגנונות</h2><p className="muted">כלי עימוד, החלפה וניקוי</p></div><span className="style-manager-mark">Aa</span></div>
       <nav className="style-manager-tabs" aria-label="כלי ניהול סגנונות">
         {([['word', 'ניקוי וורד'], ['swap', 'החלפה'], ['batch', 'קבוצתית'], ['colors', 'צבעים'], ['tools', 'סימן']] as [Tab, string][]).map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}

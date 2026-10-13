@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { summarizePreflight, type PreflightIssue, type PreflightKind } from '../preflight'
 import '../preflight.css'
+import { t } from '../i18n'
 
 interface Props {
   issues: PreflightIssue[]
@@ -10,12 +11,12 @@ interface Props {
 
 /** the groups of the list, in the order they are shown */
 const GROUPS: { kind: PreflightKind; title: string }[] = [
-  { kind: 'overset', title: 'טקסט עודף' },
-  { kind: 'footnote-overflow', title: 'הערות שוליים שלא נכנסו' },
-  { kind: 'crosses-page', title: 'חריגה מקצה העמוד' },
-  { kind: 'outside-page', title: 'מחוץ לעמוד' },
-  { kind: 'missing-font', title: 'גופנים חסרים' },
-  { kind: 'missing-image', title: 'תמונות חסרות' },
+  { kind: 'overset', get title() { return t('טקסט עודף') } },
+  { kind: 'footnote-overflow', get title() { return t('הערות שוליים שלא נכנסו') } },
+  { kind: 'crosses-page', get title() { return t('חריגה מקצה העמוד') } },
+  { kind: 'outside-page', get title() { return t('מחוץ לעמוד') } },
+  { kind: 'missing-font', get title() { return t('גופנים חסרים') } },
+  { kind: 'missing-image', get title() { return t('תמונות חסרות') } },
 ]
 
 const PANEL_WIDTH = 380
@@ -34,10 +35,10 @@ export function PreflightButton({ issues, onGoToIssue }: Props) {
   const { errors, warnings } = summarizePreflight(issues)
   const level = errors ? 'error' : warnings ? 'warning' : 'ok'
   const label = errors
-    ? `${plural(errors, 'שגיאה אחת', 'שגיאות')}${warnings ? ` · ${plural(warnings, 'אזהרה אחת', 'אזהרות')}` : ''}`
+    ? `${plural(errors, t('שגיאה אחת'), t('שגיאות'))}${warnings ? ` · ${plural(warnings, t('אזהרה אחת'), t('אזהרות'))}` : ''}`
     : warnings
-      ? plural(warnings, 'אזהרה אחת', 'אזהרות')
-      : 'אין שגיאות'
+      ? plural(warnings, t('אזהרה אחת'), t('אזהרות'))
+      : t('אין שגיאות')
 
   const toggle = () => {
     if (!open && button.current) {
@@ -67,17 +68,17 @@ export function PreflightButton({ issues, onGoToIssue }: Props) {
 
   return (
     <>
-      <button ref={button} className={`status-preflight ${level}`} aria-haspopup="dialog" aria-expanded={open} title="בדיקה לפני הדפסה" onClick={toggle}>
+      <button ref={button} className={`status-preflight ${level}`} aria-haspopup="dialog" aria-expanded={open} title={t('בדיקה לפני הדפסה')} onClick={toggle}>
         <span className="dot" />
         {label}
       </button>
       {open && (
-        <div ref={panel} className="preflight-panel" role="dialog" aria-label="בדיקה לפני הדפסה" style={{ ...place, width: PANEL_WIDTH }}>
+        <div ref={panel} className="preflight-panel" role="dialog" aria-label={t('בדיקה לפני הדפסה')} style={{ ...place, width: PANEL_WIDTH }}>
           <div className="preflight-head">
-            <b>בדיקה לפני הדפסה</b>
-            <span className="muted">{issues.length ? `${plural(errors, 'שגיאה אחת', 'שגיאות')} · ${plural(warnings, 'אזהרה אחת', 'אזהרות')}` : 'המסמך מוכן להדפסה'}</span>
+            <b>{t('בדיקה לפני הדפסה')}</b>
+            <span className="muted">{issues.length ? t('{errors} · {warnings}', { errors: plural(errors, t('שגיאה אחת'), t('שגיאות')), warnings: plural(warnings, t('אזהרה אחת'), t('אזהרות')) }) : t('המסמך מוכן להדפסה')}</span>
           </div>
-          {issues.length === 0 && <p className="preflight-empty">לא נמצאו בעיות: אין טקסט עודף, שום דבר לא חורג מהעמוד, והגופנים והתמונות במקומם.</p>}
+          {issues.length === 0 && <p className="preflight-empty">{t('לא נמצאו בעיות: אין טקסט עודף, שום דבר לא חורג מהעמוד, והגופנים והתמונות במקומם.')}</p>}
           {GROUPS.map(({ kind, title }) => {
             const group = issues.filter((issue) => issue.kind === kind)
             if (group.length === 0) return null

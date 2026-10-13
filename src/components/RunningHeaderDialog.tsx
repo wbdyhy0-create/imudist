@@ -12,7 +12,7 @@ export function RunningHeaderDialog({ styles, onApply, onClose }: Props) {
   const [strategy, setStrategy] = useState<'first' | 'last'>('last')
   return (
     <div className="modal-backdrop">
-      <div className="modal" role="dialog" aria-modal="true" aria-label="כותרת משתנה" dir="rtl">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="כותרת משתנה">
         <h2>כותרת משתנה</h2>
         <p>הכותרת תוצג בתיבת המאסטר ותשתנה לפי סגנון הפסקה שמופיע בעמוד.</p>
         <label className="field-label">סגנון פסקה<select className="select" value={styleId} onChange={(event) => setStyleId(event.target.value)}>{styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>

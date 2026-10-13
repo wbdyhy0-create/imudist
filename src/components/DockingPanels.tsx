@@ -1,4 +1,5 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { t } from '../i18n'
 
 export interface DockPanelDefinition {
   id: string
@@ -141,7 +142,7 @@ export function DockingPanels({
 
   return (
     <>
-      <aside ref={dockRef} className={'docking-shell' + (open || floating ? ' has-open' : '')} aria-label="חלוניות">
+      <aside ref={dockRef} className={'docking-shell' + (open || floating ? ' has-open' : '')} aria-label={t('חלוניות')}>
         <div className="dock-strip">
           {ordered.map((panel) => (
             <button
@@ -149,7 +150,7 @@ export function DockingPanels({
               className={'dock-tab' + (open?.id === panel.id || floating?.id === panel.id ? ' open' : '') + (dockOverId === panel.id && dragLayerId !== panel.id ? ' drop-target' : '')}
               data-tour-id={`panel:${panel.id}`}
               aria-expanded={open?.id === panel.id || floating?.id === panel.id}
-              title={panel.label}
+              title={t(panel.label)}
               data-dock-panel-id={panel.id}
               onPointerDown={(event) => startDrag(panel.id, event, !!panel.floating)}
               onClick={() => {
@@ -160,7 +161,7 @@ export function DockingPanels({
                 toggle(panel.id)
               }}
             >
-              <span>{panel.label}</span>
+              <span>{t(panel.label)}</span>
             </button>
           ))}
         </div>
@@ -181,14 +182,14 @@ export function DockingPanels({
               onFloatingPanelChange(null)
               onOpenChange(null)
             }}>
-              <span>{floating.label}</span>
+              <span>{t(floating.label)}</span>
               <span aria-hidden="true">×</span>
             </button>
             <div className="dock-floating-content">{floating.content}</div>
           </section>
         )}
       </aside>
-      {dragRef.current?.floating && <div className="dock-drop-zone">גרור לכאן כדי להצמיד</div>}
+      {dragRef.current?.floating && <div className="dock-drop-zone">{t('גרור לכאן כדי להצמיד')}</div>}
     </>
   )
 }

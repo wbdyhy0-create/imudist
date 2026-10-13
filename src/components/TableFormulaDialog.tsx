@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormulaFormat, TableData } from '../table'
 import { cellName, columnLabel, FORMULA_FUNCTIONS, formulaProblem, setCellFormula } from '../tableFormulas'
+import { t } from '../i18n'
 
 interface Props {
   table: TableData
@@ -73,19 +74,19 @@ export function TableFormulaDialog({ table, row, col, formula, format, onApply, 
         className="modal table-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="נוסחה בתא"
-        dir="rtl"
+        aria-label={t('נוסחה בתא')}
+       
         onSubmit={(event) => {
           event.preventDefault()
           setProblem(onApply(source, chosenFormat()))
         }}
       >
-        <h2>נוסחה בתא {name}</h2>
+        <h2>{t('נוסחה בתא {name}', { name })}</h2>
         <p className="muted">
-          תא נקרא לפי העמודה והשורה: A1 הוא התא הראשון בשורה הראשונה (בטבלה מימין לשמאל, הימני ביותר), B1 הבא אחריו, ו-A2 מתחתיו.
-          טווח כותבים בשני קצותיו: A1:A5. הנוסחה מתעדכנת מעצמה כשהתאים משתנים. הקלדה בתא מסירה את הנוסחה.
+          {t('תא נקרא לפי העמודה והשורה: A1 הוא התא הראשון בשורה הראשונה (בטבלה מימין לשמאל, הימני ביותר), B1 הבא אחריו, ו-A2 מתחתיו.')}{' '}
+          {t('טווח כותבים בשני קצותיו: A1:A5. הנוסחה מתעדכנת מעצמה כשהתאים משתנים. הקלדה בתא מסירה את הנוסחה.')}
         </p>
-        <label className="field-label table-dialog-field">נוסחה
+        <label className="field-label table-dialog-field">{t('נוסחה')}
           <input
             ref={input}
             className="select"
@@ -100,9 +101,9 @@ export function TableFormulaDialog({ table, row, col, formula, format, onApply, 
           />
         </label>
         <div className="modal-buttons">
-          {above && <button type="button" className="btn" onClick={() => insert(above)}>סכום התאים שמעל</button>}
-          {before && <button type="button" className="btn" onClick={() => insert(before)}>סכום התאים שלפני</button>}
-          <label className="field-label table-dialog-field">הוספת פונקציה
+          {above && <button type="button" className="btn" onClick={() => insert(above)}>{t('סכום התאים שמעל')}</button>}
+          {before && <button type="button" className="btn" onClick={() => insert(before)}>{t('סכום התאים שלפני')}</button>}
+          <label className="field-label table-dialog-field">{t('הוספת פונקציה')}
             <select
               className="select"
               value=""
@@ -110,31 +111,31 @@ export function TableFormulaDialog({ table, row, col, formula, format, onApply, 
                 if (event.target.value) insert(event.target.value)
               }}
             >
-              <option value="">בחירה…</option>
-              {FORMULA_FUNCTIONS.map((fn) => <option key={fn.name} value={fn.sample}>{fn.name} — {fn.label}</option>)}
+              <option value="">{t('בחירה…')}</option>
+              {FORMULA_FUNCTIONS.map((fn) => <option key={fn.name} value={fn.sample}>{fn.name} — {t(fn.label)}</option>)}
             </select>
           </label>
         </div>
         <div className="table-dialog-grid">
-          <label className="field-label table-dialog-field">ספרות אחרי הנקודה
-            <input className="select" type="number" min={0} max={10} placeholder="אוטומטי" value={decimals} onChange={(event) => setDecimals(event.target.value)} />
+          <label className="field-label table-dialog-field">{t('ספרות אחרי הנקודה')}
+            <input className="select" type="number" min={0} max={10} placeholder={t('אוטומטי')} value={decimals} onChange={(event) => setDecimals(event.target.value)} />
           </label>
-          <label className="field-label table-dialog-field">טקסט לפני התוצאה
+          <label className="field-label table-dialog-field">{t('טקסט לפני התוצאה')}
             <input className="select" maxLength={20} value={prefix} placeholder="₪" onChange={(event) => setPrefix(event.target.value)} />
           </label>
-          <label className="field-label table-dialog-field">טקסט אחרי התוצאה
+          <label className="field-label table-dialog-field">{t('טקסט אחרי התוצאה')}
             <input className="select" maxLength={20} value={suffix} placeholder="%" onChange={(event) => setSuffix(event.target.value)} />
           </label>
         </div>
-        <label className="dlg-check"><input type="checkbox" checked={thousands} onChange={(event) => setThousands(event.target.checked)} />מפריד אלפים (1,234)</label>
+        <label className="dlg-check"><input type="checkbox" checked={thousands} onChange={(event) => setThousands(event.target.checked)} />{t('מפריד אלפים (1,234)')}</label>
         <p className="muted" aria-live="polite">
-          {preview.problem ? preview.problem : `התוצאה: ${preview.result}`}
+          {preview.problem ? t(preview.problem) : t('התוצאה: {result}', { result: preview.result })}
         </p>
-        {problem && <p className="muted" role="alert">{problem}</p>}
+        {problem && <p className="muted" role="alert">{t(problem)}</p>}
         <div className="modal-buttons">
-          <button type="submit" className="btn primary" disabled={!!preview.problem}>הכנסת הנוסחה</button>
-          {formula !== undefined && <button type="button" className="btn" onClick={onRemove}>הסרת הנוסחה</button>}
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
+          <button type="submit" className="btn primary" disabled={!!preview.problem}>{t('הכנסת הנוסחה')}</button>
+          {formula !== undefined && <button type="button" className="btn" onClick={onRemove}>{t('הסרת הנוסחה')}</button>}
+          <button type="button" className="btn" onClick={onClose}>{t('ביטול')}</button>
         </div>
       </form>
     </div>

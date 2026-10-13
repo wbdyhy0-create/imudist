@@ -4,6 +4,7 @@ import { LINE_ARROWS, LINE_PROFILES, MAX_LINE_WIDTH_MULTIPLE, type LineWidths } 
 import { lineLook, SHARPNESS_LEVELS } from '../sharpness'
 import type { Unit } from '../units'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 /** the sharpness level a line is at: blurred is soft, flat ends are sharp, round ones are medium (as the properties panel says it) */
 const sharpnessOf = (shape: ShapeFrame): Sharpness => {
@@ -97,17 +98,17 @@ export function LineToolbarControls({
   )
 
   return (
-    <div className="context-line-controls" ref={rootRef} role="group" aria-label="הגדרות הקו">
-      {menu('style', 'סגנון הקו', (
+    <div className="context-line-controls" ref={rootRef} role="group" aria-label={t('הגדרות הקו')}>
+      {menu('style', t('סגנון הקו'), (
         <>
-          {row('תבנית', (
-            <span className="context-seg" role="radiogroup" aria-label="תבנית הקו">
-              <button type="button" role="radio" aria-checked={!shape.strokeDash} className={!shape.strokeDash ? 'on' : ''} onClick={() => onChange({ strokeDash: undefined })}>רציף</button>
-              <button type="button" role="radio" aria-checked={shape.strokeDash === 'dashed'} className={shape.strokeDash === 'dashed' ? 'on' : ''} onClick={() => onChange({ strokeDash: 'dashed' })}>מקווקו</button>
+          {row(t('תבנית'), (
+            <span className="context-seg" role="radiogroup" aria-label={t('תבנית הקו')}>
+              <button type="button" role="radio" aria-checked={!shape.strokeDash} className={!shape.strokeDash ? 'on' : ''} onClick={() => onChange({ strokeDash: undefined })}>{t('רציף')}</button>
+              <button type="button" role="radio" aria-checked={shape.strokeDash === 'dashed'} className={shape.strokeDash === 'dashed' ? 'on' : ''} onClick={() => onChange({ strokeDash: 'dashed' })}>{t('מקווקו')}</button>
             </span>
           ))}
-          {row('קצוות', (
-            <span className="context-seg" role="radiogroup" aria-label="צורת הקצוות">
+          {row(t('קצוות'), (
+            <span className="context-seg" role="radiogroup" aria-label={t('צורת הקצוות')}>
               {(['butt', 'round', 'square'] as LineCap[]).map((value) => (
                 <button
                   key={value}
@@ -115,30 +116,30 @@ export function LineToolbarControls({
                   role="radio"
                   aria-checked={cap === value}
                   className={cap === value ? 'on' : ''}
-                  title={value === 'butt' ? 'קצה חד' : value === 'round' ? 'קצה עגול' : 'קצה מרובע'}
+                  title={value === 'butt' ? t('קצה חד') : value === 'round' ? t('קצה עגול') : t('קצה מרובע')}
                   onClick={() => onChange({ strokeCap: value === 'butt' ? undefined : value })}
                 >
-                  {value === 'butt' ? 'חד' : value === 'round' ? 'עגול' : 'מרובע'}
+                  {value === 'butt' ? t('חד') : value === 'round' ? t('עגול') : t('מרובע')}
                 </button>
               ))}
             </span>
           ))}
-          {row('חיצים', (
-            <span className="context-seg" role="radiogroup" aria-label="מיקום החיצים">
-              {([['none', 'ללא', 'בלי חיצים'], ['end', 'בסוף', 'חץ בסוף הקו'], ['start', 'בהתחלה', 'חץ בתחילת הקו'], ['both', 'שניהם', 'חיצים בשני הקצוות']] as const).map(([place, text, title]) => (
+          {row(t('חיצים'), (
+            <span className="context-seg" role="radiogroup" aria-label={t('מיקום החיצים')}>
+              {([['none', t('ללא'), t('בלי חיצים')], ['end', t('בסוף'), t('חץ בסוף הקו')], ['start', t('בהתחלה'), t('חץ בתחילת הקו')], ['both', t('שניהם'), t('חיצים בשני הקצוות')]] as const).map(([place, text, title]) => (
                 <button key={place} type="button" role="radio" aria-checked={arrowPlace === place} className={arrowPlace === place ? 'on' : ''} title={title} onClick={() => setArrows(place, arrowKind)}>{text}</button>
               ))}
             </span>
           ))}
-          {arrowPlace !== 'none' && row('צורת החץ', (
+          {arrowPlace !== 'none' && row(t('צורת החץ'), (
             <select value={arrowKind} onChange={(event) => setArrows(arrowPlace, event.target.value as LineArrow)}>
               {LINE_ARROWS.map((arrow) => <option key={arrow.id} value={arrow.id}>{arrow.label}</option>)}
             </select>
           ))}
-          {row('חדות', (
+          {row(t('חדות'), (
             <select
               value={sharp}
-              title="חד, בינוני (קצוות עגולים) או רך (טשטוש)"
+              title={t('חד, בינוני (קצוות עגולים) או רך (טשטוש)')}
               onChange={(event) => {
                 const look = lineLook(event.target.value as Sharpness, shape.strokeWidth)
                 onChange({ strokeCap: look.strokeCap === 'butt' ? undefined : look.strokeCap, blur: look.blur })
@@ -149,9 +150,9 @@ export function LineToolbarControls({
           ))}
         </>
       ))}
-      {menu('profile', 'עובי לאורך הקו', (
+      {menu('profile', t('עובי לאורך הקו'), (
         <>
-          {row('צורה', (
+          {row(t('צורה'), (
             <select
               value={profileId}
               onChange={(event) => {
@@ -159,30 +160,30 @@ export function LineToolbarControls({
                 if (preset) onChange({ lineWidths: sameWidths(preset.widths, [1, 1, 1]) ? undefined : ([...preset.widths] as LineWidths) })
               }}
             >
-              {profileId === 'custom' && <option value="custom">מותאם אישית</option>}
+              {profileId === 'custom' && <option value="custom">{t('מותאם אישית')}</option>}
               {LINE_PROFILES.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
             </select>
           ))}
-          {(['בהתחלה', 'באמצע', 'בסוף'] as const).map((label, index) =>
+          {([t('בהתחלה'), t('באמצע'), t('בסוף')] as const).map((label, index) =>
             <div key={label}>{row(`${label} (%)`, numberInput(Math.round(widths[index]! * 100), (value) => setWidth(index, value), { min: 0, max: MAX_LINE_WIDTH_MULTIPLE * 100, step: 5 }))}</div>,
           )}
         </>
       ))}
-      {menu('effects', 'טשטוש והצללה', (
+      {menu('effects', t('טשטוש והצללה'), (
         <>
-          {row('טשטוש (pt)', <NumberField value={shape.blur ?? 0} unit="px" unitLabel="pt" step={0.5} min={0} max={MAX_BLUR_PT} onChange={(value) => onChange({ blur: value > 0 ? value : undefined })} />)}
-          {row('צבע הצללה', <input type="color" value={shape.shadowColor ?? '#000000'} onChange={(event) => onChange({ shadowColor: event.target.value })} />)}
-          {row('חוזק הצללה (%)', numberInput(Math.round((shape.shadowOpacity ?? 0) * 100), (value) => onChange({ shadowOpacity: Math.min(1, Math.max(0, value / 100)) }), { min: 0, max: 100, step: 5 }))}
-          {row('הזזה אופקית (pt)', numberInput(shape.shadowOffsetX ?? 0, (value) => onChange({ shadowOffsetX: value }), { min: -40, max: 40, step: 1 }))}
-          {row('הזזה אנכית (pt)', numberInput(shape.shadowOffsetY ?? shape.shadowOffset ?? DEFAULT_SHADOW_OFFSET, (value) => onChange({ shadowOffsetY: value }), { min: -40, max: 40, step: 1 }))}
+          {row(t('טשטוש (pt)'), <NumberField value={shape.blur ?? 0} unit="px" unitLabel="pt" step={0.5} min={0} max={MAX_BLUR_PT} onChange={(value) => onChange({ blur: value > 0 ? value : undefined })} />)}
+          {row(t('צבע הצללה'), <input type="color" value={shape.shadowColor ?? '#000000'} onChange={(event) => onChange({ shadowColor: event.target.value })} />)}
+          {row(t('חוזק הצללה (%)'), numberInput(Math.round((shape.shadowOpacity ?? 0) * 100), (value) => onChange({ shadowOpacity: Math.min(1, Math.max(0, value / 100)) }), { min: 0, max: 100, step: 5 }))}
+          {row(t('הזזה אופקית (pt)'), numberInput(shape.shadowOffsetX ?? 0, (value) => onChange({ shadowOffsetX: value }), { min: -40, max: 40, step: 1 }))}
+          {row(t('הזזה אנכית (pt)'), numberInput(shape.shadowOffsetY ?? shape.shadowOffset ?? DEFAULT_SHADOW_OFFSET, (value) => onChange({ shadowOffsetY: value }), { min: -40, max: 40, step: 1 }))}
         </>
       ))}
-      {menu('place', 'מיקום וגודל', (
+      {menu('place', t('מיקום וגודל'), (
         <>
-          {row('מיקום X', <NumberField value={shape.x} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(x) => onGeometry({ x })} />)}
-          {row('מיקום Y', <NumberField value={shape.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(y) => onGeometry({ y })} />)}
-          {row('רוחב', <NumberField value={shape.w} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(w) => onGeometry({ w })} />)}
-          {row('גובה', <NumberField value={shape.h} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(h) => onGeometry({ h })} />)}
+          {row(t('מיקום X'), <NumberField value={shape.x} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(x) => onGeometry({ x })} />)}
+          {row(t('מיקום Y'), <NumberField value={shape.y} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={(y) => onGeometry({ y })} />)}
+          {row(t('רוחב'), <NumberField value={shape.w} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(w) => onGeometry({ w })} />)}
+          {row(t('גובה'), <NumberField value={shape.h} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(h) => onGeometry({ h })} />)}
         </>
       ))}
     </div>

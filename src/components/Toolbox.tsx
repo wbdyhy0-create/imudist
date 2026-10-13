@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { t } from '../i18n'
 
 export type ToolId =
   | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'magneticLasso' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'brush' | 'eraser'
@@ -22,18 +23,18 @@ interface ToolDef {
 
 // Groups: 1 navigate & select · 2 content · 3 shapes & lines · 4 edit & transform · 5 helpers
 export const TOOLS: ToolDef[] = [
-  { id: 'select', label: 'בחירה', group: 1, key: 'V', code: 'KeyV', enabled: true, icon: <path d="M5 3v16l4.300-3.700L12 21.500l2.700-1.200-2.700-6.100 6-.2z" fill="currentColor" stroke="none" /> },
-  { id: 'direct', label: 'עריכת נקודות', group: 1, key: 'A', code: 'KeyA', enabled: true, icon: <><path d="M4.500 17.500C8 17.500 8 6.500 12 6.500s4 11 7.500 11" /><path d="M3 16h3v3H3zM10.500 5h3v3h-3zM18 16h3v3h-3z" fill="currentColor" stroke="none" /></> },
-  { id: 'type', label: 'טקסט', group: 2, key: 'T', code: 'KeyT', enabled: true, icon: <path d="M6 5h12M12 5v14M9 19h6" /> },
-  { id: 'pathtype', label: 'טקסט על קו', group: 2, key: 'Shift+T', code: 'KeyT', shift: true, enabled: true, icon: <><path d="M3.500 19C6 8 18 8 20.500 19" /><path d="M9.500 4.500h5M12 4.500v6" /></> },
-  { id: 'page', label: 'עמוד', group: 2, key: 'Shift+P', code: 'KeyP', shift: true, enabled: true, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
+  { id: 'select', get label() { return t('בחירה') }, group: 1, key: 'V', code: 'KeyV', enabled: true, icon: <path d="M5 3v16l4.300-3.700L12 21.500l2.700-1.200-2.700-6.100 6-.2z" fill="currentColor" stroke="none" /> },
+  { id: 'direct', get label() { return t('עריכת נקודות') }, group: 1, key: 'A', code: 'KeyA', enabled: true, icon: <><path d="M4.500 17.500C8 17.500 8 6.500 12 6.500s4 11 7.500 11" /><path d="M3 16h3v3H3zM10.500 5h3v3h-3zM18 16h3v3h-3z" fill="currentColor" stroke="none" /></> },
+  { id: 'type', get label() { return t('טקסט') }, group: 2, key: 'T', code: 'KeyT', enabled: true, icon: <path d="M6 5h12M12 5v14M9 19h6" /> },
+  { id: 'pathtype', get label() { return t('טקסט על קו') }, group: 2, key: 'Shift+T', code: 'KeyT', shift: true, enabled: true, icon: <><path d="M3.500 19C6 8 18 8 20.500 19" /><path d="M9.500 4.500h5M12 4.500v6" /></> },
+  { id: 'page', get label() { return t('עמוד') }, group: 2, key: 'Shift+P', code: 'KeyP', shift: true, enabled: true, icon: <path d="M7 3h7l4 4v14H7zM14 3v4h4" /> },
 
-  { id: 'rect', label: 'מרובע', group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="4" width="16" height="16" rx="1.500" /> },
-  { id: 'ellipse', label: 'אליפסה', group: 3, key: 'L', code: 'KeyL', enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
-  { id: 'polygon', label: 'מצולע', group: 3, key: 'Y', code: 'KeyY', enabled: true, icon: <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" /> },
+  { id: 'rect', get label() { return t('מרובע') }, group: 3, key: 'M', code: 'KeyM', enabled: true, icon: <rect x="4" y="4" width="16" height="16" rx="1.500" /> },
+  { id: 'ellipse', get label() { return t('אליפסה') }, group: 3, key: 'L', code: 'KeyL', enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="6" /> },
+  { id: 'polygon', get label() { return t('מצולע') }, group: 3, key: 'Y', code: 'KeyY', enabled: true, icon: <path d="M12 3.500 19 8v8l-7 4.500L5 16V8z" /> },
   {
     id: 'framerect',
-    label: 'מסגרת גרפית — מלבן',
+    get label() { return t('מסגרת גרפית — מלבן') },
     group: 3,
     key: 'F',
     code: 'KeyF',
@@ -48,7 +49,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     id: 'frameellipse',
-    label: 'מסגרת גרפית — אליפסה',
+    get label() { return t('מסגרת גרפית — אליפסה') },
     group: 3,
     key: 'Shift+F',
     code: 'KeyF',
@@ -64,7 +65,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     id: 'framepolygon',
-    label: 'מסגרת גרפית — מצולע',
+    get label() { return t('מסגרת גרפית — מצולע') },
     group: 3,
     enabled: true,
     icon: (
@@ -75,21 +76,21 @@ export const TOOLS: ToolDef[] = [
       </>
     ),
   },
-  { id: 'marqueeRect', label: 'בחירה מלבנית', group: 1, enabled: true, icon: <><path d="M7 3v14a2 2 0 0 0 2 2h12" /><path d="M3 7h14a2 2 0 0 1 2 2v12" /></> },
-  { id: 'marqueeEllipse', label: 'בחירה אליפטית', group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
-  { id: 'magneticLasso', label: 'לאסו מגנטי', group: 1, enabled: true, icon: <><path d="M5 18.500 6.200 9.200a5.800 5.800 0 0 1 11.600 0L19 18.500a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z" /><path d="m6.500 16.500 2-1.500 2 1 2-2 2 1 2-2" strokeDasharray="1.5 1.5" /></> },
-  { id: 'line', label: 'קו', group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
-  { id: 'pen', label: 'עט', group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
-  { id: 'pencil', label: 'עיפרון', group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
-  { id: 'brush', label: 'מברשת', group: 3, key: 'B', code: 'KeyB', enabled: true, icon: <><path d="M14.500 4.500a2.100 2.100 0 0 1 3 3L11.500 13.500l-3-3z" /><path d="M8.500 11.500c-2.500 0-4 1.600-4 3.800 0 1.500-.8 2.700-1.500 3.500 3.500 1 8-.5 8-4" /></> },
+  { id: 'marqueeRect', get label() { return t('בחירה מלבנית') }, group: 1, enabled: true, icon: <><path d="M7 3v14a2 2 0 0 0 2 2h12" /><path d="M3 7h14a2 2 0 0 1 2 2v12" /></> },
+  { id: 'marqueeEllipse', get label() { return t('בחירה אליפטית') }, group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
+  { id: 'magneticLasso', get label() { return t('לאסו מגנטי') }, group: 1, enabled: true, icon: <><path d="M5 18.500 6.200 9.200a5.800 5.800 0 0 1 11.600 0L19 18.500a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z" /><path d="m6.500 16.500 2-1.500 2 1 2-2 2 1 2-2" strokeDasharray="1.5 1.5" /></> },
+  { id: 'line', get label() { return t('קו') }, group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
+  { id: 'pen', get label() { return t('עט') }, group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
+  { id: 'pencil', get label() { return t('עיפרון') }, group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
+  { id: 'brush', get label() { return t('מברשת') }, group: 3, key: 'B', code: 'KeyB', enabled: true, icon: <><path d="M14.500 4.500a2.100 2.100 0 0 1 3 3L11.500 13.500l-3-3z" /><path d="M8.500 11.500c-2.500 0-4 1.600-4 3.800 0 1.500-.8 2.700-1.500 3.500 3.500 1 8-.5 8-4" /></> },
 
-  { id: 'scissors', label: 'מספריים', group: 4, key: 'C', code: 'KeyC', enabled: true, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
-  { id: 'eraser', label: 'מחק נקודות', group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
-  { id: 'heal', label: 'מברשת ריפוי', group: 4, enabled: true, icon: <><path d="m4 12 8-8 8 8-8 8z" /><path d="M12 8v8M8 12h8" /><circle cx="12" cy="12" r="2" fill="currentColor" /></> },
-  { id: 'transform', label: 'שינוי צורה חופשי', group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
+  { id: 'scissors', get label() { return t('מספריים') }, group: 4, key: 'C', code: 'KeyC', enabled: true, icon: <><circle cx="6.500" cy="6.500" r="2.500" /><circle cx="6.500" cy="17.500" r="2.500" /><path d="M8.300 8.300 20 17M8.300 15.700 20 7" /></> },
+  { id: 'eraser', get label() { return t('מחק נקודות') }, group: 4, key: 'Shift+E', code: 'KeyE', shift: true, enabled: true, icon: <path d="m4 16 9-11a2 2 0 0 1 3 0l4 4-9 11H7zM12 20h9" /> },
+  { id: 'heal', get label() { return t('מברשת ריפוי') }, group: 4, enabled: true, icon: <><path d="m4 12 8-8 8 8-8 8z" /><path d="M12 8v8M8 12h8" /><circle cx="12" cy="12" r="2" fill="currentColor" /></> },
+  { id: 'transform', get label() { return t('שינוי צורה חופשי') }, group: 4, key: 'E', code: 'KeyE', enabled: true, icon: <><path d="M5 5h14v14H5z" /><path d="M3 3h4v4H3zM17 3h4v4h-4zM3 17h4v4H3zM17 17h4v4h-4z" fill="currentColor" /></> },
   {
     id: 'gap',
-    label: 'רווח',
+    get label() { return t('רווח') },
     group: 4,
     key: 'U',
     code: 'KeyU',
@@ -102,16 +103,16 @@ export const TOOLS: ToolDef[] = [
       </>
     ),
   },
-  { id: 'color', label: 'צבע', group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
-  { id: 'gradient', label: 'מעבר צבע', group: 5, key: 'G', code: 'KeyG', enabled: true, icon: <path d="M4 6h16v12H4zM7 6v12M10 6v12M13 6v12M16 6v12" /> },
-  { id: 'swatches', label: 'דוגמיות צבע', group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
-  { id: 'feather', label: 'החלקת מעבר צבע', group: 4, key: 'Shift+G', code: 'KeyG', shift: true, enabled: true, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
+  { id: 'color', get label() { return t('צבע') }, group: 5, key: 'K', code: 'KeyK', enabled: true, icon: <path d="M4 5h16v14H4zM7 8h10M7 12h6M7 16h8" /> },
+  { id: 'gradient', get label() { return t('מעבר צבע') }, group: 5, key: 'G', code: 'KeyG', enabled: true, icon: <path d="M4 6h16v12H4zM7 6v12M10 6v12M13 6v12M16 6v12" /> },
+  { id: 'swatches', get label() { return t('דוגמיות צבע') }, group: 5, enabled: true, icon: <><circle cx="8" cy="8" r="3" fill="#ed168c" stroke="none" /><circle cx="16" cy="8" r="3" fill="#00a6d6" stroke="none" /><circle cx="8" cy="16" r="3" fill="#f5b800" stroke="none" /><circle cx="16" cy="16" r="3" fill="#222" stroke="none" /></> },
+  { id: 'feather', get label() { return t('החלקת מעבר צבע') }, group: 4, key: 'Shift+G', code: 'KeyG', shift: true, enabled: true, icon: <path d="M4 6h16v12H4zM8 9v6M12 9v6M16 9v6" strokeDasharray="2 2" /> },
 
-  { id: 'eyedropper', label: 'דוגם סגנון', group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <><rect x="4" y="3" width="13" height="6" rx="1.500" /><path d="M17 6h2.500v5H11v3" /><rect x="9" y="14" width="4" height="7" rx="1" /></> },
-  { id: 'colorSampler', label: 'דגימת צבע', group: 5, enabled: true, icon: <><path d="m3 21 1-4 9-9 3 3-9 9z" /><path d="m13 8 2.500-2.500a2.100 2.100 0 0 1 3 0l.5.500a2.100 2.100 0 0 1 0 3L16.500 11.500" /><path d="m14 7 3 3" /></> },
-  { id: 'note', label: 'הערה', group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
-  { id: 'hand', label: 'יד', group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
-  { id: 'zoom', label: 'זום', group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
+  { id: 'eyedropper', get label() { return t('דוגם סגנון') }, group: 5, key: 'I', code: 'KeyI', enabled: true, icon: <><rect x="4" y="3" width="13" height="6" rx="1.500" /><path d="M17 6h2.500v5H11v3" /><rect x="9" y="14" width="4" height="7" rx="1" /></> },
+  { id: 'colorSampler', get label() { return t('דגימת צבע') }, group: 5, enabled: true, icon: <><path d="m3 21 1-4 9-9 3 3-9 9z" /><path d="m13 8 2.500-2.500a2.100 2.100 0 0 1 3 0l.5.500a2.100 2.100 0 0 1 0 3L16.500 11.500" /><path d="m14 7 3 3" /></> },
+  { id: 'note', get label() { return t('הערה') }, group: 5, enabled: false, icon: <path d="M4 5h16v11h-9l-4 4v-4H4z" /> },
+  { id: 'hand', get label() { return t('יד') }, group: 1, key: 'H', code: 'KeyH', enabled: true, icon: <path d="M8 13V6.500a1.500 1.500 0 0 1 3 0V11M11 10V4.500a1.500 1.500 0 0 1 3 0V10M14 10V6a1.500 1.500 0 0 1 3 0v8.500c0 3.500-2 6-6 6-3 0-4.500-1.500-6-4.500l-1.500-3a1.500 1.500 0 0 1 2.600-1.400L8 14" /> },
+  { id: 'zoom', get label() { return t('זום') }, group: 1, key: 'Z', code: 'KeyZ', enabled: true, icon: <><circle cx="10.500" cy="10.500" r="6" /><path d="m15 15 6 6" /></> },
 ]
 
 const HIDDEN_TOOLBOX_TOOLS = new Set<ToolId>(['color', 'gradient', 'swatches', 'transform', 'collector'])
@@ -138,36 +139,36 @@ const FOLD_GROUPS: ToolId[][] = [
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
 export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
-  select: 'בחירת אובייקטים, הזזה ושינוי גודל',
-  marqueeRect: 'בחירת צורה לחיתוך אובייקטים, תמונות וטקסט',
-  marqueeEllipse: 'בחירה אליפטית וחיתוך לאובייקט חדש',
-  magneticLasso: 'לחצו על קצה בתמונה והזיזו את העכבר לאורכו: הקו נצמד אליו. לחיצה כפולה סוגרת את האזור. אפשר למלא, למחוק או להשאיר רק את האזור הנבחר.',
-  direct: 'עריכת נקודות עוגן וידיות של נתיב',
-  hand: 'הזזת תצוגת הקנבס',
-  zoom: 'הגדלה והקטנה של תצוגת המסמך',
-  type: 'יצירת ועריכת תיבות טקסט',
-  pathtype: 'הוספת טקסט לאורך נתיב',
-  page: 'שינוי גודל ושוליים של עמוד',
-  rect: 'ציור מרובע',
-  ellipse: 'ציור אליפסה',
-  polygon: 'ציור מצולע',
-  framerect: 'יצירת מסגרת תמונה מלבנית',
-  frameellipse: 'יצירת מסגרת תמונה אליפטית',
-  framepolygon: 'יצירת מסגרת תמונה מצולעת',
-  line: 'ציור קו ישר',
-  pen: 'יצירת נתיב עם נקודות וידיות Bezier',
-  pencil: 'ציור קו חופשי מוחלק',
-  brush: 'ציור במברשת: קליגרפית, מדורגת, נתז צבע ועוד. כל משיכה נשמרת כצורה וקטורית',
-  scissors: 'חיתוך נתיב בנקודת העוגן הקרובה',
-  eraser: 'מחיקת מקטע נתיב באמצעות מברשת',
-  heal: 'גררו על אזור בתמונה כדי למלא אותו בפיקסלים מהסביבה. להקטנת המברשת החזיקו Shift ולחצו על (, ולהגדלתה החזיקו Shift ולחצו על ).',
-  gap: 'גרור בין אובייקטים מיושרים כדי להרחיב צד אחד ולכווץ את השני; Shift מגביל לזוג הקרוב בלבד',
-  color: 'בחירת צבע מילוי או קו',
-  gradient: 'יצירת מעבר צבע',
-  swatches: 'בחירה וניהול של דוגמיות צבע',
-  feather: 'גרירת נקודת התחלה וסיום יוצרת מסכת אטימות',
-  eyedropper: 'דגימת סגנון מטקסט או אובייקט',
-  colorSampler: 'דגימת צבע מהמסמך או מהמסך',
+  get select() { return t('בחירת אובייקטים, הזזה ושינוי גודל') },
+  get marqueeRect() { return t('בחירת צורה לחיתוך אובייקטים, תמונות וטקסט') },
+  get marqueeEllipse() { return t('בחירה אליפטית וחיתוך לאובייקט חדש') },
+  get magneticLasso() { return t('לחצו על קצה בתמונה והזיזו את העכבר לאורכו: הקו נצמד אליו. לחיצה כפולה סוגרת את האזור. אפשר למלא, למחוק או להשאיר רק את האזור הנבחר.') },
+  get direct() { return t('עריכת נקודות עוגן וידיות של נתיב') },
+  get hand() { return t('הזזת תצוגת הקנבס') },
+  get zoom() { return t('הגדלה והקטנה של תצוגת המסמך') },
+  get type() { return t('יצירת ועריכת תיבות טקסט') },
+  get pathtype() { return t('הוספת טקסט לאורך נתיב') },
+  get page() { return t('שינוי גודל ושוליים של עמוד') },
+  get rect() { return t('ציור מרובע') },
+  get ellipse() { return t('ציור אליפסה') },
+  get polygon() { return t('ציור מצולע') },
+  get framerect() { return t('יצירת מסגרת תמונה מלבנית') },
+  get frameellipse() { return t('יצירת מסגרת תמונה אליפטית') },
+  get framepolygon() { return t('יצירת מסגרת תמונה מצולעת') },
+  get line() { return t('ציור קו ישר') },
+  get pen() { return t('יצירת נתיב עם נקודות וידיות Bezier') },
+  get pencil() { return t('ציור קו חופשי מוחלק') },
+  get brush() { return t('ציור במברשת: קליגרפית, מדורגת, נתז צבע ועוד. כל משיכה נשמרת כצורה וקטורית') },
+  get scissors() { return t('חיתוך נתיב בנקודת העוגן הקרובה') },
+  get eraser() { return t('מחיקת מקטע נתיב באמצעות מברשת') },
+  get heal() { return t('גררו על אזור בתמונה כדי למלא אותו בפיקסלים מהסביבה. להקטנת המברשת החזיקו Shift ולחצו על (, ולהגדלתה החזיקו Shift ולחצו על ).') },
+  get gap() { return t('גרור בין אובייקטים מיושרים כדי להרחיב צד אחד ולכווץ את השני; Shift מגביל לזוג הקרוב בלבד') },
+  get color() { return t('בחירת צבע מילוי או קו') },
+  get gradient() { return t('יצירת מעבר צבע') },
+  get swatches() { return t('בחירה וניהול של דוגמיות צבע') },
+  get feather() { return t('גרירת נקודת התחלה וסיום יוצרת מסכת אטימות') },
+  get eyedropper() { return t('דגימת סגנון מטקסט או אובייקט') },
+  get colorSampler() { return t('דגימת צבע מהמסמך או מהמסך') },
 }
 
 interface ToolboxProps {
@@ -228,12 +229,12 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
       style={floating ? { left: floatingPosition.left, top: floatingPosition.top } : undefined}
       role="toolbar"
       aria-orientation="vertical"
-      aria-label="כלים"
+      aria-label={t('כלים')}
     >
       <button
         className="toolbox-grab"
-        aria-label="גרור את סרגל הכלים"
-        title={floating ? 'גרור לסרגל השמאלי כדי להצמיד' : 'גרור כדי לנתק ולהזיז'}
+        aria-label={t('גרור את סרגל הכלים')}
+        title={floating ? t('גרור לסרגל השמאלי כדי להצמיד') : t('גרור כדי לנתק ולהזיז')}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           const bounds = toolboxRef.current?.getBoundingClientRect()
@@ -280,24 +281,24 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
         <svg viewBox="0 0 24 12" aria-hidden="true"><circle cx="6" cy="3" r="1" /><circle cx="12" cy="3" r="1" /><circle cx="18" cy="3" r="1" /><circle cx="6" cy="9" r="1" /><circle cx="12" cy="9" r="1" /><circle cx="18" cy="9" r="1" /></svg>
       </button>
       <div className="toolbox-scroll">
-      {TOOLBOX_TOOLS.map((t, i) => {
-        const group = foldGroupOf.get(t.id)
+      {TOOLBOX_TOOLS.map((def, i) => {
+        const group = foldGroupOf.get(def.id)
         if (group) {
           if (renderedGroups.has(group[0])) return null
           renderedGroups.add(group[0])
         }
-        const active = toolDef(group ? (current[group[0]] ?? group[0]) : t.id)
+        const active = toolDef(group ? (current[group[0]] ?? group[0]) : def.id)
         const hasFlyout = !!group && group.length > 1
         const isActive = active.id === 'colorSampler'
           ? colorSamplerActive
           : !colorSamplerActive && tool === active.id
-        const tooltipLabel = active.id === 'marqueeRect' ? 'מסגרת חיתוך / Crop Frame' : active.label
+        const tooltipLabel = active.id === 'marqueeRect' ? t('מסגרת חיתוך / Crop Frame') : active.label
         const tooltipDescription = active.id === 'marqueeRect'
-          ? `${TOOL_HINTS[active.id]}, לחיצה כפולה להצגת צורות נוספות`
-          : `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? ' · לחיצה כפולה להצגת כלים נוספים' : ''}`
+          ? t('{hint}, לחיצה כפולה להצגת צורות נוספות', { hint: TOOL_HINTS[active.id] ?? active.label })
+          : `${TOOL_HINTS[active.id] ?? active.label}${hasFlyout ? t(' · לחיצה כפולה להצגת כלים נוספים') : ''}`
         return (
-          <Fragment key={t.id}>
-            {i > 0 && TOOLBOX_TOOLS[i - 1].group !== t.group && <div className="tool-sep" />}
+          <Fragment key={def.id}>
+            {i > 0 && TOOLBOX_TOOLS[i - 1].group !== def.group && <div className="tool-sep" />}
             <div className="tool-slot">
               <button
                 className={'tool' + (isActive ? ' active' : '') + (active.enabled ? '' : ' off')}
@@ -305,7 +306,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
                 data-tour-slot={group?.[0] ?? active.id}
                 aria-disabled={!active.enabled}
                 aria-pressed={isActive}
-                aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : `${active.label} — עדיין לא זמין`}
+                aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : t('{label} — עדיין לא זמין', { label: active.label })}
                 onMouseEnter={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
                 onMouseLeave={() => setHoveredTool(null)}
                 onFocus={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
@@ -330,11 +331,11 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
           </Fragment>
         )
       })}
-      <div className="screen-modes" role="group" aria-label="מצב מסך">
+      <div className="screen-modes" role="group" aria-label={t('מצב מסך')}>
         <button
           className={'tool' + (!previewMode ? ' active' : '')}
           data-tour-id="view:normal"
-          title="מצב רגיל (W)"
+          title={t('מצב רגיל (W)')}
           aria-pressed={!previewMode}
           onClick={() => onPreviewMode(false)}
         >
@@ -348,7 +349,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
         <button
           className={'tool' + (previewMode ? ' active' : '')}
           data-tour-id="view:preview"
-          title="מצב תצוגה מקדימה (W)"
+          title={t('מצב תצוגה מקדימה (W)')}
           aria-pressed={previewMode}
           onClick={() => onPreviewMode(true)}
         >
@@ -381,7 +382,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
       )}
       {floating && dockTarget && (
         <div className="toolbox-dock-target" style={{ left: dockTarget.left, top: dockTarget.top, width: dockTarget.width, height: dockTarget.height }} aria-hidden="true">
-          <span>שחרר כדי להצמיד</span>
+          <span>{t('שחרר כדי להצמיד')}</span>
         </div>
       )}
     </div>

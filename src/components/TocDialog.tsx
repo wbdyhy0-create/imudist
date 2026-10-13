@@ -37,7 +37,7 @@ export function TocDialog({ styles, initial, onConfirm, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal wide toc-dialog" role="dialog" aria-modal="true" aria-label="יצירת תוכן עניינים" dir="rtl">
+      <div className="modal wide toc-dialog" role="dialog" aria-modal="true" aria-label="יצירת תוכן עניינים">
         <h2>יצירת תוכן עניינים</h2>
         <p className="muted">בחר סגנונות פסקה שייכללו בתוכן העניינים, לפי רמה.</p>
         {levels.map((level, index) => (

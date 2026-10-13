@@ -25,7 +25,7 @@ export function ImportOptionsDialog({ fileName, canReplace, onConfirm, onClose }
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal import-options-dialog" role="dialog" aria-modal="true" aria-label="אפשרויות ייבוא Word" dir="rtl">
+      <div className="modal import-options-dialog" role="dialog" aria-modal="true" aria-label="אפשרויות ייבוא Word">
         <h2>אפשרויות ייבוא Word</h2>
         <p className="file-name"><bdi>{fileName}</bdi></p>
         <label className="dlg-check"><input type="checkbox" checked={showOptions} onChange={(event) => setShowOptions(event.target.checked)} />הצג אפשרויות ייבוא</label>

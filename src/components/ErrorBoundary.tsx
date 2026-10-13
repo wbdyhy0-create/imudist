@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div
         role="alert"
-        dir="rtl"
+       
         style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, height: '100vh', padding: 24, background: '#1e1818', color: '#e8e0e0', font: '15px system-ui, sans-serif', textAlign: 'center' }}
       >
         <h2 style={{ margin: 0 }}>משהו השתבש בתצוגה</h2>

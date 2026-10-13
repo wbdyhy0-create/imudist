@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 import { useState, type KeyboardEvent } from 'react'
 import { formatLength, formatNumber, fromPt, parseFieldValue, toPt, type Unit } from '../units'
 
@@ -76,10 +77,10 @@ export function NumberField({ id, ariaLabel, value, onChange, unit, unitLabel, s
   return (
     <div className="num-field">
       <div className="steppers">
-        <button type="button" tabIndex={-1} aria-label="הגדל" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(1, false)}>
+        <button type="button" tabIndex={-1} aria-label={t('הגדלת הערך')} onMouseDown={(e) => e.preventDefault()} onClick={() => bump(1, false)}>
           <svg viewBox="0 0 10 6"><path d="M1 5 5 1l4 4" fill="none" stroke="currentColor" strokeWidth="1.400" /></svg>
         </button>
-        <button type="button" tabIndex={-1} aria-label="הקטן" onMouseDown={(e) => e.preventDefault()} onClick={() => bump(-1, false)}>
+        <button type="button" tabIndex={-1} aria-label={t('הקטנת הערך')} onMouseDown={(e) => e.preventDefault()} onClick={() => bump(-1, false)}>
           <svg viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.400" /></svg>
         </button>
       </div>

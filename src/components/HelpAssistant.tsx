@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { t } from '../i18n'
 import { getHelpTopicCategory, HELP_TOPICS, type HelpTopic } from './HelpTopics'
 import { getHelpSearchTokens, getHelpTopicResults, getStarterHelpTopics, normalizeHelpQuery } from './HelpSearch'
 
@@ -67,8 +68,8 @@ export function HelpAssistant() {
           ref={inputRef}
           type="search"
           value={query}
-          placeholder="מה תרצו לדעת?"
-          aria-label="שאלה לעזרה"
+          placeholder={t('מה תרצו לדעת?')}
+          aria-label={t('שאלה לעזרה')}
           aria-expanded={open && !!normalizedQuery}
           aria-controls="help-search-results"
           onFocus={() => setOpen(true)}
@@ -80,10 +81,10 @@ export function HelpAssistant() {
         />
       </label>
       {open && normalizedQuery && (
-        <div className="help-results" id="help-search-results" role="region" aria-label="נושאי עזרה">
+        <div className="help-results" id="help-search-results" role="region" aria-label={t('נושאי עזרה')}>
           {selected ? (
             <>
-              <button type="button" className="help-back" onClick={resetResults}>‹ חזרה לנושאים</button>
+              <button type="button" className="help-back" onClick={resetResults}>{t('‹ חזרה לנושאים')}</button>
               <article className="help-answer">
                 <div className="help-answer-heading">
                   <h2>{selected.title}</h2>
@@ -93,7 +94,7 @@ export function HelpAssistant() {
               </article>
               {related.length > 0 && (
                 <div className="help-related">
-                  <h3>נושאים קשורים</h3>
+                  <h3>{t('נושאים קשורים')}</h3>
                   {related.map((topic) => (
                     <button type="button" key={topic.id} onClick={() => chooseTopic(topic)}>{topic.title}</button>
                   ))}
@@ -102,7 +103,7 @@ export function HelpAssistant() {
             </>
           ) : results.length > 0 ? (
             <>
-              <div className="help-results-heading">{hasSearchTerms ? 'נושאים ותשובות' : 'אפשר להתחיל מאחד הנושאים האלה'}</div>
+              <div className="help-results-heading">{hasSearchTerms ? t('נושאים ותשובות') : t('אפשר להתחיל מאחד הנושאים האלה')}</div>
               {results.map((topic) => (
                 <button type="button" className="help-result" key={topic.id} onClick={() => chooseTopic(topic)}>
                   <span className="help-result-title">
@@ -114,7 +115,7 @@ export function HelpAssistant() {
               ))}
             </>
           ) : (
-            <p className="help-no-results">לא מצאתי נושא מתאים. נסו ניסוח אחר או מילה כללית יותר.</p>
+            <p className="help-no-results">{t('לא מצאתי נושא מתאים. נסו ניסוח אחר או מילה כללית יותר.')}</p>
           )}
         </div>
       )}

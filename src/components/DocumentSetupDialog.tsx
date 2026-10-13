@@ -18,9 +18,10 @@ import {
   type Sides,
 } from '../document'
 import { computeLayout, pageMargins } from '../layout'
-import { PAGE_PRESETS, UNIT_OPTIONS, UNIT_SUFFIX, formatNumber, fromPt, matchPreset, type Unit } from '../units'
+import { PAGE_PRESETS, UNIT_OPTIONS, formatNumber, fromPt, matchPreset, unitSuffix, type Unit } from '../units'
 import { NumberField } from './NumberField'
 import { SidesEditor } from './NewDocumentDialog'
+import { t } from '../i18n'
 
 interface Props {
   initial: DocSettings
@@ -97,17 +98,17 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
 
   return (
     <div className="modal-backdrop">
-      <div className="setup-window" role="dialog" aria-modal="true" aria-label="הגדרות מסמך">
+      <div className="setup-window" role="dialog" aria-modal="true" aria-label={t('הגדרות מסמך')}>
         <header className="setup-head">
           <div>
-            <h2>הגדרות מסמך</h2>
+            <h2>{t('הגדרות מסמך')}</h2>
             <p>
-              <bdi>{d.name}</bdi> · {d.pages} עמודים
-              {custom > 0 && ` · ${custom} בגודל אישי`}
-              {customMargins > 0 && ` · ${customMargins} בשוליים אישיים`}
+              <bdi>{d.name}</bdi> · {d.pages === 1 ? t('עמוד אחד') : t('{count} עמודים', { count: d.pages })}
+              {custom > 0 && ` · ${t('{count} בגודל אישי', { count: custom })}`}
+              {customMargins > 0 && ` · ${t('{count} בשוליים אישיים', { count: customMargins })}`}
             </p>
           </div>
-          <button className="setup-x" aria-label="סגור" onClick={onClose}>
+          <button className="setup-x" aria-label={t('סגור')} onClick={onClose}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" />
             </svg>
@@ -116,13 +117,13 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
 
         <div className="setup-body">
           <section className="setup-controls">
-            <div className="setup-tabs" role="tablist" aria-label="קטגוריות">
-              {TABS.map((t) => (
-                <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
+            <div className="setup-tabs" role="tablist" aria-label={t('קטגוריות')}>
+              {TABS.map((item) => (
+                <button key={item.id} role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'on' : ''} onClick={() => setTab(item.id)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    {t.icon}
+                    {item.icon}
                   </svg>
-                  {t.label}
+                  {t(item.label)}
                 </button>
               ))}
             </div>
@@ -131,61 +132,63 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
               {tab === 'pages' && (
                 <>
                   <div className="setup-row">
-                    <Labeled label="מספר עמודים">
+                    <Labeled label={t('מספר עמודים')}>
                       <NumberField value={d.pages} min={1} max={MAX_PAGES} onChange={(v) => patch({ pages: v })} />
                     </Labeled>
-                    <Labeled label="מספור מתחיל מ">
+                    <Labeled label={t('מספור מתחיל מ')}>
                       <NumberField value={d.startPage} min={1} max={MAX_PAGES} onChange={(v) => patch({ startPage: v })} />
                     </Labeled>
                   </div>
 
                   <div className="setup-group">
-                    <div className="setup-label">תיבות טקסט בעמודים</div>
-                    <div className="seg" role="radiogroup" aria-label="יצירת תיבות טקסט">
+                    <div className="setup-label">{t('תיבות טקסט בעמודים')}</div>
+                    <div className="seg" role="radiogroup" aria-label={t('יצירת תיבות טקסט')}>
                       <button role="radio" aria-checked={d.primaryTextFrame} className={d.primaryTextFrame ? 'on' : ''} onClick={() => patch({ primaryTextFrame: true })}>
-                        אוטומטית
+                        {t('אוטומטית')}
                       </button>
                       <button role="radio" aria-checked={!d.primaryTextFrame} className={!d.primaryTextFrame ? 'on' : ''} onClick={() => patch({ primaryTextFrame: false })}>
-                        ידנית
+                        {t('ידנית')}
                       </button>
                     </div>
                     <p className="setup-hint">
                       {d.primaryTextFrame
-                        ? 'כל עמוד מקבל תיבת טקסט שיושבת בדיוק על השוליים (או תיבה לכל עמודה), גם עמודים שיתווספו אחר כך.'
-                        : 'העמודים נשארים ריקים, ואתה יוצר תיבות טקסט בעצמך בכלי הטקסט או בהצבת קובץ.'}
+                        ? t('כל עמוד מקבל תיבת טקסט שיושבת בדיוק על השוליים (או תיבה לכל עמודה), גם עמודים שיתווספו אחר כך.')
+                        : t('העמודים נשארים ריקים, ואתה יוצר תיבות טקסט בעצמך בכלי הטקסט או בהצבת קובץ.')}
                     </p>
                     {!d.primaryTextFrame && removableFrames > 0 && (
                       <label className="dlg-check">
                         <input type="checkbox" checked={removeEmpty} onChange={(e) => setRemoveEmpty(e.target.checked)} />
-                        מחק גם את {removableFrames === 1 ? 'תיבת הטקסט הריקה' : `${removableFrames} תיבות הטקסט הריקות`} שכבר נוצרו
+                        {removableFrames === 1
+                          ? t('מחק גם את תיבת הטקסט הריקה שכבר נוצרה')
+                          : t('מחק גם את {count} תיבות הטקסט הריקות שכבר נוצרו', { count: removableFrames })}
                       </label>
                     )}
                   </div>
 
                   <div className="setup-group">
-                    <div className="setup-label">אופן הצגת העמודים</div>
-                    <div className="row-cards" role="radiogroup" aria-label="עמודים בשורה">
+                    <div className="setup-label">{t('אופן הצגת העמודים')}</div>
+                    <div className="row-cards" role="radiogroup" aria-label={t('עמודים בשורה')}>
                       {rowChoices.map((n) => (
                         <button
                           key={n}
                           role="radio"
                           aria-checked={d.perRow === n}
                           className={'row-card' + (d.perRow === n ? ' on' : '')}
-                          title={n === 1 ? 'כל עמוד בשורה משלו' : `${n} עמודים זה לצד זה`}
+                          title={n === 1 ? t('כל עמוד בשורה משלו') : t('{count} עמודים זה לצד זה', { count: n })}
                           onClick={() => patch({ perRow: n, rowsCustom: false, pageJoins: [], facingPages: n >= 2 ? d.facingPages : false })}
                         >
                           <RowGlyph n={n} />
-                          <span>{n === 1 ? 'עמוד בשורה' : n === 2 ? 'זוגות' : `${n} בשורה`}</span>
+                          <span>{n === 1 ? t('עמוד בשורה') : n === 2 ? t('זוגות') : t('{count} בשורה', { count: n })}</span>
                         </button>
                       ))}
                       <div className="row-other">
-                        <NumberField value={d.perRow} min={1} max={MAX_PER_ROW} ariaLabel="מספר עמודים בשורה" onChange={(v) => patch({ perRow: v, rowsCustom: false, pageJoins: [], facingPages: v >= 2 ? d.facingPages : false })} />
+                        <NumberField value={d.perRow} min={1} max={MAX_PER_ROW} ariaLabel={t('מספר עמודים בשורה')} onChange={(v) => patch({ perRow: v, rowsCustom: false, pageJoins: [], facingPages: v >= 2 ? d.facingPages : false })} />
                       </div>
                     </div>
                     <p className="setup-hint">
                       {d.rowsCustom
-                        ? 'העמודים מסודרים ידנית (הוספת עמוד בצד עמוד אחר). בחירה כאן מסדרת את כולם מחדש בשורות שוות.'
-                        : 'עמוד בשורה: כל העמודים זה מתחת לזה. זוגות: שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה. עמודים באותה שורה עומדים זה ליד זה, ואפשר לתת לכל אחד גודל משלו (בלשונית ״גודל״).'}
+                        ? t('העמודים מסודרים ידנית (הוספת עמוד בצד עמוד אחר). בחירה כאן מסדרת את כולם מחדש בשורות שוות.')
+                        : t('עמוד בשורה: כל העמודים זה מתחת לזה. זוגות: שורה ראשונה עמודים 1-2, שורה שנייה 3-4, וכן הלאה. עמודים באותה שורה עומדים זה ליד זה, ואפשר לתת לכל אחד גודל משלו (בלשונית ״גודל״).')}
                     </p>
                   </div>
 
@@ -193,24 +196,24 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                     checked={d.facingPages && d.perRow >= 2}
                     disabled={d.perRow < 2}
                     onChange={(v) => patch({ facingPages: v })}
-                    title="דף כפול"
-                    hint={d.perRow < 2 ? 'זמין כשיש לפחות שני עמודים בשורה' : 'העמודים בשורה נוגעים זה בזה, ולשוליים יש צד פנימי וצד חיצוני'}
+                    title={t('דף כפול')}
+                    hint={d.perRow < 2 ? t('זמין כשיש לפחות שני עמודים בשורה') : t('העמודים בשורה נוגעים זה בזה, ולשוליים יש צד פנימי וצד חיצוני')}
                   />
 
                   <div className="setup-group">
-                    <div className="setup-label">כיוון עיון</div>
-                    <div className="seg" role="radiogroup" aria-label="כיוון עיון">
+                    <div className="setup-label">{t('כיוון עיון')}</div>
+                    <div className="seg" role="radiogroup" aria-label={t('כיוון עיון')}>
                       <button role="radio" aria-checked={d.binding === 'rtl'} className={d.binding === 'rtl' ? 'on' : ''} onClick={() => patch({ binding: 'rtl' })}>
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path d="M20 12H5M10 6l-6 6 6 6" />
                         </svg>
-                        מימין לשמאל
+                        {t('מימין לשמאל')}
                       </button>
                       <button role="radio" aria-checked={d.binding === 'ltr'} className={d.binding === 'ltr' ? 'on' : ''} onClick={() => patch({ binding: 'ltr' })}>
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path d="M4 12h15M14 6l6 6-6 6" />
                         </svg>
-                        משמאל לימין
+                        {t('משמאל לימין')}
                       </button>
                     </div>
                   </div>
@@ -220,67 +223,67 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
 
               {tab === 'size' && (
                 <>
-                  <ScopeSwitch scope={scope} onScope={setScope} label={`עמוד ${d.startPage + page} בלבד`} />
+                  <ScopeSwitch scope={scope} onScope={setScope} label={t('עמוד {number} בלבד', { number: d.startPage + page })} />
 
                   <div className="size-cards">
                     {PAGE_PRESETS.map((p) => (
                       <button key={p.id} className={'size-card' + (preset?.id === p.id ? ' on' : '')} onClick={() => setSize(landscape ? p.height : p.width, landscape ? p.width : p.height)}>
                         <span className="size-sheet" style={{ width: (p.width / p.height) * 34, height: 34 }} />
-                        <b>{p.label}</b>
+                        <b>{t(p.label)}</b>
                       </button>
                     ))}
                     <div className={'size-card' + (!preset ? ' on' : '')} aria-hidden="true">
                       <span className="size-sheet dashed" style={{ width: 24, height: 34 }} />
-                      <b>מותאם</b>
+                      <b>{t('מותאם')}</b>
                     </div>
                   </div>
 
                   <div className="setup-row">
-                    <Labeled label="רוחב">
+                    <Labeled label={t('רוחב')}>
                       <NumberField value={shown.w} unit={d.unit} min={MIN_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => setSize(v, shown.h)} />
                     </Labeled>
-                    <Labeled label="גובה">
+                    <Labeled label={t('גובה')}>
                       <NumberField value={shown.h} unit={d.unit} min={MIN_PAGE_PT} max={MAX_PAGE_PT} onChange={(v) => setSize(shown.w, v)} />
                     </Labeled>
                   </div>
                   <div className="setup-row">
-                    <Labeled label="כיוון">
-                      <div className="seg small" role="radiogroup" aria-label="כיוון העמוד">
+                    <Labeled label={t('כיוון')}>
+                      <div className="seg small" role="radiogroup" aria-label={t('כיוון העמוד')}>
                         <button role="radio" aria-checked={!landscape} className={!landscape ? 'on' : ''} onClick={() => landscape && setSize(shown.h, shown.w)}>
                           <svg viewBox="0 0 24 24" aria-hidden="true">
                             <rect x="7" y="3" width="10" height="18" rx="1" />
                           </svg>
-                          לאורך
+                          {t('לאורך')}
                         </button>
                         <button role="radio" aria-checked={landscape} className={landscape ? 'on' : ''} onClick={() => !landscape && setSize(shown.h, shown.w)}>
                           <svg viewBox="0 0 24 24" aria-hidden="true">
                             <rect x="3" y="7" width="18" height="10" rx="1" />
                           </svg>
-                          לרוחב
+                          {t('לרוחב')}
                         </button>
                       </div>
                     </Labeled>
-                    <Labeled label="יחידות מידה">
+                    <Labeled label={t('יחידות מידה')}>
                       <select className="select" value={d.unit} onChange={(e) => patch({ unit: e.target.value as Unit })}>
                         {UNIT_OPTIONS.map((u) => (
                           <option key={u.value} value={u.value}>
-                            {u.label}
+                            {t(u.label)}
                           </option>
                         ))}
                       </select>
                     </Labeled>
                   </div>
 
-                  <label className="dlg-check" title="תיבות הטקסט, התמונות והצורות של כל עמוד גדלות או קטנות ביחס לגודל העמוד ולשוליים: עמוד PDF שיובא ממלא את השטח שבין השוליים גם אחרי השינוי">
+                  <label className="dlg-check" title={t('תיבות הטקסט, התמונות והצורות של כל עמוד גדלות או קטנות ביחס לגודל העמוד ולשוליים: עמוד PDF שיובא ממלא את השטח שבין השוליים גם אחרי השינוי')}>
                     <input type="checkbox" checked={resizeTextFrames} onChange={(event) => setResizeTextFrames(event.target.checked)} />
-                    התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים
+                    {t('התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים')}
                   </label>
 
                   {custom > 0 && (
                     <div className="custom-note">
-                      <span>{custom === 1 ? 'עמוד אחד' : `${custom} עמודים`} בגודל שונה משאר המסמך.</span>
+                      <span>{custom === 1 ? t('עמוד אחד בגודל שונה משאר המסמך.') : t('{count} עמודים בגודל שונה משאר המסמך.', { count: custom })}</span>
                       <button className="btn small" onClick={() => setD((s) => ({ ...s, pageSizes: [] }))}>
-                        אפס לגודל אחיד
+                        {t('אפס לגודל אחיד')}
                       </button>
                     </div>
                   )}
@@ -289,9 +292,9 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
 
               {tab === 'margins' && (
                 <>
-                  <ScopeSwitch scope={scope} onScope={setScope} label={`עמוד ${d.startPage + page} בלבד`} />
+                  <ScopeSwitch scope={scope} onScope={setScope} label={t('עמוד {number} בלבד', { number: d.startPage + page })} />
                   <div className="setup-group">
-                    <div className="setup-label">שוליים</div>
+                    <div className="setup-label">{t('שוליים')}</div>
                     <SidesEditor
                       value={scope === 'all' ? d.margins : marginsOf(d, page)}
                       unit={d.unit}
@@ -303,21 +306,21 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                   </div>
                   {customMargins > 0 && (
                     <div className="custom-note">
-                      <span>{customMargins === 1 ? 'עמוד אחד' : `${customMargins} עמודים`} עם שוליים שונים משאר המסמך.</span>
+                      <span>{customMargins === 1 ? t('עמוד אחד עם שוליים שונים משאר המסמך.') : t('{count} עמודים עם שוליים שונים משאר המסמך.', { count: customMargins })}</span>
                       <button className="btn small" onClick={() => setD((s) => ({ ...s, pageMargins: [] }))}>
-                        אפס לשוליים אחידים
+                        {t('אפס לשוליים אחידים')}
                       </button>
                     </div>
                   )}
                   <label className="dlg-check">
                     <input type="checkbox" checked={resizeTextFrames} onChange={(event) => setResizeTextFrames(event.target.checked)} />
-                    התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים
+                    {t('התאם תיבות טקסט, תמונות וצורות לגודל ולשוליים החדשים')}
                   </label>
                   <div className="setup-row">
-                    <Labeled label="עמודות בעמוד">
+                    <Labeled label={t('עמודות בעמוד')}>
                       <NumberField value={d.columns} min={1} max={MAX_COLUMNS} onChange={(v) => patch({ columns: v })} />
                     </Labeled>
-                    <Labeled label="רווח בין העמודות">
+                    <Labeled label={t('רווח בין העמודות')}>
                       <NumberField value={d.gutter} unit={d.unit} min={0} max={MAX_SIDE_PT} onChange={(v) => patch({ gutter: v })} />
                     </Labeled>
                   </div>
@@ -327,8 +330,8 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
               {tab === 'bleed' && (
                 <>
                   <div className="setup-group">
-                    <div className="setup-label">גלישה</div>
-                    <p className="setup-hint">שטח שנמשך אל מעבר לקצה העמוד, כדי שצבעים ותמונות לא יפסיקו בקו לבן אחרי החיתוך.</p>
+                    <div className="setup-label">{t('גלישה')}</div>
+                    <p className="setup-hint">{t('שטח שנמשך אל מעבר לקצה העמוד, כדי שצבעים ותמונות לא יפסיקו בקו לבן אחרי החיתוך.')}</p>
                     <SidesEditor
                       value={d.bleed}
                       unit={d.unit}
@@ -339,8 +342,8 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
                     />
                   </div>
                   <div className="setup-group">
-                    <div className="setup-label">אזור מידע</div>
-                    <p className="setup-hint">שטח מחוץ לעמוד להערות ולסימני הדפסה.</p>
+                    <div className="setup-label">{t('אזור מידע')}</div>
+                    <p className="setup-hint">{t('שטח מחוץ לעמוד להערות ולסימני הדפסה.')}</p>
                     <SidesEditor
                       value={d.slug}
                       unit={d.unit}
@@ -355,13 +358,13 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
             </div>
           </section>
 
-          <section className="setup-board-wrap" aria-label="לוח העמודים">
+          <section className="setup-board-wrap" aria-label={t('לוח העמודים')}>
             <div className="setup-board-title">
-              <span>כך יסודרו העמודים</span>
-              <span className="muted">לחיצה על עמוד בוחרת אותו</span>
+              <span>{t('כך יסודרו העמודים')}</span>
+              <span className="muted">{t('לחיצה על עמוד בוחרת אותו')}</span>
             </div>
             <SetupBoard doc={d} selected={page} onSelect={setSel} />
-            {d.pages > BOARD_LIMIT && <p className="setup-hint">מוצגים {BOARD_LIMIT} העמודים הראשונים.</p>}
+            {d.pages > BOARD_LIMIT && <p className="setup-hint">{t('מוצגים {count} העמודים הראשונים.', { count: BOARD_LIMIT })}</p>}
           </section>
         </div>
 
@@ -370,10 +373,10 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
             {error}
           </p>
           <button className="btn" onClick={onClose}>
-            ביטול
+            {t('ביטול')}
           </button>
           <button className="btn primary" disabled={!!error} onClick={apply}>
-            החל שינויים
+            {t('החל שינויים')}
           </button>
         </footer>
       </div>
@@ -385,16 +388,16 @@ export function DocumentSetupDialog({ initial, removableFrames, onApply, onClose
 function ScopeSwitch({ scope, onScope, label }: { scope: 'all' | 'page'; onScope: (s: 'all' | 'page') => void; label: string }) {
   return (
     <div className="setup-group">
-      <div className="setup-label">השינוי חל על</div>
-      <div className="seg" role="radiogroup" aria-label="היקף השינוי">
+      <div className="setup-label">{t('השינוי חל על')}</div>
+      <div className="seg" role="radiogroup" aria-label={t('היקף השינוי')}>
         <button role="radio" aria-checked={scope === 'all'} className={scope === 'all' ? 'on' : ''} onClick={() => onScope('all')}>
-          כל העמודים
+          {t('כל העמודים')}
         </button>
         <button role="radio" aria-checked={scope === 'page'} className={scope === 'page' ? 'on' : ''} onClick={() => onScope('page')}>
           {label}
         </button>
       </div>
-      {scope === 'page' && <p className="setup-hint">אפשר לבחור עמוד אחר בלחיצה עליו בלוח שבצד.</p>}
+      {scope === 'page' && <p className="setup-hint">{t('אפשר לבחור עמוד אחר בלחיצה עליו בלוח שבצד.')}</p>}
     </div>
   )
 }
@@ -447,7 +450,7 @@ function SetupBoard({ doc, selected, onSelect }: { doc: DocSettings; selected: n
 
   return (
     <div className="setup-board">
-      <svg viewBox={viewBox} preserveAspectRatio="xMidYMin meet" role="group" aria-label="עמודים" style={{ width: `min(100%, ${Math.round((b.maxX - b.minX + pad * 2) * 0.55)}px)` }}>
+      <svg viewBox={viewBox} preserveAspectRatio="xMidYMin meet" role="group" aria-label={t('עמודים')} style={{ width: `min(100%, ${Math.round((b.maxX - b.minX + pad * 2) * 0.55)}px)` }}>
         {layout.spreads.map((s) =>
           s.pages.map((p) => {
             const m = pageMargins(doc, p.side, p.index)
@@ -461,7 +464,7 @@ function SetupBoard({ doc, selected, onSelect }: { doc: DocSettings; selected: n
                   {p.number}
                 </text>
                 <text className="board-size" x={p.x + p.w / 2} y={s.y + p.h / 2 + fs * 1.6} fontSize={fs * 0.72} textAnchor="middle" dominantBaseline="middle">
-                  {`${formatNumber(fromPt(p.w, doc.unit))} × ${formatNumber(fromPt(p.h, doc.unit))} ${UNIT_SUFFIX[doc.unit]}`}
+                  {`${formatNumber(fromPt(p.w, doc.unit))} × ${formatNumber(fromPt(p.h, doc.unit))} ${unitSuffix(doc.unit)}`}
                 </text>
               </g>
             )

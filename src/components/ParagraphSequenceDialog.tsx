@@ -120,7 +120,7 @@ export function ParagraphSequenceDialog({ sequences, styles, exampleIds, storyPa
         role="dialog"
         aria-modal="true"
         aria-label="רצף סגנונות פסקה"
-        dir="rtl"
+       
         onSubmit={(event) => {
           event.preventDefault()
           setMessage(onSave(draft))

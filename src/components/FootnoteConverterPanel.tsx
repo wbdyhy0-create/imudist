@@ -145,7 +145,7 @@ export function FootnoteConverterPanel({ styles, defaultStyleId, footnotePlaceme
   }
 
   return (
-    <aside className="footnote-converter" aria-label="ממיר הערות" dir="rtl">
+    <aside className="footnote-converter" aria-label="ממיר הערות">
       <header className="fc-head">
         <b>ממיר הערות שבטקסט להערות שוליים ולהפך</b>
         <button className="fc-close" aria-label="סגור" onClick={onClose}>×</button>

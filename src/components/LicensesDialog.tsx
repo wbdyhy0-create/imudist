@@ -30,7 +30,7 @@ export function LicensesDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal licenses-dialog" role="dialog" aria-modal="true" aria-label="רישיונות" dir="rtl">
+      <div className="modal licenses-dialog" role="dialog" aria-modal="true" aria-label="רישיונות">
         <h2>רישיונות</h2>
         <p>הרישיונות של רכיבי צד שלישי שבהם משתמשת התוכנה.</p>
         {failed ? (

@@ -2,6 +2,7 @@ import { DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type CharStyle, type ColorSample, typ
 import type { Unit } from '../units'
 import { CharControls, Group, Labeled, ParagraphTextControls, TextShadowGroup } from './PropertiesPanel'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 type SpacingPatch = Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>
 type ParagraphPatch = Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>
@@ -37,16 +38,16 @@ interface Props {
 /** Window > פסקה (Ctrl+Alt+L): paragraph layout, spacing, indents and line-break controls. */
 export function ParagraphPanel({ frame, style, textStyle, colorSamples, onCharStyle, sizeMixed, onSizeStep, scope, unit, onChange, onSpacingChange, keepFirstLines, keepLastLines, keepFirstMixed, keepLastMixed, onKeepLinesChange, keepWithNext = false, keepWithNextMixed = false, onKeepWithNextChange }: Props) {
   return (
-    <aside className="props-panel" aria-label="פסקה">
-      <h2 className="props-title">פסקה</h2>
+    <aside className="props-panel" aria-label={t('פסקה')}>
+      <h2 className="props-title">{t('פסקה')}</h2>
       {!frame || !style ? (
-        <p className="muted">בחר תיבת טקסט כדי לערוך את מרווחי הפסקה שלה.</p>
+        <p className="muted">{t('בחר תיבת טקסט כדי לערוך את מרווחי הפסקה שלה.')}</p>
       ) : (
         <>
           {textStyle && (
-            <Group title="טקסט">
+            <Group title={t('טקסט')}>
               <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
-                {scope === 'selection' ? 'השינויים חלים על הטקסט המסומן' : 'השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.'}
+                {scope === 'selection' ? t('השינויים חלים על הטקסט המסומן') : t('השינויים חלים על כל הטקסט בתיבה. סמן טקסט כדי לשנות רק חלק ממנו.')}
               </p>
               <CharControls
                 style={textStyle}
@@ -61,66 +62,66 @@ export function ParagraphPanel({ frame, style, textStyle, colorSamples, onCharSt
             </Group>
           )}
 
-          <Group title="מרווחי פסקאות">
+          <Group title={t('מרווחי פסקאות')}>
             <p className={'scope-hint' + (scope === 'selection' ? ' on' : '')}>
-              {scope === 'selection' ? 'השינויים חלים על הפסקה המסומנת' : 'השינויים חלים על כל הפסקאות בתיבה. סמן טקסט בפסקה כדי לשנות רק אותה.'}
+              {scope === 'selection' ? t('השינויים חלים על הפסקה המסומנת') : t('השינויים חלים על כל הפסקאות בתיבה. סמן טקסט בפסקה כדי לשנות רק אותה.')}
             </p>
             <div className="grid2">
-              <Labeled label="רווח לפני">
+              <Labeled label={t('רווח לפני')}>
                 <NumberField value={style.spaceBefore ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onSpacingChange({ spaceBefore: v })} />
               </Labeled>
-              <Labeled label="רווח אחרי">
+              <Labeled label={t('רווח אחרי')}>
                 <NumberField value={style.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onSpacingChange({ spaceAfter: v })} />
               </Labeled>
             </div>
             <p className="muted">
-              רווח לפני דוחק את הפסקה מהפסקה שלפניה; רווח אחרי דוחק את הפסקה שאחריה. ללא בחירת טקסט בפסקה מסוימת, הערכים חלים על כל התיבה.
+              {t('רווח לפני דוחק את הפסקה מהפסקה שלפניה; רווח אחרי דוחק את הפסקה שאחריה. ללא בחירת טקסט בפסקה מסוימת, הערכים חלים על כל התיבה.')}
             </p>
           </Group>
 
-          <Group title="הזחות">
-            <p className="muted">הזחה מימין או משמאל קובעת את מרחק הפסקה מהשוליים המתאימים.</p>
+          <Group title={t('הזחות')}>
+            <p className="muted">{t('הזחה מימין או משמאל קובעת את מרחק הפסקה מהשוליים המתאימים.')}</p>
             <div className="grid2">
-              <Labeled label="הזחה מימין">
+              <Labeled label={t('הזחה מימין')}>
                 <NumberField value={style.indentRight ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ indentRight: v })} />
               </Labeled>
-              <Labeled label="הזחה משמאל">
+              <Labeled label={t('הזחה משמאל')}>
                 <NumberField value={style.indentLeft ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ indentLeft: v })} />
               </Labeled>
             </div>
-            <Labeled label="הזחת שורה ראשונה בלבד">
+            <Labeled label={t('הזחת שורה ראשונה בלבד')}>
               <NumberField value={style.firstLineIndent ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ firstLineIndent: v })} />
             </Labeled>
-            <Labeled label="הזחת שורה שנייה ואילך">
+            <Labeled label={t('הזחת שורה שנייה ואילך')}>
               <NumberField value={style.secondLineIndent ?? 0} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => onChange({ secondLineIndent: v })} />
             </Labeled>
-            <p className="muted">ההזחות חלות על הפסקאות שבבחירה.</p>
+            <p className="muted">{t('ההזחות חלות על הפסקאות שבבחירה.')}</p>
           </Group>
 
-          <Group title="מניעת שורות בודדות">
+          <Group title={t('מניעת שורות בודדות')}>
             <div className="grid2">
-              <Labeled label="מינימום שורות בתחילת פסקה">
+              <Labeled label={t('מינימום שורות בתחילת פסקה')}>
                 <NumberField value={keepFirstLines} mixed={keepFirstMixed} min={0} max={10} onChange={(first) => onKeepLinesChange({ first })} />
               </Labeled>
-              <Labeled label="מינימום שורות בסוף פסקה">
+              <Labeled label={t('מינימום שורות בסוף פסקה')}>
                 <NumberField value={keepLastLines} mixed={keepLastMixed} min={0} max={10} onChange={(last) => onKeepLinesChange({ last })} />
               </Labeled>
             </div>
-            <p className="muted">0 מבטל את ההגבלה. הכללים חלים על כל הפסקאות שבבחירה.</p>
+            <p className="muted">{t('0 מבטל את ההגבלה. הכללים חלים על כל הפסקאות שבבחירה.')}</p>
           </Group>
 
           {onKeepWithNextChange && (
-            <Group title="שמירה על רצף">
-              <label className="page-bar-check" title="הפסקאות שבבחירה לא יישארו לבד בתחתית עמוד: הן עוברות לעמוד הבא יחד עם תחילת הפסקה שאחריהן">
+            <Group title={t('שמירה על רצף')}>
+              <label className="page-bar-check" title={t('הפסקאות שבבחירה לא יישארו לבד בתחתית עמוד: הן עוברות לעמוד הבא יחד עם תחילת הפסקה שאחריהן')}>
                 <input
                   type="checkbox"
                   checked={keepWithNext && !keepWithNextMixed}
                   ref={(el) => { if (el) el.indeterminate = keepWithNextMixed }}
                   onChange={(event) => onKeepWithNextChange(event.target.checked)}
                 />
-                שמור עם הפסקה הבאה
+                {t('שמור עם הפסקה הבאה')}
               </label>
-              <p className="muted">חל רק על הפסקאות שבבחירה (או על הפסקה שבה הסמן), בלי לשנות את הסגנון שלהן. אם כמה פסקאות רצופות מסומנות, הן עוברות יחד.</p>
+              <p className="muted">{t('חל רק על הפסקאות שבבחירה (או על הפסקה שבה הסמן), בלי לשנות את הסגנון שלהן. אם כמה פסקאות רצופות מסומנות, הן עוברות יחד.')}</p>
             </Group>
           )}
           {textStyle && <TextShadowGroup style={textStyle} onChange={onCharStyle} />}

@@ -6,6 +6,7 @@ import { dropShadowFilter } from '../shadow'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { useDisplaySrc } from '../imageProxy'
 import { useLinkStatus } from '../imageLinks'
+import { t } from '../i18n'
 
 /** the screen raises the picture's levels with `brightness`, which is what the white point does (only with the blend mode multiply) */
 function whitePointFilter(image: ImageFrame) {
@@ -77,15 +78,15 @@ export function ImageFrameView({ image, featherOverride, asset, zoom, z, tx, ty,
           }}
         />
       ) : (
-        <div className="image-missing">התמונה חסרה</div>
+        <div className="image-missing">{t('התמונה חסרה')}</div>
       )}
       {linkState && showEdge && (
-        <span className={'link-badge ' + linkState} title={linkState === 'ok' ? `מקושר: ${asset?.link?.path}` : linkState === 'modified' ? 'הקובץ המקושר השתנה בדיסק — עדכן אותו בלוח הקישורים' : 'הקובץ המקושר חסר — קשר מחדש בלוח הקישורים'}>
+        <span className={'link-badge ' + linkState} title={linkState === 'ok' ? t('מקושר: {path}', { path: asset?.link?.path ?? '' }) : linkState === 'modified' ? t('הקובץ המקושר השתנה בדיסק — עדכן אותו בלוח הקישורים') : t('הקובץ המקושר חסר — קשר מחדש בלוח הקישורים')}>
           {linkState === 'ok' ? '🔗' : linkState === 'modified' ? '⚠' : '?'}
         </span>
       )}
       {selected && showEdge && HANDLES.map((h) => <div key={h} className={'handle ' + h} onPointerDown={(e) => onHandleDown(h, e)} />)}
-      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title="גרור כדי לסובב (Shift: קפיצות של 45°)" onPointerDown={(e) => onRotateDown(c, e)} />)}
+      {selected && showEdge && ROTATE_CORNERS.map((c) => <div key={c} className={'rotate-handle ' + c} title={t('גרור כדי לסובב (Shift: קפיצות של 45°)')} onPointerDown={(e) => onRotateDown(c, e)} />)}
     </div>
   )
 }

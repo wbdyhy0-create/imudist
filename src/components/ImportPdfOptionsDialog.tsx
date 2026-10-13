@@ -27,7 +27,7 @@ export function ImportPdfOptionsDialog({ fileName, pageCount, onConfirm, onClose
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal import-pdf-options-dialog" role="dialog" aria-modal="true" aria-label="אפשרויות ייבוא PDF" dir="rtl">
+      <div className="modal import-pdf-options-dialog" role="dialog" aria-modal="true" aria-label="אפשרויות ייבוא PDF">
         <h2>ייבוא PDF כתמונות</h2>
         <p className="file-name"><bdi>{fileName}</bdi> · {pageCount} עמודים</p>
         <div className="seg small" role="radiogroup" aria-label="עמודי PDF לייבוא">

@@ -804,6 +804,11 @@ svg { display: block; }
 .footnote-options-tabs button { padding: 7px 10px; border-bottom: 2px solid transparent; color: var(--text-dim); }
 .footnote-options-tabs button:hover { background: var(--hover); color: var(--text); }
 .footnote-options-tabs button.on { border-bottom-color: var(--accent-line); color: var(--text); }
+.export-tabs { display: flex; gap: 2px; margin: 4px 0 10px; border-bottom: 1px solid var(--border); }
+.export-tabs button { padding: 7px 12px; border-bottom: 2px solid transparent; color: var(--text-dim); }
+.export-tabs button:hover { background: var(--hover); color: var(--text); }
+.export-tabs button.on { border-bottom-color: var(--accent-line); color: var(--text); }
+.export-pane { min-height: 230px; }
 .footnote-rule-decoration-field { display: grid; gap: 4px; margin: 6px 0; }
 .footnote-rule-decoration-picker { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; max-height: 230px; overflow-y: auto; padding: 1px; }
 .footnote-rule-decoration-picker .ornament-preview { display: block; width: 100%; overflow: hidden; }

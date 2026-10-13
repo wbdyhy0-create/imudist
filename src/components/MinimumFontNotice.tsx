@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { detectMinimumFontSize } from '../browserFontLimit'
+import { t } from '../i18n'
 
 const DISMISSED_KEY = 'imudist.minimum-font-notice'
 
@@ -39,8 +40,8 @@ export function MinimumFontNotice() {
   return (
     <div className="min-font-notice" role="alert">
       <div>
-        <strong>בדפדפן מוגדר גודל גופן מינימלי ({size}px)</strong>
-        <p>טקסט שהגודל שלו מוגדר קטן מ-{size} מוצג כאן בגודל {size}, ולכן הקטנת גודל גופן, גודל מספרי הפניה וכדומה לא נראית מתחת לגודל הזה. כדי לבטל את ההגבלה: בהגדרות הדפדפן, „מראה” ← „התאמה אישית של גופנים” ← „גודל גופן מינימלי”, הזיזו את המחוון לקצה הקטן, ואז רעננו את הדף.</p>
+        <strong>{t('בדפדפן מוגדר גודל גופן מינימלי ({size}px)', { size })}</strong>
+        <p>{t('טקסט שהגודל שלו מוגדר קטן מ-{size} מוצג כאן בגודל {size}, ולכן הקטנת גודל גופן, גודל מספרי הפניה וכדומה לא נראית מתחת לגודל הזה. כדי לבטל את ההגבלה: בהגדרות הדפדפן, „מראה” ← „התאמה אישית של גופנים” ← „גודל גופן מינימלי”, הזיזו את המחוון לקצה הקטן, ואז רעננו את הדף.', { size })}</p>
       </div>
       <button
         type="button"
@@ -54,7 +55,7 @@ export function MinimumFontNotice() {
           setSize(null)
         }}
       >
-        הבנתי
+        {t('הבנתי')}
       </button>
     </div>
   )

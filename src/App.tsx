@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { t, useLanguage } from './i18n'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
@@ -65,6 +66,7 @@ const isEpsFile = (f: File) => /\.(eps|ps)$/i.test(f.name) || f.type === 'applic
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
+  useLanguage() // the whole window is drawn again when the user changes the language of the interface
   const session = useDocumentSession()
   const fontCatalog = useFontCatalog()
   // menu items are memoized, so they call the session through this ref and never run an outdated action
@@ -189,7 +191,7 @@ export default function App() {
       setSaveWorkspaceDialogOpen(false)
     } catch (error) {
       setSaveWorkspaceDialogOpen(false)
-      sessionRef.current.showError('לא ניתן לשמור סביבת עבודה', error)
+      sessionRef.current.showError(t('לא ניתן לשמור סביבת עבודה'), error)
     }
   }
   const selectWorkspace = useCallback((id: string) => {
@@ -199,7 +201,7 @@ export default function App() {
     try {
       saveDockWorkspaceStore(next)
     } catch (error) {
-      sessionRef.current.showError('לא ניתן לשמור את סביבת העבודה שנבחרה', error)
+      sessionRef.current.showError(t('לא ניתן לשמור את סביבת העבודה שנבחרה'), error)
     }
     setWorkspaceStore(next)
     setDockLayout(selected.layout)
@@ -268,17 +270,17 @@ export default function App() {
     const workspace = ws.current
     if (!currentDoc || !workspace) return
     try {
-      current.notify('מייצא את העמוד הנוכחי ל־PNG…')
+      current.notify(t('מייצא את העמוד הנוכחי ל־PNG…'))
       const pageIndex = workspace.currentPageIndex()
       const prepared = prepareExport(exportContentOf(exportSourceOf(current)))
       const page = prepared.rects[pageIndex]
       if (!page) throw new Error(`page ${pageIndex + 1} is unavailable for PNG export`)
       const canvas = await renderPage(prepared.content, prepared.flows, page, 0, 300)
-      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם')
       const saved = await deliverPng(canvas, `${safeName}-page-${pageIndex + 1}`)
-      if (saved) current.notify(`העמוד ${pageIndex + 1} יוצא ל־PNG`)
+      if (saved) current.notify(t('העמוד {n1} יוצא ל־PNG', { n1: pageIndex + 1 }))
     } catch (error) {
-      current.showError('ייצוא PNG נכשל', error)
+      current.showError(t('ייצוא PNG נכשל'), error)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -295,20 +297,20 @@ export default function App() {
       const pageIndex = workspace.currentPageIndex()
       const content = exportContentOf(exportSourceOf(current))
       const page = pageRects(content.doc)[pageIndex]
-      current.notify(ids.length > 0 ? 'מייצא את הנבחרים ל-SVG…' : `מייצא את עמוד ${pageIndex + 1} ל-SVG…`)
+      current.notify(ids.length > 0 ? t('מייצא את הנבחרים ל-SVG…') : t('מייצא את עמוד {n1} ל-SVG…', { n1: pageIndex + 1 }))
       const result = await exportSvg(content, { ids, page, title: currentDoc.name })
       if (result.count === 0) {
-        current.notify(ids.length > 0 ? 'אין בנבחרים מה לייצא ל-SVG.' : 'אין בעמוד הזה אובייקטים לייצוא ל-SVG.')
+        current.notify(ids.length > 0 ? t('אין בנבחרים מה לייצא ל-SVG.') : t('אין בעמוד הזה אובייקטים לייצוא ל-SVG.'))
         return
       }
-      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
-      const saved = await deliverSvg(result.svg, result.selection ? `${safeName}-נבחרים` : `${safeName}-page-${pageIndex + 1}`)
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם')
+      const saved = await deliverSvg(result.svg, result.selection ? t('{safeName}-נבחרים', { safeName }) : `${safeName}-page-${pageIndex + 1}`)
       if (saved) {
-        const what = result.selection ? `${result.count} אובייקטים נבחרים` : `עמוד ${pageIndex + 1} (${result.count} אובייקטים)`
-        current.notify(result.notes.length > 0 ? `${what} יוצאו ל-SVG. לא יוצא כמו שהוא: ${result.notes.join(', ')}.` : `${what} יוצאו ל-SVG.`)
+        const what = result.selection ? t('{n1} אובייקטים נבחרים', { n1: result.count }) : t('עמוד {n1} ({n2} אובייקטים)', { n1: pageIndex + 1, n2: result.count })
+        current.notify(result.notes.length > 0 ? t('{what} יוצאו ל-SVG. לא יוצא כמו שהוא: {n2}.', { what, n2: result.notes.join(', ') }) : t('{what} יוצאו ל-SVG.', { what }))
       }
     } catch (error) {
-      current.showError('ייצוא SVG נכשל', error)
+      current.showError(t('ייצוא SVG נכשל'), error)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -323,20 +325,20 @@ export default function App() {
       const ids = ws.current?.selectedObjectIds() ?? []
       const result = exportText(exportContentOf(exportSourceOf(current)), format, { ids, title: currentDoc.name })
       if (result.stories === 0 || result.content.trim().length === 0) {
-        current.notify('אין טקסט לייצוא.')
+        current.notify(t('אין טקסט לייצוא.'))
         return
       }
-      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ללא שם'
-      if (await deliverText(result, format, safeName, encoding)) current.notify(`${result.stories} טקסטים יוצאו ל-${format.toUpperCase()}.`)
+      const safeName = currentDoc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם')
+      if (await deliverText(result, format, safeName, encoding)) current.notify(t('{n1} טקסטים יוצאו ל-{n2}.', { n1: result.stories, n2: format.toUpperCase() }))
     } catch (error) {
-      current.showError('ייצוא הטקסט נכשל', error)
+      current.showError(t('ייצוא הטקסט נכשל'), error)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** pictures read and waiting for a click on the page; whatever could not be read is reported */
   const queuePlacedImages = (read: PlacedImage[], problems: string[]) => {
-    if (problems.length > 0) session.showError(read.length > 0 ? 'חלק מהתמונות לא יובאו' : 'לא ניתן לייבא את התמונה', new Error(problems.join('\n')))
+    if (problems.length > 0) session.showError(read.length > 0 ? t('חלק מהתמונות לא יובאו') : t('לא ניתן לייבא את התמונה'), new Error(problems.join('\n')))
     if (read.length > 0) {
       setPlacing(null)
       setPlacingImages(read)
@@ -361,53 +363,53 @@ export default function App() {
         try {
           const fit = growOverflowingFrames(content)
           content.frames = fit.frames
-          if (fit.grown > 0) notes.push(`${fit.grown} תיבות טקסט הוגדלו כדי שהטקסט ייכנס`)
-          if (fit.stillHidden > 0) notes.push(`ב-${fit.stillHidden} תיבות הטקסט עדיין לא נכנס, כי התיבה כבר בתחתית העמוד (הגדילו אותה או חברו אותה לתיבה נוספת)`)
+          if (fit.grown > 0) notes.push(t('{n1} תיבות טקסט הוגדלו כדי שהטקסט ייכנס', { n1: fit.grown }))
+          if (fit.stillHidden > 0) notes.push(t('ב-{n1} תיבות הטקסט עדיין לא נכנס, כי התיבה כבר בתחתית העמוד (הגדילו אותה או חברו אותה לתיבה נוספת)', { n1: fit.stillHidden }))
         } catch {
           // the layout could not be run: the frames stay as the file has them
         }
         const imported = new File([idmlToDocumentText(content)], `${baseName(f.name)}${FILE_EXT}`, { type: 'application/json' })
         await sessionRef.current.openTextFile(imported)
         // what the file had that did not come through as it was
-        if (notes.length > 0) session.notify(`הקובץ יובא. שימו לב: ${notes.join('; ')}.`)
+        if (notes.length > 0) session.notify(t('הקובץ יובא. שימו לב: {n1}.', { n1: notes.join('; ') }))
       } catch (e) {
-        session.showError('לא ניתן לייבא את קובץ ה-IDML', e instanceof Error ? e : new Error('קובץ ה-IDML לא נקרא כראוי.'))
+        session.showError(t('לא ניתן לייבא את קובץ ה-IDML'), e instanceof Error ? e : new Error(t('קובץ ה-IDML לא נקרא כראוי.')))
       }
     }
     const files = all.filter((f) => !isDocumentFile(f) && !f.name.toLowerCase().endsWith('.idml'))
     const pdfs = files.filter(isPdfFile)
     if (pdfs.length > 0) {
       if (pdfs.length !== 1 || files.length !== 1) {
-        session.showError('ייבוא PDF', new ImportError('יש לבחור קובץ PDF אחד בכל פעם.'))
+        session.showError(t('ייבוא PDF'), new ImportError(t('יש לבחור קובץ PDF אחד בכל פעם.')))
         return
       }
       try {
         const { openPdfFile } = await import('./importPdf')
         setImportPdfSource(await openPdfFile(pdfs[0]))
       } catch (e) {
-        session.showError('לא ניתן לייבא את קובץ ה-PDF', e instanceof ImportError ? e : new ImportError('הקובץ פגום או מוגן בסיסמה.'))
+        session.showError(t('לא ניתן לייבא את קובץ ה-PDF'), e instanceof ImportError ? e : new ImportError(t('הקובץ פגום או מוגן בסיסמה.')))
       }
       return
     }
     const epsFiles = files.filter(isEpsFile)
     if (epsFiles.length > 0) {
       if (epsFiles.length !== 1 || files.length !== 1) {
-        session.showError('ייבוא EPS', new ImportError('יש לבחור קובץ EPS אחד בכל פעם.'))
+        session.showError(t('ייבוא EPS'), new ImportError(t('יש לבחור קובץ EPS אחד בכל פעם.')))
         return
       }
       if (!session.doc || preview) {
-        session.notify('צור או פתח מסמך לפני ייבוא EPS')
+        session.notify(t('צור או פתח מסמך לפני ייבוא EPS'))
         return
       }
       try {
         const shapes = await readEpsFile(epsFiles[0])
-        if (!ws.current?.placeVectorShapes(shapes)) throw new ImportError('לא ניתן להוסיף את הצורות לעמוד הנוכחי.')
+        if (!ws.current?.placeVectorShapes(shapes)) throw new ImportError(t('לא ניתן להוסיף את הצורות לעמוד הנוכחי.'))
       } catch (e) {
         if (e instanceof GhostscriptMissingError) {
-          session.showError('נדרש Ghostscript לייבוא EPS ו-PS', e, { label: 'הורדת Ghostscript', run: () => void openGhostscriptDownload().catch(() => session.notify('לא ניתן לפתוח את הדפדפן. כתובת ההורדה: ghostscript.com/releases/gsdnld.html')) })
+          session.showError(t('נדרש Ghostscript לייבוא EPS ו-PS'), e, { get label() { return t('הורדת Ghostscript') }, run: () => void openGhostscriptDownload().catch(() => session.notify(t('לא ניתן לפתוח את הדפדפן. כתובת ההורדה: ghostscript.com/releases/gsdnld.html'))) })
           return
         }
-        session.showError('לא ניתן לייבא את קובץ ה-EPS', e instanceof ImportError ? e : new ImportError(typeof e === 'string' ? e : e instanceof Error ? e.message : 'קובץ ה-EPS לא נקרא כראוי.'))
+        session.showError(t('לא ניתן לייבא את קובץ ה-EPS'), e instanceof ImportError ? e : new ImportError(typeof e === 'string' ? e : e instanceof Error ? e.message : t('קובץ ה-EPS לא נקרא כראוי.')))
       }
       return
     }
@@ -425,7 +427,7 @@ export default function App() {
         }
         queuePlacedImages(read, problems)
         // the desktop app lets the page see drags (masters, pages, swatches), so a dropped file has no path to link to
-        if (isTauri && read.length > 0 && problems.length === 0) session.notify('התמונות הוטמעו במסמך. כדי לקשר אותן לקובץ המקורי השתמשו ב„קובץ” > „הוספת קובץ” > „תמונה…”.')
+        if (isTauri && read.length > 0 && problems.length === 0) session.notify(t('התמונות הוטמעו במסמך. כדי לקשר אותן לקובץ המקורי השתמשו ב„קובץ” > „הוספת קובץ” > „תמונה…”.'))
       } else if (files.length > 0) {
         if (files[0].name.toLowerCase().endsWith('.docx')) {
           setImportOptionsFile(files[0])
@@ -436,7 +438,7 @@ export default function App() {
         setPlacing(text)
       }
     } catch (e) {
-      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+      session.showError(t('לא ניתן לייבא את הקובץ'), e instanceof ImportError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
   const cancelPdfImport = () => {
@@ -451,8 +453,8 @@ export default function App() {
     try {
       const { readPdfFile } = await import('./importPdf')
       // the import takes a while for a long file, and the window shows nothing meanwhile: say how far it is
-      session.notify(`מייבא PDF: ${pageNumbers.length} עמודים…`)
-      const placed = await readPdfFile(source, pageNumbers, (done, total) => session.notify(`מייבא PDF: ${done} מתוך ${total} עמודים…`))
+      session.notify(t('מייבא PDF: {n1} עמודים…', { n1: pageNumbers.length }))
+      const placed = await readPdfFile(source, pageNumbers, (done, total) => session.notify(t('מייבא PDF: {done} מתוך {total} עמודים…', { done, total })))
       let content: DocContent = {
         doc,
         frames: session.frames,
@@ -471,7 +473,7 @@ export default function App() {
           ? activeParentId
           : session.parents[0]?.id ?? null
         const expanded = insertDocumentPages(content, content.doc.pages, placed.length - content.doc.pages, false, currentMaster)
-        if (!expanded || expanded.doc.pages < placed.length) throw new ImportError('לא ניתן להוסיף את כל עמודי ה-PDF למסמך.')
+        if (!expanded || expanded.doc.pages < placed.length) throw new ImportError(t('לא ניתן להוסיף את כל עמודי ה-PDF למסמך.'))
         content = expanded
       }
       const rects = pageRects(content.doc)
@@ -482,7 +484,7 @@ export default function App() {
         const margins = marginsOf(content.doc, pageIndex)
         const width = page.w - margins.left - margins.right
         const height = page.h - margins.top - margins.bottom
-        if (width <= 0 || height <= 0) throw new ImportError(`לעמוד ${pageIndex + 1} אין שטח פנוי בין השוליים.`)
+        if (width <= 0 || height <= 0) throw new ImportError(t('לעמוד {n1} אין שטח פנוי בין השוליים.', { n1: pageIndex + 1 }))
         images.push({
           id: newImportedImageId(),
           label: asset.name,
@@ -498,9 +500,9 @@ export default function App() {
       setPlacing(null)
       setPlacingImages([])
       session.pages.commit({ ...content, images, assets })
-      session.notify(placed.length === 1 ? 'יובא עמוד אחד מה-PDF' : `יובאו ${placed.length} עמודים מה-PDF`)
+      session.notify(placed.length === 1 ? t('יובא עמוד אחד מה-PDF') : t('יובאו {n1} עמודים מה-PDF', { n1: placed.length }))
     } catch (e) {
-      session.showError('לא ניתן לייבא את קובץ ה-PDF', e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : 'הקובץ פגום או מוגן בסיסמה.'))
+      session.showError(t('לא ניתן לייבא את קובץ ה-PDF'), e instanceof ImportError ? e : new ImportError(e instanceof Error ? e.message : t('הקובץ פגום או מוגן בסיסמה.')))
     } finally {
       await source.destroy()
     }
@@ -516,7 +518,7 @@ export default function App() {
       setPlacingImages([])
       setPlacing(placed)
     } catch (e) {
-      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+      session.showError(t('לא ניתן לייבא את הקובץ'), e instanceof ImportError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
   /**
@@ -542,7 +544,7 @@ export default function App() {
       const { readFile } = await import('@tauri-apps/plugin-fs')
       await placeFiles(await Promise.all(paths.map(async (path) => new File([await readFile(path)], fileNameOf(path)))))
     } catch (e) {
-      session.showError('לא ניתן לייבא את הקובץ', e instanceof ImportError ? e : new Error('הקובץ לא נקרא כראוי.'))
+      session.showError(t('לא ניתן לייבא את הקובץ'), e instanceof ImportError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
   /**
@@ -554,8 +556,8 @@ export default function App() {
     const picker: Record<ImportKind, { name: string; extensions: string[]; accept: string; multiple?: boolean }> = {
       pdf: { name: 'PDF', extensions: ['pdf'], accept: '.pdf,application/pdf' },
       word: { name: 'Word', extensions: ['docx'], accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-      text: { name: 'טקסט', extensions: ['txt', 'text', 'md', 'csv'], accept: '.txt,.text,.md,.csv,text/plain' },
-      image: { name: 'תמונות', extensions: [...IMAGE_FILE_EXTENSIONS], accept: `${images},image/*`, multiple: true },
+      text: { name: t('טקסט'), extensions: ['txt', 'text', 'md', 'csv'], accept: '.txt,.text,.md,.csv,text/plain' },
+      image: { name: t('תמונות'), extensions: [...IMAGE_FILE_EXTENSIONS], accept: `${images},image/*`, multiple: true },
       eps: { name: 'EPS / PS', extensions: ['eps', 'ps'], accept: '.eps,.ps,application/postscript' },
       xml: { name: 'XML', extensions: ['xml'], accept: '.xml,application/xml,text/xml' },
       idml: { name: 'IDML', extensions: ['idml'], accept: '.idml' },
@@ -577,7 +579,7 @@ export default function App() {
       const picked = await open({
         multiple: true,
         directory: false,
-        filters: [{ name: 'קבצים נתמכים', extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'ps', 'psd', 'xml', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
+        filters: [{ name: t('קבצים נתמכים'), extensions: [FILE_EXT.slice(1), 'idml', 'docx', 'pdf', 'eps', 'ps', 'psd', 'xml', 'txt', 'text', 'md', 'csv', ...IMAGE_FILE_EXTENSIONS] }],
       })
       await placePaths(picked ?? [])
       return
@@ -600,7 +602,7 @@ export default function App() {
       const paragraphs = mergeParagraphStyles(sessionRef.current.paragraphStyles, remapNestedStyles(parsed.paragraphStyles, characters.idMap))
       sessionRef.current.pages.commit({ paragraphStyles: paragraphs, ...(characters.styles !== sessionRef.current.characterStyles ? { characterStyles: characters.styles } : {}) })
     } catch (e) {
-      session.showError('לא ניתן לייבא את הסגנונות', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
+      session.showError(t('לא ניתן לייבא את הסגנונות'), e instanceof FileFormatError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
   const menus = useMemo(
@@ -719,7 +721,7 @@ export default function App() {
       if (isClipToken(text)) return
       e.preventDefault()
       setPlacingImages([])
-      setPlacing(placedFromPlainText('הטקסט מהלוח', text))
+      setPlacing(placedFromPlainText(t('הטקסט מהלוח'), text))
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
@@ -757,7 +759,7 @@ export default function App() {
         const others = rest.filter((f) => !layouts.includes(f))
         if (layouts.length > 0) await placeFiles(layouts)
         if (others.length === 0) return
-        if (!doc) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+        if (!doc) sessionRef.current.notify(t('צור מסמך חדש או פתח קובץ לפני הוספת קבצים'))
         else void placeFiles(others)
       })()
     }
@@ -779,7 +781,7 @@ export default function App() {
     }
     // a document of the program and an IDML file open on the start screen too; anything else needs a document to be put in
     const opensAlone = (path: string) => /\.(?:imudist|idml)$/i.test(path) || path.toLowerCase().endsWith(FILE_EXT)
-    if (!doc && !paths.some(opensAlone)) sessionRef.current.notify('צור מסמך חדש או פתח קובץ לפני הוספת קבצים')
+    if (!doc && !paths.some(opensAlone)) sessionRef.current.notify(t('צור מסמך חדש או פתח קובץ לפני הוספת קבצים'))
     else void placePaths(doc ? paths : paths.filter(opensAlone))
   }
   useEffect(() => {
@@ -835,7 +837,7 @@ export default function App() {
   useEffect(() => {
     if (!firstRunTourPending || session.activeId !== null || firstRunDocumentStarted.current) return
     firstRunDocumentStarted.current = true
-    setFirstRunTourDocId(create(defaultDocSettings(`ללא שם-${nextName}`)))
+    setFirstRunTourDocId(create(defaultDocSettings(t('ללא שם-{nextName}', { nextName }))))
   }, [create, firstRunTourPending, nextName, session.activeId])
 
   const completeFirstRunTour = useCallback(() => {
@@ -875,7 +877,7 @@ export default function App() {
         : { width: newPreset.width, height: newPreset.height }
       : customWebSize),
     unit: newPresetUnit ?? newPreset?.unit ?? lastSettings.unit,
-    name: `ללא שם-${nextName}`,
+    name: t('ללא שם-{nextName}', { nextName }),
   }
 
   return (

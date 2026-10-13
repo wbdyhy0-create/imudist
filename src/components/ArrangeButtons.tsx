@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ArrangeOp } from '../stacking'
+import { t } from '../i18n'
 
 const OPS: { id: ArrangeOp; label: string; hint: string }[] = [
-  { id: 'front', label: 'לחזית', hint: 'הבא לחזית (Ctrl+Shift+])' },
-  { id: 'forward', label: 'קדימה', hint: 'הזז שכבה אחת קדימה (Ctrl+])' },
-  { id: 'backward', label: 'אחורה', hint: 'הזז שכבה אחת אחורה (Ctrl+[)' },
-  { id: 'back', label: 'לרקע', hint: 'שלח לרקע (Ctrl+Shift+[)' },
+  { id: 'front', get label() { return t('לחזית') }, get hint() { return t('הבא לחזית (Ctrl+Shift+])') } },
+  { id: 'forward', get label() { return t('קדימה') }, get hint() { return t('הזז שכבה אחת קדימה (Ctrl+])') } },
+  { id: 'backward', get label() { return t('אחורה') }, get hint() { return t('הזז שכבה אחת אחורה (Ctrl+[)') } },
+  { id: 'back', get label() { return t('לרקע') }, get hint() { return t('שלח לרקע (Ctrl+Shift+[)') } },
 ]
 
 /** The four stacking-order commands of the selected object. */
@@ -32,9 +33,9 @@ export function ArrangeButtons({ onArrange, compact = false }: { onArrange: (op:
     return (
       <div className="arrange-dropdown" ref={rootRef}>
         <button className="context-command arrange-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-          <span>סדר</span><span className="arrange-chevron" aria-hidden="true">⌄</span>
+          <span>{t('סדר')}</span><span className="arrange-chevron" aria-hidden="true">⌄</span>
         </button>
-        {open && <div className="arrange-menu" role="menu" aria-label="סדר שכבות">
+        {open && <div className="arrange-menu" role="menu" aria-label={t('סדר שכבות')}>
           {OPS.map((op) => <button key={op.id} role="menuitem" title={op.hint} onClick={() => { onArrange(op.id); setOpen(false) }}>{op.label}</button>)}
         </div>}
       </div>
@@ -42,7 +43,7 @@ export function ArrangeButtons({ onArrange, compact = false }: { onArrange: (op:
   }
 
   return (
-    <div className="place-modes arrange" role="group" aria-label="סדר שכבות">
+    <div className="place-modes arrange" role="group" aria-label={t('סדר שכבות')}>
       {OPS.map((o) => (
         <button key={o.id} title={o.hint} onClick={() => onArrange(o.id)}>
           {o.label}

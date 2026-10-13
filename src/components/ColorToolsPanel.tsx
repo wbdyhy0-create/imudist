@@ -214,7 +214,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
       : [{ key: 'lightness', label: 'בהירות', value: lab.lightness, max: 100 }, { key: 'a', label: 'A', value: lab.a, max: 128 }, { key: 'b', label: 'B', value: lab.b, max: 128 }]
 
   return (
-    <aside className="props-panel color-tools-panel" aria-label={title} dir="rtl">
+    <aside className="props-panel color-tools-panel" aria-label={title}>
       <h2 className="props-title">{title}</h2>
       <Group title="דגימות שנדגמו">
         <button className="btn small color-sample-start" onClick={onStartSampler}>{brushColor ? 'דגום צבע אחר' : 'דגום צבע'}</button>

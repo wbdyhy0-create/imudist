@@ -1,3 +1,4 @@
+import { t } from './i18n'
 export type Unit = 'px' | 'cm' | 'mm' | 'in'
 
 /** Internally every length is stored in points. As in professional layout tools, 1 px = 1 pt. */
@@ -21,9 +22,12 @@ export const UNIT_OPTIONS: { value: Unit; label: string }[] = [
 /** Short form shown next to numbers in fields. */
 export const UNIT_SUFFIX: Record<Unit, string> = { px: 'px', cm: 'ס״מ', mm: 'מ״מ', in: 'אינץ׳' }
 
+/** the suffix in the language of the interface */
+export const unitSuffix = (unit: Unit): string => t(UNIT_SUFFIX[unit])
+
 export const formatNumber = (n: number) => String(parseFloat(n.toFixed(3)))
 
-export const formatLength = (pt: number, unit: Unit) => `${formatNumber(fromPt(pt, unit))} ${UNIT_SUFFIX[unit]}`
+export const formatLength = (pt: number, unit: Unit) => `${formatNumber(fromPt(pt, unit))} ${unitSuffix(unit)}`
 
 const LENGTH_RE = /^\s*([+-]?(?:\d+[.,]?\d*|[.,]\d+))\s*(\S*)\s*$/
 

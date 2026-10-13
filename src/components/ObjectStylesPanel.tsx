@@ -94,7 +94,7 @@ export function ObjectStylesPanel({ styles, selection, usage, onApply, onSelecti
     setEditing({ id: null, name: newName(), settings: look ?? { fill: '#d9dde3', stroke: '#1f2937', strokeWidth: 1 }, graphic, size: look ? onSelectionSize() : undefined })
   }
   return (
-    <section className="paragraph-styles-panel props-panel object-styles-panel" aria-label="סגנונות אובייקט" dir="rtl">
+    <section className="paragraph-styles-panel props-panel object-styles-panel" aria-label="סגנונות אובייקט">
       <div className="styles-panel-head">
         <h2 className="props-title">סגנונות אובייקט</h2>
         <div className="character-style-head-actions">
@@ -282,7 +282,7 @@ function ObjectStyleDialog({ initial, reference, onSave, onApply, onDelete, onCl
 
   return (
     <div className="modal-backdrop object-style-floating">
-      <div className="modal table-dialog wide" role="dialog" aria-modal="false" aria-label="אפשרויות סגנון אובייקט" dir="rtl">
+      <div className="modal table-dialog wide" role="dialog" aria-modal="false" aria-label="אפשרויות סגנון אובייקט">
         <h2>{initial.id ? 'אפשרויות סגנון אובייקט' : 'סגנון אובייקט חדש'}</h2>
         <div className="object-style-preview" aria-hidden="true"><span style={{ ...objectStyleSwatch({ ...settings, fill: settings.fill ?? (fill as string | null | undefined) ?? undefined }, graphic), width: graphic ? 200 : 120, height: 54, display: 'block' }} /></div>
         {initial.graphic && (

@@ -59,7 +59,7 @@ export function WindowTextDialog({ styles, hasSelection, onApply, onRemove, onCl
 
   return (
     <div className="modal-backdrop">
-      <div className="modal window-text-dialog" role="dialog" aria-modal="true" aria-label="יצירת חלון בטקסט" dir="rtl">
+      <div className="modal window-text-dialog" role="dialog" aria-modal="true" aria-label="יצירת חלון בטקסט">
         <h2>יצירת חלון בטקסט</h2>
         <p className="muted">השורה השנייה של הפסקה מוזחת ברוחב מילות הפתיחה, וכך נוצר חלון מתחתיהן.</p>
 

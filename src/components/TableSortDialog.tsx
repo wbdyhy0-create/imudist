@@ -3,6 +3,7 @@ import type { CellRange, TableData } from '../table'
 import { tableCols, tableRows } from '../table'
 import { columnLabel, parseCellNumber } from '../tableFormulas'
 import { SORT_LOCALES, type SortKey, type SortOptions, type SortScope } from '../tableSort'
+import { t } from '../i18n'
 
 interface Props {
   table: TableData
@@ -16,7 +17,7 @@ interface Props {
 /** a column as the list shows it: its letter, and the text of its header when the table has one */
 const columnName = (table: TableData, col: number) => {
   const header = table.headerRows > 0 ? table.cells[table.headerRows - 1][col].text.trim() : ''
-  return header ? `${columnLabel(col)} — ${header.slice(0, 24)}` : `עמודה ${columnLabel(col)}`
+  return header ? `${columnLabel(col)} — ${header.slice(0, 24)}` : `${t('עמודה')} ${columnLabel(col)}`
 }
 
 /** whether most of what a column holds (in the body of the table) is numbers: then it is sorted as numbers by default */
@@ -60,7 +61,7 @@ export function TableSortDialog({ table, selection, onApply, onClose }: Props) {
 
   const submit = () => {
     if (chosen.length === 0) {
-      setProblem('בחרו עמודה למיון')
+      setProblem(t('בחרו עמודה למיון'))
       return
     }
     setProblem(onApply({
@@ -75,19 +76,19 @@ export function TableSortDialog({ table, selection, onApply, onClose }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <form className="modal table-dialog" role="dialog" aria-modal="true" aria-label="מיון הטבלה" dir="rtl" onSubmit={(event) => { event.preventDefault(); submit() }}>
-        <h2>מיון הטבלה</h2>
-        <p className="muted">שורות הכותרת והסיכום נשארות במקומן. הנוסחאות עוברות עם השורות שלהן.</p>
-        <label className="field-label table-dialog-field">מה למיין
+      <form className="modal table-dialog" role="dialog" aria-modal="true" aria-label={t('מיון הטבלה')} onSubmit={(event) => { event.preventDefault(); submit() }}>
+        <h2>{t('מיון הטבלה')}</h2>
+        <p className="muted">{t('שורות הכותרת והסיכום נשארות במקומן. הנוסחאות עוברות עם השורות שלהן.')}</p>
+        <label className="field-label table-dialog-field">{t('מה למיין')}
           <select className="select" value={scope} onChange={(event) => setScope(event.target.value as SortScope)}>
-            <option value="table">כל הטבלה (השורות עוברות שלמות)</option>
-            <option value="column">העמודה הראשונה שנבחרה בלבד</option>
-            <option value="selection" disabled={!hasSelection}>התאים שנבחרו בלבד</option>
+            <option value="table">{t('כל הטבלה (השורות עוברות שלמות)')}</option>
+            <option value="column">{t('העמודה הראשונה שנבחרה בלבד')}</option>
+            <option value="selection" disabled={!hasSelection}>{t('התאים שנבחרו בלבד')}</option>
           </select>
         </label>
         {keys.map((key, index) => (
           <div key={index} className="table-dialog-grid">
-            <label className="field-label table-dialog-field">{index === 0 ? 'מיין לפי' : index === 1 ? 'ואז לפי' : 'ואז לפי'}
+            <label className="field-label table-dialog-field">{index === 0 ? t('מיין לפי') : t('ואז לפי')}
               <select
                 className="select"
                 value={key ? key.col : ''}
@@ -98,36 +99,36 @@ export function TableSortDialog({ table, selection, onApply, onClose }: Props) {
                   setKey(index, { col, type: key?.type ?? (mostlyNumbers(table, col) ? 'number' : 'text'), descending: key?.descending ?? false })
                 }}
               >
-                {index > 0 && <option value="">(אין)</option>}
+                {index > 0 && <option value="">{t('(אין)')}</option>}
                 {Array.from({ length: cols }, (_, col) => <option key={col} value={col}>{columnName(table, col)}</option>)}
               </select>
             </label>
-            <label className="field-label table-dialog-field">סוג
+            <label className="field-label table-dialog-field">{t('סוג')}
               <select className="select" disabled={!key} value={key?.type ?? 'text'} onChange={(event) => key && setKey(index, { ...key, type: event.target.value as SortKey['type'] })}>
-                <option value="text">טקסט</option>
-                <option value="number">מספרים</option>
+                <option value="text">{t('טקסט')}</option>
+                <option value="number">{t('מספרים')}</option>
               </select>
             </label>
-            <label className="field-label table-dialog-field">סדר
+            <label className="field-label table-dialog-field">{t('סדר')}
               <select className="select" disabled={!key} value={key?.descending ? 'down' : 'up'} onChange={(event) => key && setKey(index, { ...key, descending: event.target.value === 'down' })}>
-                <option value="up">עולה (א–ת, 1–9)</option>
-                <option value="down">יורד (ת–א, 9–1)</option>
+                <option value="up">{t('עולה (א–ת, 1–9)')}</option>
+                <option value="down">{t('יורד (ת–א, 9–1)')}</option>
               </select>
             </label>
           </div>
         ))}
         <div className="table-dialog-grid">
-          <label className="field-label table-dialog-field">כללי השפה
+          <label className="field-label table-dialog-field">{t('כללי השפה')}
             <select className="select" value={locale} onChange={(event) => setLocale(event.target.value)}>
-              {SORT_LOCALES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              {SORT_LOCALES.map((item) => <option key={item.id} value={item.id}>{t(item.label)}</option>)}
             </select>
           </label>
         </div>
-        <label className="dlg-check"><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} />רגיש לאותיות גדולות וקטנות</label>
-        {problem && <p className="muted" role="alert">{problem}</p>}
+        <label className="dlg-check"><input type="checkbox" checked={caseSensitive} onChange={(event) => setCaseSensitive(event.target.checked)} />{t('רגיש לאותיות גדולות וקטנות')}</label>
+        {problem && <p className="muted" role="alert">{t(problem)}</p>}
         <div className="modal-buttons">
-          <button type="submit" className="btn primary">מיון</button>
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
+          <button type="submit" className="btn primary">{t('מיון')}</button>
+          <button type="button" className="btn" onClick={onClose}>{t('ביטול')}</button>
         </div>
       </form>
     </div>
