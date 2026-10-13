@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Asset, AssetLink, Assets } from '../document'
 import { linkStatus, revealInFileManager, useLinkVersion, type LinkStatus } from '../imageLinks'
+import { t } from '../i18n'
 
 /** One place a picture is used: a page item, or an item of a parent page (`page` is then null). */
 export interface LinkUse {
@@ -25,13 +26,17 @@ interface Props {
 
 type Row = { id: string; asset: Asset & { link: AssetLink }; status: LinkStatus; uses: LinkUse[] }
 
-const STATUS_LABEL: Record<LinkStatus, string> = { ok: 'מקושר', modified: 'השתנה בדיסק', missing: 'הקובץ חסר' }
+const STATUS_LABEL: Record<LinkStatus, string> = {
+  get ok() { return t('מקושר') },
+  get modified() { return t('השתנה בדיסק') },
+  get missing() { return t('הקובץ חסר') },
+}
 const STATUS_MARK: Record<LinkStatus, string> = { ok: '🔗', modified: '⚠', missing: '?' }
 
 const pagesOf = (uses: LinkUse[]) => {
   const pages = [...new Set(uses.flatMap((use) => (use.page === null ? [] : [use.page])))].sort((a, b) => a - b)
   const parents = uses.some((use) => use.page === null)
-  return [pages.length > 0 ? `עמ׳ ${pages.join(', ')}` : '', parents ? 'עמוד אב' : ''].filter(Boolean).join(' · ')
+  return [pages.length > 0 ? t('עמ׳ {n1}', { n1: pages.join(', ') }) : '', parents ? t('עמוד אב') : ''].filter(Boolean).join(' · ')
 }
 
 /** The Links panel: every picture placed as a link, whether its file is still as it was, and the ways to fix or embed it. */
@@ -48,9 +53,9 @@ export function LinksPanel({ assets, uses, available, onShow, onUpdate, onRelink
 
   if (!available) {
     return (
-      <div className="pages-panel" aria-label="קישורים">
-        <h2 className="props-title">קישורים</h2>
-        <p className="muted">קישור תמונות לקבצים שלהן זמין באפליקציית שולחן העבודה. בדפדפן התמונות מוטמעות במסמך.</p>
+      <div className="pages-panel" aria-label={t('קישורים')}>
+        <h2 className="props-title">{t('קישורים')}</h2>
+        <p className="muted">{t('קישור תמונות לקבצים שלהן זמין באפליקציית שולחן העבודה. בדפדפן התמונות מוטמעות במסמך.')}</p>
       </div>
     )
   }
@@ -83,12 +88,12 @@ export function LinksPanel({ assets, uses, available, onShow, onUpdate, onRelink
   }
 
   return (
-    <div className="pages-panel" aria-label="קישורים">
+    <div className="pages-panel" aria-label={t('קישורים')}>
       <h2 className="props-title">
-        קישורים <span className="muted">({rows.length})</span>
+        {t('קישורים')} <span className="muted">({rows.length})</span>
       </h2>
       {rows.length === 0 ? (
-        <p className="muted">אין תמונות מקושרות במסמך. תמונות שנוספות מקובץ מקושרות אליו אוטומטית.</p>
+        <p className="muted">{t('אין תמונות מקושרות במסמך. תמונות שנוספות מקובץ מקושרות אליו אוטומטית.')}</p>
       ) : (
         <ul className="links-list" aria-multiselectable="true">
           {rows.map((row) => (
@@ -120,29 +125,29 @@ export function LinksPanel({ assets, uses, available, onShow, onUpdate, onRelink
         </p>
       )}
       <div className="props-buttons">
-        <button className="btn small" disabled={busy || outdated.length === 0} onClick={() => void run(() => onUpdate(outdated.map((row) => row.id)))} title="קורא מחדש את הקבצים ששונו בדיסק">
-          {chosen.length > 0 ? 'עדכן' : 'עדכן הכל'}
+        <button className="btn small" disabled={busy || outdated.length === 0} onClick={() => void run(() => onUpdate(outdated.map((row) => row.id)))} title={t('קורא מחדש את הקבצים ששונו בדיסק')}>
+          {chosen.length > 0 ? t('עדכן') : t('עדכן הכל')}
         </button>
-        <button className="btn small" disabled={busy || !single} onClick={() => single && void run(() => onRelink(single.id))} title="בחירת קובץ אחר לתמונה (כשהקובץ הועבר או נמחק)">
-          קשר מחדש…
+        <button className="btn small" disabled={busy || !single} onClick={() => single && void run(() => onRelink(single.id))} title={t('בחירת קובץ אחר לתמונה (כשהקובץ הועבר או נמחק)')}>
+          {t('קשר מחדש…')}
         </button>
-        <button className="btn small" disabled={!single} onClick={() => single && onShow(single.id)} title="בחירת התמונה בעמוד (לחיצה כפולה בשורה)">
-          הצג בעמוד
+        <button className="btn small" disabled={!single} onClick={() => single && onShow(single.id)} title={t('בחירת התמונה בעמוד (לחיצה כפולה בשורה)')}>
+          {t('הצג בעמוד')}
         </button>
-        <button className="btn small" disabled={!single} onClick={() => single && void revealInFileManager(single.asset.link.path).catch(() => setMessage('הקובץ לא נמצא בדיסק.'))} title="פתיחת התיקייה של הקובץ">
-          הצג בתיקייה
+        <button className="btn small" disabled={!single} onClick={() => single && void revealInFileManager(single.asset.link.path).catch(() => setMessage(t('הקובץ לא נמצא בדיסק.')))} title={t('פתיחת התיקייה של הקובץ')}>
+          {t('הצג בתיקייה')}
         </button>
         <button
           className="btn small"
           disabled={busy || chosen.length === 0}
           onClick={() => void run(() => onEmbed(chosen.map((row) => row.id)))}
-          title="הופך את התמונות הנבחרות למוטמעות במסמך, בלי קישור לקובץ"
+          title={t('הופך את התמונות הנבחרות למוטמעות במסמך, בלי קישור לקובץ')}
         >
-          {chosen.length > 1 ? `הטמע ${chosen.length} תמונות` : 'הטמע'}
+          {chosen.length > 1 ? t('הטמע {n1} תמונות', { n1: chosen.length }) : t('הטמע')}
         </button>
       </div>
       {message && <p className="muted" style={{ color: '#e5484d', whiteSpace: 'pre-line' }}>{message}</p>}
-      <p className="muted">לחיצה בוחרת תמונה, Shift לטווח, Ctrl להוספה לבחירה. תמונה מוטמעת גדלה את קובץ המסמך אבל לא תלויה בקובץ המקור.</p>
+      <p className="muted">{t('לחיצה בוחרת תמונה, Shift לטווח, Ctrl להוספה לבחירה. תמונה מוטמעת גדלה את קובץ המסמך אבל לא תלויה בקובץ המקור.')}</p>
     </div>
   )
 }

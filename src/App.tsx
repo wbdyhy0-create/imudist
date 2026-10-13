@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { t, useLanguage } from './i18n'
+import { directionOf, t, useLanguage } from './i18n'
+import { setSpellcheck, useSpellcheck } from './spellcheck'
 import { Home } from './components/Home'
 import { MenuBar } from './components/MenuBar'
 import { Modal } from './components/Modal'
@@ -66,7 +67,8 @@ const isEpsFile = (f: File) => /\.(eps|ps)$/i.test(f.name) || f.type === 'applic
 const isKey = (e: KeyboardEvent, letter: string) => e.key.toLowerCase() === letter || e.code === 'Key' + letter.toUpperCase()
 
 export default function App() {
-  useLanguage() // the whole window is drawn again when the user changes the language of the interface
+  const language = useLanguage() // the whole window is drawn again when the user changes the language of the interface
+  const spellcheck = useSpellcheck()
   const session = useDocumentSession()
   const fontCatalog = useFontCatalog()
   // menu items are memoized, so they call the session through this ref and never run an outdated action
@@ -133,6 +135,18 @@ export default function App() {
   const firstRunDocumentStarted = useRef(false)
   /** settings of the last created document — the next "New Document" starts from them */
   const [lastSettings, setLastSettings] = useState(() => defaultDocSettings(''))
+  // the next document starts reading the way the new language does, unless the way it reads was set to something else by hand
+  const lastLanguage = useRef(language)
+  useEffect(() => {
+    if (lastLanguage.current === language) return
+    const before = directionOf(lastLanguage.current) === 'ltr' ? 'ltr' : 'rtl'
+    lastLanguage.current = language
+    setLastSettings((settings) => {
+      if (settings.binding !== before) return settings
+      const fresh = defaultDocSettings('')
+      return { ...settings, binding: fresh.binding, footnotes: fresh.footnotes }
+    })
+  }, [language])
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
   const [newPresetUnit, setNewPresetUnit] = useState<Unit | null>(null)
   /** the left-hand dialog: creating a document, or changing the open document's settings */
@@ -660,6 +674,8 @@ export default function App() {
         toggleRulers: () => setShowRulers((v) => !v),
         toggleGuides: () => setShowGuides((v) => !v),
         toggleHiddenChars: () => setShowHiddenChars((v) => !v),
+        spellcheck,
+        toggleSpellcheck: () => setSpellcheck(!spellcheck),
         exportPdf: () => setDialog('export'),
         separationPreview: () => {
           setSeparationPage(ws.current?.currentPageIndex() ?? 0)
@@ -674,7 +690,7 @@ export default function App() {
         toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [book.panelOpen, shown, editingParentId, showRulers, showGuides, showHiddenChars, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
+    [book.panelOpen, shown, editingParentId, showRulers, showGuides, showHiddenChars, spellcheck, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
 
   useEffect(() => {
@@ -891,6 +907,7 @@ export default function App() {
               ref={ws}
               doc={shown}
               initiallySelectPrimaryFrame={!preview && !editingParent && session.activeId === initialToolbarDocId}
+              startTypingInPrimaryFrame={session.activeId !== firstRunTourDocId}
               onInitialSelectionApplied={() => setInitialToolbarDocId((id) => id === session.activeId ? null : id)}
               startInitialTour={!preview && !editingParent && firstRunTourPending && session.activeId === firstRunTourDocId}
               onInitialTourComplete={completeFirstRunTour}

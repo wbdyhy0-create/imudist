@@ -89,10 +89,10 @@ export const PAGE_PRESETS: PagePreset[] = [
 const px = (v: number) => toPt(v, 'px')
 
 export const DIGITAL_PRESETS: PagePreset[] = [
-  { id: 'story', label: 'סטורי / סטטוס', width: px(1080), height: px(1920), unit: 'px', rotateWithDocument: false },
-  { id: 'square-post', label: 'פוסט ריבועי', width: px(1080), height: px(1080), unit: 'px', rotateWithDocument: false },
-  { id: 'wide-post', label: 'פוסט לרוחב', width: px(1200), height: px(630), unit: 'px', rotateWithDocument: false },
-  { id: 'facebook-cover', label: 'קאבר פייסבוק', width: px(851), height: px(315), unit: 'px', rotateWithDocument: false },
+  { id: 'story', get label() { return t('סטורי / סטטוס') }, width: px(1080), height: px(1920), unit: 'px', rotateWithDocument: false },
+  { id: 'square-post', get label() { return t('פוסט ריבועי') }, width: px(1080), height: px(1080), unit: 'px', rotateWithDocument: false },
+  { id: 'wide-post', get label() { return t('פוסט לרוחב') }, width: px(1200), height: px(630), unit: 'px', rotateWithDocument: false },
+  { id: 'facebook-cover', get label() { return t('קאבר פייסבוק') }, width: px(851), height: px(315), unit: 'px', rotateWithDocument: false },
   { id: 'full-hd', label: 'Full HD', width: px(1920), height: px(1080), unit: 'px', rotateWithDocument: false },
 ]
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { GradientFill } from '../document'
 import { GRADIENT_PRESETS, SOLID_COLORS } from '../colorLibrary'
+import { t } from '../i18n'
 
 type LibraryTab = 'solids' | 'gradients'
 
@@ -35,24 +36,24 @@ export function ColorLibrary({ onColor, onGradient, mode = 'all' }: Props) {
   }
 
   return (
-    <section className="color-library" aria-label="ספריית צבעים">
-      {mode === 'all' && <div className="seg small" role="radiogroup" aria-label="סוגי ספריית צבעים">
-        <button role="radio" aria-checked={activeTab === 'solids'} className={activeTab === 'solids' ? 'on' : ''} onClick={() => selectTab('solids')}>צבעים</button>
-        <button role="radio" aria-checked={activeTab === 'gradients'} className={activeTab === 'gradients' ? 'on' : ''} onClick={() => selectTab('gradients')}>מעברים</button>
+    <section className="color-library" aria-label={t('ספריית צבעים')}>
+      {mode === 'all' && <div className="seg small" role="radiogroup" aria-label={t('סוגי ספריית צבעים')}>
+        <button role="radio" aria-checked={activeTab === 'solids'} className={activeTab === 'solids' ? 'on' : ''} onClick={() => selectTab('solids')}>{t('צבעים')}</button>
+        <button role="radio" aria-checked={activeTab === 'gradients'} className={activeTab === 'gradients' ? 'on' : ''} onClick={() => selectTab('gradients')}>{t('מעברים')}</button>
       </div>}
-      <input className="color-library-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש שם או HEX" aria-label="חיפוש בספריית הצבעים" />
-      <select className="select color-library-category" value={category} onChange={(event) => setCategory(event.target.value)} aria-label="קטגוריית צבעים">
-        {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+      <input className="color-library-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('חיפוש שם או HEX')} aria-label={t('חיפוש בספריית הצבעים')} />
+      <select className="select color-library-category" value={category} onChange={(event) => setCategory(event.target.value)} aria-label={t('קטגוריית צבעים')}>
+        {categories.map((item) => <option key={item} value={item}>{t(item)}</option>)}
       </select>
       {activeTab === 'solids' ? (
         <div className="color-library-grid">
           {colors.map((color) => (
-            <button key={color.name} className="color-library-item" onMouseDown={(event) => event.preventDefault()} onClick={() => onColor?.(color.hex)} title={`${color.name} · ${color.hex}`} aria-label={`החל ${color.name}, ${color.hex}`}>
+            <button key={color.name} className="color-library-item" onMouseDown={(event) => event.preventDefault()} onClick={() => onColor?.(color.hex)} title={`${color.name} · ${color.hex}`} aria-label={t('החל {n1}, {n2}', { n1: color.name, n2: color.hex })}>
               <span className="color-library-preview" style={{ background: color.hex }} />
               <span className="color-library-copy"><strong>{color.name}</strong><small dir="ltr">{color.hex}</small></span>
             </button>
           ))}
-          {colors.length === 0 && <p className="muted color-library-empty">לא נמצאו צבעים.</p>}
+          {colors.length === 0 && <p className="muted color-library-empty">{t('לא נמצאו צבעים.')}</p>}
         </div>
       ) : (
         <div className="color-library-grid">
@@ -66,12 +67,12 @@ export function ColorLibrary({ onColor, onGradient, mode = 'all' }: Props) {
               stops: gradient.stops,
               reverse: false,
             })
-            return <button key={gradient.id} className="color-library-item color-library-gradient" onClick={apply} title={`${gradient.name} · ${gradient.stops.map((stop) => stop.color).join(' · ')}`} aria-label={`החל מעבר ${gradient.name}`}>
+            return <button key={gradient.id} className="color-library-item color-library-gradient" onClick={apply} title={`${gradient.name} · ${gradient.stops.map((stop) => stop.color).join(' · ')}`} aria-label={t('החל מעבר {n1}', { n1: gradient.name })}>
               <span className="color-library-gradient-preview" style={{ background }} />
-              <span className="color-library-copy"><strong>{gradient.name}</strong><small>{gradient.source === 'metallic' ? 'מתכתי' : gradient.tags.join(' · ')}</small></span>
+              <span className="color-library-copy"><strong>{gradient.name}</strong><small>{gradient.source === 'metallic' ? t('מתכתי') : gradient.tags.map((tag) => t(tag)).join(' · ')}</small></span>
             </button>
           })}
-          {gradients.length === 0 && <p className="muted color-library-empty">לא נמצאו מעברים.</p>}
+          {gradients.length === 0 && <p className="muted color-library-empty">{t('לא נמצאו מעברים.')}</p>}
         </div>
       )}
     </section>

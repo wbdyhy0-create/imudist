@@ -3,6 +3,7 @@ import { MAX_PAGE_PT, MAX_SIDES, MIN_SIDES, type DrawKind } from '../document'
 import { SHAPE_NAMES, SIDE_NAMES, polygonPoints, type ShapePrefs } from '../shapes'
 import type { Unit } from '../units'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 interface Props {
   kind: DrawKind
@@ -30,24 +31,24 @@ export function ShapeToolDialog({ kind, prefs, unit, onApply, onClose }: Props) 
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide shape-dialog" role="dialog" aria-modal="true" aria-label={`הגדרות כלי: ${SHAPE_NAMES[kind]}`}>
-        <h2>הגדרות כלי: {SHAPE_NAMES[kind]}</h2>
+      <div className="modal wide shape-dialog" role="dialog" aria-modal="true" aria-label={t('הגדרות כלי: {n1}', { n1: SHAPE_NAMES[kind] })}>
+        <h2>{t('הגדרות כלי: {n1}', { n1: SHAPE_NAMES[kind] })}</h2>
 
         <p className="dlg-hint">
-          בזמן הגרירה: <b>Shift</b> (או Enter) שומר על צורה מדויקת במידות שוות — ריבוע, עיגול או משושה — וגרירת העכבר רק מגדילה או מקטינה אותה. <b>Alt</b> מגדיל את הצורה מנקודת האמצע שלה לכל הצדדים.
+          {t('בזמן הגרירה:')} <b>Shift</b> {t('(או Enter) שומר על צורה מדויקת במידות שוות — ריבוע, עיגול או משושה — וגרירת העכבר רק מגדילה או מקטינה אותה.')} <b>Alt</b> {t('מגדיל את הצורה מנקודת האמצע שלה לכל הצדדים.')}
         </p>
 
         {kind === 'rect' && (
           <div className="field">
-            <div className="field-label">עיגול הפינות כברירת מחדל</div>
+            <div className="field-label">{t('עיגול הפינות כברירת מחדל')}</div>
             <NumberField value={d.rect.radius} unit={unit} min={0} max={MAX_PAGE_PT} onChange={(v) => setD((s) => ({ ...s, rect: { ...s.rect, radius: v } }))} />
           </div>
         )}
 
         {kind === 'polygon' && (
           <div className="field">
-            <div className="field-label">מספר פינות</div>
-            <div className="row-cards" role="radiogroup" aria-label="מספר פינות">
+            <div className="field-label">{t('מספר פינות')}</div>
+            <div className="row-cards" role="radiogroup" aria-label={t('מספר פינות')}>
               {Array.from({ length: MAX_SIDES - MIN_SIDES + 1 }, (_, i) => MIN_SIDES + i).map((n) => {
                 const pts = polygonPoints(n, 30, 30)
                 return (
@@ -65,10 +66,10 @@ export function ShapeToolDialog({ kind, prefs, unit, onApply, onClose }: Props) 
 
         <div className="modal-buttons">
           <button className="btn primary" onClick={() => onApply(d)}>
-            שמור הגדרות
+            {t('שמור הגדרות')}
           </button>
           <button className="btn" onClick={onClose}>
-            ביטול
+            {t('ביטול')}
           </button>
         </div>
       </div>

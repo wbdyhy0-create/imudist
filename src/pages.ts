@@ -224,8 +224,10 @@ export function parentShadowContent(
         const numbered = substituteMarker(f.text, sourceRuns, PAGE_NUMBER_MARKER, label)
       const internal = substituteMarker(numbered.text, numbered.runs, INTERNAL_PAGE_NUMBER_MARKER, String(pageIndex + 1))
       const externalNumber = substituteMarker(internal.text, internal.runs, EXTERNAL_PAGE_NUMBER_MARKER, String(pageIndex + 1))
-      const letters = substituteMarker(externalNumber.text, externalNumber.runs, LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
-      const internalLetters = substituteMarker(letters.text, letters.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, 'hebrew'))
+      // the letters of a page number are the ones of the language the text reads in: Hebrew ones, or Latin ones in a text that reads from the left
+      const letterFormat = f.direction === 'ltr' ? 'latin-lower' : 'hebrew'
+      const letters = substituteMarker(externalNumber.text, externalNumber.runs, LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, letterFormat))
+      const internalLetters = substituteMarker(letters.text, letters.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, formatPageNumber(pageIndex + 1, letterFormat))
       const sub = substituteMarker(internalLetters.text, internalLetters.runs, RUNNING_HEADER_MARKER, pageHeader)
       out.frames.push({ ...f, ...sub, id: `parent-shadow:${pageIndex}:${f.id}`, x: f.x + dx, y: f.y + dy, next: null, parentShadowRef: { parentId: parent.id, pageIndex, sourceId: f.id } })
     }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { DEFAULT_SHADOW_OFFSET, effectiveLeading, MAX_PAGE_PT, type CharStyle, type ColorSample, type Feather, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { DEFAULT_SHADOW_OFFSET, effectiveLeading, MAX_PAGE_PT, type CharStyle, type ColorSample, type Feather, type TextAlign, type TextDirection, type TextFrame, type TextStyle } from '../document'
 import { useFontCatalog, weightName } from '../fonts'
 import type { Box } from '../frames'
 import type { ArrangeOp } from '../stacking'
@@ -28,7 +28,7 @@ interface Props {
   onCharStyle: (patch: Partial<CharStyle>) => void
   sizeMixed?: boolean
   onSizeStep?: (delta: number) => void
-  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
+  onParagraphStyle: (patch: Partial<Pick<TextStyle, 'align' | 'direction' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
   onArrange: (op: ArrangeOp) => void
   onLink: () => void
   onUnlink: () => void
@@ -44,12 +44,19 @@ export const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'justifyCenter', get label() { return t('יישור מלא לשני הצדדים, שורה אחרונה ממורכזת') }, icon: 'M4 6h16M4 10h16M4 14h16M7 18h10' },
 ]
 
+/** the ways a paragraph can read: from the right, from the left, or by its own first letter */
+export const TEXT_DIRECTIONS: { id: TextDirection; short: string; title: string }[] = [
+  { id: 'rtl', short: 'RTL', get title() { return t('מימין לשמאל (עברית, ערבית)') } },
+  { id: 'ltr', short: 'LTR', get title() { return t('משמאל לימין (אנגלית)') } },
+  { id: 'auto', get short() { return t('אוטו׳') }, get title() { return t('אוטומטי: לפי האות הראשונה בכל פסקה') } },
+]
+
 export function ParagraphTextControls({
   style,
   onChange,
 }: {
   style: TextStyle
-  onChange: (patch: Partial<Pick<TextStyle, 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
+  onChange: (patch: Partial<Pick<TextStyle, 'align' | 'direction' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing'>>) => void
 }) {
   return (
     <>
@@ -65,6 +72,23 @@ export function ParagraphTextControls({
               onClick={() => onChange({ align: align.id })}
             >
               <svg viewBox="0 0 24 24"><path d={align.icon} /></svg>
+            </button>
+          ))}
+        </div>
+      </Labeled>
+      <Labeled label={t('כיוון הטקסט')}>
+        <div className="toggle-group" role="radiogroup" aria-label={t('כיוון הטקסט')}>
+          {TEXT_DIRECTIONS.map((item) => (
+            <button
+              key={item.id}
+              role="radio"
+              className={(style.direction ?? 'rtl') === item.id ? 'on' : ''}
+              title={item.title}
+              aria-label={item.title}
+              aria-checked={(style.direction ?? 'rtl') === item.id}
+              onClick={() => onChange({ direction: item.id })}
+            >
+              {item.short}
             </button>
           ))}
         </div>

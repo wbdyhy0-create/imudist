@@ -1,5 +1,6 @@
 import type { CharacterStyleRecord, CharStyle, NestedStyleRule, Run } from './document'
 import { applyCharacterStyle, clearCharacterStyle } from './story'
+import { t } from './i18n'
 
 /**
  * Nested styles: a paragraph style can say "give the first words (or what comes before a colon...) of every paragraph in
@@ -7,10 +8,10 @@ import { applyCharacterStyle, clearCharacterStyle } from './story'
  */
 
 export const NESTED_UNITS: { id: NestedStyleRule['unit']; label: string }[] = [
-  { id: 'words', label: 'מילים' },
-  { id: 'letters', label: 'תווים' },
-  { id: 'sentences', label: 'משפטים' },
-  { id: 'delimiter', label: 'מופעים של התו' },
+  { id: 'words', get label() { return t('מילים') } },
+  { id: 'letters', get label() { return t('תווים') } },
+  { id: 'sentences', get label() { return t('משפטים') } },
+  { id: 'delimiter', get label() { return t('מופעים של התו') } },
 ]
 
 /** the characters that end a sentence */

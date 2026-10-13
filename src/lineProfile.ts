@@ -1,4 +1,5 @@
 import type { LineArrow, ShapeFrame } from './document'
+import { t } from './i18n'
 
 /**
  * A width profile for a line: how thick the line is along its length. Three widths (at the start, the middle and the end, each a
@@ -18,14 +19,14 @@ export const MAX_LINE_WIDTH_POS = 0.9
 export const MAX_LINE_WIDTH_EDGE = 0.4
 
 export const LINE_PROFILES: { id: string; label: string; widths: LineWidths }[] = [
-  { id: 'even', label: 'אחיד', widths: [1, 1, 1] },
-  { id: 'thickToThin', label: 'עבה בהתחלה ודק בסוף', widths: [1, 0.55, 0.12] },
-  { id: 'thinToThick', label: 'דק בהתחלה ועבה בסוף', widths: [0.12, 0.55, 1] },
-  { id: 'pointEnd', label: 'מחודד בסוף', widths: [1, 0.5, 0] },
-  { id: 'pointStart', label: 'מחודד בהתחלה', widths: [0, 0.5, 1] },
-  { id: 'lens', label: 'מחודד בשני הקצוות', widths: [0, 1, 0] },
-  { id: 'thickMiddle', label: 'עבה באמצע', widths: [0.15, 1, 0.15] },
-  { id: 'pinched', label: 'דק באמצע', widths: [1, 0.18, 1] },
+  { id: 'even', get label() { return t('אחיד') }, widths: [1, 1, 1] },
+  { id: 'thickToThin', get label() { return t('עבה בהתחלה ודק בסוף') }, widths: [1, 0.55, 0.12] },
+  { id: 'thinToThick', get label() { return t('דק בהתחלה ועבה בסוף') }, widths: [0.12, 0.55, 1] },
+  { id: 'pointEnd', get label() { return t('מחודד בסוף') }, widths: [1, 0.5, 0] },
+  { id: 'pointStart', get label() { return t('מחודד בהתחלה') }, widths: [0, 0.5, 1] },
+  { id: 'lens', get label() { return t('מחודד בשני הקצוות') }, widths: [0, 1, 0] },
+  { id: 'thickMiddle', get label() { return t('עבה באמצע') }, widths: [0.15, 1, 0.15] },
+  { id: 'pinched', get label() { return t('דק באמצע') }, widths: [1, 0.18, 1] },
 ]
 
 const EVEN: LineWidths = [1, 1, 1]
@@ -56,11 +57,11 @@ export function cleanLineWidthEdges(value: unknown): [number, number] | null {
 }
 
 export const LINE_ARROWS: { id: LineArrow; label: string }[] = [
-  { id: 'triangle', label: 'משולש' },
-  { id: 'stealth', label: 'חץ חד' },
-  { id: 'diamond', label: 'מעוין' },
-  { id: 'circle', label: 'עיגול' },
-  { id: 'square', label: 'ריבוע' },
+  { id: 'triangle', get label() { return t('משולש') } },
+  { id: 'stealth', get label() { return t('חץ חד') } },
+  { id: 'diamond', get label() { return t('מעוין') } },
+  { id: 'circle', get label() { return t('עיגול') } },
+  { id: 'square', get label() { return t('ריבוע') } },
 ]
 
 /** the head kind when it is a valid one, else null */

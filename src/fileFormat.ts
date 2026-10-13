@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import {
   DEFAULT_PARAGRAPH_STYLES,
   DEFAULT_FOOTNOTE_CONFIG,
@@ -51,6 +52,8 @@ import {
   type PageSection,
   type PageSize,
   type ParagraphStyleRecord,
+  type ParagraphWindowRule,
+  type TextDirection,
   type ParentPage,
   type PathGeom,
   type PathSide,
@@ -316,11 +319,11 @@ function parseSettings(v: unknown, name: string): DocSettings {
     parentItemsAbovePageContent: bool(v.parentItemsAbovePageContent, d.parentItemsAbovePageContent ?? false),
   }
   const clean = normalizeSizes(settings)
-  if (validateDoc(clean)) throw new FileFormatError('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).')
+  if (validateDoc(clean)) throw new FileFormatError(t('הגדרות העמוד בקובץ אינן תקינות (השוליים גדולים מהעמוד).'))
   return clean
 }
 
-function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
+export function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
   const raw = isObj(value) ? value : {}
   return {
     placement: oneOf(raw.placement, ['footnotes', 'endnotes'], DEFAULT_FOOTNOTE_CONFIG.placement),
@@ -350,7 +353,8 @@ function parseFootnoteConfig(value: unknown): FootnoteLayoutConfig {
     ...(typeof raw.referenceStyleId === 'string' && raw.referenceStyleId ? { referenceStyleId: raw.referenceStyleId.slice(0, 100) } : {}),
     spaceBefore: num(raw.spaceBefore, DEFAULT_FOOTNOTE_CONFIG.spaceBefore, 0, MAX_PAGE_PT),
     startAt: int(raw.startAt, DEFAULT_FOOTNOTE_CONFIG.startAt, 1, 9999),
-    restart: oneOf(raw.restart, ['continuous', 'page', 'spread'], DEFAULT_FOOTNOTE_CONFIG.restart),
+    restart: oneOf(raw.restart, ['continuous', 'page', 'spread', 'style'], DEFAULT_FOOTNOTE_CONFIG.restart),
+    ...(typeof raw.restartStyleId === 'string' && raw.restartStyleId ? { restartStyleId: raw.restartStyleId.slice(0, 100) } : {}),
     markerPrefix: str(raw.markerPrefix, DEFAULT_FOOTNOTE_CONFIG.markerPrefix).slice(0, 12),
     markerSuffix: str(raw.markerSuffix, DEFAULT_FOOTNOTE_CONFIG.markerSuffix).slice(0, 12),
     numberStyle: oneOf(raw.numberStyle, ['arabic', 'hebrew', 'roman'], DEFAULT_FOOTNOTE_CONFIG.numberStyle),
@@ -494,6 +498,9 @@ const parseParagraphBox = (s: Record<string, unknown>): { background?: string; b
     : {}),
 })
 
+const TEXT_DIRECTIONS: readonly TextDirection[] = ['rtl', 'ltr', 'auto']
+const directionOf = (value: unknown): { direction?: TextDirection } => (TEXT_DIRECTIONS.includes(value as TextDirection) ? { direction: value as TextDirection } : {})
+
 const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStylePatches?: TextFrame['paragraphStylePatches'] } => ({
   ...(Array.isArray(raw.paragraphStylePatches)
     ? {
@@ -502,6 +509,7 @@ const paragraphStylePatchesOf = (raw: Record<string, unknown>): { paragraphStyle
             ? {
                 ...paragraphStyleOf(value),
                 ...(['right', 'center', 'left', 'justify', 'justifyCenter'].includes(value.align as string) ? { align: value.align as TextAlign } : {}),
+                ...directionOf(value.direction),
                 ...(value.listKind === 'bullet' || value.listKind === 'number' ? { listKind: value.listKind } : {}),
                 ...(typeof value.listGap === 'number' && Number.isFinite(value.listGap) ? { listGap: num(value.listGap, 4, 0, 100) } : {}),
                 ...parseParagraphBox(value),
@@ -529,6 +537,7 @@ function parseParagraphStylePatch(v: unknown): ParagraphStyleRecord['patch'] {
     ...(typeof s.leading === 'number' && Number.isFinite(s.leading) ? { leading: num(s.leading, 17, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.tracking === 'number' && Number.isFinite(s.tracking) ? { tracking: num(s.tracking, 0, -1000, 1000) } : {}),
     ...((['right', 'center', 'left', 'justify', 'justifyCenter'] as const).includes(s.align as TextAlign) ? { align: s.align as TextAlign } : {}),
+    ...directionOf(s.direction),
     ...(typeof s.spaceBefore === 'number' && Number.isFinite(s.spaceBefore) ? { spaceBefore: num(s.spaceBefore, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.spaceAfter === 'number' && Number.isFinite(s.spaceAfter) ? { spaceAfter: num(s.spaceAfter, 0, 0, MAX_PAGE_PT) } : {}),
     ...(typeof s.indentLeft === 'number' && Number.isFinite(s.indentLeft) ? { indentLeft: num(s.indentLeft, 0, 0, MAX_PAGE_PT) } : {}),
@@ -590,6 +599,15 @@ function parseStyleLayers(v: unknown): { layers?: StyleLayerRule[] } {
   return rules.length ? { layers: rules } : {}
 }
 
+/** the window built into a paragraph style: 1-4 opening words, paragraphs of 3 or 4 lines at least, and the style of the opening words if there is one */
+function parseWindowRule(v: unknown): { window?: ParagraphWindowRule } {
+  if (!isObj(v)) return {}
+  const words = int(v.words, 1, 1, 4)
+  const minLines = int(v.minLines, 3, 3, 4)
+  const openingStyleId = typeof v.openingStyleId === 'string' && v.openingStyleId ? v.openingStyleId.slice(0, 100) : undefined
+  return { window: { words, minLines, ...(openingStyleId ? { openingStyleId } : {}) } }
+}
+
 function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
   if (!Array.isArray(v)) return DEFAULT_PARAGRAPH_STYLES
   const used = new Set<string>()
@@ -607,6 +625,7 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
       patch: parseParagraphStylePatch(raw.patch),
       ...parseNestedRules(raw.nested),
       ...parseStyleLayers(raw.layers),
+      ...parseWindowRule(raw.window),
     })
   }
   if (styles.length === 0) return DEFAULT_PARAGRAPH_STYLES
@@ -616,6 +635,7 @@ function parseParagraphStyles(v: unknown): ParagraphStyleRecord[] {
     ...s,
     ...(s.basedOnId && !ids.has(s.basedOnId) ? { basedOnId: undefined } : {}),
     ...(s.nextStyleId && !ids.has(s.nextStyleId) ? { nextStyleId: undefined } : {}),
+    ...(s.window?.openingStyleId && !ids.has(s.window.openingStyleId) ? { window: { words: s.window.words, minLines: s.window.minLines } } : {}),
   }))
 }
 
@@ -697,6 +717,7 @@ function parseFrames(v: unknown, footnoteConfig: FootnoteLayoutConfig = DEFAULT_
       ...(typeof raw.runningHeaderStyleId === 'string' && raw.runningHeaderStyleId ? { runningHeaderStyleId: raw.runningHeaderStyleId } : {}),
       ...(raw.runningHeaderStrategy === 'first' || raw.runningHeaderStrategy === 'last' ? { runningHeaderStrategy: raw.runningHeaderStrategy } : {}),
       align: oneOf<TextAlign>(raw.align, ['right', 'center', 'left', 'justify', 'justifyCenter'], D.align),
+      ...directionOf(raw.direction),
       id,
       x: num(raw.x, 0, -1e6, 1e6),
       y: num(raw.y, 0, -1e6, 1e6),
@@ -1264,11 +1285,11 @@ export function parseDocument(text: string, name: string): DocContent {
   try {
     data = JSON.parse(text)
   } catch {
-    throw new FileFormatError('הקובץ פגום או שאינו מסמך של Imudist.')
+    throw new FileFormatError(t('הקובץ פגום או שאינו מסמך של Imudist.'))
   }
-  if (!isObj(data) || data.format !== FORMAT) throw new FileFormatError('זה לא קובץ של Imudist.')
+  if (!isObj(data) || data.format !== FORMAT) throw new FileFormatError(t('זה לא קובץ של Imudist.'))
   if (typeof data.version === 'number' && data.version > VERSION) {
-    throw new FileFormatError('הקובץ נשמר בגרסה חדשה יותר של Imudist. עדכן את התוכנה כדי לפתוח אותו.')
+    throw new FileFormatError(t('הקובץ נשמר בגרסה חדשה יותר של Imudist. עדכן את התוכנה כדי לפתוח אותו.'))
   }
   const assets = parseAssets(data.assets)
   anchorAssets = assets

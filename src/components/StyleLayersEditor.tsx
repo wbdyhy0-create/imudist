@@ -1,5 +1,6 @@
 import type { CharacterStyleRecord, StyleLayerRule, StyleLayerWhen } from '../document'
 import { layerProblem, MAX_LAYER_PATTERN, MAX_STYLE_LAYERS, STYLE_LAYER_KINDS } from '../styleLayers'
+import { t } from '../i18n'
 
 interface Props {
   rules: StyleLayerRule[]
@@ -18,36 +19,34 @@ export function StyleLayersEditor({ rules, characterStyles, onChange }: Props) {
   return (
     <div className="nested-styles-editor">
       <p className="muted">
-        שכבה נותנת סגנון תו נוסף, מעל הטקסט, לכל מה שבפסקאות הסגנון הזה מסוג מסוים: למשל לאותיות לטיניות בתוך עברית, כדי שיקבלו גופן אנגלי.
-        השכבה לא נכתבת לתוך הטקסט אלא מחושבת בכל תצוגה וייצוא, ולכן היא עוקבת אחרי כל הקלדה, ולא דורסת סגנונות תו שהטקסט כבר מחזיק:
-        רק ההגדרות שהסגנון שלה קובע מתווספות. כמה שכבות נקראות לפי הסדר, והמאוחרת גוברת.
+        {t('שכבה נותנת סגנון תו נוסף, מעל הטקסט, לכל מה שבפסקאות הסגנון הזה מסוג מסוים: למשל לאותיות לטיניות בתוך עברית, כדי שיקבלו גופן אנגלי. השכבה לא נכתבת לתוך הטקסט אלא מחושבת בכל תצוגה וייצוא, ולכן היא עוקבת אחרי כל הקלדה, ולא דורסת סגנונות תו שהטקסט כבר מחזיק: רק ההגדרות שהסגנון שלה קובע מתווספות. כמה שכבות נקראות לפי הסדר, והמאוחרת גוברת.')}
       </p>
-      {characterStyles.length === 0 && <p className="muted">אין עדיין סגנונות תו. אפשר ליצור אותם בפאנל "סגנונות תו".</p>}
+      {characterStyles.length === 0 && <p className="muted">{t('אין עדיין סגנונות תו. אפשר ליצור אותם בפאנל "סגנונות תו".')}</p>}
       {rules.map((rule, index) => {
         const problem = layerProblem(rule)
         return (
           <div key={index} className="nested-rule">
             <div className="table-dialog-grid">
-              <label className="field-label table-dialog-field">מה לזהות
+              <label className="field-label table-dialog-field">{t('מה לזהות')}
                 <select className="select" value={rule.when} onChange={(e) => change(index, { when: e.target.value as StyleLayerWhen })}>
                   {STYLE_LAYER_KINDS.map((kind) => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
                 </select>
               </label>
-              <label className="field-label table-dialog-field">סגנון התו שמתווסף
+              <label className="field-label table-dialog-field">{t('סגנון התו שמתווסף')}
                 <select className="select" value={rule.styleId} onChange={(e) => change(index, { styleId: e.target.value })}>
-                  {!known(rule.styleId) && <option value={rule.styleId}>(סגנון שנמחק)</option>}
+                  {!known(rule.styleId) && <option value={rule.styleId}>{t('(סגנון שנמחק)')}</option>}
                   {characterStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
                 </select>
               </label>
-              <label className="field-label table-dialog-field">רק היכן שחל סגנון תו
+              <label className="field-label table-dialog-field">{t('רק היכן שחל סגנון תו')}
                 <select className="select" value={rule.onlyWithStyleId ?? ''} onChange={(e) => change(index, { onlyWithStyleId: e.target.value || undefined })}>
-                  <option value="">(בכל מקום)</option>
-                  {rule.onlyWithStyleId && !known(rule.onlyWithStyleId) && <option value={rule.onlyWithStyleId}>(סגנון שנמחק)</option>}
+                  <option value="">{t('(בכל מקום)')}</option>
+                  {rule.onlyWithStyleId && !known(rule.onlyWithStyleId) && <option value={rule.onlyWithStyleId}>{t('(סגנון שנמחק)')}</option>}
                   {characterStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
                 </select>
               </label>
               {rule.when === 'custom' && (
-                <label className="field-label table-dialog-field">תבנית (ביטוי רגולרי)
+                <label className="field-label table-dialog-field">{t('תבנית (ביטוי רגולרי)')}
                   <input
                     className="select"
                     dir="ltr"
@@ -60,13 +59,13 @@ export function StyleLayersEditor({ rules, characterStyles, onChange }: Props) {
                 </label>
               )}
             </div>
-            {problem && <p className="muted" role="alert">{problem}: השכבה לא פועלת.</p>}
-            <button className="btn" onClick={() => onChange(rules.filter((_, i) => i !== index))}>הסרת השכבה</button>
+            {problem && <p className="muted" role="alert">{t('{problem}: השכבה לא פועלת.', { problem })}</p>}
+            <button className="btn" onClick={() => onChange(rules.filter((_, i) => i !== index))}>{t('הסרת השכבה')}</button>
           </div>
         )
       })}
       <div className="modal-buttons">
-        <button className="btn" disabled={characterStyles.length === 0 || rules.length >= MAX_STYLE_LAYERS} onClick={add}>הוספת שכבה</button>
+        <button className="btn" disabled={characterStyles.length === 0 || rules.length >= MAX_STYLE_LAYERS} onClick={add}>{t('הוספת שכבה')}</button>
       </div>
     </div>
   )

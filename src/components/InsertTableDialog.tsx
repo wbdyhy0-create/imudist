@@ -100,10 +100,10 @@ export function InsertTableDialog({ onConfirm, onClose }: Props) {
           {headerRows > 0 && <label className="dlg-check"><input type="checkbox" checked={headerContinuous} onChange={(e) => setHeaderContinuous(e.target.checked)} />{t('כותרת רציפה, כמו בטבלה רגילה')}</label>}
         </div>}
         <div className="table-dialog-grid">
-          {field('שורות', rows, setRows, 1, MAX_TABLE_ROWS)}
-          {field('עמודות', cols, setCols, 1, MAX_TABLE_COLS)}
-          {field('שורות כותרת עליונה', headerRows, setHeaderRows, 0, rows)}
-          {field('שורות כותרת תחתונה', footerRows, setFooterRows, 0, rows)}
+          {field(t('שורות'), rows, setRows, 1, MAX_TABLE_ROWS)}
+          {field(t('עמודות'), cols, setCols, 1, MAX_TABLE_COLS)}
+          {field(t('שורות כותרת עליונה'), headerRows, setHeaderRows, 0, rows)}
+          {field(t('שורות כותרת תחתונה'), footerRows, setFooterRows, 0, rows)}
         </div>
         <div className="modal-buttons">
           <button className="btn primary" type="submit" autoFocus>{t('הוספה')}</button>

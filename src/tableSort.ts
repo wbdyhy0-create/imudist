@@ -1,5 +1,6 @@
 import { ownerGrid, tableCols, tableRows, type CellRange, type TableCell, type TableData } from './table'
 import { parseCellNumber, recalcTable, shiftFormula } from './tableFormulas'
+import { t } from './i18n'
 
 /**
  * Sorting the rows of a table by one or more columns (text or numbers, up and down, in the rules of a language). Header and footer
@@ -32,12 +33,12 @@ export interface SortOptions {
 export type SortOutcome = { ok: true; table: TableData } | { ok: false; reason: 'merged' | 'nothing' }
 
 export const SORT_LOCALES: { id: string; label: string }[] = [
-  { id: 'he', label: 'עברית' },
-  { id: 'en', label: 'אנגלית' },
-  { id: 'ar', label: 'ערבית' },
-  { id: 'ru', label: 'רוסית' },
-  { id: 'fr', label: 'צרפתית' },
-  { id: 'de', label: 'גרמנית' },
+  { id: 'he', get label() { return t('עברית') } },
+  { id: 'en', get label() { return t('אנגלית') } },
+  { id: 'ar', get label() { return t('ערבית') } },
+  { id: 'ru', get label() { return t('רוסית') } },
+  { id: 'fr', get label() { return t('צרפתית') } },
+  { id: 'de', get label() { return t('גרמנית') } },
 ]
 
 const clean = (text: string) => text.replace(/[‎‏‪-‮⁦-⁩]/g, '').trim()

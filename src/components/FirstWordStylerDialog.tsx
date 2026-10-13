@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { CharacterStyleRecord } from '../document'
 import type { ParagraphStyleRecord } from './ParagraphStylesPanel'
+import { t } from '../i18n'
 
 /** what the first word is given: a character style (the word stays tied to it), or only the look of a paragraph style */
 export type FirstWordTarget = { kind: 'character' | 'paragraph'; id: string }
@@ -23,33 +24,33 @@ export function FirstWordStylerDialog({ styles, characterStyles, onApply, hasSel
   const chosen = decode(target)
   return (
     <div className="modal-backdrop">
-      <div className="modal" role="dialog" aria-modal="true" aria-label="עיצוב מילה ראשונה">
-        <h2>עיצוב מילה ראשונה</h2>
-        <label className="field-label">החל על פסקאות בסגנון
+      <div className="modal" role="dialog" aria-modal="true" aria-label={t('עיצוב מילה ראשונה')}>
+        <h2>{t('עיצוב מילה ראשונה')}</h2>
+        <label className="field-label">{t('החל על פסקאות בסגנון')}
           <select className="select" value={sourceId} onChange={(event) => setSourceId(event.target.value)}>
             {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
           </select>
         </label>
-        <label className="field-label">סגנון תו למילה הראשונה
+        <label className="field-label">{t('סגנון תו למילה הראשונה')}
           <select className="select" value={target} onChange={(event) => setTarget(event.target.value)}>
             {characterStyles.length > 0 && (
-              <optgroup label="סגנונות תו">
+              <optgroup label={t('סגנונות תו')}>
                 {characterStyles.map((style) => <option key={style.id} value={encode({ kind: 'character', id: style.id })}>{style.name}</option>)}
               </optgroup>
             )}
-            <optgroup label="עיצוב לפי סגנון פסקה (בלי קישור)">
+            <optgroup label={t('עיצוב לפי סגנון פסקה (בלי קישור)')}>
               {styles.map((style) => <option key={style.id} value={encode({ kind: 'paragraph', id: style.id })}>{style.name}</option>)}
             </optgroup>
           </select>
         </label>
-        {characterStyles.length === 0 && <p className="muted">אפשר ליצור סגנון תו בפאנל "סגנונות תו". מילה שעוצבה בסגנון תו נשארת קשורה אליו, ושינוי הסגנון משנה אותה.</p>}
-        <div className="seg" role="radiogroup" aria-label="טווח החלה">
-          <button className={scope === 'document' ? 'on' : ''} onClick={() => setScope('document')}>כל המסמך</button>
-          <button className={scope === 'selection' ? 'on' : ''} disabled={!hasSelection} onClick={() => setScope('selection')}>בחירה בלבד</button>
+        {characterStyles.length === 0 && <p className="muted">{t('אפשר ליצור סגנון תו בפאנל "סגנונות תו". מילה שעוצבה בסגנון תו נשארת קשורה אליו, ושינוי הסגנון משנה אותה.')}</p>}
+        <div className="seg" role="radiogroup" aria-label={t('טווח החלה')}>
+          <button className={scope === 'document' ? 'on' : ''} onClick={() => setScope('document')}>{t('כל המסמך')}</button>
+          <button className={scope === 'selection' ? 'on' : ''} disabled={!hasSelection} onClick={() => setScope('selection')}>{t('בחירה בלבד')}</button>
         </div>
         <div className="modal-buttons">
-          <button className="btn primary" disabled={!sourceId || !chosen.id} onClick={() => onApply(sourceId, chosen, scope)}>החל עיצוב</button>
-          <button className="btn" onClick={onClose}>סגור חלון</button>
+          <button className="btn primary" disabled={!sourceId || !chosen.id} onClick={() => onApply(sourceId, chosen, scope)}>{t('החל עיצוב')}</button>
+          <button className="btn" onClick={onClose}>{t('סגור חלון')}</button>
         </div>
       </div>
     </div>

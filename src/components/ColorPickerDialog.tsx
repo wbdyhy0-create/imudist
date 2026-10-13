@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab } from '../colorModels'
+import { t } from '../i18n'
 
 interface Props {
   initial: string
@@ -79,14 +80,14 @@ export function ColorPickerDialog({ initial, target, onApply, onClose }: Props) 
   const hsv = rgbToHsv(rgb)
   const hsl = rgbToHsl(rgb)
   const values = model === 'CMYK'
-    ? [{ key: 'cyan', label: 'ציאן', value: cmyk.cyan, min: 0, max: 100 }, { key: 'magenta', label: 'מג׳נטה', value: cmyk.magenta, min: 0, max: 100 }, { key: 'yellow', label: 'צהוב', value: cmyk.yellow, min: 0, max: 100 }, { key: 'black', label: 'שחור', value: cmyk.black, min: 0, max: 100 }]
+    ? [{ key: 'cyan', get label() { return t('ציאן') }, value: cmyk.cyan, min: 0, max: 100 }, { key: 'magenta', get label() { return t('מג׳נטה') }, value: cmyk.magenta, min: 0, max: 100 }, { key: 'yellow', get label() { return t('צהוב') }, value: cmyk.yellow, min: 0, max: 100 }, { key: 'black', get label() { return t('שחור') }, value: cmyk.black, min: 0, max: 100 }]
     : model === 'RGB'
-      ? [{ key: 'red', label: 'אדום', value: rgb.red, min: 0, max: 255 }, { key: 'green', label: 'ירוק', value: rgb.green, min: 0, max: 255 }, { key: 'blue', label: 'כחול', value: rgb.blue, min: 0, max: 255 }]
+      ? [{ key: 'red', get label() { return t('אדום') }, value: rgb.red, min: 0, max: 255 }, { key: 'green', get label() { return t('ירוק') }, value: rgb.green, min: 0, max: 255 }, { key: 'blue', get label() { return t('כחול') }, value: rgb.blue, min: 0, max: 255 }]
       : model === 'LAB'
-        ? [{ key: 'lightness', label: 'בהירות', value: lab.lightness, min: 0, max: 100 }, { key: 'a', label: 'A', value: lab.a, min: -128, max: 128 }, { key: 'b', label: 'B', value: lab.b, min: -128, max: 128 }]
+        ? [{ key: 'lightness', get label() { return t('בהירות') }, value: lab.lightness, min: 0, max: 100 }, { key: 'a', label: 'A', value: lab.a, min: -128, max: 128 }, { key: 'b', label: 'B', value: lab.b, min: -128, max: 128 }]
         : model === 'HSB'
-          ? [{ key: 'hue', label: 'גוון', value: hue, min: 0, max: 360 }, { key: 'saturation', label: 'רוויה', value: hsv.saturation, min: 0, max: 100 }, { key: 'brightness', label: 'בהירות', value: hsv.brightness, min: 0, max: 100 }]
-          : [{ key: 'hue', label: 'גוון', value: hue, min: 0, max: 360 }, { key: 'saturation', label: 'רוויה', value: hsl.saturation, min: 0, max: 100 }, { key: 'lightness', label: 'בהירות', value: hsl.lightness, min: 0, max: 100 }]
+          ? [{ key: 'hue', get label() { return t('גוון') }, value: hue, min: 0, max: 360 }, { key: 'saturation', get label() { return t('רוויה') }, value: hsv.saturation, min: 0, max: 100 }, { key: 'brightness', get label() { return t('בהירות') }, value: hsv.brightness, min: 0, max: 100 }]
+          : [{ key: 'hue', get label() { return t('גוון') }, value: hue, min: 0, max: 360 }, { key: 'saturation', get label() { return t('רוויה') }, value: hsl.saturation, min: 0, max: 100 }, { key: 'lightness', get label() { return t('בהירות') }, value: hsl.lightness, min: 0, max: 100 }]
   const update = (key: string, value: number) => {
     if (model === 'CMYK') setColor(rgbToHex(cmykToRgb({ cyan: cmyk.cyan, magenta: cmyk.magenta, yellow: cmyk.yellow, black: cmyk.black, [key]: value })))
     else if (model === 'RGB') setColor(rgbToHex({ red: rgb.red, green: rgb.green, blue: rgb.blue, [key]: value }))
@@ -115,24 +116,24 @@ export function ColorPickerDialog({ initial, target, onApply, onClose }: Props) 
 
   return (
     <div className="color-dialog-backdrop" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="color-dialog" role="dialog" aria-modal="true" aria-label="בחירת צבע" style={{ transform: `translate(${position.x}px, ${position.y}px)` }}>
-        <div className="color-dialog-head" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><h2>בחירת צבע</h2><button className="setup-x" onClick={onClose} aria-label="סגור">×</button></div>
+      <div className="color-dialog" role="dialog" aria-modal="true" aria-label={t('בחירת צבע')} style={{ transform: `translate(${position.x}px, ${position.y}px)` }}>
+        <div className="color-dialog-head" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}><h2>{t('בחירת צבע')}</h2><button className="setup-x" onClick={onClose} aria-label={t('סגור')}>×</button></div>
         <div className="color-dialog-body">
           <div className="color-dialog-preview">
             <div className="color-preview-large" style={{ background: color }} />
-            <label>צבע שנבחר<input type="color" value={safeColor} onChange={(e) => setColor(e.target.value)} /></label>
-            <label>ערך הקסדצימלי<input value={color} onChange={(e) => /^#[0-9a-f]{0,6}$/i.test(e.target.value) && setColor(e.target.value)} dir="ltr" /></label>
+            <label>{t('צבע שנבחר')}<input type="color" value={safeColor} onChange={(e) => setColor(e.target.value)} /></label>
+            <label>{t('ערך הקסדצימלי')}<input value={color} onChange={(e) => /^#[0-9a-f]{0,6}$/i.test(e.target.value) && setColor(e.target.value)} dir="ltr" /></label>
           </div>
           <div className="color-dialog-controls">
-            <div className="color-spectrum" style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${hue} 100% 50%))` }} onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); chooseSpectrum(e) }} onPointerMove={(e) => e.buttons === 1 && chooseSpectrum(e)} role="application" aria-label="בחירת צבע חזותית" />
-            <input className="hue-slider" type="range" min={0} max={360} value={hue} onChange={(e) => { const next = Number(e.target.value); setHue(next); setColorRaw(rgbToHex(hsvToRgb({ hue: next, saturation: hsv.saturation, brightness: hsv.brightness }))) }} aria-label="גוון" />
-            <label className="field-label" htmlFor="dialog-color-model">מודל צבע</label>
+            <div className="color-spectrum" style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, hsl(${hue} 100% 50%))` }} onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); chooseSpectrum(e) }} onPointerMove={(e) => e.buttons === 1 && chooseSpectrum(e)} role="application" aria-label={t('בחירת צבע חזותית')} />
+            <input className="hue-slider" type="range" min={0} max={360} value={hue} onChange={(e) => { const next = Number(e.target.value); setHue(next); setColorRaw(rgbToHex(hsvToRgb({ hue: next, saturation: hsv.saturation, brightness: hsv.brightness }))) }} aria-label={t('גוון')} />
+            <label className="field-label" htmlFor="dialog-color-model">{t('מודל צבע')}</label>
             <select id="dialog-color-model" className="select" value={model} onChange={(e) => setModel(e.target.value as typeof model)}>
-              <option value="RGB">RGB — מסך</option>
-              <option value="CMYK">CMYK — דפוס</option>
-              <option value="LAB">LAB — דיוק חזותי</option>
-              <option value="HSB">HSB — גוון, רוויה ובהירות</option>
-              <option value="HSL">HSL — גוון, רוויה ובהירות</option>
+              <option value="RGB">{t('RGB — מסך')}</option>
+              <option value="CMYK">{t('CMYK — דפוס')}</option>
+              <option value="LAB">{t('LAB — דיוק חזותי')}</option>
+              <option value="HSB">{t('HSB — גוון, רוויה ובהירות')}</option>
+              <option value="HSL">{t('HSL — גוון, רוויה ובהירות')}</option>
             </select>
             <div className="color-dialog-values">
               {values.map((entry) => <label key={entry.key}>{entry.label}<input type="number" min={entry.min} max={entry.max} value={Math.round(entry.value)} onChange={(e) => update(entry.key, Number(e.target.value))} /></label>)}
@@ -140,8 +141,8 @@ export function ColorPickerDialog({ initial, target, onApply, onClose }: Props) 
           </div>
         </div>
         <div className="color-dialog-foot">
-          <span className="muted">יעד: {target === 'fill' ? 'מילוי' : 'קו'}</span>
-          <div className="modal-buttons"><button className="btn primary" onClick={() => { onApply(safeColor); onClose() }}>אישור</button><button className="btn" onClick={onClose}>ביטול</button></div>
+          <span className="muted">{t('יעד: {target}', { target: target === 'fill' ? t('מילוי') : t('קו') })}</span>
+          <div className="modal-buttons"><button className="btn primary" onClick={() => { onApply(safeColor); onClose() }}>{t('אישור')}</button><button className="btn" onClick={onClose}>{t('ביטול')}</button></div>
         </div>
       </div>
     </div>

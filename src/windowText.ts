@@ -5,6 +5,22 @@
  * editing, the thread of frames and the exported PDF all see the same lines.
  */
 
+/** the window rule of a paragraph style: its own, or the nearest one of the styles it is based on */
+export function windowRuleOf(
+  styles: readonly { id: string; basedOnId?: string; window?: { words: number; minLines: number; openingStyleId?: string } }[],
+  styleId: string,
+): { words: number; minLines: number; openingStyleId?: string } | null {
+  const byId = new Map(styles.map((style) => [style.id, style]))
+  const seen = new Set<string>()
+  let current = byId.get(styleId)
+  while (current && !seen.has(current.id)) {
+    if (current.window) return current.window
+    seen.add(current.id)
+    current = current.basedOnId ? byId.get(current.basedOnId) : undefined
+  }
+  return null
+}
+
 export interface WindowTextOptions {
   /** which paragraphs: only the ones in this paragraph style */
   styleId: string

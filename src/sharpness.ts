@@ -1,4 +1,5 @@
 import type { LineCap, Sharpness } from './document'
+import { t } from './i18n'
 
 /**
  * How sharp a free-drawn line or brush stroke is. Sharp: straight, crisp ends (a flat cut, with sharp corners). Medium: rounded ends. Soft: rounded ends with the edge
@@ -8,9 +9,9 @@ import type { LineCap, Sharpness } from './document'
 export type { Sharpness } from './document'
 
 export const SHARPNESS_LEVELS: { id: Sharpness; label: string; hint: string }[] = [
-  { id: 'sharp', label: 'חד', hint: 'קצוות ישרים וחדים, בלי ריכוך. מתאים לקווים מדויקים ולגרפיקה נקייה' },
-  { id: 'medium', label: 'בינוני', hint: 'קצוות מעוגלים מעט, בין קו חד לזרימה רכה' },
-  { id: 'soft', label: 'רגיל / רך', hint: 'קצוות מרוככים בטשטוש עדין, כמו משיכת מכחול רכה' },
+  { id: 'sharp', get label() { return t('חד') }, get hint() { return t('קצוות ישרים וחדים, בלי ריכוך. מתאים לקווים מדויקים ולגרפיקה נקייה') } },
+  { id: 'medium', get label() { return t('בינוני') }, get hint() { return t('קצוות מעוגלים מעט, בין קו חד לזרימה רכה') } },
+  { id: 'soft', get label() { return t('רגיל / רך') }, get hint() { return t('קצוות מרוככים בטשטוש עדין, כמו משיכת מכחול רכה') } },
 ]
 
 export const DEFAULT_SHARPNESS: Sharpness = 'medium'

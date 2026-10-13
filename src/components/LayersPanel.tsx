@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import type { ImageFrame, LayerInfo, ShapeFrame, TextFrame } from '../document'
 import { LAYER_COLORS, layerViewsOf, newLayerId, withLayerInfo } from '../layers'
 import { ContextMenu } from './ContextMenu'
+import { t } from '../i18n'
 
 interface Props {
   frames: TextFrame[]
@@ -83,9 +84,9 @@ export function LayersPanel({ frames, images, shapes, layerOrder, layers: layerI
   const suppressClickRef = useRef<string | null>(null)
   const visibleTextFrames = frames
   const allItems = [
-    ...images.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 0, label: item.label ?? 'תמונה', type: 'IMG', hidden: item.hidden === true, locked: item.locked === true })),
-    ...shapes.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 1, label: item.label ?? (item.kind === 'path' ? 'נתיב' : item.kind === 'rect' ? 'מלבן' : item.kind === 'ellipse' ? 'אליפסה' : 'צורה'), type: 'PATH', hidden: item.hidden === true, locked: item.locked === true })),
-    ...visibleTextFrames.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 1, label: item.label ?? (item.rasterized ? 'מקור טקסט חתוך' : item.text.trim().split('\n')[0] || 'תיבת טקסט'), type: 'T', hidden: item.hidden === true, locked: item.locked === true })),
+    ...images.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 0, label: item.label ?? t('תמונה'), type: 'IMG', hidden: item.hidden === true, locked: item.locked === true })),
+    ...shapes.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 1, label: item.label ?? (item.kind === 'path' ? t('נתיב') : item.kind === 'rect' ? t('מלבן') : item.kind === 'ellipse' ? t('אליפסה') : t('צורה')), type: 'PATH', hidden: item.hidden === true, locked: item.locked === true })),
+    ...visibleTextFrames.map((item) => ({ id: item.id, layerId: item.layerId, z: item.z ?? 1, label: item.label ?? (item.rasterized ? t('מקור טקסט חתוך') : item.text.trim().split('\n')[0] || t('תיבת טקסט')), type: 'T', hidden: item.hidden === true, locked: item.locked === true })),
   ]
   const itemsFor = (layerId: string) => {
     const items = allItems.filter((item) => layerId === 'layer-1' ? !item.layerId || item.layerId === 'layer-1' || !layers.some((layer) => layer.id === item.layerId) : item.layerId === layerId)
@@ -258,26 +259,26 @@ export function LayersPanel({ frames, images, shapes, layerOrder, layers: layerI
   }
 
   return (
-    <section className="layers-panel" aria-label="שכבות">
+    <section className="layers-panel" aria-label={t('שכבות')}>
       <div className="layers-head">
-        <h2 className="props-title">שכבות</h2>
+        <h2 className="props-title">{t('שכבות')}</h2>
       </div>
       {layers.map((layer) => <div key={layer.id} className="layer-row-wrap" data-layer-row-id={layer.id}>
         {dragging?.kind === 'layer' && dragOverLayerId === layer.id && dragging.id !== layer.id && <div className="layer-drop-indicator" aria-hidden="true" />}
         <div className={'layer-row' + (layer.id === active.id ? ' active' : '') + (dragging?.kind === 'layer' && dragging.id === layer.id ? ' dragging' : '')} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('button')) startReorder('layer', layer.id, layer.id, event) }} onClick={() => { if (suppressClickRef.current === `layer:${layer.id}`) { suppressClickRef.current = null; return } setActiveId(layer.id); onActiveLayer(layer.id); toggleOpen(layer.id) }} onDoubleClick={() => openEditor('layer', layer.id, layer.name, layer.color)}>
-        <button className="layer-toggle" aria-label={layer.open ? 'סגור שכבה' : 'פתח שכבה'} onClick={(event) => { event.stopPropagation(); toggleOpen(layer.id) }}>{layer.open ? '▾' : '▸'}</button>
-        <button className="layer-eye" aria-label={layer.hidden ? 'הצג שכבה' : 'הסתר שכבה'} onPointerDown={(event) => startPaint('layer', 'hidden', layer.id, layer.id, !layer.hidden, event)} onClick={(event) => { event.stopPropagation(); togglePaint('layer', 'hidden', layer.id, !layer.hidden) }}><span className={'visibility-dot' + (layer.hidden ? '' : ' filled')} /></button>
-        <button className={'layer-lock' + (layer.locked ? ' locked' : '')} aria-label={layer.locked ? 'פתח שכבה' : 'נעל שכבה'} onPointerDown={(event) => startPaint('layer', 'locked', layer.id, layer.id, !layer.locked, event)} onClick={(event) => { event.stopPropagation(); togglePaint('layer', 'locked', layer.id, !layer.locked) }}><LockIcon locked={layer.locked} /></button>
+        <button className="layer-toggle" aria-label={layer.open ? t('סגור שכבה') : t('פתח שכבה')} onClick={(event) => { event.stopPropagation(); toggleOpen(layer.id) }}>{layer.open ? '▾' : '▸'}</button>
+        <button className="layer-eye" aria-label={layer.hidden ? t('הצג שכבה') : t('הסתר שכבה')} onPointerDown={(event) => startPaint('layer', 'hidden', layer.id, layer.id, !layer.hidden, event)} onClick={(event) => { event.stopPropagation(); togglePaint('layer', 'hidden', layer.id, !layer.hidden) }}><span className={'visibility-dot' + (layer.hidden ? '' : ' filled')} /></button>
+        <button className={'layer-lock' + (layer.locked ? ' locked' : '')} aria-label={layer.locked ? t('פתח שכבה') : t('נעל שכבה')} onPointerDown={(event) => startPaint('layer', 'locked', layer.id, layer.id, !layer.locked, event)} onClick={(event) => { event.stopPropagation(); togglePaint('layer', 'locked', layer.id, !layer.locked) }}><LockIcon locked={layer.locked} /></button>
         <span className="layer-color" style={{ background: layer.color }} />
         <span className="layer-name">{layer.name}</span>
         </div>
         {layer.open && <div className="layer-children">
-        {itemsFor(layer.id).length === 0 && <p className="muted">אין אובייקטים בשכבה</p>}
+        {itemsFor(layer.id).length === 0 && <p className="muted">{t('אין אובייקטים בשכבה')}</p>}
         {[...itemsFor(layer.id)].reverse().map((item) => {
           return (
             <div key={item.id} className={'layer-item' + (selectedId === item.id ? ' selected' : '') + (dragging?.kind === 'item' && dragging.id === item.id ? ' dragging' : '') + (dragOverItemId === item.id && dragging?.id !== item.id ? ' drop-target' : '')} data-layer-item-id={item.id} data-layer-owner-id={layer.id} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('.layer-item-eye, .layer-item-lock')) startReorder('item', item.id, layer.id, event) }} onClickCapture={(event) => { if (suppressClickRef.current === `item:${item.id}`) { suppressClickRef.current = null; event.preventDefault(); event.stopPropagation() } }} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: item.id, x: event.clientX, y: event.clientY }) }} onDoubleClick={() => openEditor('item', item.id, item.label)}>
-              <button className="layer-item-eye" aria-label={item.hidden ? `הצג ${item.label}` : `הסתר ${item.label}`} onPointerDown={(event) => startPaint('item', 'hidden', item.id, layer.id, !item.hidden, event)} onClick={(event) => { event.stopPropagation(); togglePaint('item', 'hidden', item.id, !item.hidden) }}><span className={'visibility-dot' + (item.hidden ? '' : ' filled')} /></button>
-              <button className={'layer-item-lock' + (item.locked ? ' locked' : '')} aria-label={item.locked ? `פתח ${item.label}` : `נעל ${item.label}`} onPointerDown={(event) => startPaint('item', 'locked', item.id, layer.id, !item.locked, event)} onClick={(event) => { event.stopPropagation(); togglePaint('item', 'locked', item.id, !item.locked) }}><LockIcon locked={item.locked} /></button>
+              <button className="layer-item-eye" aria-label={item.hidden ? t('הצג {n1}', { n1: item.label }) : t('הסתר {n1}', { n1: item.label })} onPointerDown={(event) => startPaint('item', 'hidden', item.id, layer.id, !item.hidden, event)} onClick={(event) => { event.stopPropagation(); togglePaint('item', 'hidden', item.id, !item.hidden) }}><span className={'visibility-dot' + (item.hidden ? '' : ' filled')} /></button>
+              <button className={'layer-item-lock' + (item.locked ? ' locked' : '')} aria-label={item.locked ? t('פתח {n1}', { n1: item.label }) : t('נעל {n1}', { n1: item.label })} onPointerDown={(event) => startPaint('item', 'locked', item.id, layer.id, !item.locked, event)} onClick={(event) => { event.stopPropagation(); togglePaint('item', 'locked', item.id, !item.locked) }}><LockIcon locked={item.locked} /></button>
               <button className="layer-item-main" onClick={() => onSelect(item.id)}><span className="layer-item-type">{item.type}</span><span>{item.label}</span></button>
             </div>
           )
@@ -285,7 +286,7 @@ export function LayersPanel({ frames, images, shapes, layerOrder, layers: layerI
         </div>}
       </div>)}
       <div className="layers-foot">
-        {itemsFor(active.id).length} אובייקטים · {active.name}
+        {t('{count} אובייקטים', { count: itemsFor(active.id).length })} · {active.name}
         <label className="layer-parent-order">
           <input
             type="checkbox"
@@ -293,20 +294,20 @@ export function LayersPanel({ frames, images, shapes, layerOrder, layers: layerI
             disabled={!canChangeParentOrder}
             onChange={(event) => onParentItemsAbovePageContentChange(event.target.checked)}
           />
-          <span>אובייקטי אב מעל תוכן העמוד</span>
+          <span>{t('אובייקטי אב מעל תוכן העמוד')}</span>
         </label>
         <div className="layers-actions">
-          <button className="icon-button" aria-label="הוסף שכבה" title="הוסף שכבה" onClick={() => { const id = newLayerId(layerOrder); onLayersChange([...layerOrder, id], layerInfo); setActiveId(id); onActiveLayer(id) }}>+</button>
-          <button className="icon-button" aria-label="מחק שכבה" title="מחק שכבה ואת כל האובייקטים שבה" disabled={layers.length <= 1 || active.id === 'layer-1'} onClick={() => { onLayerDelete(active.id); setActiveId('layer-1'); onActiveLayer('layer-1') }}>⌫</button>
+          <button className="icon-button" aria-label={t('הוסף שכבה')} title={t('הוסף שכבה')} onClick={() => { const id = newLayerId(layerOrder); onLayersChange([...layerOrder, id], layerInfo); setActiveId(id); onActiveLayer(id) }}>+</button>
+          <button className="icon-button" aria-label={t('מחק שכבה')} title={t('מחק שכבה ואת כל האובייקטים שבה')} disabled={layers.length <= 1 || active.id === 'layer-1'} onClick={() => { onLayerDelete(active.id); setActiveId('layer-1'); onActiveLayer('layer-1') }}>⌫</button>
         </div>
       </div>
-      {editing && <div className="layer-edit-dialog" role="dialog" aria-label={editing.kind === 'layer' ? 'אפשרויות שכבה' : 'שם אובייקט'}>
-        <div className="layer-edit-title">{editing.kind === 'layer' ? 'אפשרויות שכבה' : 'שם תת-פריט'}</div>
-        <label>שם<input value={editName} onChange={(event) => setEditName(event.target.value)} autoFocus /></label>
-        {editing.kind === 'layer' && <label>צבע<input type="color" value={editColor} onChange={(event) => setEditColor(event.target.value)} /></label>}
-        <div className="layer-edit-actions"><button className="btn small primary" onClick={saveEditor}>אישור</button><button className="btn small" onClick={() => setEditing(null)}>ביטול</button></div>
+      {editing && <div className="layer-edit-dialog" role="dialog" aria-label={editing.kind === 'layer' ? t('אפשרויות שכבה') : t('שם אובייקט')}>
+        <div className="layer-edit-title">{editing.kind === 'layer' ? t('אפשרויות שכבה') : t('שם תת-פריט')}</div>
+        <label>{t('שם')}<input value={editName} onChange={(event) => setEditName(event.target.value)} autoFocus /></label>
+        {editing.kind === 'layer' && <label>{t('צבע')}<input type="color" value={editColor} onChange={(event) => setEditColor(event.target.value)} /></label>}
+        <div className="layer-edit-actions"><button className="btn small primary" onClick={saveEditor}>{t('אישור')}</button><button className="btn small" onClick={() => setEditing(null)}>{t('ביטול')}</button></div>
       </div>}
-      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} items={[{ label: 'מחק אובייקט', onClick: () => onItemDelete(contextMenu.id) }]} />}
+      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)} items={[{ get label() { return t('מחק אובייקט') }, onClick: () => onItemDelete(contextMenu.id) }]} />}
     </section>
   )
 }

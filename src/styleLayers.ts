@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { resolvedRecords } from './characterStyleTree'
 import type { CharacterStyleRecord, ParagraphStyleRecord, Run, StyleLayerRule, StyleLayerWhen, TextFrame } from './document'
 import { headFrames } from './frames'
@@ -11,14 +12,14 @@ import { styleIdOf } from './styleApply'
  */
 
 export const STYLE_LAYER_KINDS: { id: StyleLayerWhen; label: string }[] = [
-  { id: 'latin', label: 'אנגלית (אותיות לטיניות)' },
-  { id: 'hebrew', label: 'עברית' },
-  { id: 'arabic', label: 'ערבית' },
-  { id: 'cyrillic', label: 'רוסית (קירילית)' },
-  { id: 'greek', label: 'יוונית' },
-  { id: 'digits', label: 'מספרים' },
-  { id: 'all', label: 'כל הפסקה' },
-  { id: 'custom', label: 'תבנית מותאמת (מתקדם)' },
+  { id: 'latin', get label() { return t('אנגלית (אותיות לטיניות)') } },
+  { id: 'hebrew', get label() { return t('עברית') } },
+  { id: 'arabic', get label() { return t('ערבית') } },
+  { id: 'cyrillic', get label() { return t('רוסית (קירילית)') } },
+  { id: 'greek', get label() { return t('יוונית') } },
+  { id: 'digits', get label() { return t('מספרים') } },
+  { id: 'all', get label() { return t('כל הפסקה') } },
+  { id: 'custom', get label() { return t('תבנית מותאמת (מתקדם)') } },
 ]
 
 export const MAX_STYLE_LAYERS = 20
@@ -74,9 +75,9 @@ function compile(source: string): RegExp | null {
 export function layerProblem(rule: Pick<StyleLayerRule, 'when' | 'pattern'>): string | null {
   if (rule.when !== 'custom') return null
   const pattern = rule.pattern?.trim() ?? ''
-  if (!pattern) return 'לא נכתבה תבנית'
-  if (pattern.length > MAX_LAYER_PATTERN) return 'התבנית ארוכה מדי'
-  return compile(pattern) ? null : 'התבנית אינה תקינה'
+  if (!pattern) return t('לא נכתבה תבנית')
+  if (pattern.length > MAX_LAYER_PATTERN) return t('התבנית ארוכה מדי')
+  return compile(pattern) ? null : t('התבנית אינה תקינה')
 }
 
 /** the pieces of `paragraph` a rule gives its style to, [start, end) */

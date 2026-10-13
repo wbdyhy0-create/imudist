@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { BOOK_EXT, basenameOf, dirnameOf, joinPath, normalizePath, relativePath, serializeBook, type BookFile } from './book'
 import { FILE_EXT } from './fileFormat'
 import { isTauri, writeToHandle } from './fileio'
@@ -104,7 +105,7 @@ const entriesOf = (dir: FileSystemDirectoryHandle): AsyncIterable<[string, FileS
 
 async function fileHandleAt(root: FileSystemDirectoryHandle, path: string, create = false): Promise<FileSystemFileHandle> {
   const parts = normalizePath(path).split('/')
-  if (parts.some((part) => part === '..')) throw new Error('הקובץ נמצא מחוץ לתיקיית הספר, ולכן הדפדפן לא יכול לפתוח אותו.')
+  if (parts.some((part) => part === '..')) throw new Error(t('הקובץ נמצא מחוץ לתיקיית הספר, ולכן הדפדפן לא יכול לפתוח אותו.'))
   let dir = root
   for (const part of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(part)
   return dir.getFileHandle(parts[parts.length - 1], { create })
@@ -155,7 +156,7 @@ async function openFolderBook(): Promise<{ text: string; storage: BookStorage } 
   if (!root) return null
   const books: string[] = []
   for await (const [name, handle] of entriesOf(root)) if (handle.kind === 'file' && name.toLowerCase().endsWith(BOOK_EXT)) books.push(name)
-  if (books.length === 0) throw new Error(`בתיקייה "${root.name}" אין קובץ ספר (${BOOK_EXT}). כדי ליצור ספר חדש בחר בקובץ > חדש > ספר.`)
+  if (books.length === 0) throw new Error(t('בתיקייה "{name}" אין קובץ ספר ({ext}). כדי ליצור ספר חדש בחר בקובץ > חדש > ספר.', { name: root.name, ext: BOOK_EXT }))
   books.sort((a, b) => a.localeCompare(b, 'he'))
   const storage = folderStorage(root, books[0])
   return { text: await storage.readText(books[0]), storage }

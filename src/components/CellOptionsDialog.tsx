@@ -15,17 +15,17 @@ interface Props {
 }
 
 const ALIGNS: { id: TextAlign | ''; label: string }[] = [
-  { id: '', label: 'כמו בטבלה' },
-  { id: 'right', label: 'ימין' },
-  { id: 'center', label: 'מרכז' },
-  { id: 'left', label: 'שמאל' },
-  { id: 'justify', label: 'מיושר' },
+  { id: '', get label() { return t('כמו בטבלה') } },
+  { id: 'right', get label() { return t('ימין') } },
+  { id: 'center', get label() { return t('מרכז') } },
+  { id: 'left', get label() { return t('שמאל') } },
+  { id: 'justify', get label() { return t('מיושר') } },
 ]
 const VALIGNS: { id: CellVAlign | ''; label: string }[] = [
-  { id: '', label: 'כמו בטבלה' },
-  { id: 'top', label: 'למעלה' },
-  { id: 'middle', label: 'באמצע' },
-  { id: 'bottom', label: 'למטה' },
+  { id: '', get label() { return t('כמו בטבלה') } },
+  { id: 'top', get label() { return t('למעלה') } },
+  { id: 'middle', get label() { return t('באמצע') } },
+  { id: 'bottom', get label() { return t('למטה') } },
 ]
 const SIDES = [
   ['top', 'עליון'], ['right', 'ימני'], ['bottom', 'תחתון'], ['left', 'שמאלי'],

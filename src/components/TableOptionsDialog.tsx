@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useFontCatalog } from '../fonts'
-import { setHeaderFooter, tableRows, type CellVAlign, type TableData, type TableStroke, type TableStyle } from '../table'
+import { setHeaderFooter, tableRows, withTableDirection, type CellVAlign, type TableData, type TableStroke, type TableStyle } from '../table'
 import { withoutFormulas } from '../tableFormulas'
 import type { TextAlign } from '../document'
 import { FontPicker } from './FontPicker'
@@ -15,15 +15,15 @@ interface Props {
 }
 
 const ALIGNS: { id: TextAlign; label: string }[] = [
-  { id: 'right', label: 'ימין' },
-  { id: 'center', label: 'מרכז' },
-  { id: 'left', label: 'שמאל' },
-  { id: 'justify', label: 'מיושר' },
+  { id: 'right', get label() { return t('ימין') } },
+  { id: 'center', get label() { return t('מרכז') } },
+  { id: 'left', get label() { return t('שמאל') } },
+  { id: 'justify', get label() { return t('מיושר') } },
 ]
 const VALIGNS: { id: CellVAlign; label: string }[] = [
-  { id: 'top', label: 'למעלה' },
-  { id: 'middle', label: 'באמצע' },
-  { id: 'bottom', label: 'למטה' },
+  { id: 'top', get label() { return t('למעלה') } },
+  { id: 'middle', get label() { return t('באמצע') } },
+  { id: 'bottom', get label() { return t('למטה') } },
 ]
 
 const number = (value: string, fallback: number) => (value.trim() !== '' && Number.isFinite(Number(value)) ? Number(value) : fallback)
@@ -33,8 +33,8 @@ function StrokeField({ label, value, onChange }: { label: string; value: TableSt
   return (
     <div className="table-dialog-row">
       <label className="dlg-check"><input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked ? last : null)} />{label}</label>
-      <input type="color" aria-label={`${label}: ${t('צבע')}`} disabled={!value} value={last.color} onChange={(e) => onChange({ ...last, color: e.target.value })} />
-      <input className="select table-dialog-number" type="number" step={0.25} min={0.1} max={40} aria-label={`${label}: ${t('עובי')}`} disabled={!value} value={last.width} onChange={(e) => onChange({ ...last, width: Math.min(40, Math.max(0.1, number(e.target.value, last.width))) })} />
+      <input type="color" aria-label={t('{label}: {n2}', { label, n2: t('צבע') })} disabled={!value} value={last.color} onChange={(e) => onChange({ ...last, color: e.target.value })} />
+      <input className="select table-dialog-number" type="number" step={0.25} min={0.1} max={40} aria-label={t('{label}: {n2}', { label, n2: t('עובי') })} disabled={!value} value={last.width} onChange={(e) => onChange({ ...last, width: Math.min(40, Math.max(0.1, number(e.target.value, last.width))) })} />
     </div>
   )
 }
@@ -44,8 +44,8 @@ function AlternateStrokeField({ label, value, onChange }: { label: string; value
   return (
     <div className="table-dialog-row">
       <label className="dlg-check"><input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked ? fallback : undefined)} />{label}</label>
-      <input type="color" aria-label={`${label}: ${t('צבע')}`} disabled={!value} value={fallback.color} onChange={(e) => onChange({ ...fallback, color: e.target.value })} />
-      <input className="select table-dialog-number" type="number" step={0.25} min={0.1} max={40} aria-label={`${label}: ${t('עובי')}`} disabled={!value} value={fallback.width} onChange={(e) => onChange({ ...fallback, width: Math.min(40, Math.max(0.1, number(e.target.value, fallback.width))) })} />
+      <input type="color" aria-label={t('{label}: {n2}', { label, n2: t('צבע') })} disabled={!value} value={fallback.color} onChange={(e) => onChange({ ...fallback, color: e.target.value })} />
+      <input className="select table-dialog-number" type="number" step={0.25} min={0.1} max={40} aria-label={t('{label}: {n2}', { label, n2: t('עובי') })} disabled={!value} value={fallback.width} onChange={(e) => onChange({ ...fallback, width: Math.min(40, Math.max(0.1, number(e.target.value, fallback.width))) })} />
     </div>
   )
 }
@@ -54,7 +54,7 @@ function FillField({ label, value, onChange }: { label: string; value: string | 
   return (
     <div className="table-dialog-row">
       <label className="dlg-check"><input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked ? '#e6e6e6' : null)} />{label}</label>
-      <input type="color" aria-label={`${label}: ${t('צבע')}`} disabled={!value} value={value ?? '#e6e6e6'} onChange={(e) => onChange(e.target.value)} />
+      <input type="color" aria-label={t('{label}: {n2}', { label, n2: t('צבע') })} disabled={!value} value={value ?? '#e6e6e6'} onChange={(e) => onChange(e.target.value)} />
     </div>
   )
 }
@@ -65,6 +65,7 @@ export function TableOptionsDialog({ table, hint, onApply, onClose }: Props) {
   const [style, setStyle] = useState<TableStyle>(table.style)
   const [headerRows, setHeaderRows] = useState(table.headerRows)
   const [footerRows, setFooterRows] = useState(table.footerRows)
+  const [ltr, setLtr] = useState(table.rtl === false)
   const catalog = useFontCatalog()
   const patch = (next: Partial<TableStyle>) => setStyle((current) => ({ ...current, ...next }))
 
@@ -77,7 +78,7 @@ export function TableOptionsDialog({ table, hint, onApply, onClose }: Props) {
   }, [onClose])
 
   const apply = () => {
-    const sized = setHeaderFooter({ ...table, style }, headerRows, footerRows)
+    const sized = withTableDirection(setHeaderFooter({ ...table, style }, headerRows, footerRows), ltr)
     if (calculation) return onApply({ ...sized, calculation: true })
     // a table that is not a calculation table has no formulas: what they showed stays as text
     const { calculation: _was, ...plain } = sized
@@ -95,6 +96,14 @@ export function TableOptionsDialog({ table, hint, onApply, onClose }: Props) {
           <input type="checkbox" checked={calculation} onChange={(e) => setCalculation(e.target.checked)} />{t('טבלת חישוב (נוסחאות בתאים)')}
         </label>
         {!calculation && hasFormulas && <p className="muted">{t('הנוסחאות שבטבלה יוסרו, והתוצאות שלהן יישארו בתאים כטקסט.')}</p>}
+
+        <h3 className="window-text-section">{t('כיוון הטבלה')}</h3>
+        <label className="field-label table-dialog-field" title={t('הכיוון קובע מאיזה צד מתחילות העמודות, ומחליף את היישור ימין ושמאל של הטקסט בתאים')}>{t('העמודות מתחילות מ')}
+          <select className="select" value={ltr ? 'ltr' : 'rtl'} onChange={(e) => setLtr(e.target.value === 'ltr')}>
+            <option value="rtl">{t('הצד הימני (עברית, ערבית)')}</option>
+            <option value="ltr">{t('הצד השמאלי (אנגלית)')}</option>
+          </select>
+        </label>
 
         <h3 className="window-text-section">{t('שורות')}</h3>
         <div className="table-dialog-grid">

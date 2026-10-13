@@ -44,7 +44,7 @@ const RTL_LETTERS = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/
 const ARABIC_LETTERS = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/
 
 /** what is not text: the markers some features write into a story */
-const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u200b\ufeff\ufffc]/g, '').replace(/\u2028/g, '\n')
+const clean = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u00ad\u200b\ufeff\ufffc]/g, '').replace(/\u2028/g, '\n')
 
 const baseOf = (frame: TextFrame): CharStyle => ({ fontFamily: frame.fontFamily, fontSize: frame.fontSize, weight: frame.weight, italic: frame.italic, tracking: frame.tracking, color: frame.color })
 

@@ -4,6 +4,7 @@ import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab, tintHex, 
 import { FillPicker } from './FillPicker'
 import { ColorLibrary } from './ColorLibrary'
 import { Group } from './PropertiesPanel'
+import { t } from '../i18n'
 
 interface Props {
   tool: 'color' | 'gradient' | 'swatches'
@@ -85,7 +86,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
     setColor(targetColor)
   }, [target, textTargetColor, textColorTarget])
 
-  const title = tool === 'color' ? 'צבע' : tool === 'gradient' ? 'מעבר צבע' : 'דוגמיות צבע'
+  const title = tool === 'color' ? t('צבע') : tool === 'gradient' ? t('מעבר צבע') : t('דוגמיות צבע')
   const applyColor = (next: string | null, tintValue = tint) => {
     setBaseColor(next)
     setColor(next ?? '#000000')
@@ -189,7 +190,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
     setDeleteStopIndex(null)
     if (deleteStop) removeStop(index)
   }
-  const addSwatch = () => setSwatches((current) => [...current, { name: `צבע ${current.length + 1}`, color, kind: 'תהליך', global: false }])
+  const addSwatch = () => setSwatches((current) => [...current, { name: t('צבע {n1}', { n1: current.length + 1 }), color, kind: 'תהליך', global: false }])
   const applySwatch = (swatch: Swatch) => applyColor(swatch.color)
 
   const rgb = hexToRgb(color)
@@ -208,75 +209,75 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
     }
   }
   const values = model === 'CMYK'
-    ? [{ key: 'cyan', label: 'ציאן', value: cmyk.cyan, max: 100 }, { key: 'magenta', label: 'מג׳נטה', value: cmyk.magenta, max: 100 }, { key: 'yellow', label: 'צהוב', value: cmyk.yellow, max: 100 }, { key: 'black', label: 'שחור', value: cmyk.black, max: 100 }]
+    ? [{ key: 'cyan', get label() { return t('ציאן') }, value: cmyk.cyan, max: 100 }, { key: 'magenta', get label() { return t('מג׳נטה') }, value: cmyk.magenta, max: 100 }, { key: 'yellow', get label() { return t('צהוב') }, value: cmyk.yellow, max: 100 }, { key: 'black', get label() { return t('שחור') }, value: cmyk.black, max: 100 }]
     : model === 'RGB'
-      ? [{ key: 'red', label: 'אדום', value: rgb.red, max: 255 }, { key: 'green', label: 'ירוק', value: rgb.green, max: 255 }, { key: 'blue', label: 'כחול', value: rgb.blue, max: 255 }]
-      : [{ key: 'lightness', label: 'בהירות', value: lab.lightness, max: 100 }, { key: 'a', label: 'A', value: lab.a, max: 128 }, { key: 'b', label: 'B', value: lab.b, max: 128 }]
+      ? [{ key: 'red', get label() { return t('אדום') }, value: rgb.red, max: 255 }, { key: 'green', get label() { return t('ירוק') }, value: rgb.green, max: 255 }, { key: 'blue', get label() { return t('כחול') }, value: rgb.blue, max: 255 }]
+      : [{ key: 'lightness', get label() { return t('בהירות') }, value: lab.lightness, max: 100 }, { key: 'a', label: 'A', value: lab.a, max: 128 }, { key: 'b', label: 'B', value: lab.b, max: 128 }]
 
   return (
     <aside className="props-panel color-tools-panel" aria-label={title}>
       <h2 className="props-title">{title}</h2>
-      <Group title="דגימות שנדגמו">
-        <button className="btn small color-sample-start" onClick={onStartSampler}>{brushColor ? 'דגום צבע אחר' : 'דגום צבע'}</button>
+      <Group title={t('דגימות שנדגמו')}>
+        <button className="btn small color-sample-start" onClick={onStartSampler}>{brushColor ? t('דגום צבע אחר') : t('דגום צבע')}</button>
         {brushColor && (
           <div className="color-brush-active">
             <span className="color-sample-chip" style={{ background: brushColor }} />
-            <span>מברשת פעילה — גרור על תמונה</span>
-            <button className="btn small" onClick={onExitBrush}>סיום</button>
+            <span>{t('מברשת פעילה — גרור על תמונה')}</span>
+            <button className="btn small" onClick={onExitBrush}>{t('סיום')}</button>
           </div>
         )}
         {brushColor && onBrushRadiusChange && (
           <label className="color-brush-size">
-            <span>גודל המברשת</span>
-            <input aria-label="גודל המברשת" type="range" min="1" max="400" value={Math.min(400, brushRadius)} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
+            <span>{t('גודל המברשת')}</span>
+            <input aria-label={t('גודל המברשת')} type="range" min="1" max="400" value={Math.min(400, brushRadius)} onChange={(event) => onBrushRadiusChange(Number(event.currentTarget.value))} />
             <output>{brushRadius}</output>
           </label>
         )}
         {brushColor && onBrushStrengthChange && (
           <label className="color-brush-size">
-            <span>חוזק הצבע</span>
-            <input aria-label="חוזק הצבע" type="range" min="0" max="100" value={brushStrength} onChange={(event) => onBrushStrengthChange(Number(event.currentTarget.value))} />
+            <span>{t('חוזק הצבע')}</span>
+            <input aria-label={t('חוזק הצבע')} type="range" min="0" max="100" value={brushStrength} onChange={(event) => onBrushStrengthChange(Number(event.currentTarget.value))} />
             <output>{brushStrength}%</output>
           </label>
         )}
-        {samples.length === 0 ? <p className="muted color-samples-empty">אין דגימות במסמך.</p> : (
+        {samples.length === 0 ? <p className="muted color-samples-empty">{t('אין דגימות במסמך.')}</p> : (
           <div className="color-samples-list">
             {samples.map((sample) => (
               <div className="color-sample-row" key={sample.id}>
                 <button className={`color-sample-apply${brushColor === sample.color ? ' brush-selected' : ''}`} aria-pressed={brushColor === sample.color} draggable onDragStart={(event) => { event.dataTransfer.setData('application/x-imudist-color', sample.color); event.dataTransfer.setData('text/plain', sample.color); event.dataTransfer.effectAllowed = 'copy' }} onClick={() => {
                   if (brushColor) onSelectBrushColor(sample.color)
                   else { setTint(100); applyColor(sample.color, 100) }
-                }} title={brushColor ? `בחר ${sample.color} למברשת` : `החל ${sample.color}`}>
+                }} title={brushColor ? t('בחר {n1} למברשת', { n1: sample.color }) : t('החל {n1}', { n1: sample.color })}>
                   <span className="color-sample-chip" style={{ background: sample.color }} />
                   <span className="color-sample-label">{sample.label}</span>
                   <bdi className="color-sample-hex" dir="ltr">{sample.color}</bdi>
                 </button>
-                <button className="icon-button color-sample-delete" aria-label={`מחק דגימה ${sample.label}`} title="מחק דגימה" onClick={() => onDeleteSample(sample.id)}>×</button>
+                <button className="icon-button color-sample-delete" aria-label={t('מחק דגימה {n1}', { n1: sample.label })} title={t('מחק דגימה')} onClick={() => onDeleteSample(sample.id)}>×</button>
               </div>
             ))}
           </div>
         )}
       </Group>
-      {shapeTargets.length > 1 && <p className="muted">השינוי יחול על {shapeTargets.length} הצורות שנבחרו.</p>}
-      {!targetShape && !isTextTarget && tool !== 'gradient' ? <p className="muted">צבע שנבחר יחול על הצורה הבאה שתיצור.</p> : tool === 'gradient' && isTextTarget ? (
-        <Group title="מעבר צבע"><p className="muted">מעבר צבע זמין לצורות; צבע הטקסט הנבחר הוא אחיד.</p></Group>
+      {shapeTargets.length > 1 && <p className="muted">{t('השינוי יחול על {count} הצורות שנבחרו.', { count: shapeTargets.length })}</p>}
+      {!targetShape && !isTextTarget && tool !== 'gradient' ? <p className="muted">{t('צבע שנבחר יחול על הצורה הבאה שתיצור.')}</p> : tool === 'gradient' && isTextTarget ? (
+        <Group title={t('מעבר צבע')}><p className="muted">{t('מעבר צבע זמין לצורות; צבע הטקסט הנבחר הוא אחיד.')}</p></Group>
       ) : tool === 'gradient' ? (
         <>
-        <Group title="מעבר צבע">
-          <label className="field-label" htmlFor="gradient-type">סוג מעבר</label>
+        <Group title={t('מעבר צבע')}>
+          <label className="field-label" htmlFor="gradient-type">{t('סוג מעבר')}</label>
           <select id="gradient-type" className="select" value={gradient.type} onChange={(e) => updateGradient({ type: e.target.value as GradientFill['type'] })}>
-            <option value="linear">קווי</option>
-            <option value="radial">מעגלי</option>
+            <option value="linear">{t('קווי')}</option>
+            <option value="radial">{t('מעגלי')}</option>
           </select>
           <div className="gradient-preview" style={{ background: gradient.type === 'radial'
             ? `radial-gradient(${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})`
             : `linear-gradient(${90 - (gradient.angle ?? 0) + (gradient.reverse ? 180 : 0)}deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }} />
-          {gradient.type === 'linear' && <label className="field-label" htmlFor="gradient-angle">זווית: {gradient.angle ?? 0}°</label>}
-          {gradient.type === 'linear' && <input id="gradient-angle" type="range" min={0} max={359} value={((gradient.angle ?? 0) + 360) % 360} onChange={(e) => updateGradient({ angle: Number(e.target.value) })} aria-label="זווית מעבר הצבע" />}
+          {gradient.type === 'linear' && <label className="field-label" htmlFor="gradient-angle">{t('זווית: {angle}°', { angle: gradient.angle ?? 0 })}</label>}
+          {gradient.type === 'linear' && <input id="gradient-angle" type="range" min={0} max={359} value={((gradient.angle ?? 0) + 360) % 360} onChange={(e) => updateGradient({ angle: Number(e.target.value) })} aria-label={t('זווית מעבר הצבע')} />}
           <div
             className={'gradient-ramp' + (dragOverRamp ? ' drag-over' : '')}
             style={{ background: `linear-gradient(90deg, ${(gradient.stops ?? []).map((stop) => `${stop.color} ${stop.offset * 100}%`).join(', ')})` }}
-            aria-label="רמפת מעבר צבע"
+            aria-label={t('רמפת מעבר צבע')}
             onDragOver={(event) => {
               if (!event.dataTransfer.types.includes('application/x-imudist-color') && !event.dataTransfer.types.includes('text/plain')) return
               event.preventDefault()
@@ -299,10 +300,10 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
                 key={index}
                 className={'gradient-stop' + (deleteStopIndex === index ? ' delete-armed' : '')}
                 style={{ left: `${stop.offset * 100}%`, background: stop.color }}
-                title={deleteStopIndex === index ? 'שחרר כדי למחוק עצירה' : `עצירה ${index + 1} · ${Math.round(stop.offset * 100)}%`}
+                title={deleteStopIndex === index ? t('שחרר כדי למחוק עצירה') : t('עצירה {n1} · {n2}%', { n1: index + 1, n2: Math.round(stop.offset * 100) })}
                 role="slider"
                 tabIndex={0}
-                aria-label={`מיקום עצירה ${index + 1}`}
+                aria-label={t('מיקום עצירה {n1}', { n1: index + 1 })}
                 aria-valuemin={Math.round((gradient.stops?.[index - 1]?.offset ?? 0) * 100)}
                 aria-valuemax={Math.round((gradient.stops?.[index + 1]?.offset ?? 1) * 100)}
                 aria-valuenow={Math.round(stop.offset * 100)}
@@ -331,59 +332,59 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
           <div className="gradient-stop-list">
             {(gradient.stops ?? []).map((stop, index) => (
               <div className="gradient-stop-editor" key={`${index}-editor`}>
-                <input type="color" value={stop.color} onChange={(e) => updateStop(index, { color: e.target.value })} aria-label={`צבע עצירה ${index + 1}`} />
-                <input type="number" min={0} max={100} value={Math.round(stop.offset * 100)} onChange={(e) => updateStop(index, { offset: Number(e.target.value) / 100 })} aria-label={`מיקום עצירה ${index + 1}`} />
-                {(gradient.stops?.length ?? 0) > 2 && <button className="icon-button" onClick={() => removeStop(index)} aria-label="מחק עצירה">×</button>}
+                <input type="color" value={stop.color} onChange={(e) => updateStop(index, { color: e.target.value })} aria-label={t('צבע עצירה {n1}', { n1: index + 1 })} />
+                <input type="number" min={0} max={100} value={Math.round(stop.offset * 100)} onChange={(e) => updateStop(index, { offset: Number(e.target.value) / 100 })} aria-label={t('מיקום עצירה {n1}', { n1: index + 1 })} />
+                {(gradient.stops?.length ?? 0) > 2 && <button className="icon-button" onClick={() => removeStop(index)} aria-label={t('מחק עצירה')}>×</button>}
               </div>
             ))}
           </div>
-          <div className="props-buttons"><button className="btn small" onClick={addStop}>הוסף עצירה</button></div>
-          <label className="page-bar-check"><input type="checkbox" checked={!!gradient.reverse} onChange={(e) => updateGradient({ reverse: e.target.checked })} />הפוך מעבר</label>
+          <div className="props-buttons"><button className="btn small" onClick={addStop}>{t('הוסף עצירה')}</button></div>
+          <label className="page-bar-check"><input type="checkbox" checked={!!gradient.reverse} onChange={(e) => updateGradient({ reverse: e.target.checked })} />{t('הפוך מעבר')}</label>
         </Group>
-        <Group title="ספריית מעברים">
+        <Group title={t('ספריית מעברים')}>
           <ColorLibrary mode="gradients" onGradient={(next) => updateGradient(next)} />
         </Group>
         </>
       ) : (
         <>
-          <Group title={isTextTarget ? 'יעד צבע' : 'מילוי וקו'}>
-            {isTextTarget ? <div className="seg small" role="radiogroup" aria-label="החל צבע על טקסט">
-              <button role="radio" aria-checked={textColorTarget === 'fill'} className={textColorTarget === 'fill' ? 'on' : ''} onClick={() => onTextColorTarget?.('fill')}>מילוי</button>
-              <button role="radio" aria-checked={textColorTarget === 'outline'} className={textColorTarget === 'outline' ? 'on' : ''} onClick={() => onTextColorTarget?.('outline')}>קו מתאר</button>
-            </div> : <div className="seg small" role="radiogroup" aria-label="החל צבע על">
-                <button role="radio" aria-checked={target === 'fill'} className={target === 'fill' ? 'on' : ''} onClick={() => onTarget('fill')}>מילוי</button>
-              <button role="radio" aria-checked={target === 'stroke'} className={target === 'stroke' ? 'on' : ''} onClick={() => onTarget('stroke')}>קו</button>
+          <Group title={isTextTarget ? t('יעד צבע') : t('מילוי וקו')}>
+            {isTextTarget ? <div className="seg small" role="radiogroup" aria-label={t('החל צבע על טקסט')}>
+              <button role="radio" aria-checked={textColorTarget === 'fill'} className={textColorTarget === 'fill' ? 'on' : ''} onClick={() => onTextColorTarget?.('fill')}>{t('מילוי')}</button>
+              <button role="radio" aria-checked={textColorTarget === 'outline'} className={textColorTarget === 'outline' ? 'on' : ''} onClick={() => onTextColorTarget?.('outline')}>{t('קו מתאר')}</button>
+            </div> : <div className="seg small" role="radiogroup" aria-label={t('החל צבע על')}>
+                <button role="radio" aria-checked={target === 'fill'} className={target === 'fill' ? 'on' : ''} onClick={() => onTarget('fill')}>{t('מילוי')}</button>
+              <button role="radio" aria-checked={target === 'stroke'} className={target === 'stroke' ? 'on' : ''} onClick={() => onTarget('stroke')}>{t('קו')}</button>
             </div>}
           </Group>
-          <Group title="מודל צבע">
+          <Group title={t('מודל צבע')}>
             <select className="select" value={model} onChange={(e) => setModel(e.target.value as ColorModel)}>
-              <option value="CMYK">CMYK — דפוס</option>
-              <option value="RGB">RGB — מסך</option>
-              <option value="LAB">LAB — דיוק חזותי</option>
+              <option value="CMYK">{t('CMYK — דפוס')}</option>
+              <option value="RGB">{t('RGB — מסך')}</option>
+              <option value="LAB">{t('LAB — דיוק חזותי')}</option>
             </select>
             <div className="color-values">
               {values.map((entry) => <label key={entry.key}>{entry.label}<input type="number" min={-128} max={entry.max} value={Math.round(entry.value)} onChange={(e) => setModelValue(entry.key, Number(e.target.value))} /></label>)}
             </div>
-            <label className="color-hex">ערך מסך <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} /></label>
-            <label className="field-label" htmlFor="color-tint">גוון: {tint}%</label>
+            <label className="color-hex">{t('ערך מסך')} <input type="color" value={color} onChange={(e) => applyColor(e.target.value)} /></label>
+            <label className="field-label" htmlFor="color-tint">{t('גוון: {percent}%', { percent: tint })}</label>
             <input id="color-tint" type="range" min={0} max={100} value={tint} onChange={(e) => applyTint(Number(e.target.value))} />
-            {!isTextTarget && <><label className="field-label" htmlFor="color-opacity">שקיפות: {Math.round(opacity * 100)}%</label>
+            {!isTextTarget && <><label className="field-label" htmlFor="color-opacity">{t('שקיפות: {percent}%', { percent: Math.round(opacity * 100) })}</label>
             <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} /></>}
           </Group>
-          <Group title="דוגמיות צבע">
-            <FillPicker label="דוגמיות צבע" value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
+          <Group title={t('דוגמיות צבע')}>
+            <FillPicker label={t('דוגמיות צבע')} value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
           </Group>
         </>
       )}
       {tool === 'swatches' && (targetShape || isTextTarget) && <>
-        <Group title="ספריית צבעים">
+        <Group title={t('ספריית צבעים')}>
           <ColorLibrary mode={isTextTarget ? 'solids' : 'all'} onColor={(next) => applyColor(next)} onGradient={(next) => { onTarget('fill'); updateGradient(next) }} />
         </Group>
-        <Group title="דוגמיות המסמך">
+        <Group title={t('דוגמיות המסמך')}>
           <div className="swatches-manager">
-            {swatches.map((swatch) => <button key={swatch.name} className="managed-swatch" title={`${swatch.kind}${swatch.global ? ' · גלובלי' : ''}`} onClick={() => applySwatch(swatch)}><span style={{ background: swatch.color ?? 'transparent' }} />{swatch.name}</button>)}
+            {swatches.map((swatch) => <button key={swatch.name} className="managed-swatch" title={`${t(swatch.kind)}${swatch.global ? t(' · גלובלי') : ''}`} onClick={() => applySwatch(swatch)}><span style={{ background: swatch.color ?? 'transparent' }} />{t(swatch.name)}</button>)}
           </div>
-          <button className="btn small" onClick={addSwatch}>הוסף את הצבע הנוכחי</button>
+          <button className="btn small" onClick={addSwatch}>{t('הוסף את הצבע הנוכחי')}</button>
         </Group>
       </>}
     </aside>

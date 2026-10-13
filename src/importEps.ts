@@ -3,6 +3,7 @@ import { getDocument, GlobalWorkerOptions, OPS } from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PathGeom, PathVertex } from './document'
 import { ImportError } from './importText'
+import { t } from './i18n'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -127,7 +128,7 @@ export function pathDataToShapes(pathData: string, paint: SvgPaint, transform: M
     .qtToC()
     .aToC()
     .matrix(...transform).commands
-  if (commands.length > MAX_COMMANDS) throw new ImportError('נתיב EPS מורכב מדי לייבוא כצורה עריכה.')
+  if (commands.length > MAX_COMMANDS) throw new ImportError(t('נתיב EPS מורכב מדי לייבוא כצורה עריכה.'))
 
   const rings: Ring[] = []
   let vertices: PathVertex[] = []
@@ -184,7 +185,7 @@ function drawOpsToPath(data: ArrayLike<number>): string {
     else if (operation === 2) path += `C${data[index++]} ${data[index++]} ${data[index++]} ${data[index++]} ${data[index++]} ${data[index++]}`
     else if (operation === 3) path += `Q${data[index++]} ${data[index++]} ${data[index++]} ${data[index++]}`
     else if (operation === 4) path += 'Z'
-    else throw new ImportError(`נתיב PDF מכיל פקודת ציור לא מוכרת (${operation}).`)
+    else throw new ImportError(t('נתיב PDF מכיל פקודת ציור לא מוכרת ({operation}).', { operation }))
   }
   return path
 }
@@ -275,9 +276,9 @@ export function pdfOperatorListToShapes(
     }
     const shapeTransform = multiply(pageTransform, state.transform)
     shapes.push(...pathDataToShapes(pathData, paint, shapeTransform, createId))
-    if (shapes.length > MAX_PATHS) throw new ImportError('קובץ ה-EPS מכיל יותר מדי צורות לייבוא.')
+    if (shapes.length > MAX_PATHS) throw new ImportError(t('קובץ ה-EPS מכיל יותר מדי צורות לייבוא.'))
   }
-  if (!shapes.length) throw new ImportError('לא נמצאו נתיבי ציור נתמכים בקובץ ה-EPS.')
+  if (!shapes.length) throw new ImportError(t('לא נמצאו נתיבי ציור נתמכים בקובץ ה-EPS.'))
   return shapes
 }
 
@@ -299,15 +300,15 @@ export class GhostscriptMissingError extends ImportError {
   constructor() {
     super(
       [
-        'לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.',
+        t('לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.'),
         '',
-        'מה עושים:',
-        '1. לוחצים על „הורדת Ghostscript”. האתר הרשמי של התוכנה ייפתח בדפדפן.',
-        '2. בדף שנפתח מורידים את הגרסה „Windows (64 bit)”.',
-        '3. מפעילים את הקובץ שהורד ומאשרים את ההתקנה, בלי לשנות את תיקיית ההתקנה המוצעת.',
-        '4. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.',
+        t('מה עושים:'),
+        t('1. לוחצים על „הורדת Ghostscript”. האתר הרשמי של התוכנה ייפתח בדפדפן.'),
+        t('2. בדף שנפתח מורידים את הגרסה „Windows (64 bit)”.'),
+        t('3. מפעילים את הקובץ שהורד ומאשרים את ההתקנה, בלי לשנות את תיקיית ההתקנה המוצעת.'),
+        t('4. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.'),
         '',
-        'אם בחרתם תיקיית התקנה אחרת, הוסיפו את תיקיית bin שלה למשתנה PATH והפעילו את Imudist מחדש.',
+        t('אם בחרתם תיקיית התקנה אחרת, הוסיפו את תיקיית bin שלה למשתנה PATH והפעילו את Imudist מחדש.'),
       ].join('\n'),
     )
   }
@@ -324,8 +325,8 @@ export async function openGhostscriptDownload(): Promise<void> {
 }
 
 export async function readEpsFile(file: File): Promise<VectorShapeData[]> {
-  if (file.size > MAX_EPS_BYTES) throw new ImportError('קובץ ה-EPS גדול מדי (מעל 50MB).')
-  if (!('__TAURI_INTERNALS__' in window)) throw new ImportError('ייבוא EPS זמין ביישום שולחני עם Ghostscript מותקן.')
+  if (file.size > MAX_EPS_BYTES) throw new ImportError(t('קובץ ה-EPS גדול מדי (מעל 50MB).'))
+  if (!('__TAURI_INTERNALS__' in window)) throw new ImportError(t('ייבוא EPS זמין ביישום שולחני עם Ghostscript מותקן.'))
   const bytes = new Uint8Array(await file.arrayBuffer())
   const { invoke } = await import('@tauri-apps/api/core')
   let pdfBase64: string
@@ -344,7 +345,7 @@ export async function readEpsFile(file: File): Promise<VectorShapeData[]> {
     const operators = await page.getOperatorList()
     return pdfOperatorListToShapes(page.view, operators.fnArray, operators.argsArray)
   } catch (error) {
-    throw new ImportError(`לא ניתן לפרק את הצורות בקובץ ה-EPS: ${error instanceof Error ? error.message : 'שגיאת PDF לא צפויה.'}`)
+    throw new ImportError(t('לא ניתן לפרק את הצורות בקובץ ה-EPS: {message}', { message: error instanceof Error ? error.message : t('שגיאת PDF לא צפויה.') }))
   } finally {
     await loading.destroy().catch(() => {})
   }

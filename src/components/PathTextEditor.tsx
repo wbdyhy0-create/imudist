@@ -1,5 +1,6 @@
 import type { Run } from '../document'
 import { RichEditor, type SelRequest } from './RichEditor'
+import { t } from '../i18n'
 
 interface Props {
   text: string
@@ -18,10 +19,10 @@ const noop = () => {}
  */
 export function PathTextEditor({ text, runs, request, onEdit, onSelect, onStop }: Props) {
   return (
-    <div className="pathtext-editor" role="group" aria-label="עריכת טקסט על הקו">
+    <div className="pathtext-editor" role="group" aria-label={t('עריכת טקסט על הקו')}>
       <div className="pathtext-editor-head">
-        <span>טקסט על הקו</span>
-        <span className="muted">הקלד או הדבק כאן — הטקסט מופיע על קו הצורה. סמן חלק מהטקסט כדי לשנות רק אותו. Esc = סיום.</span>
+        <span>{t('טקסט על הקו')}</span>
+        <span className="muted">{t('הקלד או הדבק כאן — הטקסט מופיע על קו הצורה. סמן חלק מהטקסט כדי לשנות רק אותו. Esc = סיום.')}</span>
       </div>
       <div className="pathtext-editor-body">
         <RichEditor text={text} runs={runs} scale={1} floats={[]} hasPrev={false} request={request} onEdit={onEdit} onSelect={onSelect} onBackspaceAtStart={noop} onCopyText={() => null} onStop={onStop} />

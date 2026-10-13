@@ -25,21 +25,21 @@ interface Props {
 
 type ExportTab = 'general' | 'marks' | 'color' | 'vector'
 const TABS: { id: ExportTab; label: string }[] = [
-  { id: 'general', label: 'כללי' },
-  { id: 'marks', label: 'סימני דפוס' },
-  { id: 'color', label: 'צבע' },
-  { id: 'vector', label: 'טקסט וצורות' },
+  { id: 'general', get label() { return t('כללי') } },
+  { id: 'marks', get label() { return t('סימני דפוס') } },
+  { id: 'color', get label() { return t('צבע') } },
+  { id: 'vector', get label() { return t('טקסט וצורות') } },
 ]
 
 const DPI_OPTIONS = [
-  { dpi: 300, label: 'איכות גבוהה להדפסה (300 DPI)' },
-  { dpi: 150, label: 'איכות מסך / שליחה דיגיטלית (150 DPI)' },
-  { dpi: 600, label: 'איכות גבוהה במיוחד (600 DPI, קובץ גדול)' },
+  { dpi: 300, get label() { return t('איכות גבוהה להדפסה (300 DPI)') } },
+  { dpi: 150, get label() { return t('איכות מסך / שליחה דיגיטלית (150 DPI)') } },
+  { dpi: 600, get label() { return t('איכות גבוהה במיוחד (600 DPI, קובץ גדול)') } },
 ]
 const HIGH_DPI_NOTE = 'ב-600 DPI כל עמוד גדול פי ארבעה מ-300 DPI: הייצוא איטי והקובץ גדול (וצורך הרבה זיכרון). כדאי להשתמש בזה לעמודים בודדים או לטווח קטן, למשל לעמוד עם טקסט מנוקד שצריך להיות חד בדפוס.'
 const COLOR_MODES = [
-  { mode: 'rgb' as const, label: 'RGB — למסך ולשליחה דיגיטלית' },
-  { mode: 'cmyk' as const, label: 'CMYK — להדפסה בדפוס' },
+  { mode: 'rgb' as const, get label() { return t('RGB — למסך ולשליחה דיגיטלית') } },
+  { mode: 'cmyk' as const, get label() { return t('CMYK — להדפסה בדפוס') } },
 ]
 const CMYK_NOTE = 'הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.'
 
@@ -243,14 +243,14 @@ export function VectorSummary({ report }: { report: VectorReport }) {
   const shapeReasons = Object.entries(report.shapeReasons) as [ShapePictureReason, number][]
   /** a whole sentence for one and another for many, so that each language agrees as it needs to */
   const counted = (count: number, one: string, many: string) => (count === 1 ? t(one) : t(many, { count }))
-  const boxes = (count: number) => counted(count, 'תיבה אחת', '{count} תיבות')
-  const shapes = (count: number) => counted(count, 'צורה אחת', '{count} צורות')
+  const boxes = (count: number) => counted(count, t('תיבה אחת'), t('{count} תיבות'))
+  const shapes = (count: number) => counted(count, t('צורה אחת'), t('{count} צורות'))
   const shapesText = [
-    report.shapes > 0 ? counted(report.shapes, 'צורה אחת יצאה כצורה', '{count} צורות יצאו כצורות') : t('אף צורה לא יצאה כצורה'),
-    report.shapesPicture > 0 ? counted(report.shapesPicture, 'צורה אחת נשארה כתמונה', '{count} צורות נשארו כתמונה') : '',
+    report.shapes > 0 ? counted(report.shapes, t('צורה אחת יצאה כצורה'), t('{count} צורות יצאו כצורות')) : t('אף צורה לא יצאה כצורה'),
+    report.shapesPicture > 0 ? counted(report.shapesPicture, t('צורה אחת נשארה כתמונה'), t('{count} צורות נשארו כתמונה')) : '',
   ].filter(Boolean).join(', ')
   const imagesText = [
-    report.images > 0 ? counted(report.images, 'תמונה אחת הוכנסה כתמונה נפרדת', '{count} תמונות הוכנסו כתמונות נפרדות') : t('אף תמונה לא הוכנסה כתמונה נפרדת'),
+    report.images > 0 ? counted(report.images, t('תמונה אחת הוכנסה כתמונה נפרדת'), t('{count} תמונות הוכנסו כתמונות נפרדות')) : t('אף תמונה לא הוכנסה כתמונה נפרדת'),
     report.imagesPicture > 0
       ? `${counted(report.imagesPicture, 'תמונה אחת נשארה חלק מתמונת העמוד', '{count} תמונות נשארו חלק מתמונת העמוד')} ${t('(צל או טשטוש קצוות)')}`
       : '',

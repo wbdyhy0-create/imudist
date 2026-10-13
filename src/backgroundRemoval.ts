@@ -4,6 +4,7 @@ import { hashId } from './assetHash'
 import modelUrl from './assets/birefnet-lite-512.onnx?url'
 import { makeInputTensorData, stableSigmoid } from './backgroundRemovalMath'
 import { cleanEdges } from './backgroundEdges'
+import { t } from './i18n'
 
 const MODEL_SIZE = 512
 
@@ -18,7 +19,7 @@ function createCanvas(width: number, height: number) {
   canvas.width = width
   canvas.height = height
   const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) throw new Error('הדפדפן לא הצליח להכין משטח עיבוד לתמונה.')
+  if (!context) throw new Error(t('הדפדפן לא הצליח להכין משטח עיבוד לתמונה.'))
   return { canvas, context }
 }
 
@@ -26,7 +27,7 @@ function loadImage(dataUrl: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
     image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('לא ניתן לפתוח את התמונה לעיבוד.'))
+    image.onerror = () => reject(new Error(t('לא ניתן לפתוח את התמונה לעיבוד.')))
     image.src = dataUrl
   })
 }
@@ -62,7 +63,7 @@ async function runInference(input: Tensor) {
     const outputs = await session.run({ [session.inputNames[0]]: input })
     const output = outputs[session.outputNames[0]]
     if (!output || !(output.data instanceof Float32Array) || output.data.length !== MODEL_SIZE * MODEL_SIZE) {
-      throw new Error('המודל החזיר מסיכה בפורמט לא צפוי.')
+      throw new Error(t('המודל החזיר מסיכה בפורמט לא צפוי.'))
     }
     return output.data
   }
@@ -82,8 +83,8 @@ function blobAsDataUrl(blob: Blob) {
     const reader = new FileReader()
     reader.onload = () => typeof reader.result === 'string'
       ? resolve(reader.result)
-      : reject(new Error('לא ניתן לקרוא את תמונת ה-PNG שנוצרה.'))
-    reader.onerror = () => reject(reader.error ?? new Error('לא ניתן לקרוא את תמונת ה-PNG שנוצרה.'))
+      : reject(new Error(t('לא ניתן לקרוא את תמונת ה-PNG שנוצרה.')))
+    reader.onerror = () => reject(reader.error ?? new Error(t('לא ניתן לקרוא את תמונת ה-PNG שנוצרה.')))
     reader.readAsDataURL(blob)
   })
 }
@@ -92,7 +93,7 @@ function toPngBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob)
-      else reject(new Error('לא ניתן ליצור קובץ PNG עם רקע שקוף.'))
+      else reject(new Error(t('לא ניתן ליצור קובץ PNG עם רקע שקוף.')))
     }, 'image/png')
   })
 }
@@ -104,13 +105,13 @@ export interface RemoveBackgroundOptions {
 
 export async function removeImageBackground(asset: Asset, options: RemoveBackgroundOptions = {}): Promise<{ assetId: string; asset: Asset }> {
   if (asset.mime === 'image/gif') {
-    throw new Error('הסרת הרקע מתמונות GIF אינה נתמכת כדי לא לאבד את האנימציה.')
+    throw new Error(t('הסרת הרקע מתמונות GIF אינה נתמכת כדי לא לאבד את האנימציה.'))
   }
-  if (!asset.dataUrl) throw new Error('נתוני התמונה אינם זמינים לעיבוד.')
+  if (!asset.dataUrl) throw new Error(t('נתוני התמונה אינם זמינים לעיבוד.'))
 
   const image = await loadImage(asset.dataUrl)
   const { naturalWidth: width, naturalHeight: height } = image
-  if (!width || !height) throw new Error('לתמונה אין מידות תקינות.')
+  if (!width || !height) throw new Error(t('לתמונה אין מידות תקינות.'))
 
   const input = createCanvas(MODEL_SIZE, MODEL_SIZE)
   input.context.fillStyle = '#fff'
@@ -146,13 +147,13 @@ export async function removeImageBackground(asset: Asset, options: RemoveBackgro
   }
   const blob = await toPngBlob(output.canvas)
   if (blob.size > MAX_IMAGE_BYTES) {
-    throw new Error('תמונת ה-PNG שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.')
+    throw new Error(t('תמונת ה-PNG שנוצרה גדולה מ-50MB. הקטינו את התמונה ונסו שוב.'))
   }
 
   const bytes = await blob.arrayBuffer()
   const baseName = asset.name.replace(/\.[^.]+$/, '') || 'image'
   const result: Asset = {
-    name: `${baseName}-רקע-שקוף.png`,
+    name: t('{baseName}-רקע-שקוף.png', { baseName }),
     mime: 'image/png',
     dataUrl: await blobAsDataUrl(blob),
     width,

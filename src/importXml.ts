@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { XMLParser, XMLValidator } from 'fast-xml-parser'
 import { DEFAULT_TEXT_STYLE, type Run } from './document'
 import { alignFor, ImportError, type ImportedParagraphStyle, type PlacedText } from './importText'
@@ -117,13 +118,13 @@ function normalized(pieces: Piece[]): Piece[] {
 
 export function placedFromXml(name: string, raw: string): PlacedText {
   const source = raw.replace(/^﻿/, '')
-  if (/<!ENTITY/i.test(source)) throw new ImportError('קובץ XML שמגדיר ישויות (ENTITY) אינו נתמך.')
+  if (/<!ENTITY/i.test(source)) throw new ImportError(t('קובץ XML שמגדיר ישויות (ENTITY) אינו נתמך.'))
   const valid = XMLValidator.validate(source)
-  if (valid !== true) throw new ImportError(`קובץ ה-XML אינו תקין (שורה ${valid.err.line}).`)
+  if (valid !== true) throw new ImportError(t('קובץ ה-XML אינו תקין (שורה {line}).', { line: valid.err.line }))
   const found: Paragraph[] = []
   collect(toNodes(parser.parse(source)), found)
   const lines = found.map((paragraph) => ({ tag: paragraph.tag, pieces: normalized(paragraph.pieces) })).filter((line) => line.pieces.length > 0)
-  if (lines.length === 0) throw new ImportError('לא נמצא טקסט בקובץ ה-XML.')
+  if (lines.length === 0) throw new ImportError(t('לא נמצא טקסט בקובץ ה-XML.'))
 
   const text = lines.map((line) => line.pieces.map((piece) => piece.text).join('')).join('\n')
   const style = { ...DEFAULT_TEXT_STYLE, align: alignFor(text) }

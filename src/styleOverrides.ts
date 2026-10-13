@@ -8,7 +8,7 @@ type Look = ParagraphStyleRecord['patch']
 const CHAR_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'color', 'tracking', 'outlineColor', 'outlineWidth'] as const
 const CHAR_PLAIN: Partial<Record<(typeof CHAR_KEYS)[number], number | boolean>> = { weight: 400, italic: false, tracking: 0, outlineWidth: 0 }
 /** and the paragraph ones */
-const LAYOUT_KEYS = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'wordSpacing'] as const
+const LAYOUT_KEYS = ['leading', 'align', 'direction', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'wordSpacing'] as const
 
 const same = (a: unknown, b: unknown) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 0.01 : a === b)
 
@@ -28,6 +28,7 @@ function actualLayout(head: TextFrame, index: number): Record<(typeof LAYOUT_KEY
   return {
     leading: own?.leading ?? head.leading,
     align: own?.align ?? head.align,
+    direction: own?.direction ?? head.direction,
     spaceBefore: head.paraSpaceBefore?.[index] ?? own?.spaceBefore ?? head.spaceBefore,
     spaceAfter: head.paraSpaceAfter?.[index] ?? own?.spaceAfter ?? head.spaceAfter,
     indentLeft: own?.indentLeft ?? head.indentLeft,

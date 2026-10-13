@@ -1,6 +1,7 @@
 import type { Assets, DocSettings, ImageFrame, ShapeFrame, TextFrame } from './document'
 import { ownerPage, type PageRect } from './pages'
 import type { FrameFlow } from './textLayout'
+import { localeTag, t } from './i18n'
 
 /** What the check found: text that does not fit, things off the page, what is missing. */
 export type PreflightKind = 'overset' | 'footnote-overflow' | 'outside-page' | 'crosses-page' | 'missing-font' | 'missing-image'
@@ -58,7 +59,11 @@ function coverOf(item: Box & { rotation?: number }): Box {
 
 const touches = (a: Box, b: Box) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
 
-const KIND_NAME = { frame: 'מסגרת טקסט', image: 'תמונה', shape: 'צורה' } as const
+const KIND_NAME = {
+  get frame() { return t('מסגרת טקסט') },
+  get image() { return t('תמונה') },
+  get shape() { return t('צורה') },
+}
 
 /**
  * Everything that would go wrong in print, found from the document as it is now: text that does not fit its frames (and
@@ -82,8 +87,8 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
         id: `overset:${frameId}`,
         kind: 'overset',
         severity: 'error',
-        title: 'טקסט עודף',
-        detail: `עמוד ${page + 1}: ${left.toLocaleString('he-IL')} תווים לא נכנסו במסגרת האחרונה של הסיפור`,
+        get title() { return t('טקסט עודף') },
+        detail: t('עמוד {n1}: {n2} תווים לא נכנסו במסגרת האחרונה של הסיפור', { n1: page + 1, n2: left.toLocaleString(localeTag()) }),
         page,
         target: { type: 'frame', id: frameId },
       })
@@ -95,8 +100,8 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
           id: `footnote-overflow:${frameId}`,
           kind: 'footnote-overflow',
           severity: 'error',
-          title: 'הערות שוליים שלא נכנסו',
-          detail: `עמוד ${page + 1}: ${notes} ${notes === 1 ? 'הערה' : 'הערות'} חורגות מהעמוד`,
+          get title() { return t('הערות שוליים שלא נכנסו') },
+          detail: t('עמוד {page}: {notes} חורגות מהעמוד', { page: page + 1, notes: `${notes} ${notes === 1 ? t('הערה בודדת') : t('הערות')}` }),
           page,
           target: { type: 'frame', id: frameId },
         })
@@ -113,7 +118,7 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
     const page = pageOf(box)
     const hit = pageRects.filter((rect) => touches(box, rect))
     if (hit.length === 0) {
-      issues.push({ id: `outside-page:${item.id}`, kind: 'outside-page', severity: 'warning', title: 'אובייקט מחוץ לעמוד', detail: `${KIND_NAME[kind]} שנמצאת על שולחן העבודה, ליד עמוד ${page + 1}`, page, target: { type: kind, id: item.id } })
+      issues.push({ id: `outside-page:${item.id}`, kind: 'outside-page', severity: 'warning', get title() { return t('אובייקט מחוץ לעמוד') }, detail: t('{n1} שנמצאת על שולחן העבודה, ליד עמוד {n2}', { n1: KIND_NAME[kind], n2: page + 1 }), page, target: { type: kind, id: item.id } })
       return
     }
     // the area it may fill: the pages it touches together (a picture across a spread is fine), and for what is not text also the bleed
@@ -128,8 +133,8 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
         id: `crosses-page:${item.id}`,
         kind: 'crosses-page',
         severity: printsText ? 'error' : 'warning',
-        title: printsText ? 'טקסט חורג מקצה העמוד' : 'אובייקט חורג מקצה העמוד',
-        detail: printsText ? `עמוד ${page + 1}: חלק מהטקסט נמצא מחוץ לעמוד ולא יודפס` : `עמוד ${page + 1}: ${KIND_NAME[kind]} חורגת מעבר לשולי הגלישה`,
+        title: printsText ? t('טקסט חורג מקצה העמוד') : t('אובייקט חורג מקצה העמוד'),
+        detail: printsText ? t('עמוד {n1}: חלק מהטקסט נמצא מחוץ לעמוד ולא יודפס', { n1: page + 1 }) : t('עמוד {n1}: {n2} חורגת מעבר לשולי הגלישה', { n1: page + 1, n2: KIND_NAME[kind] }),
         page,
         target: { type: kind, id: item.id },
       })
@@ -146,7 +151,7 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
   for (const image of images) {
     if (assets[image.assetId]) continue
     const page = pageOf(image)
-    issues.push({ id: `missing-image:${image.id}`, kind: 'missing-image', severity: 'error', title: 'תמונה חסרה', detail: `עמוד ${page + 1}: קובץ התמונה לא נמצא במסמך`, page, target: { type: 'image', id: image.id } })
+    issues.push({ id: `missing-image:${image.id}`, kind: 'missing-image', severity: 'error', get title() { return t('תמונה חסרה') }, detail: t('עמוד {n1}: קובץ התמונה לא נמצא במסמך', { n1: page + 1 }), page, target: { type: 'image', id: image.id } })
   }
 
   // fonts the text uses that are not installed: one problem per font, at the first place it is used
@@ -182,8 +187,8 @@ export function runPreflight(input: PreflightInput): PreflightIssue[] {
       id: `missing-font:${family}`,
       kind: 'missing-font',
       severity: 'error',
-      title: 'גופן חסר',
-      detail: `${family}: לא מותקן במחשב (${places === 1 ? 'מקום אחד' : `${places} מקומות`} בטקסט, הראשון בעמוד ${page + 1})`,
+      get title() { return t('גופן חסר') },
+      detail: t('{family}: לא מותקן במחשב ({places} בטקסט, הראשון בעמוד {page})', { family, places: places === 1 ? t('מקום אחד') : t('{count} מקומות', { count: places }), page: page + 1 }),
       page,
       target: { type: 'frame', id: frame.id },
     })

@@ -4,6 +4,7 @@
  * document opens and shown from a blob: URL, so the saved document stays small. Only the desktop app can do this - a
  * browser never learns a file's path - and everywhere else pictures are embedded as before.
  */
+import { t } from './i18n'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Asset, AssetLink, Assets } from './document'
 import { hashId } from './assetHash'
@@ -112,7 +113,7 @@ async function measure(url: string, name: string) {
   try {
     await img.decode()
   } catch {
-    throw new ImportError(`לא ניתן לקרוא את התמונה "${name}". ייתכן שהקובץ פגום.`)
+    throw new ImportError(t('לא ניתן לקרוא את התמונה "{name}". ייתכן שהקובץ פגום.', { name }))
   }
   // an SVG without its own size reports 0: give it a sensible default
   return { img, width: img.naturalWidth || 300, height: img.naturalHeight || 300 }
@@ -129,19 +130,19 @@ function makePreview(img: HTMLImageElement, width: number, height: number): stri
 
 function mimeOf(path: string): string {
   const mime = imageMimeOfName(path)
-  if (!mime) throw new ImportError(`"${fileNameOf(path)}" אינו קובץ תמונה נתמך (PNG, JPG, GIF, WebP, SVG, BMP או AVIF).`)
+  if (!mime) throw new ImportError(t('"{name}" אינו קובץ תמונה נתמך (PNG, JPG, GIF, WebP, SVG, BMP או AVIF).', { name: fileNameOf(path) }))
   return mime
 }
 
 async function readLinkedFile(path: string, mime: string): Promise<{ asset: Asset; url: string }> {
   const name = fileNameOf(path)
   const [stat] = await statFiles([path])
-  if (!stat) throw new ImportError(`הקובץ "${name}" לא נמצא.`)
+  if (!stat) throw new ImportError(t('הקובץ "{name}" לא נמצא.', { name }))
   let bytes: ArrayBuffer
   try {
     bytes = await readFileBytes(path)
   } catch (error) {
-    throw new ImportError(typeof error === 'string' && error.includes('too large') ? `התמונה "${name}" גדולה מדי (מעל 50MB).` : `לא ניתן לקרוא את הקובץ "${name}".`)
+    throw new ImportError(typeof error === 'string' && error.includes('too large') ? t('התמונה "{name}" גדולה מדי (מעל 50MB).', { name }) : t('לא ניתן לקרוא את הקובץ "{name}".', { name }))
   }
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
   try {
@@ -188,7 +189,7 @@ export async function embedLinkedAsset(asset: Asset): Promise<Asset> {
   try {
     bytes = await readFileBytes(asset.link.path)
   } catch {
-    throw new ImportError(`הקובץ "${name}" לא נמצא, ולכן אי אפשר להטמיע אותו.`)
+    throw new ImportError(t('הקובץ "{name}" לא נמצא, ולכן אי אפשר להטמיע אותו.', { name }))
   }
   const dataUrl = await toDataUrl(new Blob([bytes], { type: asset.mime }))
   const { width, height } = await measure(dataUrl, name)

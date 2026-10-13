@@ -1,3 +1,4 @@
+import { directionOf, t } from './i18n'
 import type { DesignRecord } from './designs'
 import { PAGE_PRESETS, toPt, type Unit } from './units'
 import type { TableData } from './table'
@@ -16,7 +17,8 @@ export interface Sides {
 }
 
 export type FootnoteLayoutMode = 'vertical' | 'horizontal'
-export type FootnoteRestart = 'continuous' | 'page' | 'spread'
+/** 'style': the numbering starts over at every paragraph in the paragraph style `restartStyleId` (a chapter heading, say) */
+export type FootnoteRestart = 'continuous' | 'page' | 'spread' | 'style'
 export type FootnoteNumberStyle = 'arabic' | 'hebrew' | 'roman'
 export type FootnoteMarkerFormat = 'plain' | 'dot' | 'dotBefore' | 'rightParen' | 'doubleRightParen' | 'leftParen' | 'doubleLeftParen' | 'round' | 'square'
 export type FootnoteAlignment = 'right' | 'center'
@@ -73,6 +75,8 @@ export interface FootnoteLayoutConfig {
   spaceBefore: number
   startAt: number
   restart: FootnoteRestart
+  /** with `restart` 'style': the paragraph style whose paragraphs start the numbering over */
+  restartStyleId?: string
   markerPrefix: string
   markerSuffix: string
   numberStyle: FootnoteNumberStyle
@@ -225,6 +229,52 @@ export interface ParagraphSequence {
 /** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
 export type TextAlign = 'right' | 'center' | 'left' | 'justify' | 'justifyCenter'
 
+/**
+ * The direction a paragraph reads in. A document written before this was a setting has none, and reads right to left;
+ * `auto` takes it from the first letter of each paragraph (a Hebrew paragraph reads from the right, an English one from the left).
+ */
+export type TextDirection = 'rtl' | 'ltr' | 'auto'
+
+/** The CSS of a direction: `auto` is the plaintext bidi mode, which finds each paragraph's own direction, falling back to right to left. */
+export function cssTextDirection(direction: TextDirection | undefined): { direction: 'rtl' | 'ltr'; unicodeBidi: 'normal' | 'plaintext' } {
+  if (direction === 'ltr') return { direction: 'ltr', unicodeBidi: 'normal' }
+  if (direction === 'auto') return { direction: 'rtl', unicodeBidi: 'plaintext' }
+  return { direction: 'rtl', unicodeBidi: 'normal' }
+}
+
+/** What of a paragraph's look depends on the side it starts on. */
+export interface SideLook {
+  align?: TextAlign
+  direction?: TextDirection
+  indentLeft?: number
+  indentRight?: number
+}
+
+/**
+ * A paragraph that is made to read from the other side goes on starting where it started: its alignment and its two side
+ * indents turn with it (a right-aligned one set in 20 from the right, made left to right, is left-aligned and set in 20 from
+ * the left). Centred and justified paragraphs stay as they are, and so does what the change itself sets. Nothing turns when the
+ * paragraph reads that way already, or when either direction is the automatic one (it is not known which way it will read).
+ */
+export function lookTurnedBy(patch: SideLook, current: SideLook): SideLook {
+  if (patch.direction === undefined || patch.direction === 'auto') return {}
+  const from = current.direction ?? 'rtl'
+  if (from === 'auto' || from === patch.direction) return {}
+  const out: SideLook = {}
+  if (patch.align === undefined) {
+    if (current.align === 'right') out.align = 'left'
+    else if (current.align === 'left') out.align = 'right'
+  }
+  if (patch.indentLeft === undefined && patch.indentRight === undefined && (current.indentLeft || current.indentRight)) {
+    out.indentLeft = current.indentRight
+    out.indentRight = current.indentLeft
+  }
+  return out
+}
+
+/** The side a paragraph starts on: where its first line begins and its second line is indented from. */
+export const startSideOf = (direction: TextDirection | undefined): 'left' | 'right' => (direction === 'ltr' ? 'left' : 'right')
+
 /** The CSS for an align value: `justifyCenter` isn't a real `text-align` keyword, so it becomes `justify` plus `text-align-last`. */
 export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' | 'left' | 'justify'; textAlignLast?: 'center' } {
   return align === 'justifyCenter' ? { textAlign: 'justify', textAlignLast: 'center' } : { textAlign: align }
@@ -300,6 +350,8 @@ export interface CharacterStyleRecord {
 export interface TextStyle extends CharStyle {
   /** physical alignment; Hebrew text normally sits on the right */
   align: TextAlign
+  /** the way the text reads; missing = right to left (the only way before this was a setting) */
+  direction?: TextDirection
   /** line spacing (leading), points; missing = automatic, `fontSize × LINE_HEIGHT` */
   leading?: number
   /** word spacing while `align` is 'justify', % of the normal space width the line may be stretched or squeezed to
@@ -341,8 +393,11 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   spaceAfter: DEFAULT_SPACE_AFTER,
 }
 
+/** what a paragraph is set to in a language that reads from left to right: its own side, not the Hebrew one */
+export const LTR_TEXT_DEFAULTS = { align: 'left', direction: 'ltr' } as const
+
 export function defaultTextStyle(): TextStyle {
-  return { ...DEFAULT_TEXT_STYLE, fontFamily: getLastUsedFontFamily() }
+  return { ...DEFAULT_TEXT_STYLE, fontFamily: getLastUsedFontFamily(), ...(directionOf() === 'ltr' ? LTR_TEXT_DEFAULTS : {}) }
 }
 
 /** Fonts with Hebrew glyphs that ship with Windows: used until the real system fonts are loaded. */
@@ -460,8 +515,8 @@ export type BlendMode = 'multiply' | 'screen'
 
 /** the blend modes, in the order they are offered, with the names the interface gives them */
 export const BLEND_MODES: { id: BlendMode; label: string }[] = [
-  { id: 'multiply', label: 'כפל (Multiply)' },
-  { id: 'screen', label: 'מסך (Screen)' },
+  { id: 'multiply', get label() { return t('כפל (Multiply)') } },
+  { id: 'screen', get label() { return t('מסך (Screen)') } },
 ]
 
 export interface TextFrame extends TextStyle {
@@ -488,7 +543,7 @@ export interface TextFrame extends TextStyle {
    * Resolved paragraph-level overrides, parallel to paragraphStyleIds. `windowIndent` (points) is the "window in the
    * text" of טיפוגרפיה > יצירת חלון בטקסט: how far the paragraph's second line is set in under its opening word(s).
    */
-  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
+  paragraphStylePatches?: (Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent' | 'align' | 'direction'>> & { windowIndent?: number; windowWords?: number; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox)[]
   /** top-level Layers panel membership; missing means the default Layer 1 */
   layerId?: string
   /** hidden in the Layers panel: not drawn, and not exported (its text still takes its place in the story) */
@@ -608,6 +663,16 @@ export interface ParagraphDecoration {
   refSize?: { w: number; h: number }
 }
 
+/** a "window in the text" built into a paragraph style: its paragraphs get one by themselves (see windowText.ts) */
+export interface ParagraphWindowRule {
+  /** how many opening words the window is as wide as (1-4) */
+  words: number
+  /** paragraphs with fewer lines than this are left without a window (3 or 4) */
+  minLines: number
+  /** a paragraph style whose character look is given to the opening words; missing for none */
+  openingStyleId?: string
+}
+
 export interface ParagraphStyleRecord {
   id: string
   name: string
@@ -615,10 +680,12 @@ export interface ParagraphStyleRecord {
   nested?: NestedStyleRule[]
   /** style layers: character styles given, on top, to what is of a kind in the paragraph (a style based on this one has them too, unless it has its own) */
   layers?: StyleLayerRule[]
+  /** a window under the opening words of every paragraph in this style (a style based on this one has it too, unless it has its own) */
+  window?: ParagraphWindowRule
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'direction'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
 }
 
 /** The only paragraph style every new document starts with; part of `DocContent`, saved with the file. */
@@ -627,9 +694,10 @@ export const DEFAULT_PARAGRAPH_STYLES: ParagraphStyleRecord[] = [
 ]
 
 export function defaultParagraphStyles(): ParagraphStyleRecord[] {
+  const ltr = directionOf() === 'ltr'
   return DEFAULT_PARAGRAPH_STYLES.map((style) =>
     style.id === 'body'
-      ? { ...style, patch: { ...style.patch, fontFamily: getLastUsedFontFamily() } }
+      ? { ...style, patch: { ...style.patch, fontFamily: getLastUsedFontFamily(), ...(ltr ? LTR_TEXT_DEFAULTS : {}) } }
       : style,
   )
 }
@@ -791,14 +859,14 @@ export interface Guide {
 }
 
 export const GUIDE_COLORS: { value: string; label: string }[] = [
-  { value: '#00d1b2', label: 'טורקיז' },
-  { value: '#3d8bff', label: 'כחול' },
-  { value: '#f5b800', label: 'צהוב' },
-  { value: '#ff8a3d', label: 'כתום' },
-  { value: '#ff5c5c', label: 'אדום' },
-  { value: '#ff7ac6', label: 'ורוד' },
-  { value: '#a78bfa', label: 'סגול' },
-  { value: '#8a8f98', label: 'אפור' },
+  { value: '#00d1b2', get label() { return t('טורקיז') } },
+  { value: '#3d8bff', get label() { return t('כחול') } },
+  { value: '#f5b800', get label() { return t('צהוב') } },
+  { value: '#ff8a3d', get label() { return t('כתום') } },
+  { value: '#ff5c5c', get label() { return t('אדום') } },
+  { value: '#ff7ac6', get label() { return t('ורוד') } },
+  { value: '#a78bfa', get label() { return t('סגול') } },
+  { value: '#8a8f98', get label() { return t('אפור') } },
 ]
 export const DEFAULT_GUIDE_COLOR = GUIDE_COLORS[1].value
 /** No document may hold more guides than this. */
@@ -1048,7 +1116,7 @@ export type NumberFormat = 'decimal' | 'hebrew' | 'roman-upper' | 'roman-lower' 
 
 export const NUMBER_FORMAT_LABELS: Record<NumberFormat, string> = {
   decimal: '1, 2, 3…',
-  hebrew: 'א, ב, ג…',
+  get hebrew() { return t('א, ב, ג…') },
   'roman-upper': 'I, II, III…',
   'roman-lower': 'i, ii, iii…',
   'latin-upper': 'A, B, C…',
@@ -1127,7 +1195,7 @@ export function defaultDocSettings(name: string): DocSettings {
     pageSizes: [],
     pageMargins: [],
     unit: 'mm',
-    binding: 'rtl',
+    binding: directionOf() === 'ltr' ? 'ltr' : 'rtl',
     pages: 1,
     facingPages: false,
     startPage: 1,
@@ -1138,6 +1206,8 @@ export function defaultDocSettings(name: string): DocSettings {
     bleed: sides(0),
     slug: sides(0),
     parentItemsAbovePageContent: false,
+    // the notes of a document in a language that reads from the left keep the line above them on the left
+    ...(directionOf() === 'ltr' ? { footnotes: { ...DEFAULT_FOOTNOTE_CONFIG, dividerAlignment: 'left' as const } } : {}),
   }
 }
 
@@ -1234,10 +1304,10 @@ export function validateDoc(d: DocSettings): string | null {
     const m = marginsOf(d, i)
     const own = !!d.pageSizes[i] || !!d.pageMargins[i]
     if (m.left + m.right >= z.w || m.top + m.bottom >= z.h) {
-      return own ? `השוליים גדולים מעמוד ${d.startPage + i}.` : 'השוליים גדולים מהעמוד.'
+      return own ? t('השוליים גדולים מעמוד {page}.', { page: d.startPage + i }) : t('השוליים גדולים מהעמוד.')
     }
     if (d.gutter * (d.columns - 1) >= z.w - m.left - m.right) {
-      return own ? `העמודות לא נכנסות בין השוליים של עמוד ${d.startPage + i}.` : 'העמודות לא נכנסות בין השוליים.'
+      return own ? t('העמודות לא נכנסות בין השוליים של עמוד {page}.', { page: d.startPage + i }) : t('העמודות לא נכנסות בין השוליים.')
     }
   }
   return null

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { spliceParagraphStyles } from './story'
-import { openingRange } from './windowText'
+import { defaultDocSettings } from './document'
+import { parseDocument, serializeDocument } from './fileFormat'
+import type { DocContent } from './pages'
+import { openingRange, windowRuleOf } from './windowText'
 
 describe('openingRange', () => {
   const text = 'בראשית ברא אלהים את השמים'
@@ -41,5 +44,41 @@ describe('a window and Enter', () => {
     const lists = { paragraphStylePatches: [{ leading: 14, align: 'justify' as const, windowIndent: 10 }] }
     const out = spliceParagraphStyles(lists, 'אבג', 1, 1, '\n')
     expect(out.paragraphStylePatches).toEqual([{ leading: 14, align: 'justify', windowIndent: 10 }, { leading: 14, align: 'justify' }])
+  })
+})
+
+describe('a window built into a paragraph style', () => {
+  const styles = [
+    { id: 'body', name: 'Body' },
+    { id: 'lead', name: 'Lead', basedOnId: 'body', window: { words: 2, minLines: 4, openingStyleId: 'big' } },
+    { id: 'lead-note', name: 'Lead note', basedOnId: 'lead' },
+    { id: 'plain', name: 'Plain', basedOnId: 'body' },
+  ]
+
+  it('is the own rule of the style, or the nearest one of the styles it is based on', () => {
+    expect(windowRuleOf(styles, 'lead')).toEqual({ words: 2, minLines: 4, openingStyleId: 'big' })
+    expect(windowRuleOf(styles, 'lead-note')).toEqual({ words: 2, minLines: 4, openingStyleId: 'big' })
+    expect(windowRuleOf(styles, 'plain')).toBeNull()
+    expect(windowRuleOf(styles, 'missing')).toBeNull()
+  })
+
+  it('does not loop on styles based on each other', () => {
+    expect(windowRuleOf([{ id: 'a', basedOnId: 'b' }, { id: 'b', basedOnId: 'a' }], 'a')).toBeNull()
+  })
+
+  const contentWith = (paragraphStyles: Record<string, unknown>[]): DocContent =>
+    ({ doc: defaultDocSettings('w'), frames: [], images: [], assets: {}, guides: [], shapes: [], paragraphStyles, parents: [], pageParents: [], sections: [] }) as unknown as DocContent
+
+  it('is kept in the file, bounded to what the dialog offers', () => {
+    const reopened = parseDocument(serializeDocument(contentWith([
+      { id: 'body', name: 'Body', patch: {} },
+      { id: 'lead', name: 'Lead', patch: {}, window: { words: 9, minLines: 7, openingStyleId: 'body' } },
+      { id: 'gone', name: 'Gone', patch: {}, window: { words: 2, minLines: 3, openingStyleId: 'nothing' } },
+    ])), 'w.imudist')
+    const byId = new Map(reopened.paragraphStyles.map((style) => [style.id, style]))
+    expect(byId.get('body')?.window).toBeUndefined()
+    expect(byId.get('lead')?.window).toEqual({ words: 4, minLines: 4, openingStyleId: 'body' })
+    // a style of the opening words that is no longer there is dropped rather than left dangling
+    expect(byId.get('gone')?.window).toEqual({ words: 2, minLines: 3 })
   })
 })

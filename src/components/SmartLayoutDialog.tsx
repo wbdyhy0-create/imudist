@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 export interface SmartLayoutRequest {
   scope: 'doc' | 'selection'
@@ -74,19 +75,19 @@ export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Pr
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="יתומים, אלמנות וכיווץ">
-        <h2>יתומים, אלמנות וכיווץ</h2>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('יתומים, אלמנות וכיווץ')}>
+        <h2>{t('יתומים, אלמנות וכיווץ')}</h2>
 
-        <div className="place-modes" role="group" aria-label="טווח ההחלה">
+        <div className="place-modes" role="group" aria-label={t('טווח ההחלה')}>
           <button className={scope === 'doc' ? 'on' : ''} onClick={() => setScope('doc')}>
-            כל המסמך
+            {t('כל המסמך')}
           </button>
           <button className={scope === 'selection' ? 'on' : ''} disabled={!hasSelection} onClick={() => setScope('selection')}>
-            בחירה בלבד
+            {t('בחירה בלבד')}
           </button>
         </div>
 
-        <label className="field-label">החל על פסקאות בסגנון
+        <label className="field-label">{t('החל על פסקאות בסגנון')}
           <select
             className="select"
             value={styleId}
@@ -95,46 +96,46 @@ export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Pr
               setNothingMatched(false)
             }}
           >
-            <option value="">כל הפסקאות</option>
+            <option value="">{t('כל הפסקאות')}</option>
             {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
           </select>
         </label>
-        {nothingMatched && <p className="dlg-summary" role="alert">אין בטווח שבחרת פסקאות בסגנון הזה, ולכן לא שונה כלום.</p>}
+        {nothingMatched && <p className="dlg-summary" role="alert">{t('אין בטווח שבחרת פסקאות בסגנון הזה, ולכן לא שונה כלום.')}</p>}
 
         <fieldset className="dlg-block">
-          <legend>מניעת יתומים ואלמנות</legend>
+          <legend>{t('מניעת יתומים ואלמנות')}</legend>
           <label className="dlg-check">
             <input type="checkbox" checked={keepLines} onChange={(e) => setKeepLines(e.target.checked)} />
-            שמור שורות ראשונות/אחרונות של פסקה יחד בין העברות עמוד
+            {t('שמור שורות ראשונות/אחרונות של פסקה יחד בין העברות עמוד')}
           </label>
           {keepLines && (
             <div className="dlg-cols">
-              <Field label="שורות ראשונות (מינימום)">
+              <Field label={t('שורות ראשונות (מינימום)')}>
                 <NumberField value={keepFirst} min={1} max={10} onChange={setKeepFirst} />
               </Field>
-              <Field label="שורות אחרונות (מינימום)">
+              <Field label={t('שורות אחרונות (מינימום)')}>
                 <NumberField value={keepLast} min={1} max={10} onChange={setKeepLast} />
               </Field>
             </div>
           )}
           <label className="dlg-check">
             <input type="checkbox" checked={noBreak} onChange={(e) => setNoBreak(e.target.checked)} />
-            מנע ניתוק המילה האחרונה בסוף פסקה לשורה נפרדת
+            {t('מנע ניתוק המילה האחרונה בסוף פסקה לשורה נפרדת')}
           </label>
         </fieldset>
 
         <fieldset className="dlg-block">
-          <legend>כיווץ שורה אחרונה קצרה</legend>
+          <legend>{t('כיווץ שורה אחרונה קצרה')}</legend>
           <label className="dlg-check">
             <input type="checkbox" checked={smartTracking} onChange={(e) => setSmartTracking(e.target.checked)} />
-            כווץ (ריווח אותיות) פסקאות שהשורה האחרונה שלהן קצרה
+            {t('כווץ (ריווח אותיות) פסקאות שהשורה האחרונה שלהן קצרה')}
           </label>
           {smartTracking && (
             <div className="dlg-cols">
-              <Field label="כיווץ (% מגודל הגופן)">
+              <Field label={t('כיווץ (% מגודל הגופן)')}>
                 <NumberField value={tracking / 10} suffix="%" step={1} min={-10} max={0} onChange={(v) => setTracking(Math.round(v * 10))} />
               </Field>
-              <Field label="עד כמה מילים בשורה">
+              <Field label={t('עד כמה מילים בשורה')}>
                 <NumberField value={maxWords} min={1} max={5} onChange={setMaxWords} />
               </Field>
             </div>
@@ -142,7 +143,7 @@ export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Pr
         </fieldset>
 
         <p className="dlg-summary" role="status">
-          שמירת שורות יחד וכיווץ שורה קצרה עלולים למשוך לכיוונים מנוגדים על אותה פסקה - אם שניהם מסומנים, כדאי לבדוק את התוצאה.
+          {t('שמירת שורות יחד וכיווץ שורה קצרה עלולים למשוך לכיוונים מנוגדים על אותה פסקה - אם שניהם מסומנים, כדאי לבדוק את התוצאה.')}
         </p>
 
         <div className="modal-buttons">
@@ -150,10 +151,10 @@ export function SmartLayoutDialog({ hasSelection, styles, onApply, onClose }: Pr
               try { localStorage.setItem(STYLE_KEY, styleId) } catch { /* a convenience only */ }
               setNothingMatched(onApply({ scope, styleId, keepLines, keepFirst, keepLast, noBreak, smartTracking, tracking, maxWords }) === 0)
             }}>
-            החל
+            {t('החל')}
           </button>
           <button className="btn" onClick={onClose}>
-            ביטול
+            {t('ביטול')}
           </button>
         </div>
       </div>

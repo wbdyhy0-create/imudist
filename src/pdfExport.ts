@@ -1,9 +1,11 @@
+import { localeTag, t } from './i18n'
+import { materializeSoftHyphens } from './softHyphens'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { cssTextAlign, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type CharacterStyleRecord, type DocSettings, type Feather, type ImageFrame, type ObjectStyleRecord, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
+import { cssTextAlign, cssTextDirection, effectiveLeading, DEFAULT_FOOTNOTE_CONFIG, RUNNING_HEADER_MARKER, textFlowBoxOf, wordSpacingPt, type Asset, type Assets, type BlendMode, type CharacterStyleRecord, type DocSettings, type Feather, type ImageFrame, type ObjectStyleRecord, type PageSection, type ParagraphStyleRecord, type ShapeFrame, type TextFrame } from './document'
 import { ownerPage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent, type PageRect } from './pages'
 import { markHiddenByLayer } from './layers'
-import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteReferenceLook, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
+import { footnoteDividerHeight, footnoteDividerTextStyle, footnoteLabelParts, footnoteReferenceLook, footnoteRestartMarks, footnoteTextStyle, numberFootnotes } from './footnoteLayout'
 import { primaryTextFrameOrder, primaryTextFramePageGroups } from './placeText'
 import { layoutEndnotes } from './endnotes'
 import { buildParagraphNodes, buildWrapFloats } from './richtext'
@@ -241,7 +243,8 @@ async function drawTextDom(
         boxSizing: 'border-box',
         overflow: 'hidden',
         color: '#111',
-        direction: 'rtl',
+        direction: cssTextDirection(style.direction).direction,
+        ...(cssTextDirection(style.direction).unicodeBidi === 'plaintext' ? { unicodeBidi: 'plaintext' } : {}),
         whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
         textRendering: 'geometricPrecision',
@@ -305,6 +308,7 @@ async function drawTextDom(
             tocPageMarkers: tocMarkers?.pageNumbers,
             tocLeaderMarkers: tocMarkers?.leaders,
             outlineMode: 'shadow',
+            direction: style.direction,
           },
           storyFrames.find((candidate) => candidate.id === flow.headId)?.paragraphStylePatches,
           style.align,
@@ -322,7 +326,7 @@ async function drawTextDom(
           bottom: '0',
           width: `${flow.footnoteAreaWidth ?? flowBox.w}px`,
           height: `${flow.footnoteHeight}px`,
-          direction: 'rtl',
+          direction: cssTextDirection(style.direction).direction,
           whiteSpace: 'pre-wrap',
           overflow: 'hidden',
           color: '#111',
@@ -439,7 +443,7 @@ async function drawTextDom(
           footnotes.appendChild(divider)
         }
         for (const note of flow.footnotes) {
-          const noteStyle = note.style ?? footnoteTextStyle(footnoteConfig, content.paragraphStyles)
+          const noteStyle = note.style ?? footnoteTextStyle(footnoteConfig, content.paragraphStyles, undefined, style)
           const item = document.createElement('div')
           item.className = 'footnote-item'
           Object.assign(item.style, {
@@ -447,13 +451,13 @@ async function drawTextDom(
             display: 'flex',
             alignItems: 'flex-start',
             gap: `${footnoteConfig.numberTextGap}px`,
-            left: `${(flow.footnoteAreaWidth ?? flowBox.w) - note.x - note.width}px`,
+            left: `${style.direction === 'ltr' ? note.x : (flow.footnoteAreaWidth ?? flowBox.w) - note.x - note.width}px`,
             top: `${note.y}px`,
             width: `${note.width}px`,
             height: `${note.height}px`,
             overflow: 'hidden',
             overflowWrap: 'anywhere',
-            textAlign: footnoteConfig.alignment,
+            textAlign: style.direction === 'ltr' && footnoteConfig.alignment === 'right' ? 'left' : footnoteConfig.alignment,
           })
           const number = document.createElement('span')
           number.className = 'footnote-number'
@@ -486,6 +490,8 @@ async function drawTextDom(
       }
     }
     await document.fonts?.ready
+    // a soft hyphen the line was broken at is a hyphen in what is written; the others are not there
+    materializeSoftHyphens(root)
     if (vector) {
       // a frame of plain text goes to the PDF as text; one that has more than that stays here and is drawn as a picture
       for (const { frame, outer, host } of plainFrames) {
@@ -955,7 +961,15 @@ export function prepareExport(content: ExportContent): PreparedExport {
     const pageRect = documentRects[page]
     const spread = pageRect ? Math.round(pageRect.y * 1000) : page
     return flow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
-  }), footnoteConfig, content.doc.binding)
+  }), footnoteConfig, content.doc.binding, footnoteConfig.restart === 'style'
+    ? footnoteRestartMarks(provisionalFlows, frameById, footnoteConfig.restartStyleId, (frameId) => {
+        const frame = frameById.get(frameId)
+        if (!frame) return null
+        const page = ownerPage(documentRects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+        const pageRect = documentRects[page]
+        return { page, spread: pageRect ? Math.round(pageRect.y * 1000) : page, frameX: frame.x, frameY: frame.y }
+      })
+    : [])
   const bodyFlows = numbering.size
     ? flowFramesWithFootnoteContinuation(source.frames, source.images, footnoteConfig, numbering, primaryFrameIds, source.paragraphStyles, undefined, sharedFootnoteGroups)
     : provisionalFlows
@@ -1084,7 +1098,7 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
         target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
         written += picture.length * 0.75
       }
-      if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
+      if (written > MAX_PDF_BYTES) throw new Error(t(TOO_LARGE_MESSAGE))
       if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, cmyk)
       if (options.registrationMarks) drawRegistrationMarks(target, page, marksMargin + bleedPt, bleedPt, cmyk)
       if (options.colorBars) drawColorBar(target, page, marksMargin + bleedPt, bleedPt, cmyk)
@@ -1103,7 +1117,7 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
       written += picture.length * 0.75
     }
     // a PDF is built as one string, and a string cannot be longer than about 512 MB: say so before drawing the rest of the pages
-    if (written > MAX_PDF_BYTES) throw new Error(TOO_LARGE_MESSAGE)
+    if (written > MAX_PDF_BYTES) throw new Error(t(TOO_LARGE_MESSAGE))
     if (options.cropMarks) drawCropMarks(target, page, marksMargin, marksMargin, bleedPt, cmyk)
     if (options.registrationMarks) drawRegistrationMarks(target, page, marksMargin + bleedPt, bleedPt, cmyk)
     if (options.colorBars) drawColorBar(target, page, marksMargin + bleedPt, bleedPt, cmyk)
@@ -1145,7 +1159,7 @@ function tooLarge<T>(make: () => T): T {
   try {
     return make()
   } catch (error) {
-    if (error instanceof RangeError || /Invalid string length/i.test(String(error))) throw new Error(TOO_LARGE_MESSAGE)
+    if (error instanceof RangeError || /Invalid string length/i.test(String(error))) throw new Error(t(TOO_LARGE_MESSAGE))
     throw error
   }
 }
@@ -1264,8 +1278,8 @@ function drawColorBar(pdf: jsPDF, page: PageRect, edge: number, bleedPt: number,
 function slugInfoText(prepared: PreparedExport, options: PageDrawOptions, pageIndex: number) {
   const { doc, sections } = prepared.content
   const label = pageNumberLabel(sections ?? [], pageIndex, doc.startPage)
-  const date = new Date().toLocaleDateString('he-IL')
-  return `${options.infoName ?? doc.name} · עמוד ${label} · ${date}`
+  const date = new Date().toLocaleDateString(localeTag())
+  return `${options.infoName ?? doc.name} · ${t('עמוד {label}', { label })} · ${date}`
 }
 
 /**

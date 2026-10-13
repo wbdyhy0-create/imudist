@@ -3,6 +3,7 @@ import type { ExtrudeSettings, GradientFill, PathGeom, ShapeFrame } from './docu
 import { shapePath } from './shapes'
 import { zOfShape } from './stacking'
 import { parseSvgPath } from './vectorShapes'
+import { t } from './i18n'
 
 /**
  * Depth for a shape ("3D"): the shape is drawn out backwards along a direction, and the sides that can be seen become shapes of their
@@ -403,15 +404,15 @@ export function extrudeSides(front: ShapeFrame, settings: ExtrudeSettings, newId
 export type SolidKind = 'cube' | 'box' | 'cylinder' | 'frame' | 'isoCube' | 'isoBox' | 'isoFrame' | 'isoBoxStanding' | 'isoFrameStanding'
 
 export const SOLID_NAMES: Record<SolidKind, string> = {
-  cube: 'קוביה',
-  box: 'תיבה',
-  cylinder: 'גליל',
-  frame: 'מסגרת',
-  isoCube: 'קוביה איזומטרית',
-  isoBox: 'תיבה איזומטרית שוכבת',
-  isoFrame: 'מסגרת איזומטרית שוכבת',
-  isoBoxStanding: 'תיבה איזומטרית זקופה',
-  isoFrameStanding: 'מסגרת איזומטרית זקופה',
+  get cube() { return t('קוביה') },
+  get box() { return t('תיבה') },
+  get cylinder() { return t('גליל') },
+  get frame() { return t('מסגרת') },
+  get isoCube() { return t('קוביה איזומטרית') },
+  get isoBox() { return t('תיבה איזומטרית שוכבת') },
+  get isoFrame() { return t('מסגרת איזומטרית שוכבת') },
+  get isoBoxStanding() { return t('תיבה איזומטרית זקופה') },
+  get isoFrameStanding() { return t('מסגרת איזומטרית זקופה') },
 }
 
 export type FrameSpec = NonNullable<ExtrudeSettings['frame']>

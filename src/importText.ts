@@ -2,6 +2,7 @@ import { DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, LINE_HEIGHT, type CharacterStyleSe
 import { mergeRuns } from './story'
 import { legacyHebrewPieces, looksLikeLegacyHebrew, mirrorBracket } from './legacyHebrew'
 import { unzipEntry } from './zip'
+import { t } from './i18n'
 
 /** a Word character style that text in the document uses: it comes in as a character style of the document */
 export interface ImportedCharacterStyle {
@@ -27,7 +28,7 @@ export interface PlacedText {
   paragraphStyleIds?: string[]
   /** Display names matching paragraphStyleIds, kept as a stable fallback when local ids change. */
   paragraphStyleNames?: string[]
-  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align'>>[]
+  paragraphStylePatches?: Partial<Pick<TextStyle, 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'align' | 'direction'>>[]
   tocPageReferences?: TocPageReference[]
   tocFootnoteReferences?: TocFootnoteReference[]
   /** Word footnotes, anchored to marker offsets in the imported story. */
@@ -69,6 +70,9 @@ export function alignFor(text: string): TextStyle['align'] {
   return rtl >= ltr ? 'right' : 'left'
 }
 
+/** The way a text reads: from the left when most of its letters are Latin ones, from the right otherwise (a Hebrew one, or one with no letters). */
+export const directionFor = (text: string): 'rtl' | 'ltr' => (alignFor(text) === 'left' ? 'ltr' : 'rtl')
+
 export const countWords = (text: string) => (text.match(/\S+/g) ?? []).length
 
 // ── plain text ──────────────────────────────────────────────────────────────────
@@ -98,8 +102,8 @@ function decodeText(buffer: ArrayBuffer): string {
 
 export function placedFromPlainText(name: string, raw: string): PlacedText {
   const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n').replace(/^\u200f/gm, '').replace(/\n+$/, '')
-  if (!text.trim()) throw new ImportError('אין טקסט בקובץ.')
-  const style = { ...DEFAULT_TEXT_STYLE, align: alignFor(text) }
+  if (!text.trim()) throw new ImportError(t('אין טקסט בקובץ.'))
+  const style = { ...DEFAULT_TEXT_STYLE, align: alignFor(text), ...(directionFor(text) === 'ltr' ? { direction: 'ltr' as const } : {}) }
   return { name, text, runs: [{ len: text.length, style: { fontFamily: style.fontFamily, fontSize: style.fontSize, weight: style.weight, italic: style.italic, tracking: style.tracking } }], style }
 }
 
@@ -241,7 +245,7 @@ const overlay = (a: RProps, b: RProps): RProps => {
 
 function parseXml(bytes: Uint8Array): Document {
   const doc = new DOMParser().parseFromString(new TextDecoder('utf-8').decode(bytes), 'application/xml')
-  if (doc.getElementsByTagName('parsererror').length) throw new ImportError('קובץ ה-Word פגום.')
+  if (doc.getElementsByTagName('parsererror').length) throw new ImportError(t('קובץ ה-Word פגום.'))
   return doc
 }
 
@@ -254,14 +258,14 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   try {
     documentXml = await unzipEntry(buffer, 'word/document.xml')
   } catch {
-    throw new ImportError('לא ניתן לקרוא את הקובץ. ודא שזה קובץ Word בפורמט docx (ולא doc ישן).')
+    throw new ImportError(t('לא ניתן לקרוא את הקובץ. ודא שזה קובץ Word בפורמט docx (ולא doc ישן).'))
   }
   try { stylesXml = await unzipEntry(buffer, 'word/styles.xml') } catch { stylesXml = null }
   try { themeXml = await unzipEntry(buffer, 'word/theme/theme1.xml') } catch { themeXml = null }
   if (options.includeFootnotes !== false) {
     try { footnotesXml = await unzipEntry(buffer, 'word/footnotes.xml') } catch { footnotesXml = null }
   }
-  if (!documentXml) throw new ImportError('זה לא קובץ Word תקין (חסר word/document.xml).')
+  if (!documentXml) throw new ImportError(t('זה לא קובץ Word תקין (חסר word/document.xml).'))
 
   const themeFonts: ThemeFonts = {}
   if (themeXml) {
@@ -489,10 +493,12 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     }
     pieces.push(...(legacyHebrew ? legacyHebrewPieces(paragraphPieces) : paragraphPieces))
     const patch = readParagraphPatch(pPr, bidi, paragraphAlign ?? (bidi ? 'right' : alignFor(writtenText)), firstRun?.fontSize ?? baseSize)
+    // Word's paragraph reads from the right when it is a bidi one; a paragraph with none is read by its letters (one in Hebrew that was never marked is still Hebrew)
+    patch.direction = bidi ? 'rtl' : directionFor(writtenText)
     const directFormatting = firstRun && (firstRun.fontSize !== baseSize || firstRun.fontFamily !== baseFont || firstRun.weight >= 600 || firstRun.italic || !!firstRun.color)
     const inferredId = directFormatting && (!pStyle || pStyle === defaultParagraphStyle) ? `inferred-${firstRun!.fontFamily}-${firstRun!.fontSize}-${firstRun!.weight}-${firstRun!.italic}-${firstRun!.color ?? ''}`.replace(/[^a-zA-Z0-9_-]/g, '-') : null
     if (inferredId && firstRun) {
-      if (!inferredStyles.has(inferredId)) inferredStyles.set(inferredId, { wordId: inferredId, name: firstRun.weight >= 600 ? 'כותרת בולד' : 'טקסט מעוצב', patch: { fontFamily: firstRun.fontFamily, fontSize: firstRun.fontSize, weight: firstRun.weight, italic: firstRun.italic, ...(firstRun.color ? { color: firstRun.color } : {}), ...(paragraphAlign ? { align: paragraphAlign } : {}) } })
+      if (!inferredStyles.has(inferredId)) inferredStyles.set(inferredId, { wordId: inferredId, name: firstRun.weight >= 600 ? t('כותרת בולד') : t('טקסט מעוצב'), patch: { fontFamily: firstRun.fontFamily, fontSize: firstRun.fontSize, weight: firstRun.weight, italic: firstRun.italic, ...(firstRun.color ? { color: firstRun.color } : {}), ...(paragraphAlign ? { align: paragraphAlign } : {}) } })
       for (let copy = 0; copy <= breaks; copy++) {
         paragraphStyleIds.push(inferredId)
         paragraphStyleNames.push(inferredStyles.get(inferredId)!.name)
@@ -528,7 +534,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   const activeParagraphStyles = [...paragraphStyles.filter((style) => usedParagraphStyles.has(style.wordId)), ...Array.from(inferredStyles.values()), ...Array.from(unresolvedStyles.values())]
 
   const text = pieces.map((p) => p.text).join('').replace(/\n+$/, '')
-  if (!text.trim()) throw new ImportError('אין טקסט במסמך ה-Word.')
+  if (!text.trim()) throw new ImportError(t('אין טקסט במסמך ה-Word.'))
   const runs = mergeRuns(pieces.map((p) => ({ len: p.text.length, style: p.style })))
   // trim the runs to the trimmed text
   let excess = pieces.reduce((n, p) => n + p.text.length, 0) - text.length
@@ -548,19 +554,19 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     const source = wordFootnotes.get(wordId)
     return source && anchor < text.length ? [{ anchor, ...source }] : []
   })
-  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(paragraphPatches.length === paragraphStyleIds.length ? { paragraphStylePatches: paragraphPatches } : {}), ...(footnotes.length ? { footnotes } : {}), ...(usedCharStyles.size ? { characterStyles: [...usedCharStyles.values()] } : {}) }
+  return { name, text, runs, style: { ...first, align: firstParagraphAlign ?? activeParagraphStyles.find((s) => s.wordId === paragraphStyleIds[0])?.patch.align ?? alignFor(text), ...(paragraphPatches[0]?.direction ? { direction: paragraphPatches[0].direction } : {}) }, paragraphStyles: activeParagraphStyles, paragraphStyleIds, paragraphStyleNames, ...(paragraphPatches.length === paragraphStyleIds.length ? { paragraphStylePatches: paragraphPatches } : {}), ...(footnotes.length ? { footnotes } : {}), ...(usedCharStyles.size ? { characterStyles: [...usedCharStyles.values()] } : {}) }
 }
 
 /** Read a file the user picked (or dropped): .docx or plain text. */
 export async function readPlacedText(file: File, options: { includeFootnotes?: boolean } = {}): Promise<PlacedText> {
-  if (file.size > MAX_FILE) throw new ImportError('הקובץ גדול מדי (מעל 40MB).')
+  if (file.size > MAX_FILE) throw new ImportError(t('הקובץ גדול מדי (מעל 40MB).'))
   const lower = file.name.toLowerCase()
   if (lower.endsWith('.docx')) return placedFromDocx(file.name, await file.arrayBuffer(), options)
   if (lower.endsWith('.xml') || file.type === 'application/xml' || file.type === 'text/xml') {
     const { placedFromXml } = await import('./importXml')
     return placedFromXml(file.name, decodeText(await file.arrayBuffer()))
   }
-  if (lower.endsWith('.doc')) throw new ImportError('קבצי doc ישנים לא נתמכים. פתח את הקובץ ב-Word ושמור אותו כ-docx.')
+  if (lower.endsWith('.doc')) throw new ImportError(t('קבצי doc ישנים לא נתמכים. פתח את הקובץ ב-Word ושמור אותו כ-docx.'))
   if (/\.(txt|text|md|csv)$/.test(lower) || file.type.startsWith('text/')) return placedFromPlainText(file.name, decodeText(await file.arrayBuffer()))
-  throw new ImportError('סוג הקובץ לא נתמך. אפשר לייבא קובצי docx, קובצי טקסט (txt) וקובצי XML.')
+  throw new ImportError(t('סוג הקובץ לא נתמך. אפשר לייבא קובצי docx, קובצי טקסט (txt) וקובצי XML.'))
 }

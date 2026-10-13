@@ -1,5 +1,5 @@
 import { ornamentExtent } from './footnoteOrnaments'
-import { effectiveLeading, DEFAULT_TEXT_STYLE, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type FootnoteReferenceLook, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
+import { effectiveLeading, DEFAULT_TEXT_STYLE, LTR_TEXT_DEFAULTS, type Binding, type FootnoteItem, type FootnoteLayoutConfig, type FootnoteLayoutMode, type FootnoteMarkerFormat, type FootnoteNumberStyle, type FootnoteReferenceLook, type ParagraphStyleRecord, type Run, type TextStyle } from './document'
 
 export function footnoteBlockWidth(frameWidth: number, widthScale = 1): number {
   return frameWidth * Math.max(0.2, Math.min(1, widthScale))
@@ -24,9 +24,11 @@ function resolveStylePatch(styles: ParagraphStyleRecord[], id: string, seen = ne
   return { ...(style.basedOnId ? resolveStylePatch(styles, style.basedOnId, nextSeen) : {}), ...style.patch }
 }
 
-export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[], paragraphStyleId?: string): TextStyle {
+export function footnoteTextStyle(config: FootnoteLayoutConfig, styles: ParagraphStyleRecord[], paragraphStyleId?: string, story?: Pick<TextStyle, 'direction'>): TextStyle {
   const patch = paragraphStyleId || config.paragraphStyleId ? resolveStylePatch(styles, paragraphStyleId || config.paragraphStyleId!) : {}
-  return { ...DEFAULT_TEXT_STYLE, ...patch, ...(config.fontFamily ? { fontFamily: config.fontFamily } : {}) }
+  // a story that reads from the left has its notes read and sit that way too, unless the style of the notes says otherwise
+  const base = story?.direction === 'ltr' ? { ...DEFAULT_TEXT_STYLE, ...LTR_TEXT_DEFAULTS } : DEFAULT_TEXT_STYLE
+  return { ...base, ...patch, ...(config.fontFamily ? { fontFamily: config.fontFamily } : {}) }
 }
 
 /**
@@ -150,17 +152,80 @@ export interface FootnoteOrderEntry {
   anchor: number
 }
 
-export function numberFootnotes(entries: FootnoteOrderEntry[], config: FootnoteLayoutConfig, binding: Binding): Map<string, number> {
-  const ordered = [...entries].sort((a, b) => a.page - b.page || a.frameY - b.frameY || (binding === 'rtl' ? b.frameX - a.frameX : a.frameX - b.frameX) || a.anchor - b.anchor)
+/** where the numbering starts over: the opening of a paragraph in the restart style, placed like a footnote entry */
+export interface FootnoteRestartMark {
+  page: number
+  spread: number
+  frameX: number
+  frameY: number
+  anchor: number
+}
+
+/**
+ * The numbers of the footnotes, in reading order: page by page, top to bottom, and across by the binding. `restarts` are the places
+ * where the numbering begins again (`config.restart` 'style'): a note is counted from the last of them before it.
+ */
+export function numberFootnotes(entries: FootnoteOrderEntry[], config: FootnoteLayoutConfig, binding: Binding, restarts: FootnoteRestartMark[] = []): Map<string, number> {
+  const rank = (item: { page: number; frameX: number; frameY: number; anchor: number }, other: { page: number; frameX: number; frameY: number; anchor: number }) =>
+    item.page - other.page || item.frameY - other.frameY || (binding === 'rtl' ? other.frameX - item.frameX : item.frameX - other.frameX) || item.anchor - other.anchor
+  type Placed = { id: string | null; page: number; spread: number; frameX: number; frameY: number; anchor: number }
+  const merged: Placed[] = [
+    ...(config.restart === 'style' ? restarts.map((mark): Placed => ({ id: null, ...mark })) : []),
+    ...entries.map((entry): Placed => ({ ...entry })),
+  ].sort((a, b) => rank(a, b) || (a.id === null ? 0 : 1) - (b.id === null ? 0 : 1))
   const counts = new Map<number, number>()
   const numbers = new Map<string, number>()
-  for (const entry of ordered) {
-    const scope = config.restart === 'page' ? entry.page : config.restart === 'spread' ? entry.spread : 0
+  let section = 0
+  for (const entry of merged) {
+    if (entry.id === null) {
+      section += 1
+      continue
+    }
+    const scope = config.restart === 'page' ? entry.page : config.restart === 'spread' ? entry.spread : config.restart === 'style' ? section : 0
     const index = counts.get(scope) ?? 0
     numbers.set(entry.id, config.startAt + index)
     counts.set(scope, index + 1)
   }
   return numbers
+}
+
+/**
+ * The places where the numbering starts over: the first character of every paragraph whose paragraph style is `styleId`, in the
+ * frame that holds it. `flows` say which part of its story each frame shows; `where` places a frame on its page (null: not on a page).
+ */
+export function footnoteRestartMarks(
+  flows: ReadonlyMap<string, { headId: string; start: number; end: number }>,
+  heads: ReadonlyMap<string, { text: string; paragraphStyleId?: string; paragraphStyleIds?: string[] }>,
+  styleId: string | undefined,
+  where: (frameId: string) => { page: number; spread: number; frameX: number; frameY: number } | null,
+): FootnoteRestartMark[] {
+  if (!styleId) return []
+  const starts = new Map<string, number[]>()
+  const startsOf = (headId: string): number[] => {
+    const known = starts.get(headId)
+    if (known) return known
+    const head = heads.get(headId)
+    const found: number[] = []
+    if (head) {
+      let offset = 0
+      head.text.split('\n').forEach((paragraph, index) => {
+        const style = head.paragraphStyleIds?.[index] ?? (index === 0 ? head.paragraphStyleId : undefined)
+        if (style === styleId) found.push(offset)
+        offset += paragraph.length + 1
+      })
+    }
+    starts.set(headId, found)
+    return found
+  }
+  const marks: FootnoteRestartMark[] = []
+  for (const [frameId, flow] of flows) {
+    const place = where(frameId)
+    if (!place) continue
+    for (const start of startsOf(flow.headId)) {
+      if (start >= flow.start && start < flow.end) marks.push({ ...place, anchor: start })
+    }
+  }
+  return marks
 }
 
 export interface FootnoteMeasurement {

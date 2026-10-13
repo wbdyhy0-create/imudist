@@ -3,6 +3,7 @@ import { GState, type jsPDF } from 'jspdf'
 import type { ShapeFrame } from './document'
 import { rgbToInks } from './cmykPage'
 import { shapePath } from './shapes'
+import { t } from './i18n'
 
 /**
  * Shapes and lines for a PDF as shapes and lines, not as a part of the page picture: sharp at any size, in the colour they were
@@ -30,13 +31,13 @@ export interface VectorShape {
 export type ShapePictureReason = 'table' | 'feather' | 'gradient' | 'shadow' | 'blur' | 'image' | 'color'
 
 export const SHAPE_PICTURE_REASONS: Record<ShapePictureReason, string> = {
-  table: 'טבלה',
-  feather: 'טשטוש קצוות',
-  gradient: 'מילוי מעבר צבעים',
-  shadow: 'צל',
-  blur: 'טשטוש',
-  image: 'תמונה בתוך צורה',
-  color: 'צבע שאינו מספר',
+  get table() { return t('טבלה') },
+  get feather() { return t('טשטוש קצוות') },
+  get gradient() { return t('מילוי מעבר צבעים') },
+  get shadow() { return t('צל') },
+  get blur() { return t('טשטוש') },
+  get image() { return t('תמונה בתוך צורה') },
+  get color() { return t('צבע שאינו מספר') },
 }
 
 /** The SVG arc from (x1, y1) to (x2, y2) as cubic curves (the SVG specification's conversion to a centre and angles, then a curve for every quarter turn or less). */

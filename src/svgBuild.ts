@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type { Asset, GradientFill, ImageFrame, ShapeFrame } from './document'
 import { linearGradientLine } from './colorModels'
 import { isProfiledLine, lineArrowWidth, lineOutlinePath } from './lineProfile'
@@ -82,10 +83,10 @@ export function buildSvg(items: SvgItem[], assets: Record<string, Pick<Asset, 'd
     if (item.kind === 'shape') {
       const shape = item.shape
       if (shape.kind === 'table') {
-        notes.add('טבלה')
+        notes.add(t('טבלה'))
         continue
       }
-      if (shape.feather) notes.add('טשטוש קצוות')
+      if (shape.feather) notes.add(t('טשטוש קצוות'))
       const isLine = shape.kind === 'line'
       const isPath = shape.kind === 'path'
       const profiled = isLine && isProfiledLine(shape)
@@ -130,10 +131,10 @@ export function buildSvg(items: SvgItem[], assets: Record<string, Pick<Asset, 'd
     const image = item.image
     const asset = assets[image.assetId]
     if (!asset || !DATA_URL.test(asset.dataUrl)) {
-      notes.add('תמונה שאינה מוטמעת בקובץ')
+      notes.add(t('תמונה שאינה מוטמעת בקובץ'))
       continue
     }
-    if (image.feather) notes.add('טשטוש קצוות')
+    if (image.feather) notes.add(t('טשטוש קצוות'))
     const clip = nextId('clip')
     defs.push(`<clipPath id="${clip}"><rect x="0" y="0" width="${num(image.w)}" height="${num(image.h)}"/></clipPath>`)
     let rect = { x: 0, y: 0, w: image.w, h: image.h }

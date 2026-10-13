@@ -12,6 +12,7 @@ import { exportContentOf, prepareExport, type PageDrawOptions } from './pdfExpor
 import { runPreflight, type PreflightIssue } from './preflight'
 import { parseDocument } from './fileFormat'
 import type { DocContent } from './pages'
+import { t } from './i18n'
 
 export type ChapterStatus = 'loading' | 'ok' | 'missing' | 'error'
 
@@ -134,7 +135,7 @@ export function useBook(options: Options) {
           knownModified.current.set(chapter.id, read.modified)
           return [chapter.id, { status: 'ok', info: readChapterInfo(read.text), modified: read.modified }]
         } catch (e) {
-          if (isMissing(e)) return [chapter.id, { status: 'missing', info: null, message: 'הקובץ לא נמצא' }]
+          if (isMissing(e)) return [chapter.id, { status: 'missing', info: null, message: t('הקובץ לא נמצא') }]
           return [chapter.id, { status: 'error', info: null, message: e instanceof BookFormatError ? e.message : messageOf(e) }]
         }
       }),
@@ -178,17 +179,17 @@ export function useBook(options: Options) {
     try {
       await from.writeText(from.bookFileName, serializeBook(next))
     } catch (e) {
-      showError('לא ניתן לשמור את הספר', e)
+      showError(t('לא ניתן לשמור את הספר'), e)
     }
   }
 
   const create = async () => {
     try {
-      const fresh = newBook('ספר חדש')
+      const fresh = newBook(t('ספר חדש'))
       const from = await createBookFile(fresh)
       if (from) adopt(fresh, from)
     } catch (e) {
-      showError('לא ניתן ליצור ספר', e)
+      showError(t('לא ניתן ליצור ספר'), e)
     }
   }
 
@@ -197,7 +198,7 @@ export function useBook(options: Options) {
       const picked = await openBookFile()
       if (picked) adopt(parseBook(picked.text), picked.storage)
     } catch (e) {
-      showError('לא ניתן לפתוח את הספר', e)
+      showError(t('לא ניתן לפתוח את הספר'), e)
     }
   }
 
@@ -235,7 +236,7 @@ export function useBook(options: Options) {
     if (!current) return
     const taken = current.chapters.some((chapter) => chapter.id !== id && chapter.path.toLowerCase() === path.toLowerCase())
     if (taken) {
-      notify('הקובץ הזה כבר פרק אחר בספר')
+      notify(t('הקובץ הזה כבר פרק אחר בספר'))
       return
     }
     knownModified.current.delete(id)
@@ -254,14 +255,14 @@ export function useBook(options: Options) {
       } else if (from.listChapters) {
         const used = new Set((latest.current.book?.chapters ?? []).filter((chapter) => chapter.id !== id).map((chapter) => chapter.path.toLowerCase()))
         const found = (await from.listChapters()).filter((path) => !used.has(path.toLowerCase()))
-        if (found.length === 0) notify('בתיקיית הספר אין מסמך אחר שאפשר לקשר אליו')
+        if (found.length === 0) notify(t('בתיקיית הספר אין מסמך אחר שאפשר לקשר אליו'))
         else {
           setRelinking(id)
           setCandidates(found)
         }
       }
     } catch (e) {
-      showError('לא ניתן לקשר את הפרק', e)
+      showError(t('לא ניתן לקשר את הפרק'), e)
     }
   }
 
@@ -286,7 +287,7 @@ export function useBook(options: Options) {
       else outside++
     }
     if (files.paths && from.chapterPathsOf) paths.push(...from.chapterPathsOf(files.paths))
-    if (outside > 0) notify('קובץ שנגרר לא נמצא בתיקיית הספר, ולכן לא נוסף. העבר אותו לתיקייה ואז הוסף אותו.')
+    if (outside > 0) notify(t('קובץ שנגרר לא נמצא בתיקיית הספר, ולכן לא נוסף. העבר אותו לתיקייה ואז הוסף אותו.'))
     if (paths.length > 0) await addPaths(paths)
   }
 
@@ -300,11 +301,11 @@ export function useBook(options: Options) {
       } else if (from.listChapters) {
         const have = new Set((latest.current.book?.chapters ?? []).map((chapter) => chapter.path.toLowerCase()))
         const found = (await from.listChapters()).filter((path) => !have.has(path.toLowerCase()))
-        if (found.length === 0) notify('אין בתיקיית הספר מסמכים נוספים שאפשר להוסיף')
+        if (found.length === 0) notify(t('אין בתיקיית הספר מסמכים נוספים שאפשר להוסיף'))
         else setCandidates(found)
       }
     } catch (e) {
-      showError('לא ניתן להוסיף פרקים', e)
+      showError(t('לא ניתן להוסיף פרקים'), e)
     }
   }
 
@@ -350,7 +351,7 @@ export function useBook(options: Options) {
       if (already) current.options.switchTo(already.id)
       else await openChapter(await current.storage.chapterRef(chapter.path))
     } catch (e) {
-      showError('לא ניתן לפתוח את הפרק', e)
+      showError(t('לא ניתן לפתוח את הפרק'), e)
     }
   }
 
@@ -425,9 +426,9 @@ export function useBook(options: Options) {
           changed++
         }
       }
-      notify(changed === 0 ? 'המספור כבר מעודכן בכל הפרקים' : inMemory > 0 ? `המספור עודכן ב-${changed} פרקים. ${inMemory} מהם פתוחים: שמור אותם כדי שהשינוי יישמר בקובץ` : `המספור עודכן ב-${changed} פרקים`)
+      notify(changed === 0 ? t('המספור כבר מעודכן בכל הפרקים') : inMemory > 0 ? t('המספור עודכן ב-{changed} פרקים. {inMemory} מהם פתוחים: שמור אותם כדי שהשינוי יישמר בקובץ', { changed, inMemory }) : t('המספור עודכן ב-{changed} פרקים', { changed }))
     } catch (e) {
-      showError('לא ניתן לעדכן את המספור', e)
+      showError(t('לא ניתן לעדכן את המספור'), e)
     } finally {
       setBusy(false)
       void refresh()
@@ -498,7 +499,7 @@ export function useBook(options: Options) {
       })
       setCheck({ at: Date.now(), chapters, bookIssues })
     } catch (e) {
-      showError('בדיקת התקינות נכשלה', e)
+      showError(t('בדיקת התקינות נכשלה'), e)
     } finally {
       setBusy(false)
       setCheckProgress(null)
@@ -528,7 +529,7 @@ export function useBook(options: Options) {
         await new Promise((resolve) => setTimeout(resolve, 100))
       }
     } catch (e) {
-      showError('לא ניתן לפתוח את הפרק', e)
+      showError(t('לא ניתן לפתוח את הפרק'), e)
     }
   }
 
@@ -538,7 +539,7 @@ export function useBook(options: Options) {
     if (!current || !numbering) return false
     if (!numbering.complete) {
       viewWindow?.close()
-      notify('אי אפשר לייצא: הקובץ של אחד הפרקים חסר או לא נקרא')
+      notify(t('אי אפשר לייצא: הקובץ של אחד הפרקים חסר או לא נקרא'))
       return false
     }
     setBusy(true)
@@ -555,16 +556,16 @@ export function useBook(options: Options) {
           return exportContentOf({ ...content, doc: { ...content.doc, startPage: numbering.chapters[index].startPage! } })
         },
       }))
-      const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || 'ספר', (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow)
+      const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ספר'), (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow)
       if (done) {
         // when the text was to be written as text, the dialog stays to say what became of each frame (it closes itself then)
         if (!options.vectorReport) setExportOpen(false)
-        notify('הספר יוצא ל-PDF')
+        notify(t('הספר יוצא ל-PDF'))
       } else viewWindow?.close()
       return done
     } catch (e) {
       viewWindow?.close()
-      showError('הייצוא נכשל', e)
+      showError(t('הייצוא נכשל'), e)
       return false
     } finally {
       setBusy(false)
@@ -584,13 +585,13 @@ export function useBook(options: Options) {
     if (!current) return
     const master = current.chapters.find((chapter) => chapter.id === current.settings.styleSourceId)
     if (!master) {
-      notify('סמן קודם פרק כמקור הסגנונות (הכוכב בשורת הפרק)')
+      notify(t('סמן קודם פרק כמקור הסגנונות (הכוכב בשורת הפרק)'))
       return
     }
     setBusy(true)
     try {
       const source = await contentOfChapter(master)
-      if (source.open?.dirty) notify('מסמך המקור פתוח עם שינויים שלא נשמרו: הסנכרון ישתמש בגרסה הנוכחית שלו, כולל השינויים')
+      if (source.open?.dirty) notify(t('מסמך המקור פתוח עם שינויים שלא נשמרו: הסנכרון ישתמש בגרסה הנוכחית שלו, כולל השינויים'))
       const set = styleSetOf(source.content)
       planMaster.current = set
       const rows: SyncRow[] = []
@@ -602,12 +603,12 @@ export function useBook(options: Options) {
           const report = planContentSync(target.content, set)
           rows.push({ chapterId: chapter.id, name, status: reportCount(report) === 0 ? 'current' : 'changes', report, open: !!target.open })
         } catch (e) {
-          rows.push({ chapterId: chapter.id, name, status: 'error', open: false, message: isMissing(e) ? 'הקובץ לא נמצא' : messageOf(e) })
+          rows.push({ chapterId: chapter.id, name, status: 'error', open: false, message: isMissing(e) ? t('הקובץ לא נמצא') : messageOf(e) })
         }
       }
       setSyncPlan({ masterName: states[master.id]?.info?.name || master.path, rows })
     } catch (e) {
-      showError('לא ניתן לקרוא את מסמך המקור', e)
+      showError(t('לא ניתן לקרוא את מסמך המקור'), e)
     } finally {
       setBusy(false)
     }
@@ -646,8 +647,8 @@ export function useBook(options: Options) {
       }
       setSyncPlan(null)
       planMaster.current = null
-      if (failed.length > 0) showError('הסנכרון לא הושלם בכל הפרקים', new Error(failed.join('\n')))
-      notify(`הסגנונות סונכרנו ב-${done} פרקים${open ? `. ${open} מהם פתוחים: שמור אותם כדי שהשינוי יישמר בקובץ` : ''}`)
+      if (failed.length > 0) showError(t('הסנכרון לא הושלם בכל הפרקים'), new Error(failed.join('\n')))
+      notify(open ? t('הסגנונות סונכרנו ב-{done} פרקים. {open} מהם פתוחים: שמור אותם כדי שהשינוי יישמר בקובץ', { done, open }) : t('הסגנונות סונכרנו ב-{done} פרקים', { done }))
     } finally {
       setBusy(false)
       void refresh()

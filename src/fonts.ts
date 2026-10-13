@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { useSyncExternalStore } from 'react'
 import { FONT_FAMILIES } from './document'
 
@@ -62,16 +63,16 @@ export function weightFromStyle(style: string): number {
 export const isItalicStyle = (style: string) => /italic|oblique/i.test(style)
 
 const HEBREW_WEIGHT_NAMES: Record<number, string> = {
-  100: 'דק במיוחד',
-  200: 'דק מאוד',
-  300: 'דק',
-  350: 'חצי-דק',
-  400: 'רגיל',
-  500: 'בינוני',
-  600: 'חצי-מודגש',
-  700: 'מודגש',
-  800: 'מודגש מאוד',
-  900: 'שחור',
+  get 100() { return t('דק במיוחד') },
+  get 200() { return t('דק מאוד') },
+  get 300() { return t('דק') },
+  get 350() { return t('חצי-דק') },
+  get 400() { return t('רגיל') },
+  get 500() { return t('בינוני') },
+  get 600() { return t('חצי-מודגש') },
+  get 700() { return t('מודגש') },
+  get 800() { return t('מודגש מאוד') },
+  get 900() { return t('שחור') },
 }
 
 /** Hebrew name of a weight, e.g. 600 → "חצי-מודגש". */

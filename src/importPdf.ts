@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { getDocument, GlobalWorkerOptions, type PDFDocumentLoadingTask, type PDFDocumentProxy } from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Asset } from './document'
@@ -26,7 +27,7 @@ export async function openPdfFile(file: File): Promise<PdfImportSource> {
   } catch (error) {
     await loading?.destroy().catch(() => {})
     const detail = error instanceof Error && error.message ? ` ${error.message}` : ''
-    throw new ImportError(`לא ניתן לקרוא את קובץ ה-PDF "${file.name}". ייתכן שהוא פגום או מוגן בסיסמה.${detail}`)
+    throw new ImportError(t('לא ניתן לקרוא את קובץ ה-PDF "{name}". ייתכן שהוא פגום או מוגן בסיסמה.', { name: file.name }) + detail)
   }
 }
 
@@ -172,7 +173,7 @@ async function pageAsset(source: PdfImportSource, pageNumber: number, pool: Enco
     return { assetId: encoded.assetId, asset }
   } catch (error) {
     const detail = error instanceof Error && error.message ? ` ${error.message}` : ''
-    throw new ImportError(`לא ניתן לרנדר את עמוד ${pageNumber} בקובץ ה-PDF "${source.file.name}".${detail}`)
+    throw new ImportError(t('לא ניתן לרנדר את עמוד {page} בקובץ ה-PDF "{name}".', { page: pageNumber, name: source.file.name }) + detail)
   } finally {
     page?.cleanup()
     if (canvas) {
@@ -189,7 +190,7 @@ async function pageAsset(source: PdfImportSource, pageNumber: number, pool: Enco
  */
 export async function readPdfFile(source: PdfImportSource, pageNumbers: number[], onProgress?: (done: number, total: number) => void): Promise<PlacedImage[]> {
   if (pageNumbers.some((page) => !Number.isInteger(page) || page < 1 || page > source.pageCount)) {
-    throw new ImportError('טווח העמודים כולל עמוד שאינו קיים בקובץ ה-PDF.')
+    throw new ImportError(t('טווח העמודים כולל עמוד שאינו קיים בקובץ ה-PDF.'))
   }
   const pool = pageNumbers.length > 1 ? await EncoderPool.start() : null
   // a page waiting for a worker holds its picture (35 MB): at most one is waiting for each worker

@@ -1,4 +1,5 @@
 import type { Feather, GradientFeather } from '../document'
+import { t } from '../i18n'
 
 interface Props {
   feather?: Feather
@@ -44,37 +45,37 @@ export function FeatherControls({ feather, onChange, onUseGradientTool }: Props)
 
   return (
     <div className="feather-controls">
-      <div className="place-modes" role="group" aria-label="סוג טשטוש הקצוות">
-        <button type="button" className={mode === 'none' ? 'on' : ''} aria-pressed={mode === 'none'} onClick={() => selectMode('none')}>ללא</button>
-        <button type="button" className={mode === 'basic' ? 'on' : ''} aria-pressed={mode === 'basic'} onClick={() => selectMode('basic')}>בסיסי</button>
-        <button type="button" className={mode === 'directional' ? 'on' : ''} aria-pressed={mode === 'directional'} onClick={() => selectMode('directional')}>כיווני</button>
-        <button type="button" className={mode === 'gradient' ? 'on' : ''} aria-pressed={mode === 'gradient'} onClick={() => selectMode('gradient')}>הדרגתי</button>
+      <div className="place-modes" role="group" aria-label={t('סוג טשטוש הקצוות')}>
+        <button type="button" className={mode === 'none' ? 'on' : ''} aria-pressed={mode === 'none'} onClick={() => selectMode('none')}>{t('ללא')}</button>
+        <button type="button" className={mode === 'basic' ? 'on' : ''} aria-pressed={mode === 'basic'} onClick={() => selectMode('basic')}>{t('בסיסי')}</button>
+        <button type="button" className={mode === 'directional' ? 'on' : ''} aria-pressed={mode === 'directional'} onClick={() => selectMode('directional')}>{t('כיווני')}</button>
+        <button type="button" className={mode === 'gradient' ? 'on' : ''} aria-pressed={mode === 'gradient'} onClick={() => selectMode('gradient')}>{t('הדרגתי')}</button>
       </div>
       {feather?.type === 'basic' && (
         <label className="feather-range">
-          <span>רדיוס טשטוש: {feather.radius} נק׳</span>
-          <input aria-label="רדיוס טשטוש" type="range" min="0" max="100" step="1" value={feather.radius} onChange={(event) => setRadius(Number(event.target.value))} />
+          <span>{t('רדיוס טשטוש: {radius} נק׳', { radius: feather.radius })}</span>
+          <input aria-label={t('רדיוס טשטוש')} type="range" min="0" max="100" step="1" value={feather.radius} onChange={(event) => setRadius(Number(event.target.value))} />
         </label>
       )}
       {feather?.type === 'directional' && (
         <div className="feather-edges">
           {([
-            ['top', 'למעלה'],
-            ['right', 'ימין'],
-            ['bottom', 'למטה'],
-            ['left', 'שמאל'],
+            ['top', t('למעלה')],
+            ['right', t('ימין')],
+            ['bottom', t('למטה')],
+            ['left', t('שמאל')],
           ] as const).map(([side, label]) => (
             <label key={side} className="feather-range">
-              <span>טשטוש {label}: {feather[side]} נק׳</span>
-              <input aria-label={`טשטוש ${label}`} type="range" min="0" max="100" step="1" value={feather[side]} onChange={(event) => setEdge(side, Number(event.target.value))} />
+              <span>{t('טשטוש {label}: {value} נק׳', { label, value: feather[side] })}</span>
+              <input aria-label={t('טשטוש {label}', { label })} type="range" min="0" max="100" step="1" value={feather[side]} onChange={(event) => setEdge(side, Number(event.target.value))} />
             </label>
           ))}
         </div>
       )}
       {mode === 'gradient' && (
         <>
-          <p className="muted">גרור את כלי ההחלקה מהצד האטום אל הצד השקוף כדי לקבוע את הכיוון והמרחק.</p>
-          <button type="button" className="btn small" onClick={onUseGradientTool}>עריכת כיוון המעבר</button>
+          <p className="muted">{t('גרור את כלי ההחלקה מהצד האטום אל הצד השקוף כדי לקבוע את הכיוון והמרחק.')}</p>
+          <button type="button" className="btn small" onClick={onUseGradientTool}>{t('עריכת כיוון המעבר')}</button>
         </>
       )}
     </div>

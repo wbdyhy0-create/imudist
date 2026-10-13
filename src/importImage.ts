@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { MAX_IMAGE_BYTES, type Asset } from './document'
 import { hashId } from './assetHash'
 import { ImportError } from './importText'
@@ -44,8 +45,8 @@ function toBase64(bytes: Uint8Array): string {
 /** Read a picture file: keep its bytes as a data URL and find out its pixel size. */
 export async function readImageFile(file: File): Promise<PlacedImage> {
   const mime = imageMime(file)
-  if (!mime) throw new ImportError(`"${file.name}" אינו קובץ תמונה נתמך (PNG, JPG, GIF, WebP, SVG, BMP או AVIF).`)
-  if (file.size > MAX_IMAGE_BYTES) throw new ImportError(`התמונה "${file.name}" גדולה מדי (מעל 50MB).`)
+  if (!mime) throw new ImportError(t('"{name}" אינו קובץ תמונה נתמך (PNG, JPG, GIF, WebP, SVG, BMP או AVIF).', { name: file.name }))
+  if (file.size > MAX_IMAGE_BYTES) throw new ImportError(t('התמונה "{name}" גדולה מדי (מעל 50MB).', { name: file.name }))
 
   const buffer = await file.arrayBuffer()
   const dataUrl = `data:${mime};base64,${toBase64(new Uint8Array(buffer))}`
@@ -55,7 +56,7 @@ export async function readImageFile(file: File): Promise<PlacedImage> {
   try {
     await img.decode()
   } catch {
-    throw new ImportError(`לא ניתן לקרוא את התמונה "${file.name}". ייתכן שהקובץ פגום.`)
+    throw new ImportError(t('לא ניתן לקרוא את התמונה "{name}". ייתכן שהקובץ פגום.', { name: file.name }))
   }
   // an SVG without its own size reports 0: give it a sensible default
   const width = img.naturalWidth || 300

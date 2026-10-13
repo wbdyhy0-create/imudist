@@ -2,6 +2,7 @@ import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { DEFAULT_FOOTNOTE_CONFIG, DEFAULT_TEXT_STYLE, FONT_FAMILIES, type CharStyle, type FootnoteLayoutConfig, type ParagraphStyleRecord, type Run, type TextStyle } from '../document'
 import { diffEdit, normalizeRuns, sliceRuns, styleAtChar } from '../story'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 import { footnoteDividerTextStyle, footnoteReferenceLook } from '../footnoteLayout'
 import { isOrnamentDecoration as isOrnament, MAX_ORNAMENT_BYTES, ORNAMENT_STYLES, ornamentPreviewMarkup, type DividerOrnamentImage } from '../footnoteOrnaments'
 
@@ -81,20 +82,20 @@ export function FootnoteEditorDialog({ title, initial, initialRuns = [], baseSty
     <div className="modal-backdrop">
       <form className="modal footnote-dialog" role="dialog" aria-modal="true" onSubmit={(event) => { event.preventDefault(); submit() }}>
         <h2>{title}</h2>
-        <div className="footnote-char-controls" role="toolbar" aria-label="עיצוב טקסט ההערה">
+        <div className="footnote-char-controls" role="toolbar" aria-label={t('עיצוב טקסט ההערה')}>
           <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format({ weight: 700 })}>B</button>
           <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => format({ italic: true })}>I</button>
-          <label>גודל<input type="number" min="1" max="999" value={fontSize} onChange={(event) => { const size = Number(event.target.value); setEditingStyle((current) => ({ ...current, fontSize: size })); format({ fontSize: size }) }} /></label>
-          <label>צבע<input type="color" value={color} onChange={(event) => { setEditingStyle((current) => ({ ...current, color: event.target.value })); format({ color: event.target.value }) }} /></label>
+          <label>{t('גודל')}<input type="number" min="1" max="999" value={fontSize} onChange={(event) => { const size = Number(event.target.value); setEditingStyle((current) => ({ ...current, fontSize: size })); format({ fontSize: size }) }} /></label>
+          <label>{t('צבע')}<input type="color" value={color} onChange={(event) => { setEditingStyle((current) => ({ ...current, color: event.target.value })); format({ color: event.target.value }) }} /></label>
         </div>
         <label className="footnote-dialog-field">
-          <span>תוכן ההערה</span>
+          <span>{t('תוכן ההערה')}</span>
           <textarea ref={area} autoFocus rows={6} value={content} onChange={(event) => { setRuns((current) => editRuns(content, event.target.value, current, editingStyle)); setContent(event.target.value) }} onSelect={onRange} onKeyUp={onRange} onMouseUp={onRange} />
         </label>
         <div className="modal-buttons">
-          {onDelete && <button type="button" className="btn danger" onClick={onDelete}>מחק הערה</button>}
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
-          <button type="submit" className="btn primary">אישור</button>
+          {onDelete && <button type="button" className="btn danger" onClick={onDelete}>{t('מחק הערה')}</button>}
+          <button type="button" className="btn" onClick={onClose}>{t('ביטול')}</button>
+          <button type="submit" className="btn primary">{t('אישור')}</button>
         </div>
       </form>
     </div>
@@ -119,8 +120,8 @@ interface FootnoteStyleFieldsProps {
 export function FootnoteStyleFields({ fontFamily, paragraphStyleId, paragraphStyles, onChange }: FootnoteStyleFieldsProps) {
   return (
     <>
-      <label className="footnote-dialog-field"><span>גופן הערות</span><select value={fontFamily ?? ''} onChange={(event) => onChange({ fontFamily: event.target.value })}><option value="">לפי סגנון הפסקה</option>{FONT_FAMILIES.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
-      <label className="footnote-dialog-field"><span>סגנון פסקה להערות</span><select value={paragraphStyleId ?? ''} onChange={(event) => onChange({ paragraphStyleId: event.target.value || undefined })}><option value="">סגנון גוף הטקסט</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>
+      <label className="footnote-dialog-field"><span>{t('גופן הערות')}</span><select value={fontFamily ?? ''} onChange={(event) => onChange({ fontFamily: event.target.value })}><option value="">{t('לפי סגנון הפסקה')}</option>{FONT_FAMILIES.map((font) => <option key={font} value={font}>{font}</option>)}</select></label>
+      <label className="footnote-dialog-field"><span>{t('סגנון פסקה להערות')}</span><select value={paragraphStyleId ?? ''} onChange={(event) => onChange({ paragraphStyleId: event.target.value || undefined })}><option value="">{t('סגנון גוף הטקסט')}</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>
     </>
   )
 }
@@ -138,10 +139,10 @@ const HIDDEN_FOOTNOTE_ORNAMENT_IDS = new Set([
 ])
 
 const footnoteRuleDecorations: { value: FootnoteLayoutConfig['dividerHeadingDecoration']; label: string }[] = [
-  { value: 'none', label: 'קו ישר' },
-  { value: 'outer', label: 'עיטור בקצוות החיצוניים' },
-  { value: 'both', label: 'עיטור בכל קצות הקווים' },
-  { value: 'needle', label: 'קצוות מחודדים' },
+  { value: 'none', get label() { return t('קו ישר') } },
+  { value: 'outer', get label() { return t('עיטור בקצוות החיצוניים') } },
+  { value: 'both', get label() { return t('עיטור בכל קצות הקווים') } },
+  { value: 'needle', get label() { return t('קצוות מחודדים') } },
   ...ORNAMENT_STYLES
     .filter((style) => !HIDDEN_FOOTNOTE_ORNAMENT_IDS.has(style.id))
     .map((style) => ({ value: style.id as FootnoteLayoutConfig['dividerHeadingDecoration'], label: style.label })),
@@ -149,9 +150,9 @@ const footnoteRuleDecorations: { value: FootnoteLayoutConfig['dividerHeadingDeco
 
 function FootnoteRuleDecorationPicker({ value, ornament, onChange }: { value: FootnoteLayoutConfig['dividerHeadingDecoration']; ornament?: DividerOrnamentImage; onChange: (value: FootnoteLayoutConfig['dividerHeadingDecoration']) => void }) {
   return (
-    <div className="footnote-rule-decoration-picker" role="group" aria-label="עיטור הקווים">
+    <div className="footnote-rule-decoration-picker" role="group" aria-label={t('עיטור הקווים')}>
       {ornament && (
-        <button type="button" aria-label={`העיטור שיובא: ${ornament.name}`} aria-pressed={value === 'custom'} title={`העיטור שיובא: ${ornament.name}`} className={'ornament-choice' + (value === 'custom' ? ' selected' : '')} onClick={() => onChange('custom')}>
+        <button type="button" aria-label={t('העיטור שיובא: {n1}', { n1: ornament.name })} aria-pressed={value === 'custom'} title={t('העיטור שיובא: {n1}', { n1: ornament.name })} className={'ornament-choice' + (value === 'custom' ? ' selected' : '')} onClick={() => onChange('custom')}>
           <span className="ornament-preview" dangerouslySetInnerHTML={{ __html: ornamentPreviewMarkup('custom', ornament) }} />
         </button>
       )}
@@ -222,7 +223,7 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
   const importOrnament = async (file: File) => {
     setOrnamentError(null)
     if (file.size > MAX_ORNAMENT_BYTES) {
-      setOrnamentError(`הקובץ גדול מדי (עד ${Math.round(MAX_ORNAMENT_BYTES / 1024)}KB). אפשר לכווץ אותו או להקטין אותו.`)
+      setOrnamentError(t('הקובץ גדול מדי (עד {n1}KB). אפשר לכווץ אותו או להקטין אותו.', { n1: Math.round(MAX_ORNAMENT_BYTES / 1024) }))
       return
     }
     try {
@@ -234,7 +235,7 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
       setConfig(updated)
       onPreview(updated)
     } catch {
-      setOrnamentError('לא ניתן לקרוא את הקובץ הזה כתמונה.')
+      setOrnamentError(t('לא ניתן לקרוא את הקובץ הזה כתמונה.'))
     }
   }
   const startWindowDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -288,59 +289,69 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
           window.setTimeout(() => form.requestSubmit(), 0)
         }}
       >
-        <button type="button" className="footnote-window-grip" aria-label="גרור את חלון אפשרויות הערות השוליים" title="גרור להזזת החלון" onPointerDown={startWindowDrag} onPointerMove={moveWindowDrag} onPointerUp={endWindowDrag} onPointerCancel={endWindowDrag}>+</button>
-        <h2>אפשרויות הערות שוליים</h2>
-        <div className="footnote-options-tabs" role="tablist" aria-label="קטגוריות הגדרות הערות שוליים">
-          <button type="button" role="tab" id="footnote-layout-tab" aria-controls="footnote-layout-panel" aria-selected={tab === 'layout'} tabIndex={tab === 'layout' ? 0 : -1} className={tab === 'layout' ? 'on' : ''} onClick={() => setTab('layout')}>פריסה</button>
-          <button type="button" role="tab" id="footnote-numbering-tab" aria-controls="footnote-numbering-panel" aria-selected={tab === 'numbering'} tabIndex={tab === 'numbering' ? 0 : -1} className={tab === 'numbering' ? 'on' : ''} onClick={() => setTab('numbering')}>מספור הערות</button>
-          <button type="button" role="tab" id="footnote-divider-tab" aria-controls="footnote-divider-panel" aria-selected={tab === 'divider'} tabIndex={tab === 'divider' ? 0 : -1} className={tab === 'divider' ? 'on' : ''} onClick={() => setTab('divider')}>קו הפרדה</button>
-          <button type="button" role="tab" id="footnote-style-tab" aria-controls="footnote-style-panel" aria-selected={tab === 'style'} tabIndex={tab === 'style' ? 0 : -1} className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>סגנון הערות</button>
+        <button type="button" className="footnote-window-grip" aria-label={t('גרור את חלון אפשרויות הערות השוליים')} title={t('גרור להזזת החלון')} onPointerDown={startWindowDrag} onPointerMove={moveWindowDrag} onPointerUp={endWindowDrag} onPointerCancel={endWindowDrag}>+</button>
+        <h2>{t('אפשרויות הערות שוליים')}</h2>
+        <div className="footnote-options-tabs" role="tablist" aria-label={t('קטגוריות הגדרות הערות שוליים')}>
+          <button type="button" role="tab" id="footnote-layout-tab" aria-controls="footnote-layout-panel" aria-selected={tab === 'layout'} tabIndex={tab === 'layout' ? 0 : -1} className={tab === 'layout' ? 'on' : ''} onClick={() => setTab('layout')}>{t('פריסה')}</button>
+          <button type="button" role="tab" id="footnote-numbering-tab" aria-controls="footnote-numbering-panel" aria-selected={tab === 'numbering'} tabIndex={tab === 'numbering' ? 0 : -1} className={tab === 'numbering' ? 'on' : ''} onClick={() => setTab('numbering')}>{t('מספור הערות')}</button>
+          <button type="button" role="tab" id="footnote-divider-tab" aria-controls="footnote-divider-panel" aria-selected={tab === 'divider'} tabIndex={tab === 'divider' ? 0 : -1} className={tab === 'divider' ? 'on' : ''} onClick={() => setTab('divider')}>{t('קו הפרדה')}</button>
+          <button type="button" role="tab" id="footnote-style-tab" aria-controls="footnote-style-panel" aria-selected={tab === 'style'} tabIndex={tab === 'style' ? 0 : -1} className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>{t('סגנון הערות')}</button>
         </div>
         <div id="footnote-layout-panel" role="tabpanel" aria-labelledby="footnote-layout-tab" hidden={tab !== 'layout'}>
-        <label className="footnote-dialog-field"><span>מיקום ההערות</span><select value={config.placement} onChange={(event) => set('placement', event.target.value as FootnoteLayoutConfig['placement'])}><option value="footnotes">בתחתית כל עמוד</option><option value="endnotes">בסוף המסמך</option></select></label>
-        <label className="footnote-dialog-field"><span>סידור</span><select value={config.mode} onChange={(event) => set('mode', event.target.value as FootnoteLayoutConfig['mode'])}><option value="vertical">אנכי</option><option value="horizontal">אופקי רציף</option></select></label>
-        <label className="footnote-dialog-field"><span>מספר עמודות בטקסט ההערות</span><select value={config.columns} onChange={(event) => set('columns', Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>עמודה אחת</option><option value={2}>שתי עמודות</option></select></label>
-        <label className="footnote-dialog-field"><span>מרווח בין עמודות אנכיות (ס״מ)</span><NumberField ariaLabel="מרווח בין עמודות אנכיות" value={config.columnGap} unit="cm" unitLabel="ס״מ" min={0} max={100} onChange={(gap) => set('columnGap', gap)} /></label>
-        <label className="footnote-dialog-field"><span>גודל מספרי הפניה בטקסט (%)</span><NumberField ariaLabel="גודל מספרי הפניה בטקסט" live value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
-        <label className="footnote-dialog-field"><span>סגנון פסקה למספרי ההפניה</span><select value={config.referenceStyleId ?? ''} onChange={(event) => set('referenceStyleId', event.target.value || undefined)}><option value="">ללא סגנון (כמו הטקסט שלפני המספר)</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select>{referenceLook?.fontSize !== undefined ? <small>הגודל נקבע לפי הסגנון ({Math.round(referenceLook.fontSize * 100) / 100} pt), ולכן שדה האחוזים שמעל אינו בשימוש.</small> : <small>הגופן, המשקל, הנטייה והצבע של הסגנון חלים על המספרים. אם הסגנון מגדיר גם גודל, הוא קובע את הגודל במקום האחוזים.</small>}</label>
-        <label className="footnote-dialog-field"><span>מרווח בין מספר ההפניה למילה (pt)</span><NumberField ariaLabel="מרווח בין מספר ההפניה למילה" live value={config.referenceGap} unit="px" unitLabel="pt" step={1} min={0} max={72} onChange={(gap) => set('referenceGap', gap)} /></label>
-        <label className="footnote-dialog-field"><span>הזזה אנכית של מספר ההפניה (pt)</span><NumberField ariaLabel="הזזה אנכית של מספר ההפניה" live value={config.referenceVerticalOffset} unit="px" unitLabel="pt" step={1} min={-20} max={20} onChange={(offset) => set('referenceVerticalOffset', offset)} /><small>ערך חיובי מעלה את המספר; ערך שלילי מוריד אותו.</small></label>
-        <label className="footnote-dialog-field"><span>מרווח בין מספר ההערה לטקסט (pt)</span><input type="number" min="0" max="100" value={config.numberTextGap} onChange={(event) => set('numberTextGap', Number(event.target.value))} /></label>
-        <label className="footnote-dialog-field"><span>מרווח בין הערות אופקיות (pt)</span><input type="number" min="0" max="100" value={config.minSpacingBetweenInline} onChange={(event) => set('minSpacingBetweenInline', Number(event.target.value))} /></label>
-        <label className="footnote-dialog-field"><span>גובה מרבי (pt)</span><input type="number" min="12" max="1000" value={config.maxFootnoteHeight} onChange={(event) => set('maxFootnoteHeight', Number(event.target.value))} /></label>
-        <label className="footnote-dialog-field"><span>מרווח לפני ההערות (pt)</span><input type="number" min="0" max="100" value={config.spaceBefore} onChange={(event) => set('spaceBefore', Number(event.target.value))} /></label>
-        {config.mode === 'horizontal' && <label className="footnote-dialog-field"><span>יישור הרצף האופקי</span><select value={config.alignment} onChange={(event) => set('alignment', event.target.value as FootnoteLayoutConfig['alignment'])}><option value="right">לימין</option><option value="center">למרכז העמוד</option></select></label>}
+        <label className="footnote-dialog-field"><span>{t('מיקום ההערות')}</span><select value={config.placement} onChange={(event) => set('placement', event.target.value as FootnoteLayoutConfig['placement'])}><option value="footnotes">{t('בתחתית כל עמוד')}</option><option value="endnotes">{t('בסוף המסמך')}</option></select></label>
+        <label className="footnote-dialog-field"><span>{t('סידור')}</span><select value={config.mode} onChange={(event) => set('mode', event.target.value as FootnoteLayoutConfig['mode'])}><option value="vertical">{t('אנכי')}</option><option value="horizontal">{t('אופקי רציף')}</option></select></label>
+        <label className="footnote-dialog-field"><span>{t('מספר עמודות בטקסט ההערות')}</span><select value={config.columns} onChange={(event) => set('columns', Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>{t('עמודה אחת')}</option><option value={2}>{t('שתי עמודות')}</option></select></label>
+        <label className="footnote-dialog-field"><span>{t('מרווח בין עמודות אנכיות (ס״מ)')}</span><NumberField ariaLabel={t('מרווח בין עמודות אנכיות')} value={config.columnGap} unit="cm" unitLabel={t('ס״מ')} min={0} max={100} onChange={(gap) => set('columnGap', gap)} /></label>
+        <label className="footnote-dialog-field"><span>{t('גודל מספרי הפניה בטקסט (%)')}</span><NumberField ariaLabel={t('גודל מספרי הפניה בטקסט')} live value={Math.round(config.referenceScale * 100)} min={25} max={100} onChange={(size) => set('referenceScale', size / 100)} /></label>
+        <label className="footnote-dialog-field"><span>{t('סגנון פסקה למספרי ההפניה')}</span><select value={config.referenceStyleId ?? ''} onChange={(event) => set('referenceStyleId', event.target.value || undefined)}><option value="">{t('ללא סגנון (כמו הטקסט שלפני המספר)')}</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select>{referenceLook?.fontSize !== undefined ? <small>{t('הגודל נקבע לפי הסגנון ({size} pt), ולכן שדה האחוזים שמעל אינו בשימוש.', { size: Math.round(referenceLook.fontSize * 100) / 100 })}</small> : <small>{t('הגופן, המשקל, הנטייה והצבע של הסגנון חלים על המספרים. אם הסגנון מגדיר גם גודל, הוא קובע את הגודל במקום האחוזים.')}</small>}</label>
+        <label className="footnote-dialog-field"><span>{t('מרווח בין מספר ההפניה למילה (pt)')}</span><NumberField ariaLabel={t('מרווח בין מספר ההפניה למילה')} live value={config.referenceGap} unit="px" unitLabel="pt" step={1} min={0} max={72} onChange={(gap) => set('referenceGap', gap)} /></label>
+        <label className="footnote-dialog-field"><span>{t('הזזה אנכית של מספר ההפניה (pt)')}</span><NumberField ariaLabel={t('הזזה אנכית של מספר ההפניה')} live value={config.referenceVerticalOffset} unit="px" unitLabel="pt" step={1} min={-20} max={20} onChange={(offset) => set('referenceVerticalOffset', offset)} /><small>{t('ערך חיובי מעלה את המספר; ערך שלילי מוריד אותו.')}</small></label>
+        <label className="footnote-dialog-field"><span>{t('מרווח בין מספר ההערה לטקסט (pt)')}</span><input type="number" min="0" max="100" value={config.numberTextGap} onChange={(event) => set('numberTextGap', Number(event.target.value))} /></label>
+        <label className="footnote-dialog-field"><span>{t('מרווח בין הערות אופקיות (pt)')}</span><input type="number" min="0" max="100" value={config.minSpacingBetweenInline} onChange={(event) => set('minSpacingBetweenInline', Number(event.target.value))} /></label>
+        <label className="footnote-dialog-field"><span>{t('גובה מרבי (pt)')}</span><input type="number" min="12" max="1000" value={config.maxFootnoteHeight} onChange={(event) => set('maxFootnoteHeight', Number(event.target.value))} /></label>
+        <label className="footnote-dialog-field"><span>{t('מרווח לפני ההערות (pt)')}</span><input type="number" min="0" max="100" value={config.spaceBefore} onChange={(event) => set('spaceBefore', Number(event.target.value))} /></label>
+        {config.mode === 'horizontal' && <label className="footnote-dialog-field"><span>{t('יישור הרצף האופקי')}</span><select value={config.alignment} onChange={(event) => set('alignment', event.target.value as FootnoteLayoutConfig['alignment'])}><option value="right">{t('לצד תחילת הטקסט (ימין בעברית, שמאל באנגלית)')}</option><option value="center">{t('למרכז העמוד')}</option></select></label>}
         </div>
         <div id="footnote-numbering-panel" role="tabpanel" aria-labelledby="footnote-numbering-tab" hidden={tab !== 'numbering'}>
-          <label className="footnote-dialog-field"><span>מספר התחלתי</span><input type="number" min="1" max="9999" value={config.startAt} onChange={(event) => set('startAt', Number(event.target.value))} /></label>
-          <label className="footnote-dialog-field"><span>איפוס מספור</span><select value={config.restart} onChange={(event) => set('restart', event.target.value as FootnoteLayoutConfig['restart'])}><option value="continuous">רציף במסמך</option><option value="page">בכל עמוד</option><option value="spread">בכל גיליון</option></select></label>
-          <label className="footnote-dialog-field"><span>סוג מספור</span><select value={config.numberStyle} onChange={(event) => set('numberStyle', event.target.value as FootnoteLayoutConfig['numberStyle'])}><option value="arabic">מספרים</option><option value="hebrew">אותיות בעברית</option><option value="roman">ספרות רומיות</option></select></label>
-          <label className="footnote-dialog-field"><span>עיצוב המספר בהערה</span><select value={config.noteFormat} onChange={(event) => set('noteFormat', event.target.value as FootnoteLayoutConfig['noteFormat'])}><option value="plain">ללא סימן</option><option value="dotBefore">נקודה לפני</option><option value="dot">נקודה אחרי</option><option value="leftParen">סוגר לפני</option><option value="doubleLeftParen">שני סוגרים לפני</option><option value="rightParen">סוגר אחרי</option><option value="doubleRightParen">שני סוגרים אחרי</option><option value="round">סוגריים עגולים</option><option value="square">סוגריים מרובעים</option></select></label>
+          <label className="footnote-dialog-field"><span>{t('מספר התחלתי')}</span><input type="number" min="1" max="9999" value={config.startAt} onChange={(event) => set('startAt', Number(event.target.value))} /></label>
+          <label className="footnote-dialog-field"><span>{t('איפוס מספור')}</span><select value={config.restart} onChange={(event) => set('restart', event.target.value as FootnoteLayoutConfig['restart'])}><option value="continuous">{t('רציף במסמך')}</option><option value="page">{t('בכל עמוד')}</option><option value="spread">{t('בכל גיליון')}</option><option value="style">{t('בכל פסקה בסגנון נבחר')}</option></select></label>
+          {config.restart === 'style' && (
+            <label className="footnote-dialog-field">
+              <span>{t('סגנון הפסקה שמתחיל מספור מחדש')}</span>
+              <select value={config.restartStyleId ?? ''} onChange={(event) => set('restartStyleId', event.target.value || undefined)}>
+                <option value="">{t('בחרו סגנון פסקה')}</option>
+                {paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+              </select>
+              <small>{t('כל פסקה בסגנון הזה (למשל כותרת פרק) מתחילה את מספר ההערות מחדש, מהמספר ההתחלתי.')}</small>
+            </label>
+          )}
+          <label className="footnote-dialog-field"><span>{t('סוג מספור')}</span><select value={config.numberStyle} onChange={(event) => set('numberStyle', event.target.value as FootnoteLayoutConfig['numberStyle'])}><option value="arabic">{t('מספרים')}</option><option value="hebrew">{t('אותיות בעברית')}</option><option value="roman">{t('ספרות רומיות')}</option></select></label>
+          <label className="footnote-dialog-field"><span>{t('עיצוב המספר בהערה')}</span><select value={config.noteFormat} onChange={(event) => set('noteFormat', event.target.value as FootnoteLayoutConfig['noteFormat'])}><option value="plain">{t('ללא סימן')}</option><option value="dotBefore">{t('נקודה לפני')}</option><option value="dot">{t('נקודה אחרי')}</option><option value="leftParen">{t('סוגר לפני')}</option><option value="doubleLeftParen">{t('שני סוגרים לפני')}</option><option value="rightParen">{t('סוגר אחרי')}</option><option value="doubleRightParen">{t('שני סוגרים אחרי')}</option><option value="round">{t('סוגריים עגולים')}</option><option value="square">{t('סוגריים מרובעים')}</option></select></label>
           <div className="grid2">
-            <label className="footnote-dialog-field"><span>לפני המספר</span><input value={config.markerPrefix} onChange={(event) => set('markerPrefix', event.target.value)} /></label>
-            <label className="footnote-dialog-field"><span>אחרי המספר</span><input value={config.markerSuffix} onChange={(event) => set('markerSuffix', event.target.value)} /></label>
+            <label className="footnote-dialog-field"><span>{t('לפני המספר')}</span><input value={config.markerPrefix} onChange={(event) => set('markerPrefix', event.target.value)} /></label>
+            <label className="footnote-dialog-field"><span>{t('אחרי המספר')}</span><input value={config.markerSuffix} onChange={(event) => set('markerSuffix', event.target.value)} /></label>
           </div>
         </div>
         <div id="footnote-divider-panel" role="tabpanel" aria-labelledby="footnote-divider-tab" hidden={tab !== 'divider'}>
-          <label className="footnote-dialog-field"><span>סוג הפרדה</span><select value={config.dividerMode} onChange={(event) => set('dividerMode', event.target.value as FootnoteLayoutConfig['dividerMode'])}><option value="line">קו</option><option value="heading">כותרת בין קווים</option></select></label>
+          <label className="footnote-dialog-field"><span>{t('סוג הפרדה')}</span><select value={config.dividerMode} onChange={(event) => set('dividerMode', event.target.value as FootnoteLayoutConfig['dividerMode'])}><option value="line">{t('קו')}</option><option value="heading">{t('כותרת בין קווים')}</option></select></label>
           {config.dividerMode === 'heading' && (
             <>
-              <label className="footnote-dialog-field"><span>טקסט הכותרת</span><input type="text" maxLength={200} value={config.dividerText} onChange={(event) => set('dividerText', event.target.value)} /></label>
-              <label className="footnote-dialog-field"><span>סגנון פסקה לכותרת</span><select value={config.dividerHeadingStyleId ?? ''} onChange={(event) => set('dividerHeadingStyleId', event.target.value || undefined)}><option value="">סגנון ברירת מחדל</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>
-              <label className="footnote-dialog-checkbox"><input type="checkbox" checked={config.dividerHeadingLines} onChange={(event) => set('dividerHeadingLines', event.target.checked)} /><span>הצג קווים משני צדי הכותרת</span></label>
+              <label className="footnote-dialog-field"><span>{t('טקסט הכותרת')}</span><input type="text" maxLength={200} value={config.dividerText} onChange={(event) => set('dividerText', event.target.value)} /></label>
+              <label className="footnote-dialog-field"><span>{t('סגנון פסקה לכותרת')}</span><select value={config.dividerHeadingStyleId ?? ''} onChange={(event) => set('dividerHeadingStyleId', event.target.value || undefined)}><option value="">{t('סגנון ברירת מחדל')}</option>{paragraphStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}</select></label>
+              <label className="footnote-dialog-checkbox"><input type="checkbox" checked={config.dividerHeadingLines} onChange={(event) => set('dividerHeadingLines', event.target.checked)} /><span>{t('הצג קווים משני צדי הכותרת')}</span></label>
               {config.dividerHeadingLines && (
                 <div className="footnote-rule-decoration-field">
-                  <span>עיטור הקווים</span>
+                  <span>{t('עיטור הקווים')}</span>
                   <FootnoteRuleDecorationPicker value={config.dividerHeadingDecoration} ornament={config.dividerOrnament} onChange={(decoration) => set('dividerHeadingDecoration', decoration)} />
                   <div className="footnote-ornament-import">
-                    <button type="button" className="btn small" onClick={() => ornamentInput.current?.click()}>ייבוא עיטור מקובץ…</button>
+                    <button type="button" className="btn small" onClick={() => ornamentInput.current?.click()}>{t('ייבוא עיטור מקובץ…')}</button>
                     {config.dividerOrnament && (
                       <button type="button" className="btn small" onClick={() => {
                         const { dividerOrnament: _removed, ...rest } = config
                         const next = { ...rest, dividerHeadingDecoration: config.dividerHeadingDecoration === 'custom' ? 'none' as const : config.dividerHeadingDecoration }
                         setConfig(next)
                         onPreview(next)
-                      }}>הסר את העיטור שיובא</button>
+                      }}>{t('הסר את העיטור שיובא')}</button>
                     )}
                     <input ref={ornamentInput} type="file" hidden accept="image/svg+xml,image/png,image/jpeg,image/webp,image/gif" onChange={(event) => {
                       const file = event.target.files?.[0]
@@ -349,25 +360,25 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
                     }} />
                     {ornamentError && <span className="footnote-ornament-error" role="alert">{ornamentError}</span>}
                   </div>
-                  <span className="muted">העיטור המיובא (SVG, PNG או JPG) מוצב בקצה החיצוני של כל קו, ומתהפך בצד השני. גודלו נגזר מגודל הגופן של הכותרת, ולכן משתנה איתו.</span>
-                  <label className="footnote-dialog-field"><span>מרווח בין הקווים או העיטורים לכותרת (נק׳)</span><NumberField ariaLabel="מרווח בין הקווים או העיטורים לכותרת" live value={config.dividerHeadingGap ?? Math.round(Math.max(6, footnoteDividerTextStyle(config, paragraphStyles).fontSize * 0.4) * 10) / 10} unit="px" unitLabel="pt" step={1} min={0} max={200} onChange={(gap) => set('dividerHeadingGap', gap)} /></label>
+                  <span className="muted">{t('העיטור המיובא (SVG, PNG או JPG) מוצב בקצה החיצוני של כל קו, ומתהפך בצד השני. גודלו נגזר מגודל הגופן של הכותרת, ולכן משתנה איתו.')}</span>
+                  <label className="footnote-dialog-field"><span>{t('מרווח בין הקווים או העיטורים לכותרת (נק׳)')}</span><NumberField ariaLabel={t('מרווח בין הקווים או העיטורים לכותרת')} live value={config.dividerHeadingGap ?? Math.round(Math.max(6, footnoteDividerTextStyle(config, paragraphStyles).fontSize * 0.4) * 10) / 10} unit="px" unitLabel="pt" step={1} min={0} max={200} onChange={(gap) => set('dividerHeadingGap', gap)} /></label>
                   {isOrnament(config.dividerHeadingDecoration) && (
                     <>
-                    <label className="footnote-dialog-field"><span>גודל העיטור (% מגודל הגופן של הכותרת)</span><NumberField ariaLabel="גודל העיטור באחוזים מגודל הגופן של הכותרת" live value={Math.round(config.dividerOrnamentScale ?? 100)} step={5} min={20} max={500} onChange={(scale) => set('dividerOrnamentScale', scale)} /></label>
-                    <label className="footnote-dialog-field"><span>הגבהה או הנמכה של העיטורים לעומת הכותרת (pt)</span><NumberField ariaLabel="הגבהה או הנמכה של העיטורים לעומת הכותרת" live value={config.dividerOrnamentOffset ?? 0} unit="px" unitLabel="pt" step={1} min={-100} max={100} onChange={(offset) => set('dividerOrnamentOffset', offset)} /><small>ערך חיובי מגביה את העיטורים, ערך שלילי מנמיך אותם. באפס הם מיושרים לאמצע האותיות של הכותרת.</small></label>
+                    <label className="footnote-dialog-field"><span>{t('גודל העיטור (% מגודל הגופן של הכותרת)')}</span><NumberField ariaLabel={t('גודל העיטור באחוזים מגודל הגופן של הכותרת')} live value={Math.round(config.dividerOrnamentScale ?? 100)} step={5} min={20} max={500} onChange={(scale) => set('dividerOrnamentScale', scale)} /></label>
+                    <label className="footnote-dialog-field"><span>{t('הגבהה או הנמכה של העיטורים לעומת הכותרת (pt)')}</span><NumberField ariaLabel={t('הגבהה או הנמכה של העיטורים לעומת הכותרת')} live value={config.dividerOrnamentOffset ?? 0} unit="px" unitLabel="pt" step={1} min={-100} max={100} onChange={(offset) => set('dividerOrnamentOffset', offset)} /><small>{t('ערך חיובי מגביה את העיטורים, ערך שלילי מנמיך אותם. באפס הם מיושרים לאמצע האותיות של הכותרת.')}</small></label>
                     </>
                   )}
                 </div>
               )}
             </>
           )}
-          <label className="footnote-dialog-field"><span>מרחק הטקסט הרץ מהקו העליון (pt)</span><NumberField ariaLabel="מרחק הטקסט הרץ מהקו העליון" live value={config.dividerGap} unit="px" unitLabel="pt" step={1} min={0} max={100} onChange={(gap) => set('dividerGap', gap)} /></label>
-          <label className="footnote-dialog-field"><span>עובי קו ההפרדה (pt)</span><NumberField ariaLabel="עובי קו ההפרדה" live value={config.dividerThickness} unit="px" unitLabel="pt" step={0.1} min={0.1} max={10} onChange={(thickness) => set('dividerThickness', thickness)} /></label>
-          {config.dividerMode === 'heading' && <label className="footnote-dialog-field"><span>רוחב אזור הכותרת והקווים (%)</span><NumberField ariaLabel="רוחב אזור הכותרת והקווים באחוזים" live value={Math.round(config.dividerWidth)} min={20} max={100} onChange={(width) => set('dividerWidth', width)} /></label>}
+          <label className="footnote-dialog-field"><span>{t('מרחק הטקסט הרץ מהקו העליון (pt)')}</span><NumberField ariaLabel={t('מרחק הטקסט הרץ מהקו העליון')} live value={config.dividerGap} unit="px" unitLabel="pt" step={1} min={0} max={100} onChange={(gap) => set('dividerGap', gap)} /></label>
+          <label className="footnote-dialog-field"><span>{t('עובי קו ההפרדה (pt)')}</span><NumberField ariaLabel={t('עובי קו ההפרדה')} live value={config.dividerThickness} unit="px" unitLabel="pt" step={0.1} min={0.1} max={10} onChange={(thickness) => set('dividerThickness', thickness)} /></label>
+          {config.dividerMode === 'heading' && <label className="footnote-dialog-field"><span>{t('רוחב אזור הכותרת והקווים (%)')}</span><NumberField ariaLabel={t('רוחב אזור הכותרת והקווים באחוזים')} live value={Math.round(config.dividerWidth)} min={20} max={100} onChange={(width) => set('dividerWidth', width)} /></label>}
           {config.dividerMode === 'line' && (
             <>
-              <label className="footnote-dialog-field"><span>רוחב קו ההפרדה (%)</span><NumberField ariaLabel="רוחב קו ההפרדה באחוזים" live value={Math.round(config.dividerWidth)} min={1} max={100} onChange={(width) => set('dividerWidth', width)} /></label>
-              <label className="footnote-dialog-field"><span>יישור קו ההפרדה</span><select value={config.dividerAlignment} onChange={(event) => set('dividerAlignment', event.target.value as FootnoteLayoutConfig['dividerAlignment'])}><option value="right">ימין</option><option value="center">מרכז</option><option value="left">שמאל</option></select></label>
+              <label className="footnote-dialog-field"><span>{t('רוחב קו ההפרדה (%)')}</span><NumberField ariaLabel={t('רוחב קו ההפרדה באחוזים')} live value={Math.round(config.dividerWidth)} min={1} max={100} onChange={(width) => set('dividerWidth', width)} /></label>
+              <label className="footnote-dialog-field"><span>{t('יישור קו ההפרדה')}</span><select value={config.dividerAlignment} onChange={(event) => set('dividerAlignment', event.target.value as FootnoteLayoutConfig['dividerAlignment'])}><option value="right">{t('ימין')}</option><option value="center">{t('מרכז')}</option><option value="left">{t('שמאל')}</option></select></label>
             </>
           )}
         </div>
@@ -379,8 +390,8 @@ export function FootnoteOptionsDialog({ value, paragraphStyles, onPreview, onSav
           }} />
         </div>
         <div className="modal-buttons">
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
-          <button type="submit" className="btn primary">אישור</button>
+          <button type="button" className="btn" onClick={onClose}>{t('ביטול')}</button>
+          <button type="submit" className="btn primary">{t('אישור')}</button>
         </div>
       </form>
     </div>

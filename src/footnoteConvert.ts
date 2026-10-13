@@ -3,6 +3,7 @@
  * text in brackets become real footnotes, and footnotes become notes in brackets again. Pure functions on a story; Workspace.tsx
  * gives them the stories, the selection and the one undo step.
  */
+import { t } from './i18n'
 import { FOOTNOTE_MARKER, type FootnoteItem, type ParagraphStyleRecord, type Run, type TextFrame } from './document'
 import { mergeRuns, normalizeRuns } from './story'
 import { styleIdOf } from './styleApply'
@@ -17,7 +18,7 @@ export const NOTE_BRACKETS = [
 export type NoteBracket = (typeof NOTE_BRACKETS)[number]
 
 /** "הומרה הערה אחת" / "הומרו 3 הערות" */
-export const convertedText = (count: number) => (count === 1 ? 'הומרה הערה אחת' : `הומרו ${count} הערות`)
+export const convertedText = (count: number) => (count === 1 ? t('הומרה הערה אחת') : t('הומרו {count} הערות', { count }))
 
 /** the part of a story to work on, [from, to); none means the whole story */
 export type NoteRange = { from: number; to: number } | null

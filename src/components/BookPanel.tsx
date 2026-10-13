@@ -10,11 +10,12 @@ import { countBookCheck, countChapter, type BookCheck } from '../bookPreflight'
 import type { SyncReport } from '../bookStyles'
 import type { BookController } from '../useBook'
 import '../book.css'
+import { localeTag, t } from '../i18n'
 
 const START_OPTIONS: { value: ChapterStart; label: string }[] = [
-  { value: 'any', label: 'בכל עמוד' },
-  { value: 'odd', label: 'בעמוד אי-זוגי' },
-  { value: 'even', label: 'בעמוד זוגי' },
+  { value: 'any', get label() { return t('בכל עמוד') } },
+  { value: 'odd', get label() { return t('בעמוד אי-זוגי') } },
+  { value: 'even', get label() { return t('בעמוד זוגי') } },
 ]
 
 const plural = (count: number, one: string, many: string) => (count === 1 ? one : `${count} ${many}`)
@@ -34,20 +35,20 @@ export function BookPanel({ controller }: { controller: BookController }) {
 
   if (!book || !numbering) {
     return (
-      <aside className="book-panel" aria-label="ספר">
+      <aside className="book-panel" aria-label={t('ספר')}>
         <header className="book-head">
-          <b>ספר</b>
-          <button className="book-close" aria-label="סגור" onClick={() => controller.setPanelOpen(false)}>×</button>
+          <b>{t('ספר')}</b>
+          <button className="book-close" aria-label={t('סגור')} onClick={() => controller.setPanelOpen(false)}>×</button>
         </header>
         <div className="book-empty">
-          <p>ספר מקבץ כמה מסמכים (פרקים) לפרסום אחד: מספור עמודים רציף, סגנונות משותפים וייצוא אחד.</p>
+          <p>{t('ספר מקבץ כמה מסמכים (פרקים) לפרסום אחד: מספור עמודים רציף, סגנונות משותפים וייצוא אחד.')}</p>
           {canKeepBooks() ? (
             <div className="book-actions">
-              <button className="btn primary" onClick={() => void controller.create()}>ספר חדש…</button>
-              <button className="btn" onClick={() => void controller.open()}>פתח ספר…</button>
+              <button className="btn primary" onClick={() => void controller.create()}>{t('ספר חדש…')}</button>
+              <button className="btn" onClick={() => void controller.open()}>{t('פתח ספר…')}</button>
             </div>
           ) : (
-            <p className="book-note">הדפדפן הזה לא מאפשר לתוכנה לפתוח תיקייה, ולכן אי אפשר לנהל בו ספר. השתמש בגרסת שולחן העבודה או בדפדפן Chrome או Edge.</p>
+            <p className="book-note">{t('הדפדפן הזה לא מאפשר לתוכנה לפתוח תיקייה, ולכן אי אפשר לנהל בו ספר. השתמש בגרסת שולחן העבודה או בדפדפן Chrome או Edge.')}</p>
           )}
         </div>
       </aside>
@@ -56,13 +57,13 @@ export function BookPanel({ controller }: { controller: BookController }) {
 
   const counts = check ? countBookCheck(check) : null
   const checkLevel = !counts ? 'unknown' : counts.errors ? 'error' : counts.warnings ? 'warning' : 'ok'
-  const checkLabel = !counts ? 'בדיקת תקינות: עדיין לא נבדק' : counts.errors || counts.warnings ? `${counts.errors ? plural(counts.errors, 'שגיאה אחת', 'שגיאות') : ''}${counts.errors && counts.warnings ? ' · ' : ''}${counts.warnings ? plural(counts.warnings, 'אזהרה אחת', 'אזהרות') : ''}` : 'אין שגיאות בספר'
+  const checkLabel = !counts ? t('בדיקת תקינות: עדיין לא נבדק') : counts.errors || counts.warnings ? `${counts.errors ? plural(counts.errors, t('שגיאה אחת'), t('שגיאות')) : ''}${counts.errors && counts.warnings ? ' · ' : ''}${counts.warnings ? plural(counts.warnings, t('אזהרה אחת'), t('אזהרות')) : ''}` : t('אין שגיאות בספר')
   const total = numbering.totalPages
   const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files')
   return (
     <aside
       className={`book-panel${dropActive ? ' drop-active' : ''}`}
-      aria-label="ספר"
+      aria-label={t('ספר')}
       onDragOver={(event) => {
         // a document file dragged over the panel: it can be dropped here to become a chapter
         if (!hasFiles(event)) return
@@ -90,16 +91,16 @@ export function BookPanel({ controller }: { controller: BookController }) {
           key={book.title}
           className="book-title"
           defaultValue={book.title}
-          aria-label="שם הספר"
+          aria-label={t('שם הספר')}
           onBlur={(event) => controller.setTitle(event.target.value)}
           onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
         />
-        <button className="book-close" aria-label="סגור את הלוח" onClick={() => controller.setPanelOpen(false)}>×</button>
+        <button className="book-close" aria-label={t('סגור את הלוח')} onClick={() => controller.setPanelOpen(false)}>×</button>
       </header>
       <div className="book-summary">
-        <span>{plural(book.chapters.length, 'פרק אחד', 'פרקים')}</span>
+        <span>{plural(book.chapters.length, t('פרק אחד'), t('פרקים'))}</span>
         <span>
-          {total} עמודים{numbering.complete ? '' : ' (לא כולל פרקים שגודלם לא ידוע)'}
+          {t('{total} עמודים', { total })}{numbering.complete ? '' : t(' (לא כולל פרקים שגודלם לא ידוע)')}
         </span>
       </div>
       <div className="book-path" title={controller.storage?.label}>{controller.storage?.label}</div>
@@ -108,21 +109,21 @@ export function BookPanel({ controller }: { controller: BookController }) {
         <span className={`dot ${checkLevel}`} />
         <span className="book-check-text">{checkLabel}</span>
         <button className="btn small" disabled={controller.busy} onClick={() => (check ? setView(view === 'check' ? 'chapters' : 'check') : void controller.runCheck())}>
-          {check ? (view === 'check' ? 'חזרה לפרקים' : 'פירוט') : 'בדוק ספר'}
+          {check ? (view === 'check' ? t('חזרה לפרקים') : t('פירוט')) : t('בדוק ספר')}
         </button>
       </div>
-      {controller.checkProgress && <div className="book-note" role="status">בודק: {controller.checkProgress.title} ({controller.checkProgress.done + 1} מתוך {controller.checkProgress.total})</div>}
+      {controller.checkProgress && <div className="book-note" role="status">{t('בודק: {title} ({done} מתוך {total})', { title: controller.checkProgress.title, done: controller.checkProgress.done + 1, total: controller.checkProgress.total })}</div>}
       {view === 'check' && check ? (
         <BookCheckList controller={controller} />
       ) : (
         <>
       <div className="book-settings">
         <label>
-          מספר העמוד הראשון
+          {t('מספר העמוד הראשון')}
           <input type="number" value={book.settings.startPage} onChange={(event) => Number.isFinite(event.target.valueAsNumber) && controller.setSettings({ startPage: Math.round(event.target.valueAsNumber) })} />
         </label>
         <label>
-          פרק מתחיל
+          {t('פרק מתחיל')}
           <select value={book.settings.chapterStart} onChange={(event) => controller.setSettings({ chapterStart: event.target.value as ChapterStart })}>
             {START_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
@@ -130,7 +131,7 @@ export function BookPanel({ controller }: { controller: BookController }) {
       </div>
 
       <ol className="book-chapters">
-        {book.chapters.length === 0 && <li className="book-note">עדיין אין פרקים. לחץ על "הוסף פרקים" כדי לצרף מסמכים.</li>}
+        {book.chapters.length === 0 && <li className="book-note">{t('עדיין אין פרקים. לחץ על "הוסף פרקים" כדי לצרף מסמכים.')}</li>}
         {book.chapters.map((chapter, index) => {
           const state = states[chapter.id]
           const number = numbering.chapters[index]
@@ -164,28 +165,28 @@ export function BookPanel({ controller }: { controller: BookController }) {
               <span className="book-grip" aria-hidden="true">⋮⋮</span>
               <span className="book-index">{index + 1}</span>
               <div className="book-chapter-main">
-                <button className="book-chapter-name" title="פתח את הפרק" onClick={() => void controller.openChapter(chapter.id)} disabled={state?.status === 'missing'}>{name}</button>
+                <button className="book-chapter-name" title={t('פתח את הפרק')} onClick={() => void controller.openChapter(chapter.id)} disabled={state?.status === 'missing'}>{name}</button>
                 <div className="book-chapter-meta">
                   {state?.status === 'missing' || state?.status === 'error' ? (
                     <span className="book-bad">
                       {state.message}
-                      {state.status === 'missing' && <button className="btn small" onClick={() => void controller.relinkChapter(chapter.id)}>קשר מחדש…</button>}
+                      {state.status === 'missing' && <button className="btn small" onClick={() => void controller.relinkChapter(chapter.id)}>{t('קשר מחדש…')}</button>}
                     </span>
                   ) : number?.startPage != null && number.endPage != null ? (
                     <span>
-                      עמ׳ {number.startPage}–{number.endPage} · {plural(number.pages ?? 0, 'עמוד אחד', 'עמודים')}
-                      {number.skipped > 0 && ' · לפניו עמוד ריק'}
+                      {t('עמ׳ {start}–{end}', { start: number.startPage, end: number.endPage })} · {plural(number.pages ?? 0, t('עמוד אחד'), t('עמודים'))}
+                      {number.skipped > 0 && t(' · לפניו עמוד ריק')}
                     </span>
                   ) : state?.status === 'loading' ? (
-                    <span>טוען…</span>
+                    <span>{t('טוען…')}</span>
                   ) : (
-                    <span>המספור לא ידוע (פרק קודם חסר)</span>
+                    <span>{t('המספור לא ידוע (פרק קודם חסר)')}</span>
                   )}
-                  {staleNumbers.includes(chapter.id) && state?.info && <span className="book-warn">⚠ בפרק שמור מספר ראשון {state.info.startPage} ולא {number?.startPage}</span>}
+                  {staleNumbers.includes(chapter.id) && state?.info && <span className="book-warn">{t('⚠ בפרק שמור מספר ראשון {saved} ולא {computed}', { saved: state.info.startPage, computed: number?.startPage ?? '' })}</span>}
                   {controller.conflicts.includes(chapter.id) && (
                     <span className="book-warn">
-                      ⚠ הקובץ שונה בדיסק בזמן שהפרק פתוח עם שינויים שלא נשמרו: שמירה תדרוס את השינוי
-                      <button className="btn small" onClick={() => controller.dismissConflict(chapter.id)}>הבנתי</button>
+                      {t('⚠ הקובץ שונה בדיסק בזמן שהפרק פתוח עם שינויים שלא נשמרו: שמירה תדרוס את השינוי')}
+                      <button className="btn small" onClick={() => controller.dismissConflict(chapter.id)}>{t('הבנתי')}</button>
                     </span>
                   )}
                   {check && <ChapterBadge check={check} chapterId={chapter.id} />}
@@ -193,12 +194,12 @@ export function BookPanel({ controller }: { controller: BookController }) {
                 </div>
               </div>
               <div className="book-chapter-tools">
-                <button className={`book-star${book.settings.styleSourceId === chapter.id ? ' on' : ''}`} aria-label="מקור הסגנונות" aria-pressed={book.settings.styleSourceId === chapter.id} title={book.settings.styleSourceId === chapter.id ? 'זה מקור הסגנונות של הספר (לחיצה מבטלת)' : 'קבע כמקור הסגנונות של הספר'} onClick={() => controller.setStyleSource(chapter.id)}>
+                <button className={`book-star${book.settings.styleSourceId === chapter.id ? ' on' : ''}`} aria-label={t('מקור הסגנונות')} aria-pressed={book.settings.styleSourceId === chapter.id} title={book.settings.styleSourceId === chapter.id ? t('זה מקור הסגנונות של הספר (לחיצה מבטלת)') : t('קבע כמקור הסגנונות של הספר')} onClick={() => controller.setStyleSource(chapter.id)}>
                   {book.settings.styleSourceId === chapter.id ? '★' : '☆'}
                 </button>
-                <button aria-label="הזז למעלה" title="הזז למעלה" disabled={index === 0} onClick={() => controller.moveChapter(chapter.id, index - 1)}>▲</button>
-                <button aria-label="הזז למטה" title="הזז למטה" disabled={index === book.chapters.length - 1} onClick={() => controller.moveChapter(chapter.id, index + 1)}>▼</button>
-                <button aria-label="הסר מהספר" title="הסר מהספר (הקובץ עצמו לא נמחק)" onClick={() => controller.removeChapter(chapter.id)}>✕</button>
+                <button aria-label={t('הזז למעלה')} title={t('הזז למעלה')} disabled={index === 0} onClick={() => controller.moveChapter(chapter.id, index - 1)}>▲</button>
+                <button aria-label={t('הזז למטה')} title={t('הזז למטה')} disabled={index === book.chapters.length - 1} onClick={() => controller.moveChapter(chapter.id, index + 1)}>▼</button>
+                <button aria-label={t('הסר מהספר')} title={t('הסר מהספר (הקובץ עצמו לא נמחק)')} onClick={() => controller.removeChapter(chapter.id)}>✕</button>
               </div>
             </li>
           )
@@ -208,18 +209,18 @@ export function BookPanel({ controller }: { controller: BookController }) {
       )}
 
       <footer className="book-foot">
-        <button className="btn primary" onClick={() => void controller.addChapters()}>הוסף פרקים…</button>
-        <button className="btn" onClick={controller.refresh} title="קרא שוב את גודל הפרקים מהקבצים">רענן</button>
-        <button className="btn" disabled={staleNumbers.length === 0 || controller.busy} onClick={() => void controller.updateNumbering()} title="כתוב בכל פרק את מספר העמוד הראשון שהספר מחשב לו">
-          עדכן מספור{staleNumbers.length > 0 ? ` (${staleNumbers.length})` : ''}
+        <button className="btn primary" onClick={() => void controller.addChapters()}>{t('הוסף פרקים…')}</button>
+        <button className="btn" onClick={controller.refresh} title={t('קרא שוב את גודל הפרקים מהקבצים')}>{t('רענן')}</button>
+        <button className="btn" disabled={staleNumbers.length === 0 || controller.busy} onClick={() => void controller.updateNumbering()} title={t('כתוב בכל פרק את מספר העמוד הראשון שהספר מחשב לו')}>
+          {t('עדכן מספור')}{staleNumbers.length > 0 ? ` (${staleNumbers.length})` : ''}
         </button>
-        <button className="btn" disabled={!book.settings.styleSourceId || controller.busy} onClick={() => void controller.planSync()} title={book.settings.styleSourceId ? 'הבא את הסגנונות והצבעים של פרק המקור לשאר הפרקים' : 'סמן קודם פרק כמקור הסגנונות (הכוכב)'}>
-          סנכרון סגנונות
+        <button className="btn" disabled={!book.settings.styleSourceId || controller.busy} onClick={() => void controller.planSync()} title={book.settings.styleSourceId ? t('הבא את הסגנונות והצבעים של פרק המקור לשאר הפרקים') : t('סמן קודם פרק כמקור הסגנונות (הכוכב)')}>
+          {t('סנכרון סגנונות')}
         </button>
-        <button className="btn" disabled={book.chapters.length === 0 || !numbering.complete || controller.busy} onClick={() => controller.setExportOpen(true)} title={numbering.complete ? 'כל הפרקים לקובץ PDF אחד, עם מספור רציף וסימניות' : 'אי אפשר לייצא: הקובץ של אחד הפרקים חסר'}>
-          ייצוא הספר ל-PDF
+        <button className="btn" disabled={book.chapters.length === 0 || !numbering.complete || controller.busy} onClick={() => controller.setExportOpen(true)} title={numbering.complete ? t('כל הפרקים לקובץ PDF אחד, עם מספור רציף וסימניות') : t('אי אפשר לייצא: הקובץ של אחד הפרקים חסר')}>
+          {t('ייצוא הספר ל-PDF')}
         </button>
-        <button className="btn" onClick={controller.close} title="סגור את הספר (הקבצים נשמרים)">סגור ספר</button>
+        <button className="btn" onClick={controller.close} title={t('סגור את הספר (הקבצים נשמרים)')}>{t('סגור ספר')}</button>
       </footer>
     </aside>
   )
@@ -245,9 +246,9 @@ export function ChapterPicker({ controller }: { controller: BookController }) {
   }
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="הוספת פרקים">
-        <h2>{relinking ? 'קישור מחדש של הפרק' : 'הוספת פרקים'}</h2>
-        <p className="muted">{relinking ? 'בחר את המסמך שיבוא במקום הקובץ שחסר. מקום הפרק בספר והמספור נשארים.' : 'מסמכים שנמצאו בתיקיית הספר. הם יתווספו לספר בסדר הרשימה.'}</p>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('הוספת פרקים')}>
+        <h2>{relinking ? t('קישור מחדש של הפרק') : t('הוספת פרקים')}</h2>
+        <p className="muted">{relinking ? t('בחר את המסמך שיבוא במקום הקובץ שחסר. מקום הפרק בספר והמספור נשארים.') : t('מסמכים שנמצאו בתיקיית הספר. הם יתווספו לספר בסדר הרשימה.')}</p>
         <ul className="book-picker">
           {files.map((path) => (
             <li key={path}>
@@ -268,9 +269,9 @@ export function ChapterPicker({ controller }: { controller: BookController }) {
               void controller.confirmCandidates(paths)
             }}
           >
-            {relinking ? 'קשר' : chosen.size ? `הוסף ${plural(chosen.size, 'פרק אחד', 'פרקים')}` : 'הוסף'}
+            {relinking ? t('קשר') : chosen.size ? t('הוסף {n1}', { n1: plural(chosen.size, t('פרק אחד'), t('פרקים')) }) : t('הוסף')}
           </button>
-          <button className="btn" onClick={close}>ביטול</button>
+          <button className="btn" onClick={close}>{t('ביטול')}</button>
         </div>
       </div>
     </div>
@@ -281,11 +282,11 @@ const listOf = (report: SyncReport | undefined) => {
   if (!report) return ''
   const parts: string[] = []
   const add = (label: string, count: number) => count > 0 && parts.push(`${label}: ${count}`)
-  add('סגנונות פסקה חדשים', report.addedParagraph.length)
-  add('סגנונות פסקה שיתעדכנו', report.updatedParagraph.length)
-  add('סגנונות תו חדשים', report.addedCharacter.length)
-  add('סגנונות תו שיתעדכנו', report.updatedCharacter.length)
-  add('צבעים חדשים', report.addedColors.length)
+  add(t('סגנונות פסקה חדשים'), report.addedParagraph.length)
+  add(t('סגנונות פסקה שיתעדכנו'), report.updatedParagraph.length)
+  add(t('סגנונות תו חדשים'), report.addedCharacter.length)
+  add(t('סגנונות תו שיתעדכנו'), report.updatedCharacter.length)
+  add(t('צבעים חדשים'), report.addedColors.length)
   return parts.join(' · ')
 }
 
@@ -296,30 +297,30 @@ export function SyncDialog({ controller }: { controller: BookController }) {
   const changing = plan.rows.filter((row) => row.status === 'changes')
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="סנכרון סגנונות">
-        <h2>סנכרון סגנונות</h2>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('סנכרון סגנונות')}>
+        <h2>{t('סנכרון סגנונות')}</h2>
         <p className="muted">
-          הסגנונות והצבעים של "{plan.masterName}" יועברו לשאר הפרקים. סגנון עם אותו שם מתעדכן (והטקסט שבו מקבל את המראה החדש), סגנון חסר נוסף, ושום סגנון לא נמחק.
+          {t('הסגנונות והצבעים של "{name}" יועברו לשאר הפרקים. סגנון עם אותו שם מתעדכן (והטקסט שבו מקבל את המראה החדש), סגנון חסר נוסף, ושום סגנון לא נמחק.', { name: plan.masterName })}
         </p>
         <ul className="book-sync-rows">
           {plan.rows.map((row) => (
             <li key={row.chapterId} className={row.status}>
               <b>{row.name}</b>
               <span>
-                {row.status === 'current' && 'מעודכן'}
+                {row.status === 'current' && t('מעודכן')}
                 {row.status === 'error' && <span className="book-bad">{row.message}</span>}
                 {row.status === 'changes' && listOf(row.report)}
-                {row.open && row.status === 'changes' && ' · פתוח: השינוי ייעשה במסמך הפתוח (לשמור אחר כך)'}
+                {row.open && row.status === 'changes' && t(' · פתוח: השינוי ייעשה במסמך הפתוח (לשמור אחר כך)')}
               </span>
             </li>
           ))}
-          {plan.rows.length === 0 && <li className="current"><span>אין בספר פרקים אחרים.</span></li>}
+          {plan.rows.length === 0 && <li className="current"><span>{t('אין בספר פרקים אחרים.')}</span></li>}
         </ul>
         <div className="modal-buttons">
           <button className="btn primary" disabled={changing.length === 0 || controller.busy} onClick={() => void controller.applySync()}>
-            {changing.length ? `החל על ${plural(changing.length, 'פרק אחד', 'פרקים')}` : 'אין מה לסנכרן'}
+            {changing.length ? t('החל על {n1}', { n1: plural(changing.length, t('פרק אחד'), t('פרקים')) }) : t('אין מה לסנכרן')}
           </button>
-          <button className="btn" onClick={controller.cancelSync}>ביטול</button>
+          <button className="btn" onClick={controller.cancelSync}>{t('ביטול')}</button>
         </div>
       </div>
     </div>
@@ -327,14 +328,14 @@ export function SyncDialog({ controller }: { controller: BookController }) {
 }
 
 const DPI_CHOICES = [
-  { dpi: 300, label: 'איכות גבוהה להדפסה (300 DPI)' },
-  { dpi: 150, label: 'איכות מסך / שליחה דיגיטלית (150 DPI)' },
-  { dpi: 600, label: 'איכות גבוהה במיוחד (600 DPI, קובץ גדול)' },
+  { dpi: 300, get label() { return t('איכות גבוהה להדפסה (300 DPI)') } },
+  { dpi: 150, get label() { return t('איכות מסך / שליחה דיגיטלית (150 DPI)') } },
+  { dpi: 600, get label() { return t('איכות גבוהה במיוחד (600 DPI, קובץ גדול)') } },
 ]
 
 const COLOR_CHOICES = [
-  { mode: 'rgb' as const, label: 'RGB — למסך ולשליחה דיגיטלית' },
-  { mode: 'cmyk' as const, label: 'CMYK — להדפסה בדפוס' },
+  { mode: 'rgb' as const, get label() { return t('RGB — למסך ולשליחה דיגיטלית') } },
+  { mode: 'cmyk' as const, get label() { return t('CMYK — להדפסה בדפוס') } },
 ]
 
 /** The book as one PDF: the same choices as a single document's export, for every page of every chapter. */
@@ -355,10 +356,10 @@ export function BookExportDialog({ controller }: { controller: BookController })
     // opened synchronously, still inside the click, so showing the result in it is not stopped as a popup
     const view = isTauri ? null : window.open('', '_blank')
     if (view) {
-      view.document.title = 'מייצא PDF…'
+      view.document.title = t('מייצא PDF…')
       view.document.documentElement.dir = 'rtl'
       view.document.body.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#1e1e1e;color:#ccc;font:14px sans-serif'
-      view.document.body.textContent = 'מייצא PDF, נא להמתין…'
+      view.document.body.textContent = t('מייצא PDF, נא להמתין…')
     }
     const vectorReport = vectorText ? emptyReport() : undefined
     const done = await controller.runExport({ ...printMarksOptions(marks), dpi, colorMode, vectorText, vectorReport }, view)
@@ -366,15 +367,15 @@ export function BookExportDialog({ controller }: { controller: BookController })
   }
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="ייצוא הספר ל-PDF">
-        <h2>ייצוא הספר ל-PDF</h2>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('ייצוא הספר ל-PDF')}>
+        <h2>{t('ייצוא הספר ל-PDF')}</h2>
         <p className="muted">
-          {plural(book.chapters.length, 'פרק אחד', 'פרקים')}, {numbering.totalPages} עמודים, מהעמוד {book.settings.startPage}. הספר יוצא לקובץ אחד לפי סדר הפרקים, עם הספרור של הספר, עמוד ריק היכן שפרק צריך להתחיל בעמוד אי-זוגי או זוגי, וסימנייה לכל פרק.
+          {plural(book.chapters.length, t('פרק אחד'), t('פרקים'))}{t(', {pages} עמודים, מהעמוד {start}. הספר יוצא לקובץ אחד לפי סדר הפרקים, עם הספרור של הספר, עמוד ריק היכן שפרק צריך להתחיל בעמוד אי-זוגי או זוגי, וסימנייה לכל פרק.', { pages: numbering.totalPages, start: book.settings.startPage })}
         </p>
         <PrintMarksFields value={marks} onChange={setMarks} unit="mm" disabled={busy} />
         <div className="field">
-          <div className="field-label">איכות תמונות</div>
-          <div className="seg small" role="radiogroup" aria-label="איכות תמונות">
+          <div className="field-label">{t('איכות תמונות')}</div>
+          <div className="seg small" role="radiogroup" aria-label={t('איכות תמונות')}>
             {DPI_CHOICES.map((choice) => (
               <button key={choice.dpi} role="radio" aria-checked={dpi === choice.dpi} className={dpi === choice.dpi ? 'on' : ''} onClick={() => setDpi(choice.dpi)} disabled={busy}>
                 {choice.label}
@@ -383,8 +384,8 @@ export function BookExportDialog({ controller }: { controller: BookController })
           </div>
         </div>
         <div className="field">
-          <div className="field-label">מצב צבע</div>
-          <div className="seg small" role="radiogroup" aria-label="מצב צבע">
+          <div className="field-label">{t('מצב צבע')}</div>
+          <div className="seg small" role="radiogroup" aria-label={t('מצב צבע')}>
             {COLOR_CHOICES.map((choice) => (
               <button key={choice.mode} role="radio" aria-checked={colorMode === choice.mode} className={colorMode === choice.mode ? 'on' : ''} onClick={() => setColorMode(choice.mode)} disabled={busy}>
                 {choice.label}
@@ -392,27 +393,27 @@ export function BookExportDialog({ controller }: { controller: BookController })
             ))}
           </div>
         </div>
-        {colorMode === 'cmyk' && <p className="muted">הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.</p>}
-        {dpi === 600 && <p className="muted">ב-600 DPI כל עמוד גדול פי ארבעה מ-300 DPI, וספר שלם בגודל כזה הוא קובץ ענק והייצוא איטי מאוד. כדאי לייצא כך רק פרק בודד או טווח קטן.</p>}
+        {colorMode === 'cmyk' && <p className="muted">{t('הצבעים מומרים ל-CMYK בהמרה פשוטה, בלי פרופיל צבע: שחור ואפור יוצאים בדיו שחור בלבד. בית דפוס שמתאים את הצבעים לפרופיל של המכונה שלו יצטרך להמיר אותם בעצמו.')}</p>}
+        {dpi === 600 && <p className="muted">{t('ב-600 DPI כל עמוד גדול פי ארבעה מ-300 DPI, וספר שלם בגודל כזה הוא קובץ ענק והייצוא איטי מאוד. כדאי לייצא כך רק פרק בודד או טווח קטן.')}</p>}
         <label className="page-bar-check">
           <input type="checkbox" checked={vectorText} onChange={(event) => setVectorText(event.target.checked)} disabled={busy} />
-          ייצוא וקטורי: טקסט, צורות ותמונות
+          {t('ייצוא וקטורי: טקסט, צורות ותמונות')}
         </label>
-        <p className="muted">טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות. תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה.</p>
-        <p className="muted">כל עמוד נשמר כתמונה חדה, וספר גדול ב-300 DPI הוא קובץ גדול והייצוא לוקח זמן. לבדיקה אפשר לבחור 150 DPI.</p>
+        <p className="muted">{t('טקסט פשוט נכתב ל-PDF כטקסט אמיתי, חד בכל הגדלה, עם הגופן בתוך הקובץ; צורות וקווים נכתבים כצורות, ותמונות מוצבות כתמונות נפרדות. תיבת טקסט שיש בה משהו נוסף (ניקוד, צל, הערת שוליים, תוכן עניינים, רשימה) או שהגופן שלה לא נמצא במחשב, וצורה עם מילוי מעבר צבעים, צל או תמונה, נשארות כתמונה.')}</p>
+        <p className="muted">{t('כל עמוד נשמר כתמונה חדה, וספר גדול ב-300 DPI הוא קובץ גדול והייצוא לוקח זמן. לבדיקה אפשר לבחור 150 DPI.')}</p>
         {exportProgress && (
           <p role="status">
-            פרק {exportProgress.chapter} מתוך {exportProgress.chapters} ({exportProgress.title}): עמוד {exportProgress.page} מתוך {exportProgress.pages}
+            {t('פרק {chapter} מתוך {chapters} ({title}): עמוד {page} מתוך {pages}', { chapter: exportProgress.chapter, chapters: exportProgress.chapters, title: exportProgress.title, page: exportProgress.page, pages: exportProgress.pages })}
           </p>
         )}
         {result && <VectorSummary report={result} />}
         <div className="modal-buttons">
           {result ? (
-            <button className="btn primary" onClick={close}>סגור</button>
+            <button className="btn primary" onClick={close}>{t('סגור')}</button>
           ) : (
             <>
-              <button className="btn primary" onClick={() => void run()} disabled={busy}>{busy ? 'מייצא…' : 'ייצוא'}</button>
-              <button className="btn" onClick={close} disabled={busy}>ביטול</button>
+              <button className="btn primary" onClick={() => void run()} disabled={busy}>{busy ? t('מייצא…') : t('ייצוא')}</button>
+              <button className="btn" onClick={close} disabled={busy}>{t('ביטול')}</button>
             </>
           )}
         </div>
@@ -424,8 +425,8 @@ export function BookExportDialog({ controller }: { controller: BookController })
 /** how a chapter did in the last check */
 function ChapterBadge({ check, chapterId }: { check: BookCheck; chapterId: string }) {
   const counts = countChapter(check, chapterId)
-  if (counts.errors === 0 && counts.warnings === 0) return <span className="book-ok">✓ נבדק, אין בעיות</span>
-  return <span className={counts.errors ? 'book-bad' : 'book-warn'}>{counts.errors ? plural(counts.errors, 'שגיאה אחת', 'שגיאות') : plural(counts.warnings, 'אזהרה אחת', 'אזהרות')}</span>
+  if (counts.errors === 0 && counts.warnings === 0) return <span className="book-ok">{t('✓ נבדק, אין בעיות')}</span>
+  return <span className={counts.errors ? 'book-bad' : 'book-warn'}>{counts.errors ? plural(counts.errors, t('שגיאה אחת'), t('שגיאות')) : plural(counts.warnings, t('אזהרה אחת'), t('אזהרות'))}</span>
 }
 
 /** The problems the check found, chapter by chapter; a click on one opens the chapter at the place. */
@@ -433,12 +434,12 @@ function BookCheckList({ controller }: { controller: BookController }) {
   const { check, book, numbering } = controller
   if (!check || !book || !numbering) return null
   const startOf = (chapterId: string) => numbering.chapters[book.chapters.findIndex((chapter) => chapter.id === chapterId)]?.startPage ?? null
-  const time = new Date(check.at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+  const time = new Date(check.at).toLocaleTimeString(localeTag(), { hour: '2-digit', minute: '2-digit' })
   return (
     <div className="book-check">
       <div className="book-check-head">
-        <span className="muted">נבדק ב-{time}</span>
-        <button className="btn small" disabled={controller.busy} onClick={() => void controller.runCheck()}>בדוק שוב</button>
+        <span className="muted">{t('נבדק ב-{time}', { time })}</span>
+        <button className="btn small" disabled={controller.busy} onClick={() => void controller.runCheck()}>{t('בדוק שוב')}</button>
       </div>
       <div className="book-check-list">
         {check.chapters.map((chapter) => {
@@ -450,7 +451,7 @@ function BookCheckList({ controller }: { controller: BookController }) {
               <h4>{chapter.title}</h4>
               {chapter.error && <div className="book-note book-bad">{chapter.error}</div>}
               {own.map((issue) => (
-                <button key={issue.id} className="preflight-row" onClick={() => void controller.openChapter(chapter.chapterId)} title="פתח את הפרק">
+                <button key={issue.id} className="preflight-row" onClick={() => void controller.openChapter(chapter.chapterId)} title={t('פתח את הפרק')}>
                   <span className={`dot ${issue.severity}`} />
                   <span className="preflight-text"><b>{issue.title}</b><span>{issue.detail}</span></span>
                 </button>
@@ -460,14 +461,14 @@ function BookCheckList({ controller }: { controller: BookController }) {
                   <span className={`dot ${issue.severity}`} />
                   <span className="preflight-text">
                     <b>{issue.title}</b>
-                    <span>{issue.detail}{first != null ? ` (עמוד ${first + issue.page} בספר)` : ''}</span>
+                    <span>{issue.detail}{first != null ? t(' (עמוד {n1} בספר)', { n1: first + issue.page }) : ''}</span>
                   </span>
                 </button>
               ))}
             </section>
           )
         })}
-        {countBookCheck(check).errors + countBookCheck(check).warnings === 0 && <p className="book-note">כל הפרקים נבדקו: אין טקסט עודף, שום דבר לא חורג מהעמודים, והגופנים והתמונות במקומם.</p>}
+        {countBookCheck(check).errors + countBookCheck(check).warnings === 0 && <p className="book-note">{t('כל הפרקים נבדקו: אין טקסט עודף, שום דבר לא חורג מהעמודים, והגופנים והתמונות במקומם.')}</p>}
       </div>
     </div>
   )

@@ -35,10 +35,10 @@ type TabId = 'pages' | 'size' | 'margins' | 'bleed'
 type SidesKey = 'margins' | 'bleed' | 'slug'
 
 const TABS: { id: TabId; label: string; icon: ReactNode }[] = [
-  { id: 'pages', label: 'עמודים', icon: <path d="M3 5h7v14H3zM14 5h7v14h-7z" /> },
-  { id: 'size', label: 'גודל', icon: <path d="M5 5h14v14H5zM5 9h4M5 13h4M9 5v4" /> },
-  { id: 'margins', label: 'שוליים', icon: <path d="M4 4h16v16H4zM8 8h8v8H8zM12 8v8" /> },
-  { id: 'bleed', label: 'גלישה', icon: <path d="M7 7h10v10H7zM3 3h18v18H3z" strokeDasharray="2.500 2" /> },
+  { id: 'pages', get label() { return t('עמודים') }, icon: <path d="M3 5h7v14H3zM14 5h7v14h-7z" /> },
+  { id: 'size', get label() { return t('גודל') }, icon: <path d="M5 5h14v14H5zM5 9h4M5 13h4M9 5v4" /> },
+  { id: 'margins', get label() { return t('שוליים') }, icon: <path d="M4 4h16v16H4zM8 8h8v8H8zM12 8v8" /> },
+  { id: 'bleed', get label() { return t('גלישה') }, icon: <path d="M7 7h10v10H7zM3 3h18v18H3z" strokeDasharray="2.500 2" /> },
 ]
 
 /** How many pages the board draws at most (a long document would make it unreadable and slow). */

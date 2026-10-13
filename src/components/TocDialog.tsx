@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ParagraphStyleRecord, TocConfig, TocLevelConfig } from '../document'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 interface Props {
   styles: ParagraphStyleRecord[]
@@ -29,47 +30,47 @@ export function TocDialog({ styles, initial, onConfirm, onClose }: Props) {
 
   const submit = () => {
     if (levels.length === 0 || levels.some((level) => !level.sourceStyleId || !level.outputStyleId)) {
-      setError('בחר סגנון מקור וסגנון תצוגה לכל רמה.')
+      setError(t('בחר סגנון מקור וסגנון תצוגה לכל רמה.'))
       return
     }
-    if (!onConfirm({ levels, leader: leader || '.' })) setError('לא נמצאו כותרות בסגנונות שנבחרו.')
+    if (!onConfirm({ levels, leader: leader || '.' })) setError(t('לא נמצאו כותרות בסגנונות שנבחרו.'))
   }
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal wide toc-dialog" role="dialog" aria-modal="true" aria-label="יצירת תוכן עניינים">
-        <h2>יצירת תוכן עניינים</h2>
-        <p className="muted">בחר סגנונות פסקה שייכללו בתוכן העניינים, לפי רמה.</p>
+      <div className="modal wide toc-dialog" role="dialog" aria-modal="true" aria-label={t('יצירת תוכן עניינים')}>
+        <h2>{t('יצירת תוכן עניינים')}</h2>
+        <p className="muted">{t('בחר סגנונות פסקה שייכללו בתוכן העניינים, לפי רמה.')}</p>
         {levels.map((level, index) => (
           <div className="toc-level-row" key={index}>
             <label className="field">
-              <span className="field-label">רמה {index + 1} — כותרת מקור</span>
+              <span className="field-label">{t('רמה {level} — כותרת מקור', { level: index + 1 })}</span>
               <select value={level.sourceStyleId} onChange={(event) => updateLevel(index, { sourceStyleId: event.target.value })}>
                 {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
               </select>
             </label>
             <label className="field">
-              <span className="field-label">סגנון תצוגה ב־TOC</span>
+              <span className="field-label">{t('סגנון תצוגה ב־TOC')}</span>
               <select value={level.outputStyleId} onChange={(event) => updateLevel(index, { outputStyleId: event.target.value })}>
                 {styles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
               </select>
             </label>
             <label className="field toc-indent-field">
-              <span className="field-label">הזחה (נק׳)</span>
+              <span className="field-label">{t('הזחה (נק׳)')}</span>
               <NumberField value={level.indent} min={0} max={200} step={6} onChange={(indent) => updateLevel(index, { indent })} />
             </label>
-            <button className="icon-button toc-remove-level" aria-label={`הסר רמה ${index + 1}`} title="הסר רמה" disabled={levels.length <= 1} onClick={() => setLevels((current) => current.filter((_, at) => at !== index))}>−</button>
+            <button className="icon-button toc-remove-level" aria-label={t('הסר רמה {n1}', { n1: index + 1 })} title={t('הסר רמה')} disabled={levels.length <= 1} onClick={() => setLevels((current) => current.filter((_, at) => at !== index))}>−</button>
           </div>
         ))}
-        <button className="btn toc-add-level" disabled={styles.length === 0 || levels.length >= 6} onClick={() => setLevels((current) => [...current, { sourceStyleId: styles.find((style) => !current.some((level) => level.sourceStyleId === style.id))?.id ?? styles[0].id, outputStyleId: bodyStyleId, indent: current.length * 12 }])}>הוסף רמה</button>
+        <button className="btn toc-add-level" disabled={styles.length === 0 || levels.length >= 6} onClick={() => setLevels((current) => [...current, { sourceStyleId: styles.find((style) => !current.some((level) => level.sourceStyleId === style.id))?.id ?? styles[0].id, outputStyleId: bodyStyleId, indent: current.length * 12 }])}>{t('הוסף רמה')}</button>
         <label className="field toc-leader-field">
-          <span className="field-label">מוביל בין הכותרת למספר העמוד</span>
+          <span className="field-label">{t('מוביל בין הכותרת למספר העמוד')}</span>
           <input value={leader} maxLength={4} onChange={(event) => setLeader(event.target.value)} />
         </label>
         {error && <p className="toc-error" role="alert">{error}</p>}
         <div className="modal-buttons">
-          <button className="btn primary" disabled={styles.length === 0} onClick={submit}>צור תוכן עניינים</button>
-          <button className="btn" onClick={onClose}>ביטול</button>
+          <button className="btn primary" disabled={styles.length === 0} onClick={submit}>{t('צור תוכן עניינים')}</button>
+          <button className="btn" onClick={onClose}>{t('ביטול')}</button>
         </div>
       </div>
     </div>

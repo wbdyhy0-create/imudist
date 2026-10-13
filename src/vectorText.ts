@@ -1,4 +1,5 @@
 import { loadFont, type FontSpec, type LoadedFont } from './fontFiles'
+import { t } from './i18n'
 
 /**
  * Text of a frame as real text for a PDF.
@@ -47,22 +48,22 @@ export type PictureReason =
   | 'uneven-scale'
 
 export const PICTURE_REASONS: Record<PictureReason, string> = {
-  marks: 'ניקוד',
-  decoration: 'קו תחתון או קו חוצה',
-  shadow: 'צל על הטקסט',
-  outline: 'מסגרת לאות',
-  faded: 'טקסט או תיבה שקופים',
-  transformed: 'טקסט מעוות',
-  case: 'אותיות גדולות או קטנות מוכפות',
-  pseudo: 'הערת שוליים, רשימה או תוכן עניינים',
-  marker: 'סימן פנימי של הערת שוליים או תוכן עניינים',
-  font: 'גופן שאינו מותקן במחשב או שאי אפשר להטמיע',
-  glyph: 'אות שחסרה בגופן',
-  color: 'צבע טקסט שקוף',
-  feather: 'טשטוש קצוות',
-  rasterized: 'תיבה שהומרה לתמונה',
-  footnotes: 'תיבה עם הערות שוליים',
-  'uneven-scale': 'הגדלה או הקטנה של הטקסט שאינה שווה לאורך וגובה',
+  get marks() { return t('ניקוד') },
+  get decoration() { return t('קו תחתון או קו חוצה') },
+  get shadow() { return t('צל על הטקסט') },
+  get outline() { return t('מסגרת לאות') },
+  get faded() { return t('טקסט או תיבה שקופים') },
+  get transformed() { return t('טקסט מעוות') },
+  get case() { return t('אותיות גדולות או קטנות מוכפות') },
+  get pseudo() { return t('הערת שוליים, רשימה או תוכן עניינים') },
+  get marker() { return t('סימן פנימי של הערת שוליים או תוכן עניינים') },
+  get font() { return t('גופן שאינו מותקן במחשב או שאי אפשר להטמיע') },
+  get glyph() { return t('אות שחסרה בגופן') },
+  get color() { return t('צבע טקסט שקוף') },
+  get feather() { return t('טשטוש קצוות') },
+  get rasterized() { return t('תיבה שהומרה לתמונה') },
+  get footnotes() { return t('תיבה עם הערות שוליים') },
+  get 'uneven-scale'() { return t('הגדלה או הקטנה של הטקסט שאינה שווה לאורך וגובה') },
 }
 
 /** What an export made of the frames of text (how many were written as text, how many stayed a picture, and why), of the shapes and of the pictures. */

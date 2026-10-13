@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { fontSupportsHebrew, setFontListFilter, useFontListFilter, type FontFamily } from '../fonts'
 import { rememberFontFamily } from '../fontPreference'
+import { t } from '../i18n'
 
 interface Props {
   value: string
@@ -107,7 +108,7 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
           <input
             autoFocus
             className="font-picker-search"
-            placeholder="חיפוש גופן…"
+            placeholder={t('חיפוש גופן…')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -126,9 +127,9 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
               }
             }}
           />
-          <div className="font-picker-filter" role="group" aria-label="סינון גופנים">
-            <button type="button" aria-pressed={fontFilter === 'hebrew'} className={fontFilter === 'hebrew' ? 'on' : ''} onClick={() => setFontListFilter('hebrew')}>גופנים בעברית</button>
-            <button type="button" aria-pressed={fontFilter === 'all'} className={fontFilter === 'all' ? 'on' : ''} onClick={() => setFontListFilter('all')}>הכול</button>
+          <div className="font-picker-filter" role="group" aria-label={t('סינון גופנים')}>
+            <button type="button" aria-pressed={fontFilter === 'hebrew'} className={fontFilter === 'hebrew' ? 'on' : ''} onClick={() => setFontListFilter('hebrew')}>{t('גופנים בעברית')}</button>
+            <button type="button" aria-pressed={fontFilter === 'all'} className={fontFilter === 'all' ? 'on' : ''} onClick={() => setFontListFilter('all')}>{t('הכול')}</button>
           </div>
           <ul
             ref={listRef}
@@ -155,7 +156,7 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
                 </button>
               </li>
             ))}
-            {matches.length === 0 && <li className="font-picker-empty">לא נמצא גופן</li>}
+            {matches.length === 0 && <li className="font-picker-empty">{t('לא נמצא גופן')}</li>}
           </ul>
         </div>
       )}

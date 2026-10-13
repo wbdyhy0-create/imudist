@@ -2,10 +2,10 @@ import type { ClipObjects } from '../objectClipboard'
 import { decorationClass, decorationVars } from '../decorations'
 import type { CSSProperties, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 import { useRef } from 'react'
-import type { FootnoteHeadingDecoration, FootnoteReferenceLook } from '../document'
+import type { FootnoteHeadingDecoration, FootnoteReferenceLook, TextDirection } from '../document'
 import { isOrnamentDecoration, ornamentSideMarkup, type DividerOrnamentImage } from '../footnoteOrnaments'
 import { letterCenterShift } from '../headingMetrics'
-import { cssTextAlign, effectiveLeading, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
+import { cssTextAlign, cssTextDirection, effectiveLeading, startSideOf, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
 import { anchorRunCss, baselineShiftCss, isAnchorRun, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
 import { substituteMarker } from '../numbering'
@@ -222,6 +222,7 @@ function RichText({
   atParaStart,
   firstLineIndent,
   baseAlign,
+  baseDirection,
   continuesParagraphAtEnd,
   paragraphPatches,
   baseFontSize,
@@ -245,6 +246,7 @@ function RichText({
   atParaStart: boolean
   firstLineIndent: (paragraphIndex: number) => number
   baseAlign: TextStyle['align']
+  baseDirection?: TextDirection
   continuesParagraphAtEnd: boolean
   paragraphPatches?: ParagraphPatch[]
   baseFontSize: number
@@ -302,14 +304,14 @@ function RichText({
         ...(patch?.align ? cssTextAlign(patch.align) : {}),
         lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined,
         paddingTop: gapsBefore ? `${gapsBefore * scale}px` : undefined,
-        paddingLeft: patch?.indentLeft ? `${patch.indentLeft * scale}px` : undefined,
-        paddingRight: patch?.indentRight || patch?.secondLineIndent ? `${((patch.indentRight ?? 0) + (patch.secondLineIndent ?? 0)) * scale}px` : undefined,
+        ...paragraphSidePadding(patch, scale, baseDirection),
+        ...(patch?.direction ? { direction: cssTextDirection(patch.direction).direction } : {}),
         textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined,
         boxSizing: 'border-box',
       }
       if (pageOffset >= 0 && leaderAt >= lineStart) {
         rows.push(
-          <div key={`toc-row-${rowIndex}`} className="toc-row" dir="rtl" style={rowStyle}>
+          <div key={`toc-row-${rowIndex}`} className="toc-row" dir={cssTextDirection(patch?.direction ?? baseDirection).direction} style={rowStyle}>
             {indent > 0 && <span className="para-indent" aria-hidden="true" style={{ width: indent * scale }} />}
             <span className="toc-title">{renderRange(lineStart, titleEnd, paragraph)}</span>
             <span className="toc-tab" aria-hidden="true">{'\t'}</span>
@@ -411,7 +413,7 @@ function RichText({
         const decoWanted = decoration && !marker && (decoration.position === 'below' ? paragraph.index < startParaIndex + (text.match(/\n/g) ?? []).length : decoration.position === 'above' ? paragraph.index > startParaIndex || atParaStart : true)
         const decoVars = decoration && decoWanted ? decorationVars(decoration, scale, { align: patch?.align ?? baseAlign, gapBefore: paragraph.index > startParaIndex ? paraGaps[paragraph.index - 1] ?? 0 : 0 }) : null
         const listMarkerStyle = marker ? { '--list-marker-offset': `${markerOffset}px`, ...(markerSize ? { fontSize: `${markerSize}px` } : {}) } as CSSProperties : {}
-        return <div key={`paragraph-${paragraph.index}`} className={[tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : '', decoVars ? decorationClass(decoration) : ''].filter(Boolean).join(' ') || undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(decoVars as CSSProperties | null ?? {}), ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts)} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
+        return <div key={`paragraph-${paragraph.index}`} className={[tocParagraphs.has(paragraph.index) ? 'toc-row' : marker ? 'paragraph-list-item' : '', decoVars ? decorationClass(decoration) : ''].filter(Boolean).join(' ') || undefined} data-list-marker={marker} style={{ ...listMarkerStyle, ...(decoVars as CSSProperties | null ?? {}), ...(patch?.align ? cssTextAlign(patch.align) : {}), ...(patch?.direction ? { direction: cssTextDirection(patch.direction).direction, ...(cssTextDirection(patch.direction).unicodeBidi === 'plaintext' ? { unicodeBidi: 'plaintext' as const } : {}) } : {}), ...(continues ? { textAlignLast: 'justify' as const } : {}), lineHeight: patch?.leading ? `${patch.leading * scale}px` : undefined, wordSpacing, ...paragraphSidePadding(patch, scale, baseDirection), ...paragraphBoxStyle(patch, scale), gridTemplateColumns: marker ? `${paragraphListMarkerWidth(marker) * scale}em minmax(0, 1fr)` : undefined, columnGap: marker ? `${(patch?.listGap ?? 4) * scale}px` : undefined, textIndent: patch?.secondLineIndent ? `${-patch.secondLineIndent * scale}px` : undefined, minHeight: windowWidth ? windowBlockMinHeight(windowGap, windowFonts) : undefined, boxSizing: 'border-box' }}>{windowWidth ? <div className="wrap-float" style={windowFloatStyle(windowWidth, windowGap, windowFonts, startSideOf(patch?.direction ?? baseDirection))} /> : null}{marker ? <span className="paragraph-list-content">{paragraph.nodes}</span> : paragraph.nodes}</div>
       })}
     </>
   )
@@ -434,8 +436,8 @@ export function TextFrameView(p: Props) {
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, PAGE_NUMBER_MARKER, '1')
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_PAGE_NUMBER_MARKER, '1')
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, EXTERNAL_PAGE_NUMBER_MARKER, '1')
-    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, 'א')
-    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, LETTER_PAGE_NUMBER_MARKER, 'א')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, INTERNAL_LETTER_PAGE_NUMBER_MARKER, style.direction === 'ltr' ? 'a' : 'א')
+    masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, LETTER_PAGE_NUMBER_MARKER, style.direction === 'ltr' ? 'a' : 'א')
     masterDisplay = substituteMarker(masterDisplay.text, masterDisplay.runs, RUNNING_HEADER_MARKER, t('כותרת'))
     masterDisplay.runs = normalizeRuns(masterDisplay.text, masterDisplay.runs, style)
   }
@@ -554,6 +556,7 @@ export function TextFrameView(p: Props) {
           baseLeading={effectiveLeading(style)}
           paragraphPatches={paragraphPatches}
           baseAlign={style.align}
+          baseDirection={style.direction}
           continuesAtEnd={p.continuesParagraphAtEnd}
           storyContinues={p.storyContinues}
           footnoteMarkers={p.footnoteMarkers}
@@ -583,7 +586,7 @@ export function TextFrameView(p: Props) {
           onDragOutside={p.onDragOutside}
         />
       ) : (
-        <div className="text-frame-body" dir="rtl">
+        <div className="text-frame-body" dir={cssTextDirection(style.direction).direction} style={cssTextDirection(style.direction).unicodeBidi === 'plaintext' ? { unicodeBidi: 'plaintext' } : undefined}>
           <RichText
             text={masterDisplay.text}
             runs={masterDisplay.runs}
@@ -606,6 +609,7 @@ export function TextFrameView(p: Props) {
             baseFontSize={style.fontSize}
             baseLeading={effectiveLeading(style)}
             baseAlign={style.align}
+            baseDirection={style.direction}
             continuesParagraphAtEnd={p.continuesParagraphAtEnd}
           />
         </div>
@@ -613,7 +617,7 @@ export function TextFrameView(p: Props) {
         </div>
         {!!p.footnotes?.length && (
           <div className="footnotes-scale" style={{ width: textFlowBox.w, height: textFlowBox.h, fontFamily: style.fontFamily, fontSize: `${style.fontSize}px`, fontWeight: style.weight, fontStyle: style.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(style)}px`, transform: `scale(${p.zoom * (frame.textScale?.x ?? 1)}, ${p.zoom * (frame.textScale?.y ?? 1)})` }}>
-          <div className="footnotes-area" dir="rtl" style={{ bottom: 0, right: p.footnoteAreaX === undefined ? 0 : 'auto', left: p.footnoteAreaX ?? 'auto', width: p.footnoteAreaWidth ?? textFlowBox.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
+          <div className="footnotes-area" dir={cssTextDirection(style.direction).direction} style={{ direction: cssTextDirection(style.direction).direction, bottom: 0, right: p.footnoteAreaX === undefined ? 0 : 'auto', left: p.footnoteAreaX ?? 'auto', width: p.footnoteAreaWidth ?? textFlowBox.w, height: p.footnoteHeight, '--footnote-number-gap': `${p.footnoteNumberGap ?? 5}px` } as CSSProperties}>
             {p.footnoteDividerHeading ? (
               <div
                 className="footnote-divider-heading"
@@ -744,7 +748,7 @@ export function TextFrameView(p: Props) {
                     window.addEventListener('pointercancel', stop)
                   }}
                   onClick={(event) => event.stopPropagation()}
-                  style={{ left: `${(p.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
+                  style={{ left: `${style.direction === 'ltr' ? note.x : (p.footnoteAreaWidth ?? frame.w) - note.x - note.width}px`, top: `${note.y}px`, width: `${note.width}px`, height: `${note.height}px`, fontFamily: noteStyle.fontFamily, fontSize: `${noteStyle.fontSize}px`, fontWeight: noteStyle.weight, fontStyle: noteStyle.italic ? 'italic' : 'normal', lineHeight: `${effectiveLeading(noteStyle)}px`, wordSpacing: wordSpacingPt(noteStyle) ? `${wordSpacingPt(noteStyle)}px` : undefined, color: noteStyle.color ?? '#111', textShadow: note.runs?.length ? undefined : textShadow(noteStyle, 1) || undefined, ...cssTextAlign(noteStyle.align) }}
                 >
                   {!note.continued && (
                     <span className="footnote-number" dir="rtl" style={{ fontSize: `${noteStyle.fontSize}px` }}>

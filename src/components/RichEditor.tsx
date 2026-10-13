@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { FootnoteReferenceLook, Run, TextAlign } from '../document'
+import type { FootnoteReferenceLook, Run, TextAlign, TextDirection } from '../document'
+import { cssTextDirection } from '../document'
+import { proofingLanguage, useSpellcheck } from '../spellcheck'
 import { buildParagraphNodes, buildWrapFloats, caretOffsetAt, normalizeCaretIn, readSelectionIn, setSelectionIn, textOffsetIn, type ParagraphPatch } from '../richtext'
 import { clipForToken, isClipToken, type ClipObjects } from '../objectClipboard'
 import { diffEdit, wordEnd, wordStart } from '../story'
 import { floatsKey, type WrapFloat } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { rememberRichTextClipboard, richTextClipboardFor, type RichTextClipboard } from '../richTextClipboard'
+import { t } from '../i18n'
 
 let lastCopiedText: string | null = null
 
@@ -46,6 +49,8 @@ interface Props {
   /** the frame's own default alignment, and whether `text`'s last character is only cut here by the frame's own
    *  edge rather than a real paragraph end — see richtext.ts's `buildParagraphNodes` doc comment */
   baseAlign?: TextAlign
+  /** the way the story reads: the editor, and every paragraph with no direction of its own, reads this way */
+  baseDirection?: TextDirection
   baseLeading?: number
   continuesAtEnd?: boolean
   /**
@@ -125,6 +130,7 @@ function markSelectedMarkers(el: HTMLElement) {
  * formatting (one <span> per run) and lets the story flow between frames.
  */
 export function RichEditor(p: Props) {
+  const spellcheck = useSpellcheck()
   const ref = useRef<HTMLDivElement>(null)
   const [textMenu, setTextMenu] = useState<{ x: number; y: number; a: number; b: number } | null>(null)
   const contextSelection = useRef<[number, number]>([0, 0])
@@ -137,7 +143,7 @@ export function RichEditor(p: Props) {
   // (re)build the DOM whenever the model changed, keep focus, place the selection
   useLayoutEffect(() => {
     const el = ref.current!
-    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${p.footnoteReferenceGap}|${p.footnoteReferenceVerticalOffset}|${JSON.stringify(p.footnoteReferenceLook)}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
+    const sig = `${p.scale}|${floatsKey(p.floats)}|${!!p.showMarks}|${JSON.stringify(p.paraGaps)}|${p.startParaIndex}|${p.atParaStart}|${p.firstLineIndent}|${JSON.stringify(p.paragraphPatches)}|${p.baseDirection}|${p.baseAlign}|${!!p.continuesAtEnd}|${!!p.storyContinues}|${p.text}|${JSON.stringify(p.runs)}|${p.footnoteReferenceScale}|${p.footnoteReferenceGap}|${p.footnoteReferenceVerticalOffset}|${JSON.stringify(p.footnoteReferenceLook)}|${JSON.stringify(p.footnoteMarkers)}|${JSON.stringify(p.tocPageMarkers)}|${JSON.stringify(p.tocLeaderMarkers)}`
     const rebuilt = shown.current !== sig
     const keep = rebuilt && shown.current !== null ? p.selectionHint ?? readSelectionIn(el) : null
     if (rebuilt) {
@@ -153,6 +159,7 @@ export function RichEditor(p: Props) {
             startParaIndex: p.startParaIndex,
             atParaStart: p.atParaStart,
             firstLineIndent: p.firstLineIndent,
+            direction: p.baseDirection,
             baseLeading: p.baseLeading,
             footnoteMarkers: p.footnoteMarkers,
             tocPageMarkers: p.tocPageMarkers,
@@ -369,13 +376,15 @@ export function RichEditor(p: Props) {
     <div
       ref={ref}
       className="rich-editor"
-      dir="rtl"
+      dir={cssTextDirection(p.baseDirection).direction}
+      style={cssTextDirection(p.baseDirection).unicodeBidi === 'plaintext' ? { unicodeBidi: 'plaintext' } : undefined}
       contentEditable
       suppressContentEditableWarning
-      spellCheck={false}
+      spellCheck={spellcheck}
+      lang={spellcheck ? proofingLanguage(p.baseDirection) : undefined}
       role="textbox"
       aria-multiline="true"
-      aria-label="תיבת טקסט"
+      aria-label={t('תיבת טקסט')}
       onBlur={p.onStop}
       onContextMenu={(event) => {
         event.preventDefault()
@@ -508,9 +517,9 @@ export function RichEditor(p: Props) {
         y={textMenu.y}
         onClose={() => setTextMenu(null)}
         items={[
-          { label: 'גזור', shortcut: 'Ctrl+X', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('cut') },
-          { label: 'העתק', shortcut: 'Ctrl+C', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('copy') },
-          { label: 'הדבק', shortcut: 'Ctrl+V', onClick: () => void pasteTextFromClipboard() },
+          { get label() { return t('גזור') }, shortcut: 'Ctrl+X', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('cut') },
+          { get label() { return t('העתק') }, shortcut: 'Ctrl+C', disabled: textMenu.a === textMenu.b, onClick: () => runTextClipboardCommand('copy') },
+          { get label() { return t('הדבק') }, shortcut: 'Ctrl+V', onClick: () => void pasteTextFromClipboard() },
         ]}
       />,
       document.body,

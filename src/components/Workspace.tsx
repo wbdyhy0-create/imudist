@@ -11,7 +11,7 @@ import { removeImageBackground } from '../backgroundRemoval'
 import { deliverPng } from '../pngExport'
 import { hexToRgb, linearGradientLine, rgbToHex } from '../colorModels'
 import { createPortal } from 'react-dom'
-import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteParagraphStyleId, footnoteReferenceLook, footnoteTextStyle, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
+import { changedFootnoteOffset, footnoteDividerHeight, footnoteDividerTextStyle, footnoteParagraphStyleId, footnoteReferenceLook, footnoteTextStyle, footnoteRestartMarks, formatFootnoteNumber, numberFootnotes, updateFootnoteParagraphStyle } from '../footnoteLayout'
 import { layoutEndnotes } from '../endnotes'
 import {
   useCallback,
@@ -131,7 +131,10 @@ import { arrange, nextZ, stackOrder, zOfImage, zOfShape, type ArrangeOp } from '
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { resolveParagraphStyle as resolveSharedParagraphStyle } from '../styleApply'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
-import { openingRange, WINDOW_MAX_SHARE, type WindowTextOptions } from '../windowText'
+import { lookTurnedBy } from '../document'
+import { hyphenationPoints, softHyphenOffsets } from '../hyphenation'
+import { SOFT_HYPHEN } from '../softHyphens'
+import { openingRange, WINDOW_MAX_SHARE, windowRuleOf, type WindowTextOptions } from '../windowText'
 import { collectHits, compilePattern, replaceInNote, replaceInStory, type StoryHits } from '../findReplace'
 import type { VectorShapeData } from '../importEps'
 import { floatsFor } from '../wrap'
@@ -388,6 +391,8 @@ export interface WorkspaceHandle {
   clearGuides: () => void
   /** remove repeated spaces / empty paragraphs from the selected text, or the whole document if nothing is selected */
   cleanSpacing: () => void
+  /** hyphenation of the English words of the selected text (or of every story): soft hyphens put in, or taken out */
+  hyphenate: (remove?: boolean) => void
   insertRunningHeader: () => void
   /** open the palette that turns notes in brackets into footnotes and back */
   openFootnoteConverter: () => void
@@ -427,6 +432,8 @@ export type FramesChange = (frames: TextFrame[], coalesceKey?: string, silent?: 
 interface Props {
   doc: DocSettings
   initiallySelectPrimaryFrame?: boolean
+  /** with `initiallySelectPrimaryFrame`: also start in the text tool with the caret in that frame */
+  startTypingInPrimaryFrame?: boolean
   onInitialSelectionApplied?: () => void
   startInitialTour?: boolean
   onInitialTourComplete?: () => void
@@ -585,6 +592,7 @@ const setScrollX = (el: HTMLElement, x: number) => {
 export function Workspace({
   doc,
   initiallySelectPrimaryFrame = false,
+  startTypingInPrimaryFrame = false,
   onInitialSelectionApplied,
   startInitialTour = false,
   onInitialTourComplete,
@@ -698,7 +706,16 @@ export function Workspace({
       const spread = pageRect ? Math.round(pageRect.y * 1000) : page
       return frameFlow.footnoteReferences.map((note) => ({ id: note.id, page, spread, frameX: frame.x, frameY: frame.y, anchor: note.anchor }))
     })
-    return numberFootnotes(entries, footnoteConfig, doc.binding)
+    const restarts = footnoteConfig.restart === 'style'
+      ? footnoteRestartMarks(provisionalFlow, byId, footnoteConfig.restartStyleId, (frameId) => {
+          const frame = byId.get(frameId)
+          if (!frame) return null
+          const page = ownerPage(documentRects, frame.x + frame.w / 2, frame.y + frame.h / 2)
+          const pageRect = documentRects[page]
+          return { page, spread: pageRect ? Math.round(pageRect.y * 1000) : page, frameX: frame.x, frameY: frame.y }
+        })
+      : []
+    return numberFootnotes(entries, footnoteConfig, doc.binding, restarts)
   }, [frames, provisionalFlow, documentRects, footnoteConfig, doc.binding])
   useEffect(() => {
     if (!doc.primaryTextFrame || previewMode || editingParentId || primaryFrameIds.length < 2) return
@@ -1472,6 +1489,21 @@ export function Workspace({
     setRequest({ frameId, a, b, token: requestToken.current })
   }
 
+  // a document that has just been created with its text frames: the caret is already in the first one, ready to type
+  // (the text tool, not a move cursor over a frame that has to be double clicked first)
+  const startedTypingRef = useRef(false)
+  useEffect(() => {
+    if (!initiallySelectPrimaryFrame || startedTypingRef.current || !startTypingInPrimaryFrame) return
+    const first = primaryFrameIds[0]
+    if (!first) return
+    startedTypingRef.current = true
+    setTool('type')
+    setSelectedId(first)
+    setEditingId(first)
+    askSelection(first, 0, 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initiallySelectPrimaryFrame, startTypingInPrimaryFrame, primaryFrameIds])
+
   const alignFootnotesToMarkers = (text: string, notes: FootnoteItem[]) => {
     const markers: number[] = []
     for (let index = 0; index < text.length; index++) if (text[index] === FOOTNOTE_MARKER) markers.push(index)
@@ -1570,7 +1602,7 @@ export function Workspace({
       const { index, style } = nextStyleAt
       const setAt = <T,>(list: T[] | undefined, value: T): T[] | undefined => list?.map((item, i) => (i === index ? value : item))
       const resolved = resolveParagraphStyle(style.id)
-      const layoutKeys = ['leading', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const layoutKeys = ['leading', 'align', 'direction', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
       const layoutPatch = Object.fromEntries(layoutKeys.filter((key) => resolved[key] !== undefined).map((key) => [key, resolved[key]]))
       paragraphLists.paragraphStyleIds = setAt(paragraphLists.paragraphStyleIds, style.id)
       if (paragraphLists.paragraphStyleNames) paragraphLists.paragraphStyleNames = setAt(paragraphLists.paragraphStyleNames, style.name)
@@ -1899,10 +1931,14 @@ export function Workspace({
       runs.push({ len: line.length, style: runStyle })
       paragraphStyleIds.push(outputStyleId)
       paragraphStyleNames.push(paragraphStyles.find((style) => style.id === outputStyleId)?.name ?? '')
+      // the level's indent is from the side the text starts on
+      const tocDirection = outputStyle.direction ?? defaultTextStyle().direction
+      const fromLeft = tocDirection === 'ltr'
       paragraphStylePatches.push({
-        align: outputStyle.align ?? 'right',
-        indentRight: (outputStyle.indentRight ?? 0) + entry.level.indent,
-        ...(outputStyle.indentLeft ? { indentLeft: outputStyle.indentLeft } : {}),
+        align: outputStyle.align ?? defaultTextStyle().align,
+        ...(tocDirection ? { direction: tocDirection } : {}),
+        ...(fromLeft ? { indentLeft: (outputStyle.indentLeft ?? 0) + entry.level.indent } : { indentRight: (outputStyle.indentRight ?? 0) + entry.level.indent }),
+        ...(fromLeft ? (outputStyle.indentRight ? { indentRight: outputStyle.indentRight } : {}) : (outputStyle.indentLeft ? { indentLeft: outputStyle.indentLeft } : {})),
         ...(outputStyle.leading ? { leading: outputStyle.leading } : {}),
         ...(outputStyle.firstLineIndent ? { firstLineIndent: outputStyle.firstLineIndent } : {}),
       })
@@ -1915,7 +1951,7 @@ export function Workspace({
       get name() { return t('תוכן עניינים') },
       text: story,
       runs,
-      style: DEFAULT_TEXT_STYLE,
+      style: defaultTextStyle(),
       paragraphStyleIds,
       paragraphStyleNames,
       paragraphStylePatches,
@@ -2001,16 +2037,16 @@ export function Workspace({
    * textLayout.ts's `windowOffset`). Removing clears it and leaves the look alone. A paragraph that is too short, or
    * whose opening words leave no room for a second line beside them, ends up with no window.
    */
-  const runWindowText = (options: WindowTextOptions, remove: boolean): WindowTextResult => {
+  const windowTextUpdates = (source: TextFrame[], options: WindowTextOptions, remove: boolean): { updates: Map<string, TextFrame>; result: WindowTextResult } => {
     const result: WindowTextResult = { changed: 0, skippedShort: 0, skippedWide: 0 }
     const opening = options.openingStyleId && !remove ? resolveParagraphStyle(options.openingStyleId) : null
     const charPatch = opening
       ? Object.fromEntries(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'fontSize', 'weight', 'italic', 'tracking'].filter((key) => opening[key as keyof typeof opening] !== undefined).map((key) => [key, opening[key as keyof typeof opening]])) as Partial<CharStyle>
       : null
     const updates = new Map<string, TextFrame>()
-    for (const head of headFrames(frames)) {
+    for (const head of headFrames(source)) {
       if (!head.text || (options.scope === 'selection' && head.id !== textSel?.headId)) continue
-      const chain = chainOf(frames, head.id)
+      const chain = chainOf(source, head.id)
       const flows = chain.map((frame) => flow.get(frame.id))
       const storyStyle = flows[0]?.style ?? styleOf(head)
       let runs = normalizeRuns(head.text, head.runs, head)
@@ -2051,9 +2087,16 @@ export function Workspace({
           result.skippedShort++
           return
         }
+        // already the look of the opening words: leave the runs alone, so that a window kept up by its style settles
         if (charPatch) {
-          runs = styleRange(runs, range.start, range.end, charPatch)
-          touched = true
+          const given = Object.entries(charPatch).every(([key, value]) => {
+            for (let at = range.start; at < range.end; at++) if ((styleAtChar(runs, at, head) as unknown as Record<string, unknown>)[key] !== value) return false
+            return true
+          })
+          if (!given) {
+            runs = styleRange(runs, range.start, range.end, charPatch)
+            touched = true
+          }
         }
         const measured = windowOffset(paragraph, sliceRuns(runs, start, end), storyStyle, width, patch, options.words)
         if (measured === null || measured <= 0 || measured > width * WINDOW_MAX_SHARE) {
@@ -2061,15 +2104,42 @@ export function Workspace({
           result.skippedWide++
           return
         }
-        patches[index] = { ...patch, windowIndent: Math.round(measured * 100) / 100, windowWords: options.words }
-        touched = true
+        const windowIndent = Math.round(measured * 100) / 100
+        if (!(patch.windowWords === options.words && patch.windowIndent !== undefined && Math.abs(patch.windowIndent - windowIndent) < 0.3)) {
+          patches[index] = { ...patch, windowIndent, windowWords: options.words }
+          touched = true
+        }
         result.changed++
       })
       if (touched) updates.set(head.id, { ...head, runs, paragraphStylePatches: patches })
     }
+    return { updates, result }
+  }
+
+  const runWindowText = (options: WindowTextOptions, remove: boolean): WindowTextResult => {
+    const { updates, result } = windowTextUpdates(frames, options, remove)
     if (updates.size) onFramesChange(frames.map((frame) => updates.get(frame.id) ?? frame), remove ? 'window-text-remove' : 'window-text')
     return result
   }
+
+  // a paragraph style with a window built in (its own or the one it is based on): its paragraphs get the window, and the look of
+  // the opening words, by themselves - also the ones typed later - and keep it right as the text changes. Quietly, as the
+  // measuring below: no undo step of its own.
+  useEffect(() => {
+    if (previewMode || editingParentId) return
+    let source = frames
+    let changed = false
+    for (const style of paragraphStyles) {
+      const rule = windowRuleOf(paragraphStyles, style.id)
+      if (!rule) continue
+      const { updates } = windowTextUpdates(source, { styleId: style.id, scope: 'document', words: rule.words, minLines: rule.minLines, openingStyleId: rule.openingStyleId ?? '' }, false)
+      if (updates.size === 0) continue
+      source = source.map((frame) => updates.get(frame.id) ?? frame)
+      changed = true
+    }
+    if (changed) onFramesChange(source, 'window-text-sync', true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow, frames, paragraphStyles, previewMode, editingParentId])
 
   // A window is only right while its second line starts exactly under the word it was measured at, and the first line
   // is usually justified: typing in it, resizing the frame or changing a font moves that word. So every window is
@@ -2488,7 +2558,7 @@ export function Workspace({
     const endParagraph = paraIndexAt(head.text, Math.max(range.a, range.b - 1))
     const paragraphKeys = [
       'leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight',
-      'firstLineIndent', 'secondLineIndent', 'align', 'windowIndent', 'windowWords', 'listKind', 'listGap',
+      'firstLineIndent', 'secondLineIndent', 'align', 'direction', 'windowIndent', 'windowWords', 'listKind', 'listGap',
       'background', 'borderWidth', 'borderColor',
     ] as const
     const paragraphs: RichTextClipboard['paragraphs'] = []
@@ -2704,7 +2774,7 @@ export function Workspace({
   /** Apply paragraph layout to the selected text, or to the paragraphs shown by the selected frame. */
   const applyParagraphStyle = (
     id: string,
-    patch: Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
+    patch: Partial<Pick<TextStyle, 'align' | 'direction' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>,
   ) => {
     const flowPart = flow.get(id)
     const head = flowPart && frames.find((frame) => frame.id === flowPart.headId)
@@ -2716,8 +2786,12 @@ export function Workspace({
     const patches: NonNullable<TextFrame['paragraphStylePatches']> = head.paragraphStylePatches ? head.paragraphStylePatches.slice() : head.text.split('\n').map(() => ({}))
     // a leading of 0 is no leading: it takes the paragraph's own setting away (back to automatic) instead of storing a line height of nothing
     const wanted = patch.leading !== undefined && !(patch.leading > 0) ? { ...patch, leading: undefined } : patch
-    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...wanted }
-    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
+    const lookOf = (own: (typeof patches)[number] | undefined) => ({ align: own?.align ?? head.align, direction: own?.direction ?? head.direction, indentLeft: own?.indentLeft ?? head.indentLeft, indentRight: own?.indentRight ?? head.indentRight })
+    for (const index of indexes) patches[index] = { ...(patches[index] ?? {}), ...wanted, ...lookTurnedBy(patch, lookOf(patches[index])) }
+    // with no text selected the whole story changes direction, and so does the direction its empty frame starts a paragraph in
+    const wholeStory = !(textSel?.headId === head.id && textSel.b <= head.text.length)
+    const storyDirection = patch.direction !== undefined && wholeStory ? { direction: patch.direction, ...lookTurnedBy(patch, { align: head.align, direction: head.direction, indentLeft: head.indentLeft, indentRight: head.indentRight }) } : {}
+    onFramesChange(frames.map((frame) => frame.id === head.id ? { ...frame, ...storyDirection, paragraphStylePatches: patches } : frame), `paragraph:${id}:${Object.keys(patch).join(',')}`)
   }
 
   /**
@@ -2792,6 +2866,37 @@ export function Workspace({
     if (edited.size === 0) return
     dirtyOffsetRef.current = undefined
     onFramesChange(frames.map((f) => edited.get(f.id) ?? f), 'clean-spacing')
+  }
+
+  /**
+   * מעבר שורה עם מקף: a soft hyphen (a place a word may be broken at, shown as a hyphen only where a line is) goes into every
+   * English word that has places by the rules of the language - in the selected text, or in every story of the document. Taking
+   * them out (`remove`) gives the text back as it was. Real characters of the story, so that what is laid out, written to a PDF
+   * and searched is the same everywhere; one step of the history.
+   */
+  const hyphenateCmd = (remove = false) => {
+    const selection = textSel && textSel.a !== textSel.b ? { headId: textSel.headId, from: Math.min(textSel.a, textSel.b), to: Math.max(textSel.a, textSel.b) } : null
+    const heads = selection ? frames.filter((f) => f.id === selection.headId) : headFrames(frames).filter((head) => !head.tocPageReferences?.length && selectable(head.id))
+    const edited = new Map<string, TextFrame>()
+    let count = 0
+    for (const head of heads) {
+      const from = selection ? selection.from : 0
+      const to = selection ? Math.min(selection.to, head.text.length) : head.text.length
+      const slice = head.text.slice(from, to)
+      const offsets = remove ? softHyphenOffsets(slice) : hyphenationPoints(slice)
+      if (offsets.length === 0) continue
+      count += offsets.length
+      const matches = offsets.map((offset) => (remove ? { start: from + offset, end: from + offset + 1, replacement: '' } : { start: from + offset, end: from + offset, replacement: SOFT_HYPHEN }))
+      edited.set(head.id, replaceInStory(head, matches))
+    }
+    if (count === 0) {
+      onNotify(remove ? t('אין מקפי מעבר שורה להסרה') : t('לא נמצאו מילים באנגלית שאפשר לשבור'))
+      return
+    }
+    if (selection) setTextSel(null)
+    dirtyOffsetRef.current = undefined
+    onFramesChange(frames.map((f) => edited.get(f.id) ?? f), remove ? 'hyphenate-remove' : 'hyphenate')
+    onNotify(remove ? t('הוסרו {count} מקפי מעבר שורה', { count }) : t('נוספו {count} מקפי מעבר שורה', { count }))
   }
 
   /**
@@ -5153,6 +5258,7 @@ export function Workspace({
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
     },
     cleanSpacing: cleanSpacingCmd,
+    hyphenate: hyphenateCmd,
     insertRunningHeader,
     openFootnoteConverter: () => {
       setFootnoteConverterFocus('inline')
@@ -10414,7 +10520,7 @@ export function Workspace({
           const keptWindow = paragraphStylePatches[index]?.windowIndent
           const keptWindowWords = paragraphStylePatches[index]?.windowWords
           paragraphStylePatches[index] = {
-            ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
+            ...Object.fromEntries(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'direction'].filter((key) => resolved[key as keyof typeof resolved] !== undefined).map((key) => [key, resolved[key as keyof typeof resolved]])),
             ...(listKind ? { listKind } : {}),
             ...(listKind && listGap !== undefined ? { listGap } : {}),
             ...paragraphBoxOf(resolved),
@@ -10692,7 +10798,7 @@ export function Workspace({
       if ((hardReset || leaving[key] !== undefined) && charPatch[key] === undefined) (charPatch as Record<string, unknown>)[key] = storyLook[key]
     }
     const layout = {
-      ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'listGap']),
+      ...pick(['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'direction', 'listGap']),
       ...(resolved.listKind ? { listKind: resolved.listKind } : {}),
       ...paragraphBoxOf(resolved),
     } as NonNullable<TextFrame['paragraphStylePatches']>[number]
@@ -10736,7 +10842,7 @@ export function Workspace({
     }
     // every paragraph moved: the story as a whole is now on the target style too
     const whole = new Set(indexes).size >= count
-    const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
+    const storyStyle = whole && !keepLook ? (pick(['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'direction', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent']) as Partial<TextStyle>) : {}
     const paragraphStyleId = whole ? targetId : !hadLists || frame.paragraphStyleId === sourceId ? undefined : frame.paragraphStyleId
     const restyled: TextFrame = { ...frame, ...storyStyle, paragraphStyleId, paragraphStyleIds: ids, paragraphStyleNames: names, paragraphStylePatches: patches, paraSpaceBefore, paraSpaceAfter, paraKeepFirstLines, paraKeepLastLines, paraKeepWithNext, runs }
     return applyNestedToFrame(restyled, styles, targetId, new Set(indexes))
@@ -10818,7 +10924,7 @@ export function Workspace({
     if (occurrence.kind === 'footnote') {
       const oldBase = footnoteTextStyle(footnoteConfig, paragraphStyles, occurrence.note.paragraphStyleId)
       const nextBase = footnoteTextStyle(footnoteConfig, paragraphStyles, targetId)
-      const styleKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
+      const styleKeys = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'leading', 'tracking', 'align', 'direction', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent'] as const
       const styleOverrides = occurrence.note.style
         ? Object.fromEntries(styleKeys.filter((key) => occurrence.note.style![key] !== undefined && occurrence.note.style![key] !== oldBase[key]).map((key) => [key, occurrence.note.style![key]])) as Partial<TextStyle>
         : {}

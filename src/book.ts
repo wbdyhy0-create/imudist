@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * A book: several documents (the chapters) kept together as one publication. The book file holds only the list and the
  * settings - never a copy of what is in the chapters - so each chapter stays an ordinary document with its own file.
@@ -40,7 +41,7 @@ export class BookFormatError extends Error {
 export const newChapterId = () => globalThis.crypto?.randomUUID?.() ?? `chapter-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
 export function newBook(title: string): BookFile {
-  return { format: 'imubook', version: 1, title: title.trim() || 'ספר ללא שם', settings: { startPage: 1, chapterStart: 'any', styleSourceId: null }, chapters: [] }
+  return { format: 'imubook', version: 1, title: title.trim() || t('ספר ללא שם'), settings: { startPage: 1, chapterStart: 'any', styleSourceId: null }, chapters: [] }
 }
 
 export const serializeBook = (book: BookFile) => JSON.stringify(book, null, 2)
@@ -93,11 +94,11 @@ export function parseBook(text: string): BookFile {
   try {
     data = JSON.parse(text)
   } catch {
-    throw new BookFormatError('הקובץ אינו קובץ ספר תקין.')
+    throw new BookFormatError(t('הקובץ אינו קובץ ספר תקין.'))
   }
   const root = data as Record<string, unknown> | null
-  if (!root || typeof root !== 'object' || root.format !== 'imubook') throw new BookFormatError('הקובץ אינו קובץ ספר של Imudist.')
-  if (typeof root.version === 'number' && root.version > 1) throw new BookFormatError('הספר נשמר בגרסה חדשה יותר של התוכנה.')
+  if (!root || typeof root !== 'object' || root.format !== 'imubook') throw new BookFormatError(t('הקובץ אינו קובץ ספר של Imudist.'))
+  if (typeof root.version === 'number' && root.version > 1) throw new BookFormatError(t('הספר נשמר בגרסה חדשה יותר של התוכנה.'))
   const settings = (root.settings && typeof root.settings === 'object' ? root.settings : {}) as Record<string, unknown>
   const startPage = typeof settings.startPage === 'number' && Number.isFinite(settings.startPage) ? Math.round(settings.startPage) : 1
   const chapterStart: ChapterStart = settings.chapterStart === 'odd' || settings.chapterStart === 'even' ? settings.chapterStart : 'any'
@@ -115,7 +116,7 @@ export function parseBook(text: string): BookFile {
   return {
     format: 'imubook',
     version: 1,
-    title: typeof root.title === 'string' && root.title.trim() ? root.title : 'ספר ללא שם',
+    title: typeof root.title === 'string' && root.title.trim() ? root.title : t('ספר ללא שם'),
     settings: { startPage, chapterStart, styleSourceId },
     chapters,
   }
@@ -135,12 +136,12 @@ export function readChapterInfo(text: string): ChapterInfo {
   try {
     data = JSON.parse(text)
   } catch {
-    throw new BookFormatError('הקובץ אינו מסמך תקין.')
+    throw new BookFormatError(t('הקובץ אינו מסמך תקין.'))
   }
   const root = data as { format?: unknown; settings?: Record<string, unknown> } | null
-  if (!root || root.format !== 'imudist' || !root.settings) throw new BookFormatError('הקובץ אינו מסמך של Imudist.')
+  if (!root || root.format !== 'imudist' || !root.settings) throw new BookFormatError(t('הקובץ אינו מסמך של Imudist.'))
   const pages = root.settings.pages
-  if (typeof pages !== 'number' || !Number.isFinite(pages) || pages < 0) throw new BookFormatError('במסמך אין מספר עמודים תקין.')
+  if (typeof pages !== 'number' || !Number.isFinite(pages) || pages < 0) throw new BookFormatError(t('במסמך אין מספר עמודים תקין.'))
   const startPage = root.settings.startPage
   return {
     name: typeof root.settings.name === 'string' ? root.settings.name : '',

@@ -4,6 +4,7 @@ import type { PathGeom, Sharpness, ShapeFrame } from './document'
 import { softBrushBlur } from './sharpness'
 import { shapePath } from './shapes'
 import { parseSvgPath } from './vectorShapes'
+import { t } from './i18n'
 
 /**
  * Brushes: a stroke drawn with one becomes plain vector shapes - the outline of what the brush covers, as one shape (a compound path
@@ -24,12 +25,12 @@ export interface BrushStyle {
 }
 
 export const BRUSH_STYLES: BrushStyle[] = [
-  { id: 'round', label: 'קו עגול', hint: 'קו אחיד בקצוות עגולים', size: 8 },
-  { id: 'calligraphic', label: 'קליגרפי', hint: 'קצה שטוח בזווית: הקו עבה ודק לפי הכיוון', size: 18 },
-  { id: 'taper', label: 'מדורג', hint: 'דק בקצוות ועבה באמצע', size: 16 },
-  { id: 'splatter', label: 'נתז צבע', hint: 'גוף של צבע עם טיפות ונתזים סביבו', size: 22 },
-  { id: 'dry', label: 'מברשת יבשה', hint: 'שערות מקבילות שנקטעות', size: 26 },
-  { id: 'dots', label: 'נקודות', hint: 'נקודות לאורך הקו', size: 14 },
+  { id: 'round', get label() { return t('קו עגול') }, get hint() { return t('קו אחיד בקצוות עגולים') }, size: 8 },
+  { id: 'calligraphic', get label() { return t('קליגרפי') }, get hint() { return t('קצה שטוח בזווית: הקו עבה ודק לפי הכיוון') }, size: 18 },
+  { id: 'taper', get label() { return t('מדורג') }, get hint() { return t('דק בקצוות ועבה באמצע') }, size: 16 },
+  { id: 'splatter', get label() { return t('נתז צבע') }, get hint() { return t('גוף של צבע עם טיפות ונתזים סביבו') }, size: 22 },
+  { id: 'dry', get label() { return t('מברשת יבשה') }, get hint() { return t('שערות מקבילות שנקטעות') }, size: 26 },
+  { id: 'dots', get label() { return t('נקודות') }, get hint() { return t('נקודות לאורך הקו') }, size: 14 },
 ]
 
 export const MIN_BRUSH_SIZE = 1

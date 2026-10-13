@@ -21,6 +21,7 @@ import { resolveLinkedAssets } from './imageLinks'
 import { applySettings, deletePages, insertPages, movePage, type DocContent, type ParentOverride } from './pages'
 import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
 import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
+import { t } from './i18n'
 
 const NO_FRAMES: TextFrame[] = []
 const NO_IMAGES: ImageFrame[] = []
@@ -38,12 +39,12 @@ const NO_COLOR_SAMPLES: ColorSample[] = []
 const NO_LAYERS: Record<string, LayerInfo> = {}
 const NO_LAYER_ORDER = ['layer-1']
 
-const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : 'שגיאה לא צפויה.')
+const messageOf = (e: unknown) => (e instanceof Error && e.message ? e.message : t('שגיאה לא צפויה.'))
 
 /** what to tell the user when a document opens with linked pictures that are missing or changed on disk */
 const linkNotice = ({ missing, modified }: { missing: number; modified: number }) => {
-  const parts = [missing > 0 && `${missing} תמונות מקושרות חסרות`, modified > 0 && `${modified} תמונות מקושרות השתנו`].filter(Boolean)
-  return parts.length > 0 ? `${parts.join(', ')} — ראה את לוח הקישורים` : null
+  const parts = [missing > 0 && t('{missing} תמונות מקושרות חסרות', { missing }), modified > 0 && t('{modified} תמונות מקושרות השתנו', { modified })].filter(Boolean)
+  return parts.length > 0 ? t('{n1} — ראה את לוח הקישורים', { n1: parts.join(', ') }) : null
 }
 
 /** Extras of a settings change. */
@@ -180,8 +181,8 @@ export function useDocumentSession() {
       title,
       message: messageOf(e),
       buttons: action
-        ? [{ label: action.label, kind: 'primary', run: action.run }, { label: 'סגירה', cancel: true, run: () => setModal(null) }]
-        : [{ label: 'אישור', kind: 'primary', cancel: true, run: () => setModal(null) }],
+        ? [{ label: action.label, kind: 'primary', run: action.run }, { get label() { return t('סגירה') }, cancel: true, run: () => setModal(null) }]
+        : [{ get label() { return t('אישור') }, kind: 'primary', cancel: true, run: () => setModal(null) }],
     })
 
   // ── the active document's history ──────────────────────────────────────────────
@@ -341,13 +342,13 @@ export function useDocumentSession() {
         const name = fileNameFor(start.doc.name)
         downloadText(name, text)
         if (!copy) update(id, (d) => ({ ...d, file: { name, handle: null }, saved: start }))
-        notify(`הקובץ ${name} הורד לתיקיית ההורדות`)
+        notify(t('הקובץ {name} הורד לתיקיית ההורדות', { name }))
         return true
       }
       const ref = await saveWithPicker(fileNameFor(start.doc.name), text)
       if (!ref) return false
       if (copy) {
-        notify(`נשמר עותק: ${ref.name}`)
+        notify(t('נשמר עותק: {n1}', { n1: ref.name }))
         return true
       }
       // the document takes its name from the file, like other desktop programs
@@ -361,10 +362,10 @@ export function useDocumentSession() {
       }
       update(id, (d) => ({ ...d, file: ref, saved: savedContent }))
       await remember(ref)
-      notify(!ref.handle && !ref.path ? `הקובץ ${ref.name} הורד לתיקיית ההורדות` : `נשמר: ${ref.name}`)
+      notify(!ref.handle && !ref.path ? t('הקובץ {n1} הורד לתיקיית ההורדות', { n1: ref.name }) : t('נשמר: {n1}', { n1: ref.name }))
       return true
     } catch (e) {
-      fail('השמירה נכשלה', e)
+      fail(t('השמירה נכשלה'), e)
       return false
     }
   }
@@ -386,7 +387,7 @@ export function useDocumentSession() {
           if (!isFileHandlePermissionError(error)) throw error
           downloadText(target.name, serializeDocument(start))
           update(id, (d) => ({ ...d, file: { ...target, handle: null }, saved: start }))
-          notify(`הקובץ ${target.name} הורד לתיקיית ההורדות כי אין הרשאת כתיבה למיקום המקורי`)
+          notify(t('הקובץ {n1} הורד לתיקיית ההורדות כי אין הרשאת כתיבה למיקום המקורי', { n1: target.name }))
           return true
         }
       } else {
@@ -394,10 +395,10 @@ export function useDocumentSession() {
       }
       update(id, (d) => ({ ...d, saved: start }))
       await remember(target)
-      notify(`נשמר: ${target.name}`)
+      notify(t('נשמר: {n1}', { n1: target.name }))
       return true
     } catch (e) {
-      fail('השמירה נכשלה', e)
+      fail(t('השמירה נכשלה'), e)
       return false
     }
   }
@@ -431,11 +432,11 @@ export function useDocumentSession() {
     const entry = entryOf(id)
     if (!entry || !isDirty(entry)) return next()
     setModal({
-      title: 'לשמור את השינויים?',
-      message: `במסמך "${entry.h.present.doc.name}" יש שינויים שלא נשמרו. מה לעשות?`,
+      get title() { return t('לשמור את השינויים?') },
+      message: t('במסמך "{n1}" יש שינויים שלא נשמרו. מה לעשות?', { n1: entry.h.present.doc.name }),
       buttons: [
         {
-          label: 'שמור',
+          get label() { return t('שמור') },
           kind: 'primary',
           run: async () => {
             setModal(null)
@@ -444,14 +445,14 @@ export function useDocumentSession() {
           },
         },
         {
-          label: 'אל תשמור',
+          get label() { return t('אל תשמור') },
           run: () => {
             setModal(null)
             next()
           },
         },
         {
-          label: 'ביטול',
+          get label() { return t('ביטול') },
           cancel: true,
           run: () => {
             setModal(null)
@@ -490,7 +491,7 @@ export function useDocumentSession() {
   const createDocument = (d: DocSettings, onDone?: (id: number) => void) => {
     // every new document starts with one parent ("אב A") already applied to all of its pages, the same way
     // professional layout tools start with a default master - so pages already look uniform from the start, instead of needing it set by hand
-    const parentA: ParentPage = { id: globalThis.crypto?.randomUUID?.() ?? `parent-${Date.now()}`, prefix: 'A', name: 'אב A', w: d.width, h: d.height, frames: [], images: [], shapes: [] }
+    const parentA: ParentPage = { id: globalThis.crypto?.randomUUID?.() ?? `parent-${Date.now()}`, prefix: 'A', name: t('אב A'), w: d.width, h: d.height, frames: [], images: [], shapes: [] }
     const blank: DocContent = {
       doc: d,
       frames: NO_FRAMES,
@@ -521,9 +522,9 @@ export function useDocumentSession() {
       const links = await resolveLinkedAssets(parsed.assets)
       addDoc(parsed, ref)
       await remember(ref)
-      notify(linkNotice(links) ?? `נפתח: ${ref.name}`)
+      notify(linkNotice(links) ?? t('נפתח: {n1}', { n1: ref.name }))
     } catch (e) {
-      fail('לא ניתן לפתוח את הקובץ', e instanceof FileFormatError ? e : new Error('הקובץ לא נקרא כראוי.'))
+      fail(t('לא ניתן לפתוח את הקובץ'), e instanceof FileFormatError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
 
@@ -537,7 +538,7 @@ export function useDocumentSession() {
       const res = hasFilePicker ? await openWithPicker() : await openWithInput()
       if (res) await loadText(res.text, res.ref)
     } catch (e) {
-      fail('לא ניתן לפתוח את הקובץ', e)
+      fail(t('לא ניתן לפתוח את הקובץ'), e)
     }
   }
 
@@ -545,7 +546,7 @@ export function useDocumentSession() {
     try {
       await loadText(await file.text(), { name: file.name, handle })
     } catch (e) {
-      fail('לא ניתן לפתוח את הקובץ', e)
+      fail(t('לא ניתן לפתוח את הקובץ'), e)
     }
   }
   const openHandle = async (handle: FileSystemFileHandle) => {
@@ -564,7 +565,7 @@ export function useDocumentSession() {
         await loadText(await readTextFile(entry.path), { name: entry.name, handle: null, path: entry.path })
         return
       }
-      if (!entry.handle) throw new Error('הקובץ לא נמצא.')
+      if (!entry.handle) throw new Error(t('הקובץ לא נמצא.'))
       try {
         if (!(await ensureReadPermission(entry.handle))) {
           await openWithInputFallback()
@@ -583,17 +584,17 @@ export function useDocumentSession() {
           console.warn(`Could not remove missing recent document "${entry.name}".`, removeError)
         }
       }
-      const message = entry.path ? messageOf(e) : `הקובץ "${entry.name}" לא נמצא. ייתכן שהוא הועבר או נמחק.`
-      fail('לא ניתן לפתוח את הקובץ', new Error(message))
+      const message = entry.path ? messageOf(e) : t('הקובץ "{n1}" לא נמצא. ייתכן שהוא הועבר או נמחק.', { n1: entry.name })
+      fail(t('לא ניתן לפתוח את הקובץ'), new Error(message))
     }
   }
 
   const forgetRecent = async (entry: RecentEntry) => {
     try {
       setRecent(await removeRecent(entry))
-      notify(`"${entry.name}" הוסר מרשימת האחרונים.`)
+      notify(t('"{n1}" הוסר מרשימת האחרונים.', { n1: entry.name }))
     } catch (e) {
-      fail('לא ניתן להסיר את הקובץ מרשימת האחרונים', e)
+      fail(t('לא ניתן להסיר את הקובץ מרשימת האחרונים'), e)
     }
   }
 
@@ -603,7 +604,7 @@ export function useDocumentSession() {
       const { readTextFile } = await import('@tauri-apps/plugin-fs')
       await loadText(await readTextFile(path), { name: path.split(/[\\/]/).pop() ?? path, handle: null, path })
     } catch (e) {
-      fail('לא ניתן לפתוח את הקובץ', e)
+      fail(t('לא ניתן לפתוח את הקובץ'), e)
     }
   }
 
@@ -614,24 +615,24 @@ export function useDocumentSession() {
     const handle = current?.file?.handle
     if (id === null || !handle || !current) return
     setModal({
-      title: 'לחזור לגרסה השמורה?',
-      message: `כל השינויים ב-"${current.h.present.doc.name}" מאז השמירה האחרונה יאבדו.`,
+      get title() { return t('לחזור לגרסה השמורה?') },
+      message: t('כל השינויים ב-"{n1}" מאז השמירה האחרונה יאבדו.', { n1: current.h.present.doc.name }),
       buttons: [
         {
-          label: 'חזור לגרסה השמורה',
+          get label() { return t('חזור לגרסה השמורה') },
           kind: 'danger',
           run: async () => {
             setModal(null)
             try {
               const parsed = parseDocument(await (await handle.getFile()).text(), baseName(handle.name))
               update(id, (d) => ({ ...d, h: newHistory(parsed), saved: parsed, last: null, rev: d.rev + 1, view: null }))
-              notify('המסמך הוחזר לגרסה השמורה')
+              notify(t('המסמך הוחזר לגרסה השמורה'))
             } catch (e) {
-              fail('לא ניתן לחזור לגרסה השמורה', e)
+              fail(t('לא ניתן לחזור לגרסה השמורה'), e)
             }
           },
         },
-        { label: 'ביטול', cancel: true, run: () => setModal(null) },
+        { get label() { return t('ביטול') }, cancel: true, run: () => setModal(null) },
       ],
     })
   }

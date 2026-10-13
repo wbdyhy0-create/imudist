@@ -1,5 +1,8 @@
 import { arDialogs } from './ar.dialogs'
 import { arMessages } from './ar.messages'
+import { arModules } from './ar.modules'
+import { arMore } from './ar.more'
+import { arStyles } from './ar.styles'
 import { arChrome } from './ar.chrome'
 import { arPanels } from './ar.panels'
 
@@ -106,4 +109,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages }
+export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages, ...arStyles, ...arMore, ...arModules }

@@ -1,4 +1,4 @@
-import { ANCHOR_MARKER, cssTextAlign, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type FootnoteReferenceLook, type ParagraphBox, type Run, type TextAlign } from './document'
+import { ANCHOR_MARKER, cssTextAlign, cssTextDirection, DEFAULT_TEXT_STYLE, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, TOC_LEADER_MARKER, TOC_PAGE_MARKER, startSideOf, wordSpacingPt, type CharStyle, type FootnoteReferenceLook, type ParagraphBox, type Run, type TextAlign, type TextDirection } from './document'
 import { sliceRuns, styleAtChar } from './story'
 import { shapeOf, type WrapFloat } from './wrap'
 import { hexToRgb } from './colorModels'
@@ -111,6 +111,8 @@ export function splitMarks(text: string): MarkPiece[] {
 }
 
 export interface RunNodeOpts {
+  /** the story's own direction: a paragraph whose patch has none reads this way (missing: right to left) */
+  direction?: TextDirection
   /** how to render character outlines in the generated DOM */
   outlineMode?: 'shadow' | 'stroke'
   footnoteMarkers?: Record<number, string>
@@ -313,6 +315,8 @@ export interface ParagraphPatch extends ParagraphBox {
   firstLineIndent?: number
   secondLineIndent?: number
   align?: TextAlign
+  /** the way this paragraph reads (missing: the story's own) */
+  direction?: TextDirection
   listKind?: 'bullet' | 'number'
   listGap?: number
   /**
@@ -325,7 +329,7 @@ export interface ParagraphPatch extends ParagraphBox {
 }
 
 /** true when a patch changes something only a paragraph BLOCK can express (line height, side indents, alignment) */
-const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (!!p.decoration || p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || p.wordSpacing !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
+const shapesBlock = (p: ParagraphPatch | undefined) => !!p && (!!p.decoration || p.leading !== undefined || p.wordSpacingMin !== undefined || p.wordSpacingMax !== undefined || p.wordSpacing !== undefined || !!p.indentLeft || !!p.indentRight || p.firstLineIndent !== undefined || !!p.secondLineIndent || p.align !== undefined || p.direction !== undefined || !!p.windowIndent || !!p.listKind || paragraphHasBox(p))
 
 /** the room (points, unscaled) a paragraph's fill or line keeps between itself and the text at the sides */
 const BOX_INSET = 3
@@ -345,10 +349,12 @@ export function paragraphBoxStyle(p: ParagraphBox | undefined, scale: number): {
 }
 
 /** a paragraph block's side padding: its indents, plus the room that keeps the text off its fill / line */
-export function paragraphSidePadding(p: (ParagraphBox & Pick<ParagraphPatch, 'indentLeft' | 'indentRight' | 'secondLineIndent'>) | undefined, scale: number): { paddingLeft?: string; paddingRight?: string } {
+export function paragraphSidePadding(p: (ParagraphBox & Pick<ParagraphPatch, 'indentLeft' | 'indentRight' | 'secondLineIndent' | 'direction'>) | undefined, scale: number, direction?: TextDirection): { paddingLeft?: string; paddingRight?: string } {
   const inset = paragraphHasBox(p) ? BOX_INSET : 0
-  const left = (p?.indentLeft ?? 0) + inset
-  const right = (p?.indentRight ?? 0) + (p?.secondLineIndent ?? 0) + inset
+  // the second line is set in from the side the paragraph starts on: the right one, unless it reads from the left
+  const startsLeft = startSideOf(p?.direction ?? direction) === 'left'
+  const left = (p?.indentLeft ?? 0) + (startsLeft ? p?.secondLineIndent ?? 0 : 0) + inset
+  const right = (p?.indentRight ?? 0) + (startsLeft ? 0 : p?.secondLineIndent ?? 0) + inset
   return { ...(left ? { paddingLeft: `${left * scale}px` } : {}), ...(right ? { paddingRight: `${right * scale}px` } : {}) }
 }
 /** A CSS-generated marker for a list paragraph; adjacent numbered paragraphs continue their count. */
@@ -403,10 +409,10 @@ function windowBand(gap: number, fonts?: WindowFonts) {
   return { top: `calc(${first} + 0.3 * ${second})`, bottom: `calc(${first} + 0.7 * ${second})` }
 }
 
-export function windowFloatStyle(width: number, gap: number, fonts?: WindowFonts) {
+export function windowFloatStyle(width: number, gap: number, fonts?: WindowFonts, side: 'left' | 'right' = 'right') {
   const { top, bottom } = windowBand(gap, fonts)
   return {
-    float: 'right' as const,
+    float: side,
     width: `${width}px`,
     height: bottom,
     shapeOutside: `polygon(${width}px 0, ${width}px ${top}, 0 ${top}, 0 ${bottom}, ${width}px ${bottom})`,
@@ -418,11 +424,11 @@ export function windowFloatStyle(width: number, gap: number, fonts?: WindowFonts
 /** a paragraph block that holds a window is at least as tall as the float, so the float never spills onto the next paragraph */
 export const windowBlockMinHeight = (gap: number, fonts?: WindowFonts) => windowBand(gap, fonts).bottom
 
-function windowFloat(width: number, gap: number, fonts?: WindowFonts): HTMLElement {
+function windowFloat(width: number, gap: number, fonts?: WindowFonts, side: 'left' | 'right' = 'right'): HTMLElement {
   const el = document.createElement('div')
   el.className = 'wrap-float'
   el.contentEditable = 'false'
-  Object.assign(el.style, windowFloatStyle(width, gap, fonts))
+  Object.assign(el.style, windowFloatStyle(width, gap, fonts, side))
   return el
 }
 
@@ -470,6 +476,12 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       block.style.textAlign = css.textAlign
       if (css.textAlignLast) block.style.textAlignLast = css.textAlignLast
     }
+    if (patch?.direction) {
+      const css = cssTextDirection(patch.direction)
+      block.dir = css.direction
+      block.style.direction = css.direction
+      if (css.unicodeBidi !== 'normal') block.style.unicodeBidi = css.unicodeBidi
+    }
     if (needsLastLineJustify && end === text.length) block.style.textAlignLast = 'justify'
     if (patch?.leading) block.style.lineHeight = `${patch.leading * scale}px`
     if (patch?.wordSpacingMin !== undefined || patch?.wordSpacingMax !== undefined || patch?.wordSpacing !== undefined) {
@@ -477,7 +489,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
       const spacing = wordSpacingPt({ ...DEFAULT_TEXT_STYLE, ...paragraphStyle, align: patch.align ?? baseAlign ?? DEFAULT_TEXT_STYLE.align, ...patch })
       if (spacing) block.style.wordSpacing = `${spacing * scale}px`
     }
-    Object.assign(block.style, paragraphSidePadding(patch, scale), paragraphBoxStyle(patch, scale))
+    Object.assign(block.style, paragraphSidePadding(patch, scale, opts.direction), paragraphBoxStyle(patch, scale))
     // a decoration above opens a paragraph that starts here; one below closes a paragraph that ends here (both are
     // pseudo-elements of the block: they hold no characters, so no count of characters sees them)
     const decoration = patch?.decoration
@@ -547,7 +559,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     if (patch?.windowIndent && isOpening) {
       const fonts = windowFontsOf(runs, pos, end, scale)
       block.style.minHeight = windowBlockMinHeight(gapBefore * scale, fonts)
-      block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale, fonts))
+      block.appendChild(windowFloat(patch.windowIndent * scale, gapBefore * scale, fonts, startSideOf(patch.direction ?? opts.direction)))
     }
     if (marker && (pos > 0 || !!opts.atParaStart)) {
       const content = document.createElement('span')

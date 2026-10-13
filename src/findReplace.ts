@@ -3,6 +3,8 @@
  * sign, a word or any pattern occurs - across every story, so across every page of a thread - and replacing or
  * deleting all of them in one go. Pure functions on stories; Workspace.tsx does the navigation and the one undo step.
  */
+import { SOFT_HYPHEN } from './softHyphens'
+import { t } from './i18n'
 import { FOOTNOTE_MARKER, type CharStyle, type FootnoteItem, type Run, type TextFrame } from './document'
 import { editStory, normalizeRuns, spliceParagraphStyles, spliceParaOverrides } from './story'
 
@@ -91,7 +93,7 @@ export function compilePattern(options: FindOptions): Compiled | null {
   try {
     regex = new RegExp(source, `gu${options.matchCase ? '' : 'i'}${options.mode === 'regex' ? 'm' : ''}`)
   } catch {
-    return { ok: false, error: 'ביטוי רגולרי לא תקין' }
+    return { ok: false, error: t('ביטוי רגולרי לא תקין') }
   }
   const replacement =
     options.mode === 'regex'
@@ -113,12 +115,14 @@ export function compilePattern(options: FindOptions): Compiled | null {
 export function findMatches(text: string, compiled: Extract<Compiled, { ok: true }>): TextMatch[] {
   let haystack = text
   let map: number[] | null = null
-  if (compiled.ignoreNiqqud && NIQQUD.test(text)) {
-    // the text without its vowel points, and where each of its characters was
+  // what is not a character of the text for the search: a soft hyphen (put in for a line break) always, and the vowel points when asked
+  const skipped = (char: string) => char === SOFT_HYPHEN || (compiled.ignoreNiqqud && NIQQUD.test(char))
+  if (text.includes(SOFT_HYPHEN) || (compiled.ignoreNiqqud && NIQQUD.test(text))) {
+    // the text without them, and where each of its characters was
     map = []
     haystack = ''
     for (let i = 0; i < text.length; i++) {
-      if (NIQQUD.test(text[i])) continue
+      if (skipped(text[i])) continue
       map.push(i)
       haystack += text[i]
     }
@@ -137,7 +141,7 @@ export function findMatches(text: string, compiled: Extract<Compiled, { ok: true
       start = map[start]
       end = map[end - 1] + 1
       // the points that belong to the last letter go with it
-      while (end < text.length && NIQQUD.test(text[end])) end++
+      while (end < text.length && skipped(text[end])) end++
     }
     if (MARKERS.test(text.slice(start, end))) continue
     out.push({ start, end, replacement: compiled.replacement(match) })

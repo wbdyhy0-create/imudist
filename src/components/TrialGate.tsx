@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { isTauri } from '../fileio'
 import { trialExpiry, trialStatus, type TrialStatus } from '../trial'
+import { localeTag, t } from '../i18n'
 
 const CONSENT_KEY = 'imudist.trial-consent'
 const SEEN_KEY = 'imudist.trial-seen'
@@ -31,7 +32,7 @@ const write = (key: string, value: string) => {
   }
 }
 
-const formatDate = (time: number) => new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(time))
+const formatDate = (time: number) => new Intl.DateTimeFormat(localeTag(), { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(time))
 
 async function leave() {
   try {
@@ -66,15 +67,15 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
   if (status !== 'ok') {
     return (
       <div className="modal-backdrop">
-        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת הבדיקה הסתיימה">
-          <h2>{status === 'expired' ? 'תוקף גרסת הבדיקה הסתיים' : 'לא ניתן להמשיך'}</h2>
+        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label={t('גרסת הבדיקה הסתיימה')}>
+          <h2>{status === 'expired' ? t('תוקף גרסת הבדיקה הסתיים') : t('לא ניתן להמשיך')}</h2>
           <p>
             {status === 'expired'
-              ? `גרסת הבדיקה הזו הייתה פעילה עד ${formatDate(expiresAt)}. כדי להמשיך להשתמש בתוכנה יש לקבל גרסה חדשה.`
-              : 'שעון המחשב הוחזר אחורה, ולכן גרסת הבדיקה אינה יכולה להמשיך לפעול. יש להחזיר את השעון למצבו התקין או לקבל גרסה חדשה.'}
+              ? t('גרסת הבדיקה הזו הייתה פעילה עד {n1}. כדי להמשיך להשתמש בתוכנה יש לקבל גרסה חדשה.', { n1: formatDate(expiresAt) })
+              : t('שעון המחשב הוחזר אחורה, ולכן גרסת הבדיקה אינה יכולה להמשיך לפעול. יש להחזיר את השעון למצבו התקין או לקבל גרסה חדשה.')}
           </p>
           <div className="modal-buttons">
-            <button className="btn primary" autoFocus onClick={() => void leave()}>יציאה</button>
+            <button className="btn primary" autoFocus onClick={() => void leave()}>{t('יציאה')}</button>
           </div>
         </div>
       </div>
@@ -84,17 +85,17 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
   if (!agreed) {
     return (
       <div className="modal-backdrop">
-        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label="גרסת בדיקה">
-          <h2>גרסת בדיקה</h2>
-          <p>גרסה זו של Imudist ניתנת לך לבדיקה והתנסות בלבד.</p>
-          <p>בלחיצה על „אני מסכים” אתה מאשר ש:</p>
+        <div className="modal trial-modal" role="alertdialog" aria-modal="true" aria-label={t('גרסת בדיקה')}>
+          <h2>{t('גרסת בדיקה')}</h2>
+          <p>{t('גרסה זו של Imudist ניתנת לך לבדיקה והתנסות בלבד.')}</p>
+          <p>{t('בלחיצה על „אני מסכים” אתה מאשר ש:')}</p>
           <ul className="trial-terms">
-            <li>אין להעתיק, לפרק, לשחזר או לנסות לחלץ את קוד התוכנה או חלקים ממנו.</li>
-            <li>אין להפיץ את התוכנה או להעביר אותה לאחרים.</li>
-            <li>אין להשתמש בה או בחלק ממנה כבסיס לתוכנה אחרת.</li>
-            <li>הגרסה פעילה עד <strong>{formatDate(expiresAt)}</strong> ולאחר מכן תפסיק לעבוד.</li>
+            <li>{t('אין להעתיק, לפרק, לשחזר או לנסות לחלץ את קוד התוכנה או חלקים ממנו.')}</li>
+            <li>{t('אין להפיץ את התוכנה או להעביר אותה לאחרים.')}</li>
+            <li>{t('אין להשתמש בה או בחלק ממנה כבסיס לתוכנה אחרת.')}</li>
+            <li>{t('הגרסה פעילה עד')} <strong>{formatDate(expiresAt)}</strong> {t('ולאחר מכן תפסיק לעבוד.')}</li>
           </ul>
-          <p className="muted">התוכנה ניתנת כמות שהיא, ללא אחריות.</p>
+          <p className="muted">{t('התוכנה ניתנת כמות שהיא, ללא אחריות.')}</p>
           <div className="modal-buttons">
             <button
               className="btn primary"
@@ -104,9 +105,9 @@ function TrialShell({ expiresAt, children }: { expiresAt: number; children: Reac
                 setAgreed(true)
               }}
             >
-              אני מסכים
+              {t('אני מסכים')}
             </button>
-            <button className="btn" onClick={() => void leave()}>יציאה</button>
+            <button className="btn" onClick={() => void leave()}>{t('יציאה')}</button>
           </div>
         </div>
       </div>

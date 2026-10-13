@@ -4,6 +4,7 @@ import { learnSequence, type SequenceParts } from './paragraphSequences'
 import { normalizeRuns, sliceRuns } from './story'
 import { styleIdOf } from './styleApply'
 import { setHeaderFooter, type TableData, type TableStyle } from './table'
+import { t } from './i18n'
 
 /**
  * Designs by example (ספריית עיצובים): the look of what is selected, kept under a name and given to other things later. One design
@@ -51,21 +52,21 @@ export interface DesignPart {
 }
 
 const OBJECT_PARTS: { id: DesignPartId; label: string; keys: (keyof ObjectStyleSettings)[] }[] = [
-  { id: 'object:fill', label: 'מילוי (צבע או מעבר צבעים)', keys: ['fill', 'fillGradient'] },
-  { id: 'object:stroke', label: 'קו (צבע, עובי, סגנון)', keys: ['stroke', 'strokeWidth', 'strokeDash', 'strokeCap'] },
-  { id: 'object:radius', label: 'פינות מעוגלות', keys: ['radius'] },
-  { id: 'object:opacity', label: 'שקיפות ומיזוג', keys: ['opacity', 'blendMode'] },
-  { id: 'object:shadow', label: 'צל', keys: ['shadow'] },
-  { id: 'object:feather', label: 'שוליים רכים (נוצה)', keys: ['feather'] },
-  { id: 'object:arrows', label: 'ראשי חץ', keys: ['arrowStart', 'arrowEnd'] },
-  { id: 'object:widths', label: 'עובי משתנה לאורך הקו', keys: ['lineWidths'] },
+  { id: 'object:fill', get label() { return t('מילוי (צבע או מעבר צבעים)') }, keys: ['fill', 'fillGradient'] },
+  { id: 'object:stroke', get label() { return t('קו (צבע, עובי, סגנון)') }, keys: ['stroke', 'strokeWidth', 'strokeDash', 'strokeCap'] },
+  { id: 'object:radius', get label() { return t('פינות מעוגלות') }, keys: ['radius'] },
+  { id: 'object:opacity', get label() { return t('שקיפות ומיזוג') }, keys: ['opacity', 'blendMode'] },
+  { id: 'object:shadow', get label() { return t('צל') }, keys: ['shadow'] },
+  { id: 'object:feather', get label() { return t('שוליים רכים (נוצה)') }, keys: ['feather'] },
+  { id: 'object:arrows', get label() { return t('ראשי חץ') }, keys: ['arrowStart', 'arrowEnd'] },
+  { id: 'object:widths', get label() { return t('עובי משתנה לאורך הקו') }, keys: ['lineWidths'] },
 ]
 
 const TABLE_PARTS: { id: DesignPartId; label: string; keys: (keyof TableStyle)[] }[] = [
-  { id: 'table:text', label: 'טקסט בתאים (גופן, גודל, צבע, יישור)', keys: ['fontFamily', 'fontSize', 'leading', 'tracking', 'spaceBefore', 'spaceAfter', 'color', 'weight', 'italic', 'align', 'valign'] },
-  { id: 'table:cells', label: 'ריווח התאים (שוליים, רווחים בין תאים, פינות)', keys: ['insetX', 'insetY', 'cellGapX', 'cellGapY', 'cellRadius', 'headerContinuous'] },
-  { id: 'table:lines', label: 'קווי הטבלה (מסגרת, שורות, עמודות)', keys: ['outer', 'rowStroke', 'rowStrokeAlternate', 'colStroke', 'colStrokeAlternate'] },
-  { id: 'table:fills', label: 'מילויים (כותרת, פסים, גוף, סיכום)', keys: ['bodyFill', 'headerFill', 'headerWeight', 'footerFill', 'stripeFill'] },
+  { id: 'table:text', get label() { return t('טקסט בתאים (גופן, גודל, צבע, יישור)') }, keys: ['fontFamily', 'fontSize', 'leading', 'tracking', 'spaceBefore', 'spaceAfter', 'color', 'weight', 'italic', 'align', 'valign'] },
+  { id: 'table:cells', get label() { return t('ריווח התאים (שוליים, רווחים בין תאים, פינות)') }, keys: ['insetX', 'insetY', 'cellGapX', 'cellGapY', 'cellRadius', 'headerContinuous'] },
+  { id: 'table:lines', get label() { return t('קווי הטבלה (מסגרת, שורות, עמודות)') }, keys: ['outer', 'rowStroke', 'rowStrokeAlternate', 'colStroke', 'colStrokeAlternate'] },
+  { id: 'table:fills', get label() { return t('מילויים (כותרת, פסים, גוף, סיכום)') }, keys: ['bodyFill', 'headerFill', 'headerWeight', 'footerFill', 'stripeFill'] },
 ]
 
 /** the parts a design holds, in the order the dialog shows them */
@@ -75,11 +76,11 @@ export function designParts(design: DesignRecord): DesignPart[] {
     for (const part of OBJECT_PARTS) if (part.keys.some((key) => key in design.object!)) parts.push({ id: part.id, group: 'object', label: part.label })
   }
   const text = design.text
-  if (text?.sequence && text.sequence.start.length + text.sequence.middle.length + text.sequence.end.length > 0) parts.push({ id: 'text:sequence', group: 'text', label: 'סגנונות הפסקאות לפי מקומן' })
-  if (text?.nested?.length) parts.push({ id: 'text:nested', group: 'text', label: 'סגנונות מקוננים בפתיחת הפסקאות' })
+  if (text?.sequence && text.sequence.start.length + text.sequence.middle.length + text.sequence.end.length > 0) parts.push({ id: 'text:sequence', group: 'text', get label() { return t('סגנונות הפסקאות לפי מקומן') } })
+  if (text?.nested?.length) parts.push({ id: 'text:nested', group: 'text', get label() { return t('סגנונות מקוננים בפתיחת הפסקאות') } })
   if (design.table) {
     for (const part of TABLE_PARTS) parts.push({ id: part.id, group: 'table', label: part.label })
-    parts.push({ id: 'table:rows', group: 'table', label: 'מספר שורות הכותרת והסיכום' })
+    parts.push({ id: 'table:rows', group: 'table', get label() { return t('מספר שורות הכותרת והסיכום') } })
   }
   return parts
 }
@@ -153,16 +154,16 @@ export function designSummary(design: DesignRecord, nameOf: (paragraphStyleId: s
   const lines: string[] = []
   if (design.object) {
     const names = OBJECT_PARTS.filter((part) => part.keys.some((key) => key in design.object!)).map((part) => part.label.replace(/ \(.*\)$/, ''))
-    if (names.length) lines.push(`אובייקט: ${names.join(', ')}`)
+    if (names.length) lines.push(t('אובייקט: {n1}', { n1: names.join(', ') }))
   }
   const sequence = design.text?.sequence
   if (sequence && sequence.start.length + sequence.middle.length + sequence.end.length > 0) {
     const names = (ids: string[]) => ids.map(nameOf).join(' › ')
     const parts = [sequence.start.length ? names(sequence.start) : '', sequence.middle.length ? `(${names(sequence.middle)}) ↻` : '', sequence.end.length ? names(sequence.end) : ''].filter(Boolean)
-    lines.push(`טקסט: ${parts.join(' › ')}`)
+    lines.push(t('טקסט: {n1}', { n1: parts.join(' › ') }))
   }
   const nested = design.text?.nested
-  if (nested?.length) lines.push(`טקסט: ${nested.reduce((n, item) => n + item.rules.length, 0)} כללי סגנון מקונן`)
-  if (design.table) lines.push(`טבלה: ${design.table.headerRows} שורות כותרת, ${design.table.footerRows} שורות סיכום`)
+  if (nested?.length) lines.push(t('טקסט: {n1} כללי סגנון מקונן', { n1: nested.reduce((n, item) => n + item.rules.length, 0) }))
+  if (design.table) lines.push(t('טבלה: {n1} שורות כותרת, {n2} שורות סיכום', { n1: design.table.headerRows, n2: design.table.footerRows }))
   return lines
 }

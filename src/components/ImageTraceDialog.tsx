@@ -12,6 +12,7 @@ import {
   type TraceResult,
 } from '../imageTrace'
 import { shapePath } from '../shapes'
+import { t } from '../i18n'
 
 export interface ImageTraceRequest {
   region: ReturnType<typeof visibleRegion>
@@ -51,12 +52,12 @@ const MANY_POINTS = 20000
 
 type View = 'result' | 'source' | 'overlay'
 const VIEWS: { id: View; label: string; hint: string }[] = [
-  { id: 'result', label: 'התוצאה', hint: 'הצורה שנוצרה, בצבע שנבחר' },
-  { id: 'source', label: 'המקור', hint: 'התמונה כפי שהיא' },
-  { id: 'overlay', label: 'קו מעל המקור', hint: 'קו הצורה מצויר באדום מעל התמונה, כדי לראות איפה הוא סוטה' },
+  { id: 'result', get label() { return t('התוצאה') }, get hint() { return t('הצורה שנוצרה, בצבע שנבחר') } },
+  { id: 'source', get label() { return t('המקור') }, get hint() { return t('התמונה כפי שהיא') } },
+  { id: 'overlay', get label() { return t('קו מעל המקור') }, get hint() { return t('קו הצורה מצויר באדום מעל התמונה, כדי לראות איפה הוא סוטה') } },
 ]
 const ZOOMS = [
-  { zoom: 1, label: 'התאם לחלון' },
+  { zoom: 1, get label() { return t('התאם לחלון') } },
   { zoom: 2, label: '200%' },
   { zoom: 4, label: '400%' },
 ]
@@ -193,69 +194,69 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide image-trace" role="dialog" aria-modal="true" aria-label="המרת תמונה לווקטור">
-        <h2>המרת תמונה לווקטור</h2>
+      <div className="modal wide image-trace" role="dialog" aria-modal="true" aria-label={t('המרת תמונה לווקטור')}>
+        <h2>{t('המרת תמונה לווקטור')}</h2>
 
         {failed ? (
-          <p className="error">לא ניתן לקרוא את התמונה הזאת.</p>
+          <p className="error">{t('לא ניתן לקרוא את התמונה הזאת.')}</p>
         ) : (
           <>
             <div className="dlg-cols">
               <div className="field">
-                <div className="field-label">מה הופך לצורה</div>
-                <div className="seg small" role="radiogroup" aria-label="מה הופך לצורה">
-                  <button role="radio" aria-checked={trace === 'dark'} className={trace === 'dark' ? 'on' : ''} onClick={() => setTrace('dark')} title="מה שכהה מהסף הוא הצורה (לוגו כהה על רקע בהיר)">הכהה</button>
-                  <button role="radio" aria-checked={trace === 'light'} className={trace === 'light' ? 'on' : ''} onClick={() => setTrace('light')} title="מה שבהיר מהסף הוא הצורה (לוגו בהיר על רקע כהה)">הבהיר</button>
+                <div className="field-label">{t('מה הופך לצורה')}</div>
+                <div className="seg small" role="radiogroup" aria-label={t('מה הופך לצורה')}>
+                  <button role="radio" aria-checked={trace === 'dark'} className={trace === 'dark' ? 'on' : ''} onClick={() => setTrace('dark')} title={t('מה שכהה מהסף הוא הצורה (לוגו כהה על רקע בהיר)')}>{t('הכהה')}</button>
+                  <button role="radio" aria-checked={trace === 'light'} className={trace === 'light' ? 'on' : ''} onClick={() => setTrace('light')} title={t('מה שבהיר מהסף הוא הצורה (לוגו בהיר על רקע כהה)')}>{t('הבהיר')}</button>
                 </div>
               </div>
               <div className="field">
-                <div className="field-label">צבע הצורה</div>
+                <div className="field-label">{t('צבע הצורה')}</div>
                 <div className="trace-color">
-                  <input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label="צבע הצורה" />
+                  <input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label={t('צבע הצורה')} />
                   <bdi dir="ltr">{color}</bdi>
                 </div>
               </div>
             </div>
 
             <label className="color-brush-size trace-slider">
-              <span>סף בהירות</span>
-              <input type="range" min={1} max={254} value={level} onChange={(event) => setLevel(Number(event.target.value))} aria-label="סף בהירות" />
+              <span>{t('סף בהירות')}</span>
+              <input type="range" min={1} max={254} value={level} onChange={(event) => setLevel(Number(event.target.value))} aria-label={t('סף בהירות')} />
               <output>{level}</output>
-              <button className="btn small" onClick={autoDetect} disabled={!source}>זיהוי אוטומטי</button>
+              <button className="btn small" onClick={autoDetect} disabled={!source}>{t('זיהוי אוטומטי')}</button>
             </label>
             <label className="color-brush-size trace-slider">
-              <span>חלקות הקו</span>
-              <input type="range" min={0} max={3} step={0.25} value={smooth} onChange={(event) => setSmooth(Number(event.target.value))} aria-label="חלקות הקו" />
+              <span>{t('חלקות הקו')}</span>
+              <input type="range" min={0} max={3} step={0.25} value={smooth} onChange={(event) => setSmooth(Number(event.target.value))} aria-label={t('חלקות הקו')} />
               <output>{smooth}</output>
             </label>
             <label className="color-brush-size trace-slider">
-              <span>פישוט (פחות נקודות)</span>
-              <input type="range" min={0.2} max={3} step={0.1} value={simplify} onChange={(event) => setSimplify(Number(event.target.value))} aria-label="פישוט הקו" />
+              <span>{t('פישוט (פחות נקודות)')}</span>
+              <input type="range" min={0.2} max={3} step={0.1} value={simplify} onChange={(event) => setSimplify(Number(event.target.value))} aria-label={t('פישוט הקו')} />
               <output>{simplify.toFixed(1)}</output>
             </label>
-            <label className="color-brush-size trace-slider" title="קווים דקים וחלשים (כמו קצה של סלסול רך) נשארים גם כשהם בהירים מהסף. ככל שגבוה יותר נשמרים גם קווים חלשים יותר, ואם נוצרים כתמים מיותרים מורידים.">
-              <span>שימור קווים דקים</span>
-              <input type="range" min={0} max={5} step={1} value={thinKeep} onChange={(event) => setThinKeep(Number(event.target.value))} aria-label="שימור קווים דקים" />
+            <label className="color-brush-size trace-slider" title={t('קווים דקים וחלשים (כמו קצה של סלסול רך) נשארים גם כשהם בהירים מהסף. ככל שגבוה יותר נשמרים גם קווים חלשים יותר, ואם נוצרים כתמים מיותרים מורידים.')}>
+              <span>{t('שימור קווים דקים')}</span>
+              <input type="range" min={0} max={5} step={1} value={thinKeep} onChange={(event) => setThinKeep(Number(event.target.value))} aria-label={t('שימור קווים דקים')} />
               <output>{thinKeep}</output>
             </label>
             <label className="color-brush-size trace-slider">
-              <span>הסרת כתמים קטנים</span>
-              <input type="range" min={0} max={60} step={1} value={speck} onChange={(event) => setSpeck(Number(event.target.value))} aria-label="הסרת כתמים קטנים" />
+              <span>{t('הסרת כתמים קטנים')}</span>
+              <input type="range" min={0} max={60} step={1} value={speck} onChange={(event) => setSpeck(Number(event.target.value))} aria-label={t('הסרת כתמים קטנים')} />
               <output>{speck}</output>
             </label>
 
             <div className="dlg-cols">
               <div className="field">
-                <div className="field-label">תצוגה</div>
-                <div className="seg small" role="radiogroup" aria-label="תצוגה">
+                <div className="field-label">{t('תצוגה')}</div>
+                <div className="seg small" role="radiogroup" aria-label={t('תצוגה')}>
                   {VIEWS.map((choice) => (
                     <button key={choice.id} role="radio" aria-checked={view === choice.id} className={view === choice.id ? 'on' : ''} title={choice.hint} onClick={() => setView(choice.id)}>{choice.label}</button>
                   ))}
                 </div>
               </div>
               <div className="field">
-                <div className="field-label">גודל</div>
-                <div className="seg small" role="radiogroup" aria-label="גודל התצוגה">
+                <div className="field-label">{t('גודל')}</div>
+                <div className="seg small" role="radiogroup" aria-label={t('גודל התצוגה')}>
                   {ZOOMS.map((choice) => (
                     <button key={choice.zoom} role="radio" aria-checked={zoom === choice.zoom} className={zoom === choice.zoom ? 'on' : ''} onClick={() => setZoom(choice.zoom)}>{choice.label}</button>
                   ))}
@@ -264,12 +265,12 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
             </div>
 
             <div className="trace-preview" ref={scroller}>
-              {!source && <p className="muted">קורא את התמונה…</p>}
+              {!source && <p className="muted">{t('קורא את התמונה…')}</p>}
               {source && (
                 <div className="trace-stage" style={{ ...paneStyle, aspectRatio: `${source.width} / ${source.height}` }}>
-                  {view !== 'result' && <canvas ref={picture} aria-label="התמונה המקורית" />}
+                  {view !== 'result' && <canvas ref={picture} aria-label={t('התמונה המקורית')} />}
                   {view !== 'source' && result && (
-                    <svg viewBox={`0 0 ${source.width} ${source.height}`} preserveAspectRatio="none" aria-label="הצורה שנוצרה">
+                    <svg viewBox={`0 0 ${source.width} ${source.height}`} preserveAspectRatio="none" aria-label={t('הצורה שנוצרה')}>
                       {view === 'result' ? (
                         <path d={pathData} fill={color} fillRule="evenodd" />
                       ) : (
@@ -284,26 +285,26 @@ export function ImageTraceDialog({ image, asset, onApply, onClose }: Props) {
             {result && (
               <p className={nothing || result.points > MANY_POINTS ? 'separation-warn' : 'muted'}>
                 {nothing
-                  ? 'לא נמצאה צורה. הזיזו את סף הבהירות, או החליפו בין ״הכהה״ ל״הבהיר״.'
-                  : `${result.shapes} צורות, ${result.holes} חורים, ${result.points} נקודות עיגון.${result.points > MANY_POINTS ? ' יש הרבה נקודות — הגדילו את החלקות או את הסרת הכתמים.' : ''}`}
+                  ? t('לא נמצאה צורה. הזיזו את סף הבהירות, או החליפו בין ״הכהה״ ל״הבהיר״.')
+                  : `${t('{shapes} צורות, {holes} חורים, {points} נקודות עיגון.', { shapes: result.shapes, holes: result.holes, points: result.points })}${result.points > MANY_POINTS ? t(' יש הרבה נקודות — הגדילו את החלקות או את הסרת הכתמים.') : ''}`}
               </p>
             )}
             <p className="muted">
-              ההמרה מפרידה לפי בהירות ומציירת צבע אחד, ולכן מתאימה ללוגו או לשרטוט בצבע אחד על רקע פשוט. התוצאה היא צורה רגילה: אפשר לצבוע אותה, לשנות את גודלה בלי לאבד חדות, ולערוך את נקודותיה בכלי עריכת הנקודות.
+              {t('ההמרה מפרידה לפי בהירות ומציירת צבע אחד, ולכן מתאימה ללוגו או לשרטוט בצבע אחד על רקע פשוט. התוצאה היא צורה רגילה: אפשר לצבוע אותה, לשנות את גודלה בלי לאבד חדות, ולערוך את נקודותיה בכלי עריכת הנקודות.')}
             </p>
 
             <label className="page-bar-check">
               <input type="checkbox" checked={keepOriginal} onChange={(event) => setKeepOriginal(event.target.checked)} />
-              השאר גם את התמונה המקורית (מתחת לצורה)
+              {t('השאר גם את התמונה המקורית (מתחת לצורה)')}
             </label>
           </>
         )}
 
         <div className="modal-buttons">
           <button className="btn primary" disabled={!source || !result || nothing} onClick={() => source && result && onApply({ region: source.region, result, color, keepOriginal })}>
-            המר לווקטור
+            {t('המר לווקטור')}
           </button>
-          <button className="btn" onClick={onClose}>ביטול</button>
+          <button className="btn" onClick={onClose}>{t('ביטול')}</button>
         </div>
       </div>
     </div>

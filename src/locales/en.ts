@@ -1,5 +1,8 @@
 import { enDialogs } from './en.dialogs'
 import { enMessages } from './en.messages'
+import { enModules } from './en.modules'
+import { enMore } from './en.more'
+import { enStyles } from './en.styles'
 import { enChrome } from './en.chrome'
 import { enPanels } from './en.panels'
 
@@ -94,8 +97,8 @@ const menus: Record<string, string> = {
   'מספר מסמך': 'Document number',
   'מספר פנימי: 1, 2, 3': 'Inside number: 1, 2, 3',
   'מספר חיצוני: 1, 2, 3': 'Outside number: 1, 2, 3',
-  'אות פנימית: א, ב, ג': 'Inside letter: א, ב, ג',
-  'אות חיצונית: א, ב, ג': 'Outside letter: א, ב, ג',
+  'אות פנימית: א, ב, ג': 'Inside letter: a, b, c (א, ב, ג in Hebrew text)',
+  'אות חיצונית: א, ב, ג': 'Outside letter: a, b, c (א, ב, ג in Hebrew text)',
   'תוכן עניינים…': 'Table of contents…',
   'רצף סגנונות פסקה…': 'Paragraph style sequence…',
   'יתומים, אלמנות וכיווץ…': 'Orphans, widows and shrinking…',
@@ -208,4 +211,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages }
+export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages, ...enStyles, ...enMore, ...enModules }

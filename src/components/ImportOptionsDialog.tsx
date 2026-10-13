@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FlowMode } from '../placeText'
+import { t } from '../i18n'
 
 interface Props {
   fileName: string
@@ -25,23 +26,23 @@ export function ImportOptionsDialog({ fileName, canReplace, onConfirm, onClose }
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <div className="modal import-options-dialog" role="dialog" aria-modal="true" aria-label="אפשרויות ייבוא Word">
-        <h2>אפשרויות ייבוא Word</h2>
+      <div className="modal import-options-dialog" role="dialog" aria-modal="true" aria-label={t('אפשרויות ייבוא Word')}>
+        <h2>{t('אפשרויות ייבוא Word')}</h2>
         <p className="file-name"><bdi>{fileName}</bdi></p>
-        <label className="dlg-check"><input type="checkbox" checked={showOptions} onChange={(event) => setShowOptions(event.target.checked)} />הצג אפשרויות ייבוא</label>
+        <label className="dlg-check"><input type="checkbox" checked={showOptions} onChange={(event) => setShowOptions(event.target.checked)} />{t('הצג אפשרויות ייבוא')}</label>
         {showOptions && <div className="import-options-body">
-          <p>הטקסט ייובא עם זיהוי סגנונות הפסקה והעיצוב הבסיסי מתוך Word.</p>
-          <label className="dlg-check"><input type="checkbox" checked={includeFootnotes} onChange={(event) => setIncludeFootnotes(event.target.checked)} />ייבא הערות שוליים</label>
+          <p>{t('הטקסט ייובא עם זיהוי סגנונות הפסקה והעיצוב הבסיסי מתוך Word.')}</p>
+          <label className="dlg-check"><input type="checkbox" checked={includeFootnotes} onChange={(event) => setIncludeFootnotes(event.target.checked)} />{t('ייבא הערות שוליים')}</label>
           <fieldset className="import-flow">
-            <legend>אופן הצבת הטקסט</legend>
-            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'auto'} onChange={() => setFlow('auto')} />זרימה אוטומטית: ממלא את כל העמודים ומוסיף עמודים לפי הצורך</label>
-            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'semi'} onChange={() => setFlow('semi')} />חצי-אוטומטית: ממלא תיבה ומחכה ללחיצה הבאה</label>
-            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'single'} onChange={() => setFlow('single')} />תיבה אחת: מה שלא נכנס נשאר כגלישה</label>
+            <legend>{t('אופן הצבת הטקסט')}</legend>
+            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'auto'} onChange={() => setFlow('auto')} />{t('זרימה אוטומטית: ממלא את כל העמודים ומוסיף עמודים לפי הצורך')}</label>
+            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'semi'} onChange={() => setFlow('semi')} />{t('חצי-אוטומטית: ממלא תיבה ומחכה ללחיצה הבאה')}</label>
+            <label className="dlg-check"><input type="radio" name="import-flow" checked={flow === 'single'} onChange={() => setFlow('single')} />{t('תיבה אחת: מה שלא נכנס נשאר כגלישה')}</label>
           </fieldset>
-          <label className={'dlg-check' + (!canReplace ? ' disabled' : '')}><input type="checkbox" checked={replaceSelected} disabled={!canReplace} onChange={(event) => setReplaceSelected(event.target.checked)} />התחל בתיבת הטקסט שנבחרה (אחרת הטקסט נטען לסמן, ולוחצים בעמוד להצבתו)</label>
-          {!canReplace && <p className="muted">בחר תיבת טקסט במסמך כדי להתחיל בה.</p>}
+          <label className={'dlg-check' + (!canReplace ? ' disabled' : '')}><input type="checkbox" checked={replaceSelected} disabled={!canReplace} onChange={(event) => setReplaceSelected(event.target.checked)} />{t('התחל בתיבת הטקסט שנבחרה (אחרת הטקסט נטען לסמן, ולוחצים בעמוד להצבתו)')}</label>
+          {!canReplace && <p className="muted">{t('בחר תיבת טקסט במסמך כדי להתחיל בה.')}</p>}
         </div>}
-        <div className="modal-buttons"><button className="btn primary" onClick={() => onConfirm(showOptions && replaceSelected, !showOptions || includeFootnotes, showOptions ? flow : undefined)}>ייבוא</button><button className="btn" onClick={onClose}>ביטול</button></div>
+        <div className="modal-buttons"><button className="btn primary" onClick={() => onConfirm(showOptions && replaceSelected, !showOptions || includeFootnotes, showOptions ? flow : undefined)}>{t('ייבוא')}</button><button className="btn" onClick={onClose}>{t('ביטול')}</button></div>
       </div>
     </div>
   )

@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type { ShapeFrame, TextFrame } from './document'
 import { isTauri } from './fileio'
 import { prepareExport, type ExportContent } from './pdfExport'
@@ -63,9 +64,9 @@ export async function exportSvg(content: ExportContent, options: SvgExportOption
     if (!wanted(frame) || frame.rasterized) continue
     const outcome = await outlineFrame(prepared, frame, newId)
     if ('shapes' in outcome) letters.push(...outcome.shapes)
-    else if (outcome.problem === 'picture') notes.add(`טקסט שלא הומר (${PICTURE_REASONS[outcome.reason]})`)
-    else if (outcome.problem === 'long') notes.add('טקסט ארוך מדי להמרה')
-    else if (outcome.problem === 'font') notes.add('טקסט בגופן שלא ניתן לקרוא')
+    else if (outcome.problem === 'picture') notes.add(t('טקסט שלא הומר ({reason})', { reason: PICTURE_REASONS[outcome.reason] }))
+    else if (outcome.problem === 'long') notes.add(t('טקסט ארוך מדי להמרה'))
+    else if (outcome.problem === 'font') notes.add(t('טקסט בגופן שלא ניתן לקרוא'))
   }
 
   const shapes = [...prepared.content.shapes.filter(wanted), ...letters]

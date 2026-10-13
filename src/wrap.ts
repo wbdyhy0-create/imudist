@@ -111,8 +111,8 @@ export function floatsFor(frame: Box, images: ImageFrame[], style: TextStyle, at
   const floats = wrapFloatsFor(frame, images)
   const indent = style.secondLineIndent ?? 0
   if (!atStoryStart || indent <= 0) return floats
-  // the story's normal reading-start side: this app's text frames are always RTL regardless of `align`
-  return [...floats, secondLineFloat('right', indent, effectiveLeading(style))]
+  // the story's reading-start side: the right one, unless the story reads from the left (regardless of `align`)
+  return [...floats, secondLineFloat(style.direction === 'ltr' ? 'left' : 'right', indent, effectiveLeading(style))]
 }
 
 /**

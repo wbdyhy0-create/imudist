@@ -3,6 +3,7 @@ import { brushFromOutlines, type CustomBrush } from './customBrushes'
 import type { PathGeom, ShapeFrame } from './document'
 import { brightnessField, DEFAULT_TRACE, otsuLevel, suggestedTrace, traceField } from './imageTrace'
 import { parseSvgOutlines } from './svgBrush'
+import { t } from './i18n'
 
 /** a brush file bigger than this is not read */
 export const MAX_BRUSH_FILE_BYTES = 4 * 1024 * 1024
@@ -32,10 +33,10 @@ async function brushFromPicture(file: File): Promise<BrushImport> {
   try {
     bitmap = await createImageBitmap(file)
   } catch {
-    return { error: 'אי אפשר לקרוא את התמונה. נסו קובץ PNG, JPG או SVG.' }
+    return { error: t('אי אפשר לקרוא את התמונה. נסו קובץ PNG, JPG או SVG.') }
   }
   const longest = Math.max(bitmap.width, bitmap.height)
-  if (longest < 1) return { error: 'התמונה ריקה.' }
+  if (longest < 1) return { error: t('התמונה ריקה.') }
   const scale = Math.max(0.05, Math.min(4, WORKING_SIZE / longest))
   const width = Math.max(1, Math.round(bitmap.width * scale))
   const height = Math.max(1, Math.round(bitmap.height * scale))
@@ -43,7 +44,7 @@ async function brushFromPicture(file: File): Promise<BrushImport> {
   canvas.width = width
   canvas.height = height
   const context = canvas.getContext('2d', { willReadFrequently: true })
-  if (!context) return { error: 'אי אפשר לעבד את התמונה בדפדפן הזה.' }
+  if (!context) return { error: t('אי אפשר לעבד את התמונה בדפדפן הזה.') }
   context.imageSmoothingEnabled = true
   context.imageSmoothingQuality = 'high'
   context.drawImage(bitmap, 0, 0, width, height)
@@ -61,26 +62,26 @@ async function brushFromPicture(file: File): Promise<BrushImport> {
   const result = traceField(field, width, height, { ...DEFAULT_TRACE, trace, level, tolerance: 0.7, minArea: Math.max(6, width * height * 0.00015) })
   const groups = result.geom.map((polygon) => ringsOf(polygon, width, height)).filter((rings) => rings.length > 0)
   const brush = brushFromOutlines(groups, baseName(file.name))
-  if (!brush) return { error: 'לא נמצאה בתמונה צורה כהה על רקע בהיר (או צורה על רקע שקוף).' }
+  if (!brush) return { error: t('לא נמצאה בתמונה צורה כהה על רקע בהיר (או צורה על רקע שקוף).') }
   return { brush }
 }
 
 /** The brush made of a file: an SVG drawing (its filled shapes), or a picture (traced). Never throws. */
 export async function readBrushFile(file: File): Promise<BrushImport> {
-  if (file.size > MAX_BRUSH_FILE_BYTES) return { error: 'הקובץ גדול מדי למברשת (עד 4MB).' }
+  if (file.size > MAX_BRUSH_FILE_BYTES) return { error: t('הקובץ גדול מדי למברשת (עד 4MB).') }
   const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
   try {
     if (isSvg) {
       const outlines = parseSvgOutlines(await file.text())
-      if (!outlines) return { error: 'הקובץ אינו קובץ SVG תקין.' }
-      if (outlines.groups.length === 0) return { error: 'לא נמצאו בקובץ צורות לצייר איתן. אפשר להשתמש בקובץ שבו הצורה צבועה.' }
+      if (!outlines) return { error: t('הקובץ אינו קובץ SVG תקין.') }
+      if (outlines.groups.length === 0) return { error: t('לא נמצאו בקובץ צורות לצייר איתן. אפשר להשתמש בקובץ שבו הצורה צבועה.') }
       const brush = brushFromOutlines(outlines.groups, baseName(file.name))
-      if (!brush) return { error: 'הצורה שבקובץ ריקה או שטוחה מדי למברשת.' }
-      return outlines.lineOnly ? { brush, note: 'בקובץ היו רק קווים, ולכן המברשת נעשתה מצורת הקווים.' } : { brush }
+      if (!brush) return { error: t('הצורה שבקובץ ריקה או שטוחה מדי למברשת.') }
+      return outlines.lineOnly ? { brush, note: t('בקובץ היו רק קווים, ולכן המברשת נעשתה מצורת הקווים.') } : { brush }
     }
     if (file.type.startsWith('image/')) return await brushFromPicture(file)
-    return { error: 'סוג הקובץ אינו נתמך. בחרו קובץ SVG, PNG או JPG.' }
+    return { error: t('סוג הקובץ אינו נתמך. בחרו קובץ SVG, PNG או JPG.') }
   } catch {
-    return { error: 'אי אפשר לקרוא את הקובץ.' }
+    return { error: t('אי אפשר לקרוא את הקובץ.') }
   }
 }

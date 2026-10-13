@@ -3,6 +3,7 @@ import type { Unit } from '../units'
 import { GuideColors } from './GuideColors'
 import { NumberField } from './NumberField'
 import { Group, Labeled } from './PropertiesPanel'
+import { t } from '../i18n'
 
 interface Props {
   /** the selected guides (at least one) */
@@ -25,28 +26,28 @@ export function GuideProperties({ guides, pageNumber, unit, onPos, onColor, onDe
   const common = colors.size === 1 ? (guides[0].color ?? DEFAULT_GUIDE_COLOR) : null
 
   return (
-    <aside className="props-panel" aria-label="מאפייני קווי עזר">
-      <h2 className="props-title">{one ? 'קו עזר' : `${guides.length} קווי עזר`}</h2>
+    <aside className="props-panel" aria-label={t('מאפייני קווי עזר')}>
+      <h2 className="props-title">{one ? t('קו עזר') : t('{n1} קווי עזר', { n1: guides.length })}</h2>
       <p className="muted">
-        {one ? `${one.axis === 'h' ? 'קו אופקי' : 'קו אנכי'} · עמוד ${pageNumber}` : 'נבחרו כמה קווים. Delete מוחק את כולם, וגרירה מזיזה אותם יחד.'}
+        {one ? `${one.axis === 'h' ? t('קו אופקי') : t('קו אנכי')} · ${t('עמוד {number}', { number: pageNumber })}` : t('נבחרו כמה קווים. Delete מוחק את כולם, וגרירה מזיזה אותם יחד.')}
       </p>
 
       {one && (
-        <Group title="מיקום">
-          <Labeled label={one.axis === 'h' ? 'מרחק מראש העמוד' : 'מרחק מהקצה השמאלי של העמוד'}>
+        <Group title={t('מיקום')}>
+          <Labeled label={one.axis === 'h' ? t('מרחק מראש העמוד') : t('מרחק מהקצה השמאלי של העמוד')}>
             <NumberField value={one.pos} unit={unit} min={-MAX_PAGE_PT} max={MAX_PAGE_PT} onChange={onPos} />
           </Labeled>
-          <p className="muted">אפשר גם לגרור את הקו, או לגרור אותו חזרה אל הסרגל כדי למחוק אותו.</p>
+          <p className="muted">{t('אפשר גם לגרור את הקו, או לגרור אותו חזרה אל הסרגל כדי למחוק אותו.')}</p>
         </Group>
       )}
 
-      <Group title="צבע">
+      <Group title={t('צבע')}>
         <GuideColors value={common} onChange={onColor} />
       </Group>
 
       <div className="props-buttons" style={{ marginTop: 10 }}>
         <button className="btn small danger" onClick={onDelete}>
-          {one ? 'מחק קו עזר' : 'מחק את הקווים שנבחרו'}
+          {one ? t('מחק קו עזר') : t('מחק את הקווים שנבחרו')}
         </button>
       </div>
     </aside>

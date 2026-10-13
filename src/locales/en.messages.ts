@@ -277,4 +277,10 @@ export const enMessages: Record<string, string> = {
   'אי אפשר לשמור רצפים כאן.': 'Sequences cannot be saved here.',
   'סגנון {n1}': 'Style {n1}',
   'אב {prefix}': 'Parent {prefix}',
+
+  // footnote numbering that starts over at a paragraph style
+  'בכל פסקה בסגנון נבחר': 'At every paragraph in a chosen style',
+  'סגנון הפסקה שמתחיל מספור מחדש': 'The paragraph style that restarts the numbering',
+  'בחרו סגנון פסקה': 'Choose a paragraph style',
+  'כל פסקה בסגנון הזה (למשל כותרת פרק) מתחילה את מספר ההערות מחדש, מהמספר ההתחלתי.': 'Every paragraph in this style (a chapter heading, say) starts the footnote numbers again, from the starting number.',
 }

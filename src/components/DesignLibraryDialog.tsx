@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { designParts, designSummary, MAX_DESIGNS, type DesignGroup, type DesignPartId, type DesignRecord } from '../designs'
+import { t } from '../i18n'
 
 export interface DesignResult {
   ok: boolean
@@ -21,9 +22,9 @@ interface Props {
 }
 
 const GROUPS: { id: DesignGroup; title: string }[] = [
-  { id: 'object', title: 'אובייקט (צורה, קו או תמונה)' },
-  { id: 'text', title: 'טקסט' },
-  { id: 'table', title: 'טבלה' },
+  { id: 'object', get title() { return t('אובייקט (צורה, קו או תמונה)') } },
+  { id: 'text', get title() { return t('טקסט') } },
+  { id: 'table', get title() { return t('טבלה') } },
 ]
 
 /** the library of designs by example: made from what is selected, and given, whole or in parts, to what is selected */
@@ -54,37 +55,36 @@ export function DesignLibraryDialog({ designs, nameOf, selection, onCreate, onUp
     if (!current) return
     setUnticked((all) => ({ ...all, [current.id]: left.includes(id) ? left.filter((item) => item !== id) : [...left, id] }))
   }
-  const heldNow = [selection.object && 'אובייקט', selection.text && 'טקסט', selection.table && 'טבלה'].filter(Boolean).join(', ')
+  const heldNow = [selection.object && t('אובייקט'), selection.text && t('טקסט'), selection.table && t('טבלה')].filter(Boolean).join(', ')
 
   return (
     <div className="modal-backdrop">
-      <div className="modal table-dialog design-dialog" role="dialog" aria-modal="true" aria-label="ספריית עיצובים">
-        <h2>ספריית עיצובים</h2>
+      <div className="modal table-dialog design-dialog" role="dialog" aria-modal="true" aria-label={t('ספריית עיצובים')}>
+        <h2>{t('ספריית עיצובים')}</h2>
         <p className="muted">
-          עיצוב נלקח מדוגמה: מעצבים אובייקט, טקסט או טבלה, בוחרים אותם ויוצרים עיצוב. אחר כך אפשר להחיל אותו על דברים אחרים, כולו או חלק ממנו.
-          כל חלק מגיע למה שמתאים לו: מראה האובייקט לצורות ולתמונות, הסגנונות לטקסט, ומראה הטבלה לטבלאות.
+          {t('עיצוב נלקח מדוגמה: מעצבים אובייקט, טקסט או טבלה, בוחרים אותם ויוצרים עיצוב. אחר כך אפשר להחיל אותו על דברים אחרים, כולו או חלק ממנו. כל חלק מגיע למה שמתאים לו: מראה האובייקט לצורות ולתמונות, הסגנונות לטקסט, ומראה הטבלה לטבלאות.')}
         </p>
-        <p className="muted">{heldNow ? `בבחירה עכשיו: ${heldNow}.` : 'אין עכשיו בחירה בעמוד.'}</p>
+        <p className="muted">{heldNow ? t('בבחירה עכשיו: {heldNow}.', { heldNow }) : t('אין עכשיו בחירה בעמוד.')}</p>
         <div className="modal-buttons">
-          <label className="field-label table-dialog-field">עיצוב חדש מהבחירה
-            <input className="select" value={newName} maxLength={80} placeholder={`עיצוב ${designs.length + 1}`} onChange={(event) => setNewName(event.target.value)} />
+          <label className="field-label table-dialog-field">{t('עיצוב חדש מהבחירה')}
+            <input className="select" value={newName} maxLength={80} placeholder={t('עיצוב {n1}', { n1: designs.length + 1 })} onChange={(event) => setNewName(event.target.value)} />
           </label>
           <button
             type="button"
             className="btn primary"
             disabled={designs.length >= MAX_DESIGNS}
             onClick={() => {
-              const made = onCreate(newName.trim() || `עיצוב ${designs.length + 1}`)
+              const made = onCreate(newName.trim() || t('עיצוב {n1}', { n1: designs.length + 1 }))
               setResult(made)
               if (made.ok) setNewName('')
             }}
-          >יצירה</button>
+          >{t('יצירה')}</button>
         </div>
         {designs.length === 0 ? (
-          <p className="muted">אין עדיין עיצובים. בחרו משהו בעמוד ולחצו „יצירה”.</p>
+          <p className="muted">{t('אין עדיין עיצובים. בחרו משהו בעמוד ולחצו „יצירה”.')}</p>
         ) : (
           <div className="design-layout">
-            <ul className="design-list" aria-label="העיצובים">
+            <ul className="design-list" aria-label={t('העיצובים')}>
               {designs.map((design) => (
                 <li key={design.id}>
                   <button type="button" className={design.id === currentId ? 'active' : ''} onClick={() => { setCurrentId(design.id); setResult(null) }}>{design.name}</button>
@@ -93,7 +93,7 @@ export function DesignLibraryDialog({ designs, nameOf, selection, onCreate, onUp
             </ul>
             {current && (
               <div className="design-details">
-                <label className="field-label table-dialog-field">שם
+                <label className="field-label table-dialog-field">{t('שם')}
                   <input className="select" value={current.name} maxLength={80} onChange={(event) => onRename(current.id, event.target.value)} />
                 </label>
                 {designSummary(current, nameOf).map((line) => <p key={line} className="muted">{line}</p>)}
@@ -112,9 +112,9 @@ export function DesignLibraryDialog({ designs, nameOf, selection, onCreate, onUp
                   )
                 })}
                 <div className="modal-buttons">
-                  <button type="button" className="btn primary" disabled={chosen.length === 0} onClick={() => setResult(onApply(current.id, chosen))}>החלה על הבחירה</button>
-                  <button type="button" className="btn" disabled={!heldNow} onClick={() => setResult(onUpdate(current.id))} title="מחליף את החלקים שיש בבחירה בעיצוב">עדכון מהבחירה</button>
-                  <button type="button" className="btn" onClick={() => { onDelete(current.id); setResult(null) }}>מחיקה</button>
+                  <button type="button" className="btn primary" disabled={chosen.length === 0} onClick={() => setResult(onApply(current.id, chosen))}>{t('החלה על הבחירה')}</button>
+                  <button type="button" className="btn" disabled={!heldNow} onClick={() => setResult(onUpdate(current.id))} title={t('מחליף את החלקים שיש בבחירה בעיצוב')}>{t('עדכון מהבחירה')}</button>
+                  <button type="button" className="btn" onClick={() => { onDelete(current.id); setResult(null) }}>{t('מחיקה')}</button>
                 </div>
               </div>
             )}
@@ -122,7 +122,7 @@ export function DesignLibraryDialog({ designs, nameOf, selection, onCreate, onUp
         )}
         {result && <p className="muted" role={result.ok ? 'status' : 'alert'}>{result.message}</p>}
         <div className="modal-buttons">
-          <button type="button" className="btn" onClick={onClose}>סגירה</button>
+          <button type="button" className="btn" onClick={onClose}>{t('סגירה')}</button>
         </div>
       </div>
     </div>

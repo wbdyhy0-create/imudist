@@ -29,6 +29,7 @@ import { serializeDocument } from './fileFormat'
 import { pageRects, type DocContent } from './pages'
 import { boxFromEndpoints } from './shapes'
 import { unzipEntries } from './zip'
+import { t } from './i18n'
 
 /**
  * Opening an IDML file (the XML package a page-layout program saves): its pages, text frames and their threads, shapes, pictures that
@@ -97,14 +98,14 @@ function fillElement(into: El, list: unknown): void {
 function readXml(bytes: Uint8Array, path: string): El {
   let text = new TextDecoder('utf-8').decode(bytes).replace(/^﻿/, '')
   const firstElement = text.search(/<[A-Za-z_]/)
-  if (/<!DOCTYPE|<!ENTITY/i.test(firstElement < 0 ? text : text.slice(0, firstElement))) throw new Error(`הקובץ ${path} כולל הגדרת DOCTYPE או ENTITY, שאינה נתמכת.`)
+  if (/<!DOCTYPE|<!ENTITY/i.test(firstElement < 0 ? text : text.slice(0, firstElement))) throw new Error(t('הקובץ {path} כולל הגדרת DOCTYPE או ENTITY, שאינה נתמכת.', { path }))
   // the page number (and the other automatic marks) of a story is a processing instruction: <?ACE 18?>; the parser keeps nothing of one
   if (path.toLowerCase().startsWith('stories/')) text = text.replace(/<\?ACE\s+([0-9A-Fa-f]+)\s*\?>/g, '<ACE code="$1"/>')
-  if (XMLValidator.validate(text) !== true) throw new Error(`XML פגום בקובץ ${path}.`)
+  if (XMLValidator.validate(text) !== true) throw new Error(t('XML פגום בקובץ {path}.', { path }))
   const holder: El = { name: '', attrs: {}, kids: [], text: '' }
   fillElement(holder, parser.parse(text))
   const root = holder.kids[0]
-  if (!root) throw new Error(`לא ניתן לקרוא את קובץ ה-XML ${path}.`)
+  if (!root) throw new Error(t('לא ניתן לקרוא את קובץ ה-XML {path}.', { path }))
   return root
 }
 
@@ -640,7 +641,7 @@ function extractStory(ctx: Context, root: El, master: boolean): StoryText {
         const content = parts.join('')
         if (content) story.footnotes.push({ id: `idml-footnote-${story.footnotes.length + 1}`, anchor: story.text.length, content })
       } else if (name === 'Table') {
-        ctx.notes.add('טבלה בטקסט יובאה כטקסט רגיל (תאים מופרדים בטאב)')
+        ctx.notes.add(t('טבלה בטקסט יובאה כטקסט רגיל (תאים מופרדים בטאב)'))
         const cells = child.kids.filter((cell) => cell.name === 'Cell')
         cells.forEach((cell, index) => {
           visit(cell, state)
@@ -999,7 +1000,7 @@ function buildObjects(input: BuildInput, spreads: SourceSpread[]): { byPage: Map
           continue
         }
         // not in the package (a link to a file that stays outside it): an empty picture frame keeps its place
-        ctx.notes.add(name ? 'תמונות מקושרות שאינן בתוך הארכיון הוחלפו במסגרות תמונה ריקות' : 'מסגרות תמונה ללא תמונה יובאו כמסגרות ריקות')
+        ctx.notes.add(name ? t('תמונות מקושרות שאינן בתוך הארכיון הוחלפו במסגרות תמונה ריקות') : t('מסגרות תמונה ללא תמונה יובאו כמסגרות ריקות'))
         const kind = el.name === 'Oval' ? 'ellipse' : el.name === 'Rectangle' ? 'rect' : 'path'
         out.shapes.push({
           id, kind, x: box.x, y: box.y, w: box.w, h: box.h, fill: null, stroke: null, strokeWidth: 0, frame: true, z: z++,
@@ -1186,7 +1187,7 @@ export interface IdmlImport {
 }
 
 export async function readIdmlWithNotes(file: File): Promise<IdmlImport> {
-  if (!file.name.toLowerCase().endsWith('.idml')) throw new Error('יש לבחור קובץ IDML.')
+  if (!file.name.toLowerCase().endsWith('.idml')) throw new Error(t('יש לבחור קובץ IDML.'))
   let archive: Map<string, Uint8Array>
   try {
     archive = await unzipEntries(await file.arrayBuffer(), (path) => XML_WANTED.test(path) || (/^Links\//i.test(path) && /\.(?:png|jpe?g|gif|webp|bmp)$/i.test(path)))
@@ -1194,16 +1195,16 @@ export async function readIdmlWithNotes(file: File): Promise<IdmlImport> {
     const reason = error instanceof Error ? error.message : ''
     throw new Error(
       /too large|too many/i.test(reason)
-        ? 'קובץ ה-IDML גדול מדי לייבוא.'
+        ? t('קובץ ה-IDML גדול מדי לייבוא.')
         : /encrypted/i.test(reason)
-          ? 'קובץ ה-IDML מוצפן, ואי אפשר לקרוא אותו.'
-          : 'קובץ ה-IDML פגום או שאינו ארכיון ZIP תקין.',
+          ? t('קובץ ה-IDML מוצפן, ואי אפשר לקרוא אותו.')
+          : t('קובץ ה-IDML פגום או שאינו ארכיון ZIP תקין.'),
     )
   }
   const files = new Map<string, El>()
   for (const [path, bytes] of archive) if (path.toLowerCase().endsWith('.xml')) files.set(path, readXml(bytes, path))
   const designMap = [...files].find(([path]) => /(^|\/)designmap\.xml$/i.test(path))?.[1]
-  if (!designMap) throw new Error('קובץ IDML אינו מכיל designmap.xml תקין.')
+  if (!designMap) throw new Error(t('קובץ IDML אינו מכיל designmap.xml תקין.'))
   const orderOf = (tag: string) => descendants(designMap, tag).map((node) => node.attrs.src).filter((src): src is string => !!src)
 
   const name = file.name.replace(/\.idml$/i, '')
@@ -1211,8 +1212,8 @@ export async function readIdmlWithNotes(file: File): Promise<IdmlImport> {
   const spreads = readSpreads(files, orderOf('Spread'), false)
   const masterSpreads = readSpreads(files, orderOf('MasterSpread'), true)
   const sourcePages = spreads.flatMap((spread) => spread.pages)
-  if (sourcePages.length === 0) throw new Error('קובץ IDML אינו מכיל עמודים.')
-  if (sourcePages.length > MAX_PAGES) throw new Error(`קובץ IDML מכיל יותר מ-${MAX_PAGES} עמודים.`)
+  if (sourcePages.length === 0) throw new Error(t('קובץ IDML אינו מכיל עמודים.'))
+  if (sourcePages.length > MAX_PAGES) throw new Error(t('קובץ IDML מכיל יותר מ-{MAX_PAGES} עמודים.', { MAX_PAGES }))
   doc.pages = sourcePages.length
   doc.pageSizes = sourcePages.map((page) => ({ w: page.box.w, h: page.box.h }))
   doc.width = Math.max(...doc.pageSizes.map((size) => size!.w))
@@ -1241,7 +1242,7 @@ export async function readIdmlWithNotes(file: File): Promise<IdmlImport> {
       layerOrder.push(layerId)
       layerIds.set(self, layerId)
       layers[layerId] = {
-        name: layer.attrs.Name || `שכבה ${layerOrder.length}`,
+        name: layer.attrs.Name || t('שכבה {n1}', { n1: layerOrder.length }),
         ...(layer.attrs.Visible === 'false' ? { hidden: true as const } : {}),
         ...(isTrue(layer.attrs.Locked) ? { locked: true as const } : {}),
       }

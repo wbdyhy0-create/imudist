@@ -1,4 +1,5 @@
 import type { TextAlign } from './document'
+import { directionOf } from './i18n'
 
 /**
  * The table object (a `ShapeFrame` of kind 'table'): a grid of cells with the usual spans (merged cells), a few shared
@@ -147,8 +148,10 @@ export function createTable(options: { rows: number; cols: number; headerRows?: 
     headerRows,
     footerRows,
     cells: Array.from({ length: rows }, () => Array.from({ length: cols }, blankCell)),
+    ...(directionOf() === 'ltr' ? { rtl: false } : {}),
     style: {
       ...defaultTableStyle(),
+      ...(directionOf() === 'ltr' ? { align: 'left' as const } : {}),
       cellGapX: Math.max(0, Math.min(200, options.cellGapX ?? 0)),
       cellGapY: Math.max(0, Math.min(200, options.cellGapY ?? 0)),
       cellRadius: Math.max(0, Math.min(100, options.cellRadius ?? 0)),
@@ -428,6 +431,22 @@ export function dragColumnBorder(t: TableData, index: number, delta: number, wid
 export function setRowMinHeight(t: TableData, row: number, height: number): TableData {
   if (!t.rowHeights[row] && t.rowHeights[row] !== 0) return t
   return { ...t, rowHeights: t.rowHeights.map((h, i) => (i === row ? Math.max(1, height) : h)) }
+}
+
+/**
+ * The table read the other way: its columns run from the other side, and the alignment of its text turns with it (what was
+ * aligned to the right is aligned to the left). A table that already reads that way is returned as it is.
+ */
+export function withTableDirection(t: TableData, ltr: boolean): TableData {
+  if ((t.rtl === false) === ltr) return t
+  const turn = (align: TextAlign | undefined): TextAlign | undefined => (align === 'right' ? 'left' : align === 'left' ? 'right' : align)
+  const { rtl: _was, ...rest } = t
+  return {
+    ...rest,
+    ...(ltr ? { rtl: false } : {}),
+    style: { ...t.style, align: turn(t.style.align) ?? t.style.align },
+    cells: t.cells.map((row) => row.map((cell) => (cell.align ? { ...cell, align: turn(cell.align) } : cell))),
+  }
 }
 
 export function setHeaderFooter(t: TableData, headerRows: number, footerRows: number): TableData {

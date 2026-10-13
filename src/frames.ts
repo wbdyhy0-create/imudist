@@ -4,6 +4,7 @@ import { charStyleOf, mergeRuns, normalizeRuns } from './story'
 export const styleOf = (f: TextFrame): TextStyle => ({
   ...charStyleOf(f),
   align: f.align,
+  direction: f.direction,
   leading: f.leading,
   wordSpacingMin: f.wordSpacingMin,
   wordSpacingMax: f.wordSpacingMax,

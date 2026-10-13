@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { MAX_SIDES, MIN_SIDES, type DrawKind, type PathGeom, type PathVertex, type ShapeFrame, type ShapeKind } from './document'
 
 export interface ImageBox {
@@ -27,9 +28,21 @@ export function splitPathVerticesAt<T>(vertices: T[], index: number, closed: boo
 
 /** Geometry of the shapes, in the shape's own units (0,0 = its top-left corner, w × h = its size). */
 
-export const SHAPE_NAMES: Record<ShapeKind, string> = { rect: 'מלבן', ellipse: 'אליפסה', polygon: 'מצולע', path: 'צורה מורכבת', line: 'קו', table: 'טבלה' }
+export const SHAPE_NAMES: Record<ShapeKind, string> = {
+  get rect() { return t('מלבן') },
+  get ellipse() { return t('אליפסה') },
+  get polygon() { return t('מצולע') },
+  get path() { return t('צורה מורכבת') },
+  get line() { return t('קו') },
+  get table() { return t('טבלה') },
+}
 export const DRAW_KINDS: DrawKind[] = ['rect', 'ellipse', 'polygon', 'line']
-export const SIDE_NAMES: Record<number, string> = { 3: 'משולש', 4: 'מרובע', 5: 'מחומש', 6: 'משושה' }
+export const SIDE_NAMES: Record<number, string> = {
+  get 3() { return t('משולש') },
+  get 4() { return t('מרובע') },
+  get 5() { return t('מחומש') },
+  get 6() { return t('משושה') },
+}
 
 /** The last settings of each shape tool that a plain click doesn't decide (a click without a drag makes nothing —
  *  every shape needs an actual drag). */

@@ -7,6 +7,7 @@ import {
 } from '../table'
 import { cellTextCss, layoutOfShape, readEditable } from '../tableLayout'
 import { isTyping } from '../dom'
+import { t } from '../i18n'
 
 /** the cells the user has picked in a table: one cell (maybe being typed into) or a range of them */
 export interface TableSelection extends CellRange {
@@ -421,7 +422,7 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
         <div
           key={`equal-height-${row}`}
           className="table-row-height-guide"
-          title={`גובה שורה זהה לשורה ${equalHeightGuide.reference + 1}`}
+          title={t('גובה שורה זהה לשורה {n1}', { n1: equalHeightGuide.reference + 1 })}
           style={{ left: 0, top: px(layout.rowTop[row] + layout.rowHeight[row]), width: px(layout.width) }}
           aria-hidden="true"
         />
@@ -454,7 +455,7 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
             <div
               key={`col${k}`}
               className="table-grip col"
-              title="גרור כדי לשנות את רוחב העמודות"
+              title={t('גרור כדי לשנות את רוחב העמודות')}
               style={{ left: px(borderX(table, layout, k)) - GRIP / 2, top: 0, width: GRIP, height: px(layout.height) }}
               onPointerDown={dragBorder('col', k)}
             />
@@ -463,7 +464,7 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
             <div
               key={`row${r}`}
               className="table-grip row"
-              title="גרור כדי לשנות את גובה השורה"
+              title={t('גרור כדי לשנות את גובה השורה')}
               style={{ left: 0, top: px(layout.rowTop[r] + layout.rowHeight[r]) - GRIP / 2, width: px(layout.width), height: GRIP }}
               onPointerDown={dragBorder('row', r)}
             />
@@ -471,7 +472,7 @@ export function TableView({ shape, layout, zoom, selected, showEdge, locked, sel
         </>
       )}
       {selected && showEdge && !locked && (
-        <div className="table-move-grip" title="גרור כדי להזיז את הטבלה" onPointerDown={onBodyPointerDown} />
+        <div className="table-move-grip" title={t('גרור כדי להזיז את הטבלה')} onPointerDown={onBodyPointerDown} />
       )}
     </div>
   )

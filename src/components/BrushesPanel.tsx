@@ -5,6 +5,7 @@ import type { ColorSample, Sharpness } from '../document'
 import { SHARPNESS_LEVELS } from '../sharpness'
 import { FillPicker } from './FillPicker'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 /** the line each style is shown on: a gentle wave, long enough for a stroke's body, its ends and what splashes round it */
 const PREVIEW_W = 132
@@ -100,28 +101,28 @@ export function BrushesPanel({ style, size, color, samples, sharpness, onSharpne
   )
 
   return (
-    <div className="pages-panel brushes-panel" aria-label="מברשות">
-      <h2 className="props-title">מברשות</h2>
-      <p className="muted">בחרו סגנון וציירו בכלי המברשת. כל משיכה נשמרת כצורה וקטורית רגילה.</p>
+    <div className="pages-panel brushes-panel" aria-label={t('מברשות')}>
+      <h2 className="props-title">{t('מברשות')}</h2>
+      <p className="muted">{t('בחרו סגנון וציירו בכלי המברשת. כל משיכה נשמרת כצורה וקטורית רגילה.')}</p>
       {customs.length > SEARCH_FROM && (
-        <input type="search" className="brush-search" placeholder="חיפוש מברשת…" aria-label="חיפוש מברשת" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input type="search" className="brush-search" placeholder={t('חיפוש מברשת…')} aria-label={t('חיפוש מברשת')} value={query} onChange={(event) => setQuery(event.target.value)} />
       )}
-      <div className="brush-list" role="radiogroup" aria-label="סגנון מברשת">
+      <div className="brush-list" role="radiogroup" aria-label={t('סגנון מברשת')}>
         {builtIn.length > 0 && (
           <>
-            <h3 className="brush-group">מובנות</h3>
+            <h3 className="brush-group">{t('מובנות')}</h3>
             <div className="brush-grid">{builtIn.map((entry) => tile(entry.id, entry.label, entry.hint, builtInPreviews.get(entry.id) ?? ''))}</div>
           </>
         )}
         {customs.length > 0 && imported.length > 0 && (
           <>
             <h3 className="brush-group">
-              מקובץ <span className="muted">({imported.length === customs.length ? customs.length : `${imported.length} מתוך ${customs.length}`})</span>
+              {t('מקובץ')} <span className="muted">({imported.length === customs.length ? customs.length : t('{n1} מתוך {n2}', { n1: imported.length, n2: customs.length })})</span>
             </h3>
-            <div className="brush-grid">{imported.map((brush) => tile(brush.id, brush.name, brush.mode === 'stretch' ? 'נמתחת לאורך הקו' : 'חוזרת על הקו', customPreview(brush)))}</div>
+            <div className="brush-grid">{imported.map((brush) => tile(brush.id, brush.name, brush.mode === 'stretch' ? t('נמתחת לאורך הקו') : t('חוזרת על הקו'), customPreview(brush)))}</div>
           </>
         )}
-        {builtIn.length === 0 && imported.length === 0 && <p className="muted brush-none">לא נמצאו מברשות בשם הזה.</p>}
+        {builtIn.length === 0 && imported.length === 0 && <p className="muted brush-none">{t('לא נמצאו מברשות בשם הזה.')}</p>}
       </div>
 
       <input
@@ -135,8 +136,8 @@ export function BrushesPanel({ style, size, color, samples, sharpness, onSharpne
           if (file) onImport(file)
         }}
       />
-      <button type="button" className="btn small brush-import" disabled={customs.length >= MAX_CUSTOM_BRUSHES} onClick={() => fileInput.current?.click()} title="צורה מקובץ SVG, PNG או JPG הופכת למברשת שחוזרת על הקו או נמתחת לאורכו">
-        ייבוא מברשת מקובץ…
+      <button type="button" className="btn small brush-import" disabled={customs.length >= MAX_CUSTOM_BRUSHES} onClick={() => fileInput.current?.click()} title={t('צורה מקובץ SVG, PNG או JPG הופכת למברשת שחוזרת על הקו או נמתחת לאורכו')}>
+        {t('ייבוא מברשת מקובץ…')}
       </button>
       {message && (
         <p className="muted brush-message" role="status">
@@ -147,32 +148,32 @@ export function BrushesPanel({ style, size, color, samples, sharpness, onSharpne
       {chosen && (
         <div className="brush-options">
           <div className="brush-name-row">
-            <input type="text" className="brush-name" aria-label="שם המברשת" value={chosen.name} maxLength={60} onChange={(event) => onChangeCustom(chosen.id, { name: event.target.value })} />
-            <button type="button" className="btn small" title="הסרת המברשת מהרשימה" onClick={() => onRemoveCustom(chosen.id)}>
-              הסרה
+            <input type="text" className="brush-name" aria-label={t('שם המברשת')} value={chosen.name} maxLength={60} onChange={(event) => onChangeCustom(chosen.id, { name: event.target.value })} />
+            <button type="button" className="btn small" title={t('הסרת המברשת מהרשימה')} onClick={() => onRemoveCustom(chosen.id)}>
+              {t('הסרה')}
             </button>
           </div>
-          <div className="brush-modes" role="radiogroup" aria-label="אופן הציור">
+          <div className="brush-modes" role="radiogroup" aria-label={t('אופן הציור')}>
             <button type="button" role="radio" aria-checked={chosen.mode === 'repeat'} className={'btn small' + (chosen.mode === 'repeat' ? ' on' : '')} onClick={() => onChangeCustom(chosen.id, { mode: 'repeat' })}>
-              חוזרת על הקו
+              {t('חוזרת על הקו')}
             </button>
             <button type="button" role="radio" aria-checked={chosen.mode === 'stretch'} className={'btn small' + (chosen.mode === 'stretch' ? ' on' : '')} onClick={() => onChangeCustom(chosen.id, { mode: 'stretch' })}>
-              נמתחת לאורך הקו
+              {t('נמתחת לאורך הקו')}
             </button>
           </div>
           {chosen.mode === 'repeat' && (
             <>
               <label className="brush-field">
-                <span>מרווח</span>
-                <input type="range" min={0.2} max={4} step={0.1} value={chosen.spacing} onChange={(event) => onChangeCustom(chosen.id, { spacing: Number(event.target.value) })} aria-label="מרווח בין העותקים" />
+                <span>{t('מרווח')}</span>
+                <input type="range" min={0.2} max={4} step={0.1} value={chosen.spacing} onChange={(event) => onChangeCustom(chosen.id, { spacing: Number(event.target.value) })} aria-label={t('מרווח בין העותקים')} />
               </label>
               <label className="brush-field">
-                <span>שונות</span>
-                <input type="range" min={0} max={1} step={0.05} value={chosen.variation} onChange={(event) => onChangeCustom(chosen.id, { variation: Number(event.target.value) })} aria-label="שונות בגודל ובסיבוב" />
+                <span>{t('שונות')}</span>
+                <input type="range" min={0} max={1} step={0.05} value={chosen.variation} onChange={(event) => onChangeCustom(chosen.id, { variation: Number(event.target.value) })} aria-label={t('שונות בגודל ובסיבוב')} />
               </label>
               <label className="brush-check">
                 <input type="checkbox" checked={chosen.rotate} onChange={(event) => onChangeCustom(chosen.id, { rotate: event.target.checked })} />
-                <span>סיבוב העותקים לכיוון הקו</span>
+                <span>{t('סיבוב העותקים לכיוון הקו')}</span>
               </label>
             </>
           )}
@@ -180,8 +181,8 @@ export function BrushesPanel({ style, size, color, samples, sharpness, onSharpne
       )}
 
       <div className="brush-field brush-sharpness">
-        <span>חדות</span>
-        <div className="seg small" role="radiogroup" aria-label="חדות המברשת">
+        <span>{t('חדות')}</span>
+        <div className="seg small" role="radiogroup" aria-label={t('חדות המברשת')}>
           {SHARPNESS_LEVELS.map((level) => (
             <button key={level.id} type="button" role="radio" aria-checked={sharpness === level.id} className={sharpness === level.id ? 'on' : ''} title={level.hint} onClick={() => onSharpness(level.id)}>
               {level.label}
@@ -190,18 +191,18 @@ export function BrushesPanel({ style, size, color, samples, sharpness, onSharpne
         </div>
       </div>
       <label className="brush-field">
-        <span>גודל</span>
-        <input type="range" min={MIN_BRUSH_SIZE} max={MAX_BRUSH_SIZE} step={1} value={size} onChange={(event) => onSize(Number(event.target.value))} aria-label="גודל המברשת" />
-        <NumberField ariaLabel="גודל המברשת בנקודות" value={size} unit="px" unitLabel="pt" step={1} min={MIN_BRUSH_SIZE} max={MAX_BRUSH_SIZE} live onChange={onSize} />
+        <span>{t('גודל')}</span>
+        <input type="range" min={MIN_BRUSH_SIZE} max={MAX_BRUSH_SIZE} step={1} value={size} onChange={(event) => onSize(Number(event.target.value))} aria-label={t('גודל המברשת')} />
+        <NumberField ariaLabel={t('גודל המברשת בנקודות')} value={size} unit="px" unitLabel="pt" step={1} min={MIN_BRUSH_SIZE} max={MAX_BRUSH_SIZE} live onChange={onSize} />
       </label>
       <div className="brush-field brush-color">
-        <span>צבע</span>
-        <FillPicker value={color} label="צבע המברשת" samples={samples} allowNone={false} onChange={(next) => { if (next) onColor(next) }} />
+        <span>{t('צבע')}</span>
+        <FillPicker value={color} label={t('צבע המברשת')} samples={samples} allowNone={false} onChange={(next) => { if (next) onColor(next) }} />
       </div>
       <div className="brush-actions">
-        {!toolActive && <button type="button" className="btn small" onClick={onUseTool}>בחירת כלי המברשת</button>}
-        <button type="button" className="btn small" disabled={!canApply} onClick={onApply} title="הקו של הצורה הנבחרת מוחלף בקו מברשת בסגנון ובגודל שנבחרו">
-          החלת המברשת על הצורה הנבחרת
+        {!toolActive && <button type="button" className="btn small" onClick={onUseTool}>{t('בחירת כלי המברשת')}</button>}
+        <button type="button" className="btn small" disabled={!canApply} onClick={onApply} title={t('הקו של הצורה הנבחרת מוחלף בקו מברשת בסגנון ובגודל שנבחרו')}>
+          {t('החלת המברשת על הצורה הנבחרת')}
         </button>
       </div>
     </div>

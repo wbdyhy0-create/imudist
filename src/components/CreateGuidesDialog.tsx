@@ -5,6 +5,7 @@ import { pageSidesOf } from '../layout'
 import { UNIT_OPTIONS, type Unit } from '../units'
 import { GuideColors } from './GuideColors'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 export interface CreateGuidesRequest {
   spec: GuideSpec
@@ -26,8 +27,8 @@ interface Props {
 }
 
 const MODES: { id: GuideMode; label: string; hint: string }[] = [
-  { id: 'divide', label: 'חלוקה שווה', hint: 'מחלק את השטח לעמודות ולשורות שוות, עם רווח קבוע ביניהן' },
-  { id: 'spacing', label: 'מרווח קבוע', hint: 'קווים במרחק קבוע זה מזה, החל מתחילת השטח' },
+  { id: 'divide', get label() { return t('חלוקה שווה') }, get hint() { return t('מחלק את השטח לעמודות ולשורות שוות, עם רווח קבוע ביניהן') } },
+  { id: 'spacing', get label() { return t('מרווח קבוע') }, get hint() { return t('קווים במרחק קבוע זה מזה, החל מתחילת השטח') } },
 ]
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -79,10 +80,10 @@ export function CreateGuidesDialog({ doc, page, initialColor, existing, onCreate
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide" role="dialog" aria-modal="true" aria-label="יצירת קווי עזר">
-        <h2>יצירת קווי עזר</h2>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-label={t('יצירת קווי עזר')}>
+        <h2>{t('יצירת קווי עזר')}</h2>
 
-        <div className="place-modes" role="group" aria-label="אופן היצירה">
+        <div className="place-modes" role="group" aria-label={t('אופן היצירה')}>
           {MODES.map((m) => (
             <button key={m.id} className={spec.mode === m.id ? 'on' : ''} title={m.hint} onClick={() => patch({ mode: m.id })}>
               {m.label}
@@ -92,27 +93,27 @@ export function CreateGuidesDialog({ doc, page, initialColor, existing, onCreate
 
         <div className="dlg-cols">
           <fieldset className="dlg-block">
-            <legend>{divide ? 'עמודות (קווים אנכיים)' : 'קווים אנכיים'}</legend>
-            <Field label={divide ? 'מספר עמודות' : 'מספר קווים'}>
+            <legend>{divide ? t('עמודות (קווים אנכיים)') : t('קווים אנכיים')}</legend>
+            <Field label={divide ? t('מספר עמודות') : t('מספר קווים')}>
               <NumberField value={spec.cols} min={0} max={200} onChange={(v) => patch({ cols: v })} />
             </Field>
-            <Field label={divide ? 'רווח בין העמודות' : 'מרווח בין הקווים'}>
+            <Field label={divide ? t('רווח בין העמודות') : t('מרווח בין הקווים')}>
               <NumberField value={spec.colGap} unit={unit} min={0} max={5000} onChange={(v) => patch({ colGap: v })} />
             </Field>
           </fieldset>
           <fieldset className="dlg-block">
-            <legend>{divide ? 'שורות (קווים אופקיים)' : 'קווים אופקיים'}</legend>
-            <Field label={divide ? 'מספר שורות' : 'מספר קווים'}>
+            <legend>{divide ? t('שורות (קווים אופקיים)') : t('קווים אופקיים')}</legend>
+            <Field label={divide ? t('מספר שורות') : t('מספר קווים')}>
               <NumberField value={spec.rows} min={0} max={200} onChange={(v) => patch({ rows: v })} />
             </Field>
-            <Field label={divide ? 'רווח בין השורות' : 'מרווח בין הקווים'}>
+            <Field label={divide ? t('רווח בין השורות') : t('מרווח בין הקווים')}>
               <NumberField value={spec.rowGap} unit={unit} min={0} max={5000} onChange={(v) => patch({ rowGap: v })} />
             </Field>
           </fieldset>
         </div>
 
         <div className="dlg-cols">
-          <Field label="יחידות המרווח">
+          <Field label={t('יחידות המרווח')}>
             <select className="select" value={unit} onChange={(e) => setUnit(e.target.value as Unit)}>
               {UNIT_OPTIONS.map((u) => (
                 <option key={u.value} value={u.value}>
@@ -121,45 +122,45 @@ export function CreateGuidesDialog({ doc, page, initialColor, existing, onCreate
               ))}
             </select>
           </Field>
-          <Field label={divide ? 'חלוקה של' : 'התחלה מ'}>
+          <Field label={divide ? t('חלוקה של') : t('התחלה מ')}>
             <div className="place-modes" role="group">
               <button className={spec.area === 'margins' ? 'on' : ''} onClick={() => patch({ area: 'margins' })}>
-                שולי העמוד
+                {t('שולי העמוד')}
               </button>
               <button className={spec.area === 'page' ? 'on' : ''} onClick={() => patch({ area: 'page' })}>
-                קצה העמוד
+                {t('קצה העמוד')}
               </button>
             </div>
           </Field>
         </div>
 
-        <Field label="צבע">
+        <Field label={t('צבע')}>
           <GuideColors value={color} onChange={setColor} />
         </Field>
 
         <label className="dlg-check">
           <input type="checkbox" checked={allPages} onChange={(e) => setAllPages(e.target.checked)} />
-          החל על כל עמודי המסמך
+          {t('החל על כל עמודי המסמך')}
         </label>
         <label className="dlg-check">
           <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-          מחק קודם את קווי העזר שכבר קיימים {allPages ? 'בעמודים' : 'בעמוד'}
+          {t('מחק קודם את קווי העזר שכבר קיימים {where}', { where: allPages ? t('בעמודים') : t('בעמוד') })}
         </label>
 
         <p className={'dlg-summary' + (count === 0 || tooMany ? ' warn' : '')} role="status">
           {tooMany
-            ? `יותר מדי קווי עזר (המקסימום במסמך: ${MAX_GUIDES}).`
+            ? t('יותר מדי קווי עזר (המקסימום במסמך: {MAX_GUIDES}).', { MAX_GUIDES })
             : count === 0
-              ? 'לפי ההגדרות האלה לא ייווצרו קווים.'
-              : `ייווצרו קווים: ${total.v} אנכיים, ${total.h} אופקיים${allPages ? ` (בכל ${doc.pages} העמודים)` : ''}.`}
+              ? t('לפי ההגדרות האלה לא ייווצרו קווים.')
+              : t('ייווצרו קווים: {v} אנכיים, {h} אופקיים', { v: total.v, h: total.h }) + (allPages ? ' ' + t('(בכל {pages} העמודים)', { pages: doc.pages }) : '') + '.'}
         </p>
 
         <div className="modal-buttons">
           <button className="btn primary" disabled={count === 0 || tooMany} onClick={() => onCreate({ spec, color, replace, allPages })}>
-            צור קווים
+            {t('צור קווים')}
           </button>
           <button className="btn" onClick={onClose}>
-            ביטול
+            {t('ביטול')}
           </button>
         </div>
       </div>

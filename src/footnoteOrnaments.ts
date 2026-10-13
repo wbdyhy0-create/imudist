@@ -1,3 +1,4 @@
+import { t } from './i18n'
 /**
  * The look of the lines on both sides of the footnote heading ("הערות שוליים" between two lines): how the line itself is drawn
  * (dotted, double, fading...) and the ornament at its ends (a circle, a leaf, a scroll...), or a picture the user imported.
@@ -62,22 +63,22 @@ interface OrnamentStyle {
 
 /** the styles made of lines and ends (the older five are drawn by the stylesheet and are not here) */
 export const ORNAMENT_STYLES: OrnamentStyle[] = [
-  { id: 'dots', label: 'קו מנוקד', body: 'dotted' },
-  { id: 'dashes', label: 'קו מקווקו', body: 'dashed' },
-  { id: 'double', label: 'קו כפול', body: 'double' },
-  { id: 'thickThin', label: 'קו עבה ודק', body: 'thickThin' },
-  { id: 'triple', label: 'שלושה קווים', body: 'triple' },
-  { id: 'taper', label: 'קו מתחדד כלפי חוץ', body: 'taper' },
-  { id: 'fade', label: 'קו דועך כלפי חוץ', body: 'fade' },
-  { id: 'wave', label: 'קו גלי', body: 'wave' },
-  { id: 'circleEnd', label: 'עיגול בקצה', body: 'solid', outer: 'circle' },
-  { id: 'starEnd', label: 'כוכב בקצה', body: 'solid', outer: 'star' },
-  { id: 'leafEnd', label: 'עלה בקצה', body: 'solid', outer: 'leaf' },
-  { id: 'arrowEnd', label: 'חץ בקצה', body: 'solid', outer: 'arrow' },
-  { id: 'trioEnd', label: 'שלוש נקודות בקצה', body: 'solid', outer: 'trio' },
-  { id: 'scrollEnd', label: 'סלסול בקצה', body: 'solid', outer: 'scroll' },
-  { id: 'scrollFade', label: 'סלסול וקו דועך', body: 'fade', outer: 'scroll' },
-  { id: 'scrollBoth', label: 'סלסול בשני הצדדים', body: 'thickThin', outer: 'scroll', inner: 'circle' },
+  { id: 'dots', get label() { return t('קו מנוקד') }, body: 'dotted' },
+  { id: 'dashes', get label() { return t('קו מקווקו') }, body: 'dashed' },
+  { id: 'double', get label() { return t('קו כפול') }, body: 'double' },
+  { id: 'thickThin', get label() { return t('קו עבה ודק') }, body: 'thickThin' },
+  { id: 'triple', get label() { return t('שלושה קווים') }, body: 'triple' },
+  { id: 'taper', get label() { return t('קו מתחדד כלפי חוץ') }, body: 'taper' },
+  { id: 'fade', get label() { return t('קו דועך כלפי חוץ') }, body: 'fade' },
+  { id: 'wave', get label() { return t('קו גלי') }, body: 'wave' },
+  { id: 'circleEnd', get label() { return t('עיגול בקצה') }, body: 'solid', outer: 'circle' },
+  { id: 'starEnd', get label() { return t('כוכב בקצה') }, body: 'solid', outer: 'star' },
+  { id: 'leafEnd', get label() { return t('עלה בקצה') }, body: 'solid', outer: 'leaf' },
+  { id: 'arrowEnd', get label() { return t('חץ בקצה') }, body: 'solid', outer: 'arrow' },
+  { id: 'trioEnd', get label() { return t('שלוש נקודות בקצה') }, body: 'solid', outer: 'trio' },
+  { id: 'scrollEnd', get label() { return t('סלסול בקצה') }, body: 'solid', outer: 'scroll' },
+  { id: 'scrollFade', get label() { return t('סלסול וקו דועך') }, body: 'fade', outer: 'scroll' },
+  { id: 'scrollBoth', get label() { return t('סלסול בשני הצדדים') }, body: 'thickThin', outer: 'scroll', inner: 'circle' },
 ]
 
 const BY_ID = new Map(ORNAMENT_STYLES.map((style) => [style.id, style]))

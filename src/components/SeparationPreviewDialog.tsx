@@ -3,6 +3,7 @@ import type { Assets, DocSettings, ImageFrame, PageSection, ParagraphStyleRecord
 import { prepareExport, renderPage } from '../pdfExport'
 import { composeInkWarning, composeSeparations, INK_COLOR, INKS, inkReport, separate, type Ink, type InkSelection } from '../separations'
 import { NumberField } from './NumberField'
+import { t } from '../i18n'
 
 interface Props {
   doc: DocSettings
@@ -20,9 +21,9 @@ interface Props {
 
 /** the sharpness the page is looked at in: at 100 an A4 page is about 800 by 1100 pixels (quick, to judge the inks by); at 300 it is the sharpness of the export */
 const DPI_CHOICES = [
-  { dpi: 100, label: 'מהירה (100)' },
-  { dpi: 200, label: 'בינונית (200)' },
-  { dpi: 300, label: 'כמו בייצוא (300)' },
+  { dpi: 100, get label() { return t('מהירה (100)') } },
+  { dpi: 200, get label() { return t('בינונית (200)') } },
+  { dpi: 300, get label() { return t('כמו בייצוא (300)') } },
 ]
 /** the ink a press takes, added up (cyan + magenta + yellow + black), in per cent */
 const DEFAULT_INK_LIMIT = 300
@@ -80,7 +81,7 @@ export function SeparationPreviewDialog({ doc, frames, images, shapes, layerOrde
       .catch((reason: unknown) => {
         if (cancelled) return
         console.error('Separation preview failed:', reason)
-        setError('לא ניתן להכין את תצוגת ההפרדות לעמוד הזה.')
+        setError(t('לא ניתן להכין את תצוגת ההפרדות לעמוד הזה.'))
         setBusy(false)
       })
     return () => {
@@ -107,90 +108,90 @@ export function SeparationPreviewDialog({ doc, frames, images, shapes, layerOrde
 
   return (
     <div className="modal-backdrop">
-      <div className="modal wide separation-preview" role="dialog" aria-modal="true" aria-label="תצוגת הפרדת צבעים">
-        <h2>תצוגת הפרדת צבעים</h2>
+      <div className="modal wide separation-preview" role="dialog" aria-modal="true" aria-label={t('תצוגת הפרדת צבעים')}>
+        <h2>{t('תצוגת הפרדת צבעים')}</h2>
 
         <div className="dlg-cols">
           <div className="field">
-            <div className="field-label">עמוד</div>
-            <div className="seg small" role="group" aria-label="עמוד">
-              <button onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page <= 0 || busy} aria-label="העמוד הקודם">›</button>
+            <div className="field-label">{t('עמוד')}</div>
+            <div className="seg small" role="group" aria-label={t('עמוד')}>
+              <button onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page <= 0 || busy} aria-label={t('העמוד הקודם')}>›</button>
               <span className="separation-page-number" dir="ltr">{page + 1} / {pageCount}</span>
-              <button onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1 || busy} aria-label="העמוד הבא">‹</button>
+              <button onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1 || busy} aria-label={t('העמוד הבא')}>‹</button>
             </div>
           </div>
           <div className="field">
-            <div className="field-label">מצב</div>
-            <div className="seg small" role="radiogroup" aria-label="מצב התצוגה">
-              <button role="radio" aria-checked={mode === 'inks'} className={mode === 'inks' ? 'on' : ''} onClick={() => setMode('inks')}>הפרדות דיו</button>
-              <button role="radio" aria-checked={mode === 'total'} className={mode === 'total' ? 'on' : ''} onClick={() => setMode('total')}>כיסוי דיו כולל</button>
+            <div className="field-label">{t('מצב')}</div>
+            <div className="seg small" role="radiogroup" aria-label={t('מצב התצוגה')}>
+              <button role="radio" aria-checked={mode === 'inks'} className={mode === 'inks' ? 'on' : ''} onClick={() => setMode('inks')}>{t('הפרדות דיו')}</button>
+              <button role="radio" aria-checked={mode === 'total'} className={mode === 'total' ? 'on' : ''} onClick={() => setMode('total')}>{t('כיסוי דיו כולל')}</button>
             </div>
           </div>
         </div>
 
         <div className="dlg-cols">
           <div className="field">
-            <div className="field-label">חדות התצוגה (DPI)</div>
-            <div className="seg small" role="radiogroup" aria-label="חדות התצוגה">
+            <div className="field-label">{t('חדות התצוגה (DPI)')}</div>
+            <div className="seg small" role="radiogroup" aria-label={t('חדות התצוגה')}>
               {DPI_CHOICES.map((choice) => (
                 <button key={choice.dpi} role="radio" aria-checked={dpi === choice.dpi} className={dpi === choice.dpi ? 'on' : ''} onClick={() => setDpi(choice.dpi)} disabled={busy}>{choice.label}</button>
               ))}
             </div>
           </div>
           <div className="field">
-            <div className="field-label">גודל</div>
-            <div className="seg small" role="radiogroup" aria-label="גודל התצוגה">
-              <button role="radio" aria-checked={fit} className={fit ? 'on' : ''} onClick={() => setFit(true)}>התאם לחלון</button>
-              <button role="radio" aria-checked={!fit} className={!fit ? 'on' : ''} onClick={() => setFit(false)}>פיקסל לפיקסל</button>
+            <div className="field-label">{t('גודל')}</div>
+            <div className="seg small" role="radiogroup" aria-label={t('גודל התצוגה')}>
+              <button role="radio" aria-checked={fit} className={fit ? 'on' : ''} onClick={() => setFit(true)}>{t('התאם לחלון')}</button>
+              <button role="radio" aria-checked={!fit} className={!fit ? 'on' : ''} onClick={() => setFit(false)}>{t('פיקסל לפיקסל')}</button>
             </div>
           </div>
         </div>
 
         {mode === 'inks' ? (
-          <div className="separation-inks" role="group" aria-label="הדיו המוצגים">
+          <div className="separation-inks" role="group" aria-label={t('הדיו המוצגים')}>
             {INKS.map((ink) => (
               <label key={ink.id} className="page-bar-check">
                 <input type="checkbox" checked={show[ink.id]} onChange={(event) => setShow((current) => ({ ...current, [ink.id]: event.target.checked }))} />
                 <span className="separation-swatch" style={{ background: swatch(ink.id) }} aria-hidden="true" />
                 {ink.label}
-                {report && <span className="muted"> · ממוצע {percent(report.average[ink.id])}</span>}
+                {report && <span className="muted"> · {t('ממוצע {value}', { value: percent(report.average[ink.id]) })}</span>}
               </label>
             ))}
             <div className="separation-quick">
-              <button className="btn small" onClick={() => setShow({ cyan: true, magenta: true, yellow: true, black: true })}>הצג הכול</button>
+              <button className="btn small" onClick={() => setShow({ cyan: true, magenta: true, yellow: true, black: true })}>{t('הצג הכול')}</button>
               {INKS.map((ink) => (
-                <button key={ink.id} className="btn small" onClick={() => setShow({ cyan: ink.id === 'cyan', magenta: ink.id === 'magenta', yellow: ink.id === 'yellow', black: ink.id === 'black' })}>רק {ink.label.split(' ')[0]}</button>
+                <button key={ink.id} className="btn small" onClick={() => setShow({ cyan: ink.id === 'cyan', magenta: ink.id === 'magenta', yellow: ink.id === 'yellow', black: ink.id === 'black' })}>{t('רק {ink}', { ink: ink.label.split(' ')[0] })}</button>
               ))}
             </div>
           </div>
         ) : (
           <div className="separation-total">
             <div className="field">
-              <div className="field-label">גבול הדיו הכולל (%)</div>
+              <div className="field-label">{t('גבול הדיו הכולל (%)')}</div>
               <NumberField value={limit} onChange={(value) => setLimit(Math.max(100, Math.min(400, Math.round(value))))} min={100} max={400} step={10} />
             </div>
             {report && (
               <p className={report.overLimit > 0 ? 'separation-warn' : 'muted'}>
                 {report.overLimit > 0
-                  ? `הדיו עולה על ${limit}% ב-${report.overLimit < 0.1 ? 'פחות מ-0.1' : report.overLimit.toFixed(1)}% מהעמוד (מסומן באדום). הכי הרבה בנקודה אחת: ${Math.round(report.maxTotal)}%.`
-                  : `אין בעמוד מקום שעולה על ${limit}%. הכי הרבה בנקודה אחת: ${Math.round(report.maxTotal)}%.`}
+                  ? t('הדיו עולה על {limit}% ב-{share}% מהעמוד (מסומן באדום). הכי הרבה בנקודה אחת: {max}%.', { limit, share: report.overLimit < 0.1 ? t('פחות מ-0.1') : report.overLimit.toFixed(1), max: Math.round(report.maxTotal) })
+                  : t('אין בעמוד מקום שעולה על {limit}%. הכי הרבה בנקודה אחת: {n2}%.', { limit, n2: Math.round(report.maxTotal) })}
               </p>
             )}
           </div>
         )}
 
         <div className="separation-canvas">
-          {busy && <p className="muted">מכין את העמוד…</p>}
+          {busy && <p className="muted">{t('מכין את העמוד…')}</p>}
           {error && <p className="error">{error}</p>}
-          <canvas ref={canvas} aria-label="העמוד בהפרדת צבעים" style={{ display: busy || error ? 'none' : 'block', ...(fit ? {} : { maxWidth: 'none', width: separated?.width, height: separated?.height }) }} />
+          <canvas ref={canvas} aria-label={t('העמוד בהפרדת צבעים')} style={{ display: busy || error ? 'none' : 'block', ...(fit ? {} : { maxWidth: 'none', width: separated?.width, height: separated?.height }) }} />
         </div>
 
         <p className="muted">
-          ההפרדה היא המרה פשוטה מ-RGB ל-CMYK, בלי פרופיל צבע (כמו ייצוא ה-CMYK). היא מראה איך הדיו מתחלק בין הצלחות, לא את הצבע המדויק שיודפס.
+          {t('ההפרדה היא המרה פשוטה מ-RGB ל-CMYK, בלי פרופיל צבע (כמו ייצוא ה-CMYK). היא מראה איך הדיו מתחלק בין הצלחות, לא את הצבע המדויק שיודפס.')}
         </p>
 
         <div className="modal-buttons">
-          <button className="btn" onClick={onClose}>סגור</button>
+          <button className="btn" onClick={onClose}>{t('סגור')}</button>
         </div>
       </div>
     </div>

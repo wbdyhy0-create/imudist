@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { t } from '../i18n'
 
 interface Props {
   onSave: (name: string) => void
@@ -24,11 +25,11 @@ export function SaveWorkspaceDialog({ onSave, onClose }: Props) {
 
   return (
     <div className="modal-backdrop">
-      <form className="modal" role="dialog" aria-modal="true" aria-label="שמירת סביבת עבודה" onSubmit={submit}>
-        <h2>שמירת סביבת עבודה</h2>
-        <p>תן שם לסידור הנוכחי של חלוניות הצד. שם שכבר קיים יעדכן את סביבת העבודה השמורה.</p>
+      <form className="modal" role="dialog" aria-modal="true" aria-label={t('שמירת סביבת עבודה')} onSubmit={submit}>
+        <h2>{t('שמירת סביבת עבודה')}</h2>
+        <p>{t('תן שם לסידור הנוכחי של חלוניות הצד. שם שכבר קיים יעדכן את סביבת העבודה השמורה.')}</p>
         <label className="workspace-name-label">
-          שם סביבת העבודה
+          {t('שם סביבת העבודה')}
           <input
             className="workspace-name"
             autoFocus
@@ -37,8 +38,8 @@ export function SaveWorkspaceDialog({ onSave, onClose }: Props) {
           />
         </label>
         <div className="modal-buttons">
-          <button type="button" className="btn" onClick={onClose}>ביטול</button>
-          <button type="submit" className="btn primary" disabled={!name.trim()}>שמירה</button>
+          <button type="button" className="btn" onClick={onClose}>{t('ביטול')}</button>
+          <button type="submit" className="btn primary" disabled={!name.trim()}>{t('שמירה')}</button>
         </div>
       </form>
     </div>

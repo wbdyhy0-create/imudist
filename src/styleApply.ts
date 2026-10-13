@@ -13,7 +13,7 @@ import { applyParagraphLook, charStyleOf, normalizeRuns, paraIndexAt, restyleRan
 
 /** the character-level settings of a paragraph style that its paragraphs show (kept in step with the editor's list) */
 const CHAR_LOOK_KEYS = ['fontFamily', 'fontSize', 'weight', 'italic', 'tracking', 'baselineShift', 'color', 'outlineColor', 'outlineWidth'] as const
-const PARAGRAPH_LOOK_KEYS = ['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align'] as const
+const PARAGRAPH_LOOK_KEYS = ['leading', 'wordSpacingMin', 'wordSpacingMax', 'wordSpacing', 'spaceBefore', 'spaceAfter', 'indentLeft', 'indentRight', 'firstLineIndent', 'align', 'direction'] as const
 const RUN_KEYS = ['fontFamily', 'color', 'outlineColor', 'outlineWidth', 'weight', 'italic', 'fontSize', 'tracking'] as const
 
 export interface StyleEnv {

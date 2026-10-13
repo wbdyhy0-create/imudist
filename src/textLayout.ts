@@ -1,5 +1,6 @@
 import {
   cssTextAlign,
+  cssTextDirection,
   effectiveLeading,
   DEFAULT_FOOTNOTE_CONFIG,
   frameSpaceAfter,
@@ -168,6 +169,10 @@ function getMeasurer(): HTMLDivElement {
 }
 
 function configure(m: HTMLDivElement, style: TextStyle) {
+  const reading = cssTextDirection(style.direction)
+  m.dir = reading.direction
+  m.style.direction = reading.direction
+  m.style.unicodeBidi = reading.unicodeBidi === 'normal' ? '' : reading.unicodeBidi
   m.style.fontFamily = `"${style.fontFamily}", "Segoe UI", Arial, sans-serif`
   m.style.fontSize = `${style.fontSize}px`
   m.style.lineHeight = `${effectiveLeading(style)}px`
@@ -627,6 +632,7 @@ export function lastLineWordCount(paragraph: string, style: TextStyle, width: nu
   const measureStyle = {
     ...style,
     ...(patch?.align ? { align: patch.align } : {}),
+    ...(patch?.direction ? { direction: patch.direction } : {}),
     ...(patch?.leading !== undefined ? { leading: patch.leading } : {}),
     ...(patch?.wordSpacingMin !== undefined ? { wordSpacingMin: patch.wordSpacingMin } : {}),
     ...(patch?.wordSpacingMax !== undefined ? { wordSpacingMax: patch.wordSpacingMax } : {}),
@@ -656,6 +662,7 @@ function measurerForParagraph(style: TextStyle, width: number, patch?: Paragraph
   configure(m, {
     ...style,
     ...(patch?.align ? { align: patch.align } : {}),
+    ...(patch?.direction ? { direction: patch.direction } : {}),
     ...(patch?.leading !== undefined ? { leading: patch.leading } : {}),
     ...(patch?.wordSpacingMin !== undefined ? { wordSpacingMin: patch.wordSpacingMin } : {}),
     ...(patch?.wordSpacingMax !== undefined ? { wordSpacingMax: patch.wordSpacingMax } : {}),
@@ -732,8 +739,12 @@ export function windowOffset(paragraph: string, runs: Run[], style: TextStyle, w
     const rect = [...probe.getClientRects()].find((r) => r.width > 0)
     if (!rect) return null
     const block = inner.firstElementChild instanceof HTMLDivElement ? inner.firstElementChild : inner
-    const edge = block.getBoundingClientRect().right - (parseFloat(getComputedStyle(block).paddingRight) || 0)
-    const offset = edge - rect.right
+    const blockRect = block.getBoundingClientRect()
+    const padding = getComputedStyle(block)
+    const fromLeft = (plain?.direction ?? style.direction) === 'ltr'
+    const offset = fromLeft
+      ? rect.left - (blockRect.left + (parseFloat(padding.paddingLeft) || 0))
+      : blockRect.right - (parseFloat(padding.paddingRight) || 0) - rect.right
     // nearer than the words themselves are wide: the word did not fit and began the second line
     return offset < natural - 0.75 ? null : Math.max(0, offset)
   } finally {
@@ -812,7 +823,7 @@ export function flowFrames(
     seen.add(cacheKey)
     const chain = chainOf(frames, head.id)
     const style = styleOf(head)
-    const noteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles)
+    const noteStyle = footnoteTextStyle(footnoteConfig, paragraphStyles, undefined, style)
     const dividerHeight = footnoteDividerHeight(footnoteConfig, paragraphStyles)
     const referenceLook = footnoteReferenceLook(footnoteConfig, paragraphStyles)
     const story = head.text
@@ -820,7 +831,7 @@ export function flowFrames(
     // everything the layout depends on: default style (incl. paragraph spacing/indents), per-paragraph overrides,
     // and the id, size and wrap areas of every frame in the thread
     const reuseSig =
-      `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.leading}|` +
+      `${style.fontFamily}|${style.fontSize}|${style.weight}|${style.italic}|${style.tracking}|${style.align}|${style.direction}|${style.leading}|` +
       `${style.wordSpacingMin}|${style.wordSpacingMax}|${style.wordSpacing}|` +
       `${style.spaceBefore}|${style.spaceAfter}|${style.indentLeft}|${style.indentRight}|${style.firstLineIndent}|${style.secondLineIndent}|` +
       `${JSON.stringify(head.paraSpaceBefore)}|${JSON.stringify(head.paraSpaceAfter)}|` +
@@ -873,7 +884,7 @@ export function flowFrames(
       }
       const storyFootnoteItems: FootnoteLayoutItem[] = [...(head.footnotes ?? [])]
         .sort((a, b) => a.anchor - b.anchor)
-        .map((note: FootnoteItem, index) => ({ id: note.id, anchor: note.anchor, referenceNumber: footnoteNumbers?.get(note.id) ?? footnoteConfig.startAt + index, content: note.content, runs: note.runs, style: note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId) }))
+        .map((note: FootnoteItem, index) => ({ id: note.id, anchor: note.anchor, referenceNumber: footnoteNumbers?.get(note.id) ?? footnoteConfig.startAt + index, content: note.content, runs: note.runs, style: note.style ?? footnoteTextStyle(footnoteConfig, paragraphStyles, note.paragraphStyleId, style) }))
       const footnoteItems = footnoteConfig.placement === 'endnotes' ? [] : storyFootnoteItems
       const footnoteMarkersFrom = (start: number) => Object.fromEntries(
         storyFootnoteItems.filter((item) => item.anchor >= start).map((item) => [
@@ -887,7 +898,7 @@ export function flowFrames(
         const previousWidth = m.style.width
         const inner = m.firstElementChild as HTMLElement
         const previousInnerWidth = inner.style.width
-        configure(m, textStyle)
+        configure(m, { ...textStyle, direction: textStyle.direction ?? style.direction })
         m.style.width = Number.isFinite(width) ? `${width}px` : 'max-content'
         inner.style.width = ''
         inner.style.textAlign = cssTextAlign(textStyle.align).textAlign

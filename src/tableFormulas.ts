@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { deleteCols, deleteRows, insertCols, insertRows, tableCols, tableRows, type FormulaFormat, type TableCell, type TableData } from './table'
 
 /**
@@ -176,15 +177,15 @@ const FUNCTIONS: Record<string, string> = {
 
 /** the functions a formula can use, as the formula dialog offers them (name and a sample of its arguments) */
 export const FORMULA_FUNCTIONS: { name: string; sample: string; label: string }[] = [
-  { name: 'SUM', sample: 'SUM(A1:A5)', label: 'סכום' },
-  { name: 'AVERAGE', sample: 'AVERAGE(A1:A5)', label: 'ממוצע' },
-  { name: 'MIN', sample: 'MIN(A1:A5)', label: 'הקטן ביותר' },
-  { name: 'MAX', sample: 'MAX(A1:A5)', label: 'הגדול ביותר' },
-  { name: 'COUNT', sample: 'COUNT(A1:A5)', label: 'כמה מספרים' },
-  { name: 'PRODUCT', sample: 'PRODUCT(A1:A5)', label: 'מכפלה' },
-  { name: 'ABS', sample: 'ABS(A1)', label: 'ערך מוחלט' },
-  { name: 'INT', sample: 'INT(A1)', label: 'עיגול כלפי מטה למספר שלם' },
-  { name: 'ROUND', sample: 'ROUND(A1,2)', label: 'עיגול למספר ספרות' },
+  { name: 'SUM', sample: 'SUM(A1:A5)', get label() { return t('סכום') } },
+  { name: 'AVERAGE', sample: 'AVERAGE(A1:A5)', get label() { return t('ממוצע') } },
+  { name: 'MIN', sample: 'MIN(A1:A5)', get label() { return t('הקטן ביותר') } },
+  { name: 'MAX', sample: 'MAX(A1:A5)', get label() { return t('הגדול ביותר') } },
+  { name: 'COUNT', sample: 'COUNT(A1:A5)', get label() { return t('כמה מספרים') } },
+  { name: 'PRODUCT', sample: 'PRODUCT(A1:A5)', get label() { return t('מכפלה') } },
+  { name: 'ABS', sample: 'ABS(A1)', get label() { return t('ערך מוחלט') } },
+  { name: 'INT', sample: 'INT(A1)', get label() { return t('עיגול כלפי מטה למספר שלם') } },
+  { name: 'ROUND', sample: 'ROUND(A1,2)', get label() { return t('עיגול למספר ספרות') } },
 ]
 
 const MAX_DEPTH = 40

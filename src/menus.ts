@@ -13,6 +13,9 @@ export interface MenuContext {
   showRulers: boolean
   showGuides: boolean
   showHiddenChars: boolean
+  /** spell checking of the text being typed (the engine's own checker) */
+  spellcheck: boolean
+  toggleSpellcheck: () => void
   previewMode: boolean
   setPreviewMode: (on: boolean) => void
   showProps: boolean
@@ -238,6 +241,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
+        doc('מעבר שורה עם מקף (אנגלית)', '', (ws) => ws.hyphenate()),
+        doc('הסרת מקפי מעבר שורה', '', (ws) => ws.hyphenate(true)),
         doc('עיצוב מילה ראשונה…', '', (ws) => ws.firstWordStyler()),
         doc('יצירת חלון בטקסט…', '', (ws) => ws.windowText()),
         inParent('הוספת כותרת משתנה…', (ws) => ws.insertRunningHeader()),
@@ -373,6 +378,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'סרגלים', shortcut: 'Ctrl+R', checked: c.showRulers, onClick: c.toggleRulers },
         { label: 'קווי עזר', shortcut: 'Ctrl+;', checked: c.showGuides, onClick: c.toggleGuides },
         { label: 'תווים נסתרים', shortcut: 'Ctrl+Shift+8', checked: c.showHiddenChars, onClick: c.toggleHiddenChars },
+        { label: 'בדיקת איות בזמן הקלדה', checked: c.spellcheck, onClick: c.toggleSpellcheck },
         sep,
         { label: 'תצוגת הפרדת צבעים…', disabled: !c.hasDoc, onClick: c.separationPreview },
         sep,

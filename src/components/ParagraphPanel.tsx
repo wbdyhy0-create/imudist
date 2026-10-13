@@ -5,7 +5,7 @@ import { NumberField } from './NumberField'
 import { t } from '../i18n'
 
 type SpacingPatch = Partial<Pick<TextStyle, 'spaceBefore' | 'spaceAfter'>>
-type ParagraphPatch = Partial<Pick<TextStyle, 'align' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>
+type ParagraphPatch = Partial<Pick<TextStyle, 'align' | 'direction' | 'leading' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'secondLineIndent'>>
 type KeepLinesPatch = Partial<{ first: number; last: number }>
 
 interface Props {

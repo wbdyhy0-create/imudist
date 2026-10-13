@@ -1,12 +1,13 @@
+import { t } from './i18n'
 import { rgbaToCmyk } from './cmykPage'
 
 /** The four inks of a page, as a printing press lays them one after the other: a plate for each. */
 export type Ink = 'cyan' | 'magenta' | 'yellow' | 'black'
 export const INKS: { id: Ink; label: string }[] = [
-  { id: 'cyan', label: 'ציאן (C)' },
-  { id: 'magenta', label: 'מג׳נטה (M)' },
-  { id: 'yellow', label: 'צהוב (Y)' },
-  { id: 'black', label: 'שחור (K)' },
+  { id: 'cyan', get label() { return t('ציאן (C)') } },
+  { id: 'magenta', get label() { return t('מג׳נטה (M)') } },
+  { id: 'yellow', get label() { return t('צהוב (Y)') } },
+  { id: 'black', get label() { return t('שחור (K)') } },
 ]
 
 /** the colour each ink prints in, as it looks on white paper (each 0…1 of red, green and blue) */
