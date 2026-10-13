@@ -1,6 +1,7 @@
 import { t } from './i18n'
 import { useSyncExternalStore } from 'react'
 import { FONT_FAMILIES } from './document'
+import { fontsComeFromDesktop, installedFontsQuery } from './localFonts'
 
 /** One style of a font family, e.g. "Semibold Italic" → weight 600, italic. */
 export interface FontFace {
@@ -154,14 +155,13 @@ let loading: Promise<void> | null = null
 /** Read the fonts installed on this computer. The browser asks the user for permission the first time. */
 export function loadSystemFonts(): Promise<void> {
   if (loading) return loading
-  const query = (window as unknown as { queryLocalFonts?: () => Promise<LocalFontData[]> }).queryLocalFonts
+  const query = installedFontsQuery()
   if (!query) {
     set({ ...state, status: 'unavailable' })
     return Promise.resolve()
   }
   set({ ...state, status: 'loading' })
-  loading = query
-    .call(window)
+  loading = query()
     .then((fonts) => {
       const families = groupSystemFonts(fonts)
       set(families.length ? { families, status: 'system', filter: state.filter } : { ...state, status: 'denied' })
@@ -180,6 +180,9 @@ navigator.permissions
     if (p.state === 'granted') void loadSystemFonts()
   })
   .catch(() => {})
+
+// where the desktop program gives the list (the Mac), nothing is asked: it is read at once
+if (fontsComeFromDesktop()) void loadSystemFonts()
 
 const subscribe = (l: () => void) => {
   listeners.add(l)

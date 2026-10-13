@@ -4,6 +4,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PathGeom, PathVertex } from './document'
 import { ImportError } from './importText'
 import { t } from './i18n'
+import { isMac } from './platform'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -299,17 +300,27 @@ export const GHOSTSCRIPT_DOWNLOAD_URL = 'https://ghostscript.com/releases/gsdnld
 export class GhostscriptMissingError extends ImportError {
   constructor() {
     super(
-      [
-        t('לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.'),
-        '',
-        t('מה עושים:'),
-        t('1. לוחצים על „הורדת Ghostscript”. האתר הרשמי של התוכנה ייפתח בדפדפן.'),
-        t('2. בדף שנפתח מורידים את הגרסה „Windows (64 bit)”.'),
-        t('3. מפעילים את הקובץ שהורד ומאשרים את ההתקנה, בלי לשנות את תיקיית ההתקנה המוצעת.'),
-        t('4. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.'),
-        '',
-        t('אם בחרתם תיקיית התקנה אחרת, הוסיפו את תיקיית bin שלה למשתנה PATH והפעילו את Imudist מחדש.'),
-      ].join('\n'),
+      (isMac
+        ? [
+            t('לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.'),
+            '',
+            t('מה עושים:'),
+            t('1. פותחים את „טרמינל” ומתקינים עם Homebrew: brew install ghostscript'),
+            t('2. אם אין Homebrew, לוחצים על „הורדת Ghostscript” ומתקינים את התוכנה מהאתר שלה, או עם MacPorts.'),
+            t('3. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.'),
+          ]
+        : [
+            t('לא נמצא Ghostscript במחשב. זו תוכנה חינמית שנדרשת להמרת קבצי EPS ו-PS, והיא אינה כלולה ב-Imudist.'),
+            '',
+            t('מה עושים:'),
+            t('1. לוחצים על „הורדת Ghostscript”. האתר הרשמי של התוכנה ייפתח בדפדפן.'),
+            t('2. בדף שנפתח מורידים את הגרסה „Windows (64 bit)”.'),
+            t('3. מפעילים את הקובץ שהורד ומאשרים את ההתקנה, בלי לשנות את תיקיית ההתקנה המוצעת.'),
+            t('4. חוזרים ל-Imudist ומוסיפים את קובץ ה-EPS או ה-PS שוב. אין צורך להפעיל מחדש את התוכנה.'),
+            '',
+            t('אם בחרתם תיקיית התקנה אחרת, הוסיפו את תיקיית bin שלה למשתנה PATH והפעילו את Imudist מחדש.'),
+          ]
+      ).join('\n'),
     )
   }
 }

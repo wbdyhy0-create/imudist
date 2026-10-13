@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { t } from '../i18n'
+import { macKeys } from '../platform'
 
 export interface ContextItem {
   label?: string
@@ -76,7 +77,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
           >
             <span className="menu-check">{item.checked ? '✓' : ''}</span>
             <span className="menu-text">{item.label === undefined ? item.label : t(item.label)}</span>
-            {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}
+            {item.shortcut && <span className="menu-shortcut">{macKeys(item.shortcut)}</span>}
           </div>
         ),
       )}

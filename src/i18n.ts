@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { ar } from './locales/ar'
 import { en } from './locales/en'
+import { macKeys } from './platform'
 
 /**
  * The language of the interface. The Hebrew text written in the code is the source: `t('קובץ')` gives that text in the language
@@ -85,7 +86,7 @@ export function t(text: string, values?: Record<string, string | number>): strin
     found = TABLES[language]?.[text]
     if (found !== undefined) break
   }
-  const out = found ?? text
+  const out = macKeys(found ?? text)
   return values ? out.replace(/\{(\w+)\}/g, (whole, name: string) => (name in values ? String(values[name]) : whole)) : out
 }
 

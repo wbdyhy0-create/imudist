@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { t } from '../i18n'
+import { macKeys } from '../platform'
 import { getHelpTopicCategory, HELP_TOPICS, type HelpTopic } from './HelpTopics'
 import { getHelpSearchTokens, getHelpTopicResults, getStarterHelpTopics, normalizeHelpQuery } from './HelpSearch'
 
@@ -90,13 +91,13 @@ export function HelpAssistant() {
                   <h2>{selected.title}</h2>
                   <span className="help-topic-category">{getHelpTopicCategory(selected)}</span>
                 </div>
-                {selected.answer.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+                {selected.answer.map((paragraph) => <p key={paragraph}>{macKeys(paragraph)}</p>)}
               </article>
               {related.length > 0 && (
                 <div className="help-related">
                   <h3>{t('נושאים קשורים')}</h3>
                   {related.map((topic) => (
-                    <button type="button" key={topic.id} onClick={() => chooseTopic(topic)}>{topic.title}</button>
+                    <button type="button" key={topic.id} onClick={() => chooseTopic(topic)}>{macKeys(topic.title)}</button>
                   ))}
                 </div>
               )}
@@ -107,10 +108,10 @@ export function HelpAssistant() {
               {results.map((topic) => (
                 <button type="button" className="help-result" key={topic.id} onClick={() => chooseTopic(topic)}>
                   <span className="help-result-title">
-                    <strong>{topic.title}</strong>
+                    <strong>{macKeys(topic.title)}</strong>
                     <span className="help-topic-category">{getHelpTopicCategory(topic)}</span>
                   </span>
-                  <span className="help-result-preview">{topic.answer[0]}</span>
+                  <span className="help-result-preview">{macKeys(topic.answer[0])}</span>
                 </button>
               ))}
             </>

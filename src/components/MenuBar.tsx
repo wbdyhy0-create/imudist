@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { t, useLanguage } from '../i18n'
+import { macKeys } from '../platform'
 import { AppLogo } from './AppLogo'
 import { HelpAssistant } from './HelpAssistant'
 
@@ -83,7 +84,7 @@ function MenuPanel({ items, onDone, nested }: { items: MenuItem[]; onDone: () =>
             <span className="menu-text">{item.label === undefined ? item.label : t(item.label)}</span>
             {(item.shortcut ?? item.shownShortcut) && (
               <span className="menu-shortcut" dir="ltr">
-                {item.shortcut ?? item.shownShortcut}
+                {macKeys((item.shortcut ?? item.shownShortcut) as string)}
               </span>
             )}
             {item.submenu && (

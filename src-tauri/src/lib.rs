@@ -3,7 +3,10 @@ use std::{
   fs,
   path::PathBuf,
   process::Command,
-  sync::atomic::{AtomicU64, Ordering},
+  sync::{
+    atomic::{AtomicU64, Ordering},
+    OnceLock,
+  },
   time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, Wry};
@@ -97,6 +100,87 @@ async fn stat_linked_images(paths: Vec<String>) -> Result<Vec<Option<LinkStat>>,
     .map_err(|error| error.to_string())
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SystemFont {
+  family: String,
+  full_name: String,
+  postscript_name: String,
+  style: String,
+  path: String,
+}
+
+/// The style name of a face as the font lists of the program read it ("Regular", "Bold Italic", "Light" ...)
+fn font_style_name(weight: u16, style: fontdb::Style) -> String {
+  let weight_name = match ((weight + 50) / 100).clamp(1, 9) {
+    1 => "Thin",
+    2 => "ExtraLight",
+    3 => "Light",
+    4 => "Regular",
+    5 => "Medium",
+    6 => "SemiBold",
+    7 => "Bold",
+    8 => "ExtraBold",
+    _ => "Black",
+  };
+  let slant = match style {
+    fontdb::Style::Normal => None,
+    fontdb::Style::Italic => Some("Italic"),
+    fontdb::Style::Oblique => Some("Oblique"),
+  };
+  match slant {
+    None => weight_name.to_owned(),
+    Some(slant) if weight_name == "Regular" => slant.to_owned(),
+    Some(slant) => format!("{weight_name} {slant}"),
+  }
+}
+
+/// The fonts installed on the computer, read once: where the web view has no list of them of its own (the Mac's), the program asks for this one.
+fn installed_fonts() -> &'static Vec<SystemFont> {
+  static FONTS: OnceLock<Vec<SystemFont>> = OnceLock::new();
+  FONTS.get_or_init(|| {
+    let mut database = fontdb::Database::new();
+    database.load_system_fonts();
+    database
+      .faces()
+      .filter_map(|face| {
+        let path = match &face.source {
+          fontdb::Source::File(path) => path.clone(),
+          fontdb::Source::SharedFile(path, _) => path.clone(),
+          fontdb::Source::Binary(_) => return None,
+        };
+        let family = face.families.first()?.0.clone();
+        let style = font_style_name(face.weight.0, face.style);
+        Some(SystemFont { full_name: format!("{family} {style}"), family, postscript_name: face.post_script_name.clone(), style, path: path.to_string_lossy().into_owned() })
+      })
+      .collect()
+  })
+}
+
+#[tauri::command]
+async fn list_system_fonts() -> Result<Vec<SystemFont>, String> {
+  tauri::async_runtime::spawn_blocking(|| installed_fonts().clone()).await.map_err(|error| error.to_string())
+}
+
+const MAX_FONT_BYTES: u64 = 50 * 1024 * 1024;
+
+/// The file of one of the installed fonts (put in the PDF a text is written in); only the paths `list_system_fonts` gave are read.
+#[tauri::command]
+async fn read_system_font(path: String) -> Result<tauri::ipc::Response, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    if !installed_fonts().iter().any(|font| font.path == path) {
+      return Err("Only the files of installed fonts can be read.".to_owned());
+    }
+    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_FONT_BYTES {
+      return Err("The font file is not usable.".to_owned());
+    }
+    fs::read(&path).map(tauri::ipc::Response::new).map_err(|error| error.to_string())
+  })
+  .await
+  .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
   let source = STANDARD.decode(source_base64).map_err(|_| "לא ניתן לקרוא את נתוני קובץ ה-EPS.".to_owned())?;
@@ -124,6 +208,13 @@ fn convert_eps_to_pdf(source_base64: String) -> Result<String, String> {
     } else {
       vec![PathBuf::from("gs")]
     };
+    if cfg!(target_os = "macos") {
+      // an app opened from the Finder does not get the shell's PATH: Homebrew (Apple silicon and Intel) and MacPorts are looked for where they install
+      for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin"] {
+        let candidate = PathBuf::from(directory).join("gs");
+        if candidate.is_file() { executables.push(candidate); }
+      }
+    }
     if cfg!(windows) {
       for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
         let Some(program_files) = std::env::var_os(variable) else { continue };
@@ -221,7 +312,22 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![app_name, remember_recent_file, convert_eps_to_pdf, read_linked_image, stat_linked_images])
+    .invoke_handler(tauri::generate_handler![app_name, remember_recent_file, convert_eps_to_pdf, read_linked_image, stat_linked_images, list_system_fonts, read_system_font])
     .run(tauri::generate_context!())
     .expect("error while running Imudist");
+}
+
+#[cfg(test)]
+mod tests {
+  use super::font_style_name;
+
+  #[test]
+  fn font_styles_are_named_as_the_font_lists_read_them() {
+    assert_eq!(font_style_name(400, fontdb::Style::Normal), "Regular");
+    assert_eq!(font_style_name(700, fontdb::Style::Normal), "Bold");
+    assert_eq!(font_style_name(400, fontdb::Style::Italic), "Italic");
+    assert_eq!(font_style_name(700, fontdb::Style::Italic), "Bold Italic");
+    assert_eq!(font_style_name(300, fontdb::Style::Oblique), "Light Oblique");
+    assert_eq!(font_style_name(600, fontdb::Style::Normal), "SemiBold");
+  }
 }

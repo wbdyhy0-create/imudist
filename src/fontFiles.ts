@@ -1,5 +1,6 @@
 import type { jsPDF } from 'jspdf'
 import { isItalicStyle, weightFromStyle } from './fonts'
+import { installedFontsQuery } from './localFonts'
 
 /**
  * The font files of the fonts installed on this computer, to put inside a PDF so that its text is real text (see vectorText.ts).
@@ -130,10 +131,10 @@ let installed: Promise<InstalledFont[]> | null = null
 /** The fonts installed here (asks the first time, like the font lists do); an empty list where the browser cannot tell. */
 function installedFonts(): Promise<InstalledFont[]> {
   installed ??= (async () => {
-    const query = (window as unknown as { queryLocalFonts?: () => Promise<InstalledFont[]> }).queryLocalFonts
+    const query = installedFontsQuery()
     if (!query) return []
     try {
-      return await query.call(window)
+      return await query()
     } catch {
       return []
     }
