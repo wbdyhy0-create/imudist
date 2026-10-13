@@ -259,7 +259,19 @@ function addMarqueePath(ctx: CanvasRenderingContext2D, kind: MarqueeKind, box: S
   else ctx.rect(x, y, width, height)
 }
 
-export function splitObjectCanvas(source: HTMLCanvasElement, target: ScreenBox, selection: ScreenBox, kind: MarqueeKind) {
+function addOutlinePath(ctx: CanvasRenderingContext2D, outline: { x: number; y: number }[], originLeft: number, originTop: number, scaleX: number, scaleY: number) {
+  ctx.beginPath()
+  outline.forEach((point, index) => {
+    const x = (point.x - originLeft) * scaleX
+    const y = (point.y - originTop) * scaleY
+    if (index === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  })
+  ctx.closePath()
+}
+
+/** `outline` (screen points) replaces the rectangle or ellipse of `selection`: the piece is what lies inside the line it draws */
+export function splitObjectCanvas(source: HTMLCanvasElement, target: ScreenBox, selection: ScreenBox, kind: MarqueeKind, outline?: { x: number; y: number }[]) {
   const scaleX = source.width / target.width
   const scaleY = source.height / target.height
   const piece = document.createElement('canvas')
@@ -268,7 +280,8 @@ export function splitObjectCanvas(source: HTMLCanvasElement, target: ScreenBox, 
   const pieceContext = piece.getContext('2d')!
   pieceContext.drawImage(source, (target.left - selection.left) * scaleX, (target.top - selection.top) * scaleY)
   pieceContext.globalCompositeOperation = 'destination-in'
-  addMarqueePath(pieceContext, kind, { left: 0, top: 0, width: selection.width, height: selection.height }, scaleX, scaleY)
+  if (outline) addOutlinePath(pieceContext, outline, selection.left, selection.top, scaleX, scaleY)
+  else addMarqueePath(pieceContext, kind, { left: 0, top: 0, width: selection.width, height: selection.height }, scaleX, scaleY)
   pieceContext.fillStyle = '#fff'
   pieceContext.fill()
   pieceContext.globalCompositeOperation = 'source-over'
@@ -279,7 +292,8 @@ export function splitObjectCanvas(source: HTMLCanvasElement, target: ScreenBox, 
   const remainderContext = remainder.getContext('2d')!
   remainderContext.drawImage(source, 0, 0)
   remainderContext.globalCompositeOperation = 'destination-out'
-  addMarqueePath(remainderContext, kind, {
+  if (outline) addOutlinePath(remainderContext, outline, target.left, target.top, scaleX, scaleY)
+  else addMarqueePath(remainderContext, kind, {
     left: selection.left - target.left,
     top: selection.top - target.top,
     width: selection.width,

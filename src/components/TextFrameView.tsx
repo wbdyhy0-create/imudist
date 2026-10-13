@@ -90,7 +90,7 @@ function withMarks(
       const gapValue = paraGaps[idx]
       idx++
       const spacers = i === pieces.length - 1 ? trailing : nodes
-      if (gapValue && !atEnd) spacers.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ height: gapValue * scale }} />)
+      if (gapValue && !atEnd) spacers.push(<span key={`${i}g`} className="para-gap" contentEditable={false} style={{ paddingTop: gapValue * scale }} />)
       if (firstLineIndent(idx) && !atEnd) spacers.push(<span key={`${i}i`} className="para-indent" contentEditable={false} style={{ width: firstLineIndent(idx) * scale }} />)
     }
     offset += piece.text.length
@@ -406,7 +406,7 @@ function RichText({
         const windowWidth = patch?.windowIndent && (paragraph.index > startParaIndex || atParaStart) ? patch.windowIndent * scale : 0
         const windowGap = paragraph.index > startParaIndex ? (paraGaps[paragraph.index - 1] ?? 0) * scale : 0
         const windowFonts: WindowFonts | undefined = windowWidth && paragraph.sizes.size > 0 ? { opening: paragraph.opening, main: [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] } : undefined
-        const markerOffset = marker ? paragraphListMarkerOffset(windowGap, patch?.leading ?? baseLeading, scale) : 0
+        const markerOffset = marker ? paragraphListMarkerOffset(windowGap + (patch?.leading ?? baseLeading) * scale, patch?.leading ?? baseLeading, scale) : 0
         // the marker has the size of the text of its paragraph (the frame's own size can be smaller than a style's), so it lies level with the line
         const markerSize = marker && paragraph.sizes.size > 0 ? [...paragraph.sizes.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined
         const decoration = patch?.decoration

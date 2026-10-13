@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
  * A group of the top toolbar's settings as a menu that opens under its button, so the toolbar shows the categories and not
  * every field at once. A click elsewhere or Escape closes it.
  */
-export function ToolbarMenu({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+export function ToolbarMenu({ label, title, highlighted, compact, children }: { label: string; title?: string; highlighted?: boolean; compact?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -26,7 +26,7 @@ export function ToolbarMenu({ label, title, children }: { label: string; title?:
     <div className="context-swatch-wrap line-menu" ref={rootRef}>
       <button
         type="button"
-        className={'context-command' + (open ? ' active' : '')}
+        className={'context-command' + (open ? ' active' : '') + (highlighted ? ' filled' : '')}
         title={title}
         aria-expanded={open}
         aria-haspopup="true"
@@ -35,7 +35,7 @@ export function ToolbarMenu({ label, title, children }: { label: string; title?:
       >
         {label} <span aria-hidden="true">▾</span>
       </button>
-      {open && <div className="context-swatch-popover line-menu-panel" role="group" aria-label={label}>{children}</div>}
+      {open && <div className={'context-swatch-popover line-menu-panel' + (compact ? ' compact' : '')} role="group" aria-label={label}>{children}</div>}
     </div>
   )
 }

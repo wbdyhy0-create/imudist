@@ -82,6 +82,8 @@
 .shape-frame svg { display: block; overflow: visible; }
 .shape-frame.ghost { opacity: 0.75; }
 .shape-frame.selected::after { content: ''; position: absolute; inset: 0; outline: 1px solid var(--accent-line); pointer-events: none; }
+/* the pen and the point-editing tool show the points of a path alone: the box around it belongs to the selection tool */
+.shape-frame.selected.point-editing::after { display: none; }
 .shape-frame .handle { pointer-events: auto; border-color: var(--accent-line); }
 .shape-frame .rotate-handle { pointer-events: auto; }
 .corner-handle { position: absolute; z-index: 3; width: 10px; height: 10px; margin: -5px 0 0 -5px; transform: rotate(45deg); background: #fff; border: 1.5px solid #ffb02e; pointer-events: auto; cursor: pointer; }

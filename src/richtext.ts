@@ -152,12 +152,18 @@ export interface RunNodeOpts {
   atParaStart?: boolean
 }
 
-/** A zero-width `display: inline-block` sibling right after a "\n", `height` tall — see `buildRunNodes`. */
-function paraGap(heightPx: number): HTMLElement {
+/**
+ * A zero-width `display: inline-block` sibling right after a "\n" that makes the line it opens `extraPx` taller, above its text.
+ * It holds a line of its own (the `::before` in styles.css) that sits on the baseline like ordinary text, and the padding is
+ * added over that line: the line it opens is exactly `extraPx` taller than a line without it, whatever the font and the
+ * leading of the paragraph (a spacer of a height of its own was as tall as the story's leading, plus the gap, whatever the
+ * paragraph's leading was - a paragraph with a small leading got a gap of a whole line).
+ */
+function paraGap(extraPx: number): HTMLElement {
   const gap = document.createElement('span')
   gap.className = 'para-gap'
   gap.contentEditable = 'false'
-  gap.style.height = `${heightPx}px`
+  gap.style.paddingTop = `${extraPx}px`
   return gap
 }
 
@@ -396,8 +402,7 @@ export function windowFontsOf(runs: Run[], start: number, end: number, scale = 1
  * twice its `lh` apart. So the heights are worked out from the sizes involved:
  *   a line = `lh` + about half the difference between its biggest and its smallest font (`em` here is the frame's own size - the float
  *   inherits it - the others come from the runs);
- *   the first line also holds the opening words, and can be taller still where `gap` (the spacer of the previous paragraph's closing
- *   gap sits on it, `max(1lh, gap + below)`).
+ *   the first line also holds the opening words, and is `gap` taller where the spacer of the previous paragraph's closing gap sits on it.
  * The band is the middle of the second line (from 30% to 70% of it), so it is still inside it when the figures are off by a third.
  */
 function windowBand(gap: number, fonts?: WindowFonts) {
@@ -405,7 +410,7 @@ function windowBand(gap: number, fonts?: WindowFonts) {
   const opening = fonts ? `${fonts.opening}px` : strut
   const main = fonts ? `${fonts.main}px` : strut
   const second = `(1lh + 0.5 * (max(${strut}, ${main}) - min(${strut}, ${main})))`
-  const first = `max(1lh + 0.5 * (max(${strut}, ${opening}, ${main}) - min(${strut}, ${opening}, ${main})), ${gap}px + 0.35lh)`
+  const first = `(1lh + 0.5 * (max(${strut}, ${opening}, ${main}) - min(${strut}, ${opening}, ${main})) + ${gap}px)`
   return { top: `calc(${first} + 0.3 * ${second})`, bottom: `calc(${first} + 0.7 * ${second})` }
 }
 
@@ -545,7 +550,7 @@ export function buildParagraphNodes(text: string, runs: Run[], scale: number, op
     if (gapBefore) spacers.push(paraGap(gapBefore * scale))
     if (marker && gapBefore) {
       const leading = patch?.leading ?? opts.baseLeading ?? Math.round(styleAtChar(runs, pos, DEFAULT_TEXT_STYLE).fontSize * 1.25)
-      block.style.setProperty('--list-marker-offset', `${paragraphListMarkerOffset(gapBefore * scale, leading, scale)}px`)
+      block.style.setProperty('--list-marker-offset', `${paragraphListMarkerOffset(gapBefore * scale + leading * scale, leading, scale)}px`)
     }
     // the marker is the size of the text of its paragraph, not of the frame's default size (a style may set a bigger one)
     if (marker) {

@@ -30,7 +30,7 @@ describe('the window band', () => {
   })
 
   it('keeps the gap of the previous paragraph in the height of the first line', () => {
-    expect(windowFloatStyle(23, 47).shapeOutside).toContain('47px + 0.35lh')
+    expect(windowFloatStyle(23, 47).shapeOutside).toContain('+ 47px')
   })
 
   it('falls back to the line height when the sizes are not known', () => {

@@ -279,6 +279,7 @@ svg { display: block; }
 .arrange-menu button:hover, .arrange-menu button:focus-visible { background: var(--hover); color: #fff; }
 .context-font-size-field .num-field { width: 88px; }
 .context-command:hover { border-color: var(--accent-line); color: #fff; }
+.context-command.filled { border-color: var(--accent-line); background: var(--accent); color: #fff; }
 .context-image-fits { display: flex; gap: 3px; }
 .context-image-fits button { height: 26px; padding: 0 7px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg-field); color: var(--text-dim); font-size: 11px; }
 .context-image-fits button:hover, .context-image-fits button.on { border-color: var(--accent-line); background: var(--accent); color: #fff; }
@@ -364,6 +365,10 @@ svg { display: block; }
 /* a line's own settings: menus that open from the toolbar (style, thickness along the line, blur and shadow, place and size) */
 .context-line-controls { display: inline-flex; flex: none; align-items: center; gap: 8px; }
 .line-menu-panel { width: 290px; padding: 12px; }
+.line-menu-panel.compact { width: max-content; padding: 6px; }
+.line-menu-panel.compact .line-menu-row { gap: 10px; margin-bottom: 6px; }
+.line-menu-panel.compact .line-menu-row:last-child { margin-bottom: 0; }
+.line-menu-panel.compact input[type='number'], .line-menu-panel.compact .num-field { width: 96px; }
 .line-menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-dim); font-size: 12px; white-space: nowrap; }
 .line-menu-row:last-child { margin-bottom: 0; }
 .line-menu-panel select, .line-menu-panel input[type='number'] { height: 26px; background: var(--bg-field); border: 1px solid var(--border); color: var(--text); padding: 0 5px; }
@@ -678,7 +683,7 @@ svg { display: block; }
 @keyframes magnetic-selection-dash { to { stroke-dashoffset: -18; } }
 .viewport.preview { background: #0d0909; }
 .viewport.texttool, .viewport.linking { cursor: crosshair; }
-.viewport.pentool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M6 22 9 14 20 3l5 5-11 11z' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cpath d='m6 22 5-2' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 5 22, crosshair; }
+.viewport.pentool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24'%3E%3Cpath d='M12 3l6 10-6 8-6-8z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='round'/%3E%3Ccircle cx='12' cy='11' r='1.500' fill='black'/%3E%3C/svg%3E") 14 4, crosshair; }
 .viewport.pentool.pen-dragging { cursor: grabbing; }
 .viewport.penciltool { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='m5 22 3-7L20 3a2.5 2.5 0 0 1 4 4L12 19z' fill='%23f1c27d' stroke='black' stroke-width='1.5'/%3E%3Cpath d='m5 22 3-7 4 4z' fill='%23f2e8d5' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 5 22, crosshair; }
 .viewport.scissorstool { cursor: crosshair; }
@@ -857,11 +862,14 @@ svg { display: block; }
   color: var(--accent-line); opacity: 0.7; font-weight: 700; pointer-events: none; user-select: none;
 }
 .mark-para::before { content: '¶'; color: var(--accent-line); opacity: 0.7; user-select: none; }
-/* TextStyle.spaceAfter between paragraphs (richtext.ts's paraGap): an invisible, zero-width spacer sized purely by
-   its own `height`, baseline-aligned like ordinary text — this measured consistently on every line position tested
-   (an earlier version that set the "\n" character's own line-height did not: vertical-align: top-style alignment
-   measured a shorter gap specifically after a block's very first line than after any line following it). */
+/* TextStyle.spaceAfter between paragraphs (richtext.ts's paraGap): an invisible, zero-width spacer, baseline-aligned like
+   ordinary text — this measured consistently on every line position tested (an earlier version that set the "\n" character's
+   own line-height did not: vertical-align: top-style alignment measured a shorter gap specifically after a block's very first
+   line than after any line following it). Its `padding-top` is the gap. */
 .para-gap { display: inline-block; width: 0; pointer-events: none; user-select: none; }
+/* its own line (an empty inline-block gives it the strut of the paragraph's line height): the padding above it is the whole
+   extra height of the line it opens, with no dependence on the font or the leading */
+.para-gap::before { content: ''; display: inline-block; }
 /* TextStyle.firstLineIndent, on every paragraph's own first line (richtext.ts's paraIndent): the width twin of
    .para-gap above — zero HEIGHT so it never affects line height, only takes up width on the line it sits on. */
 .para-indent { display: inline-block; height: 0; pointer-events: none; user-select: none; }

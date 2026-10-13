@@ -126,7 +126,7 @@ import { fitPath } from '../curveFit'
 import { objectLines, snapEdges, snapLinesOf, type SnapLine } from '../snapping'
 import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '../objectClipboard'
 import { frameAsOwnStory } from '../storySlice'
-import { BOOL_OP_NAMES, combineShapes, splitShapeByMask, type BoolOp } from '../shapeOps'
+import { BOOL_OP_NAMES, combineShapes, shapeToPolygons, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, zOfImage, zOfShape, type ArrangeOp } from '../stacking'
 import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { resolveParagraphStyle as resolveSharedParagraphStyle } from '../styleApply'
@@ -1196,6 +1196,9 @@ export function Workspace({
    * own pointerdown must call preventDefault (it starts a drag), and that also suppresses the browser's own dblclick
    * on it - so double-clicking a point is detected by hand here instead of relying on onDoubleClick. */
   const lastPointDown = useRef<{ id: string; index: number; time: number } | null>(null)
+  /** a point pressed without Alt / Shift: when the pointer comes up where it went down, the click makes a corner smooth */
+  const pointClick = useRef<{ id: string; index: number; x: number; y: number } | null>(null)
+  const pointConverted = useRef<{ id: string; index: number; time: number } | null>(null)
   /** the point-editing tool, moving or resizing the picture inside a shape (not the shape itself) */
   const contentDrag = useRef<
     | { kind: 'move'; id: string; start: { x: number; y: number }; origBox: ImageBox }
@@ -5438,7 +5441,7 @@ export function Workspace({
         if (guides.some((g) => chosen.has(g.id) && along(g.axis) !== 0)) {
           onGuidesChange(guides.map((g) => (chosen.has(g.id) ? { ...g, pos: g.pos + along(g.axis) } : g)), 'nudge:guides')
         }
-      } else if (tool === 'direct' && pointSel && (e.key === 'Delete' || e.key === 'Backspace')) {
+      } else if ((tool === 'direct' || tool === 'pen') && pointSel && (e.key === 'Delete' || e.key === 'Backspace')) {
         // the point-editing tool, with points of its own selected: only they go, not the whole shape (unless too few would be left)
         e.preventDefault()
         const sh = shapes.find((x) => x.id === pointSel.id)
@@ -5505,6 +5508,7 @@ export function Workspace({
 
   // Ctrl+C / Ctrl+X / Ctrl+V on objects: the browser's own copy, cut and paste events, so the keys work like everywhere else
   const clipOps = useRef({ copy: copyObjects, paste: pasteEntry, textClip: (_cut: boolean): string | null | undefined => undefined, cutText: (): boolean => false })
+  const penCutRef = useRef<() => boolean>(() => false)
   clipOps.current = {
     copy: copyObjects,
     paste: pasteEntry,
@@ -5557,6 +5561,11 @@ export function Workspace({
     const onCutKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.code !== 'KeyX' && e.key.toLowerCase() !== 'x')) return
       if (isTyping(e.target) && !isTextEditor(e.target)) return // a field: its own cut
+      if (penCutRef.current()) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       if (!clipOps.current.cutText()) return
       e.preventDefault()
       e.stopPropagation()
@@ -5627,14 +5636,14 @@ export function Workspace({
 
   /** the topmost unlocked, visible frame/picture/shape whose bounding box overlaps a world-space rectangle — resolved from
    *  the drawn marquee at release, so the drag may start outside the target and still cut it in two. */
-  const marqueeTargetIn = (x0: number, y0: number, x1: number, y1: number): MarqueeTarget | null => {
+  const marqueeTargetIn = (x0: number, y0: number, x1: number, y1: number, exceptId?: string): MarqueeTarget | null => {
     const [ax, bx] = [Math.min(x0, x1), Math.max(x0, x1)]
     const [ay, by] = [Math.min(y0, y1), Math.max(y0, y1)]
     const overlaps = (o: { x: number; y: number; w: number; h: number }) => o.x < bx && o.x + o.w > ax && o.y < by && o.y + o.h > ay
     const candidates = [
       ...visibleFrames.filter((f) => !itemLocks[f.id] && overlaps(f)).map((f) => ({ id: f.id, kind: 'frame' as const, layerId: f.layerId, z: f.z ?? 1, name: t('תיבת טקסט') })),
       ...visibleImages.filter((im) => !itemLocks[im.id] && overlaps(im)).map((im) => ({ id: im.id, kind: 'image' as const, layerId: im.layerId, z: im.z ?? 0, name: assets[im.assetId]?.name ?? t('תמונה') })),
-      ...visibleShapes.filter((sh) => !itemLocks[sh.id] && overlaps(sh)).map((sh) => ({ id: sh.id, kind: 'shape' as const, layerId: sh.layerId, z: sh.z ?? 1, name: sh.kind === 'path' ? t('נתיב') : t('צורה') })),
+      ...visibleShapes.filter((sh) => !itemLocks[sh.id] && sh.id !== exceptId && overlaps(sh)).map((sh) => ({ id: sh.id, kind: 'shape' as const, layerId: sh.layerId, z: sh.z ?? 1, name: sh.kind === 'path' ? t('נתיב') : t('צורה') })),
     ]
     if (candidates.length === 0) return null
     const top = candidates.reduce((best, c) => ((rank.get(c.id) ?? 0) > (rank.get(best.id) ?? 0) ? c : best))
@@ -6607,7 +6616,8 @@ export function Workspace({
     }
   }
 
-  const finishMarqueeCut = async (gesture: MarqueeGesture, target: MarqueeTarget) => {
+  /** `pen`: the cut is by the outline the pen drew (`mask` in world points, `outline` in screen points) instead of a rectangle or an ellipse; `dropId` is that line when it is already a shape of the page, which goes with the cut */
+  const finishMarqueeCut = async (gesture: MarqueeGesture, target: MarqueeTarget, pen?: { mask: ShapeFrame; outline: { x: number; y: number }[]; dropId?: string }) => {
     const selection: ScreenBox = {
       left: Math.min(gesture.clientX0, gesture.clientX1),
       top: Math.min(gesture.clientY0, gesture.clientY1),
@@ -6625,7 +6635,7 @@ export function Workspace({
       if (vectorShape && !vectorShape.feather && !vectorShape.image && !vectorShape.frame && vectorShape.kind !== 'line' && vectorShape.kind !== 'table' && !(vectorShape.kind === 'path' && vectorShape.closed === false)) {
         const start = toWorld(gesture.clientX0, gesture.clientY0)
         const end = toWorld(gesture.clientX1, gesture.clientY1)
-        const mask: ShapeFrame = {
+        const mask: ShapeFrame = pen?.mask ?? {
           id: newFrameId(),
           kind: gesture.kind === 'ellipse' ? 'ellipse' : 'rect',
           x: Math.min(start.x, end.x),
@@ -6660,10 +6670,10 @@ export function Workspace({
         ]
         if (editingParentId) {
           pageOps.commit({
-            parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, shapes: [...parent.shapes.filter((shape) => shape.id !== vectorShape.id), ...pieces] } : parent),
+            parents: parents.map((parent) => parent.id === editingParentId ? { ...parent, shapes: [...parent.shapes.filter((shape) => shape.id !== vectorShape.id && shape.id !== pen?.dropId), ...pieces] } : parent),
           })
         } else {
-          pageOps.commit({ shapes: [...shapes.filter((shape) => shape.id !== vectorShape.id), ...pieces] })
+          pageOps.commit({ shapes: [...shapes.filter((shape) => shape.id !== vectorShape.id && shape.id !== pen?.dropId), ...pieces] })
         }
         const selectedPiece = pieces[pieces.length - 1]
         setSelectedId(selectedPiece.id)
@@ -6698,7 +6708,7 @@ export function Workspace({
         applyFeatherCanvasMask(context, sourceFeather, objectWidth, objectHeight, objectWidth / sourceWidth)
         context.restore()
       }
-      const { remainder, piece } = splitObjectCanvas(sourceCanvas, target.bounds, selection, gesture.kind)
+      const { remainder, piece } = splitObjectCanvas(sourceCanvas, target.bounds, selection, gesture.kind, pen?.outline)
       const trimmedPiece = trimTransparentBounds(piece)
       if (!trimmedPiece) return
       const trimmedRemainder = trimTransparentBounds(remainder)
@@ -6735,7 +6745,7 @@ export function Workspace({
       const pieceFrame = imageFor(trimmedPiece.canvas, t('חלק חתוך — {n1}', { n1: target.name }))
       const placed = (frame: ImageFrame, box: typeof sourceBox, z: number): ImageFrame => ({ ...frame, ...box, z })
       const nextImages = images.filter((image) => image.id !== (target.kind === 'image' ? target.id : ''))
-      const nextShapes = shapes.filter((shape) => shape.id !== (target.kind === 'shape' ? target.id : ''))
+      const nextShapes = shapes.filter((shape) => shape.id !== (target.kind === 'shape' ? target.id : '') && shape.id !== pen?.dropId)
       const nextFrames = target.kind === 'frame'
         ? frames.map((frame) => frame.id === target.id ? { ...frame, rasterized: true } : frame)
         : frames
@@ -6759,6 +6769,47 @@ export function Workspace({
       console.warn('Could not cut the selected object.', error)
     }
   }
+
+  /**
+   * Ctrl+X with the pen: the line it drew (a path in the making, or a closed path just drawn) is a selection. What lies inside it, of
+   * the topmost object under it, is cut away as in the cutting tools, and the line itself goes. False when there is nothing to cut:
+   * the key then does what it always did.
+   */
+  const cutWithPenPath = (): boolean => {
+    if (tool !== 'pen' || marqueeCutRef.current) return false
+    const drawn = penPoints.current.length >= 3 ? pathShapeFromPoints(penPoints.current, true, false, false, 0.28, 'butt') : null
+    const chosen = !drawn && selectedId ? shapes.find((shape) => shape.id === selectedId) : undefined
+    const mask = drawn ?? (chosen && chosen.kind === 'path' && chosen.closed !== false && !chosen.rotation && !chosen.pathText && chosen.geom?.length ? chosen : null)
+    const el = vpRef.current
+    if (!mask || !el) return false
+    const ring = shapeToPolygons(mask)[0]?.[0]
+    if (!ring || ring.length < 3) return false
+    const rect = el.getBoundingClientRect()
+    const L = live.current
+    const outline = ring.map(([x, y]) => ({ x: rect.left + L.sb - getScrollX(el) + L.tx + x * L.zoom, y: rect.top - el.scrollTop + L.ty + y * L.zoom }))
+    const target = marqueeTargetIn(mask.x, mask.y, mask.x + mask.w, mask.y + mask.h, chosen?.id)
+    if (!target) return false
+    const xs = outline.map((point) => point.x)
+    const ys = outline.map((point) => point.y)
+    const gesture: MarqueeGesture = {
+      kind: 'rect',
+      x0: mask.x,
+      y0: mask.y,
+      x1: mask.x + mask.w,
+      y1: mask.y + mask.h,
+      clientX0: Math.min(...xs),
+      clientY0: Math.min(...ys),
+      clientX1: Math.max(...xs),
+      clientY1: Math.max(...ys),
+    }
+    // the line in the making is not left to be made into a shape when the tool changes after the cut
+    penPoints.current = []
+    setFreehandPreview(null)
+    setPenHover(null)
+    void finishMarqueeCut(gesture, target, { mask, outline, dropId: chosen?.id })
+    return true
+  }
+  penCutRef.current = cutWithPenPath
 
   // ── text on the outline of a shape ────────────────────────────────────────────
   /** the outline nearest to a world point, if one is within reach (the topmost shape wins a tie) */
@@ -7546,6 +7597,7 @@ export function Workspace({
   /** clicking a shape with the Selection or point-editing tool selects it and starts moving it (the shape tools draw a new one instead) */
   const onShapePointerDown = (id: string) => (e: ReactPointerEvent<SVGPathElement>) => {
     if (e.button !== 0 || panMode || linkFrom || placing || placingImages.length > 0 || colorSamplerActive || !!rasterBrushColor) return // the sampler / paint circle take the click (the viewport sees it)
+    if (tool === 'pen') return // the pen only draws: a click over a shape begins a line (or goes on with it); picking is for the selection tools
     if (itemLocks[id]) return
     const sh = shapes.find((x) => x.id === id)
     if (!sh) return
@@ -7607,7 +7659,7 @@ export function Workspace({
       setEditingId(null)
       return
     }
-    if (tool !== 'select' && tool !== 'direct' && tool !== 'pen' && tool !== 'pencil' && tool !== 'transform') return
+    if (tool !== 'select' && tool !== 'direct' && tool !== 'pencil' && tool !== 'transform') return
     if (handleMultiPointer(id, e)) return
     e.stopPropagation()
     e.preventDefault()
@@ -7730,9 +7782,14 @@ export function Workspace({
     const isDoubleClick = !!last && last.id === id && last.index === index && now - last.time < 400
     lastPointDown.current = isDoubleClick ? null : { id, index, time: now }
     if (isDoubleClick) {
+      // the first click of the pair has already made a corner smooth: the second must not turn it back
+      const converted = pointConverted.current
+      pointConverted.current = null
+      if (converted && converted.id === id && converted.index === index && now - converted.time < 600) return
       onPointDouble(id)(index)
       return
     }
+    pointClick.current = e.altKey || e.shiftKey ? null : { id, index, x: e.clientX, y: e.clientY }
     setSelectedId(id)
     const geomBase = geomOf(sh)
     const box = { x: sh.x, y: sh.y, w: sh.w, h: sh.h }
@@ -7813,15 +7870,16 @@ export function Workspace({
     pointDrag.current = { kind: 'anchor', id, geom, indices: [flatIndex], anchor: flatIndex, ...(flatPartner >= 0 ? { twin: flatPartner } : {}), box: { x: sh.x, y: sh.y, w: sh.w, h: sh.h }, key: `points:${dragSeq.current}` }
     vpRef.current!.setPointerCapture(e.pointerId)
   }
-  /** double click on a point: a sharp corner becomes a smooth curve point (handles a third of the way to each neighbour), or a curve point loses its handles and becomes a sharp corner again */
-  const onPointDouble = (id: string) => (index: number) => {
+  /** double click on a point: a sharp corner becomes a smooth curve point (handles a third of the way to each neighbour), or a curve point loses its handles and becomes a sharp corner again; with `cornerOnly` a curve point is left as it is (false when nothing changed) */
+  const onPointDouble = (id: string) => (index: number, cornerOnly = false): boolean => {
     const sh = shapes.find((x) => x.id === id)
-    if (!sh) return
+    if (!sh) return false
     const geomBase = geomOf(sh)
     const place = locateVertex(geomBase, index)
-    if (!place) return
+    if (!place) return false
     const ring = geomBase[place.poly]![place.ring]!
     const v = ring[place.index]!
+    if (cornerOnly && (vertexHi(v) || vertexHo(v))) return false
     const nv: PathVertex = vertexHi(v) || vertexHo(v)
       ? vertexPoint(v)
       : (() => {
@@ -7833,6 +7891,7 @@ export function Workspace({
         })()
     const geom = replaceVertex(geomBase, index, nv)
     onShapesChange(shapes.map((x) => (x.id === id ? { ...x, kind: 'path', geom, sides: undefined, radii: undefined } : x)), `curve-toggle:${id}:${index}`)
+    return true
   }
   /** grabbing one of a point's own curve handles: it reshapes the curve on that side */
   const onHandleGrab = (id: string) => (index: number, which: 'hi' | 'ho', e: ReactPointerEvent<HTMLDivElement>) => {
@@ -9251,6 +9310,11 @@ export function Workspace({
       setMultiSel([])
     }
     groupDrag.current = null
+    const pressedPoint = pointClick.current
+    pointClick.current = null
+    if (pressedPoint && pointDrag.current && Math.hypot(event.clientX - pressedPoint.x, event.clientY - pressedPoint.y) < 4 && onPointDouble(pressedPoint.id)(pressedPoint.index, true)) {
+      pointConverted.current = { id: pressedPoint.id, index: pressedPoint.index, time: Date.now() }
+    }
     pointDrag.current = null
     contentDrag.current = null
     lineEndDrag.current = null
@@ -9341,6 +9405,7 @@ export function Workspace({
   /** clicking a frame: Type tool edits its text, Selection tool selects it and starts moving it */
   const onFramePointerDown = (id: string) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || panMode || colorSamplerActive || !!rasterBrushColor) return // let the pan handler (and the sampler / paint circle) see it
+    if (tool === 'pen') return // the pen only draws: a click over a frame begins a line (or goes on with it)
     oversetCaret.current = false
     setFootnoteSel(null)
     if (itemLocks[id]) return
@@ -9820,6 +9885,7 @@ export function Workspace({
         ...(scopePatch?.firstLineIndent !== undefined ? { firstLineIndent: scopePatch.firstLineIndent } : {}),
         ...(scopePatch?.secondLineIndent !== undefined ? { secondLineIndent: scopePatch.secondLineIndent } : {}),
         ...(scopePatch?.align !== undefined ? { align: scopePatch.align } : {}),
+        ...(scopePatch?.direction !== undefined ? { direction: scopePatch.direction } : {}),
         ...(scopePatch?.wordSpacingMin !== undefined ? { wordSpacingMin: scopePatch.wordSpacingMin } : {}),
         ...(scopePatch?.wordSpacingMax !== undefined ? { wordSpacingMax: scopePatch.wordSpacingMax } : {}),
         ...(scopePatch?.wordSpacing !== undefined ? { wordSpacing: scopePatch.wordSpacing } : {}),
@@ -9841,6 +9907,7 @@ export function Workspace({
             ? styleAtChar(normalizeRuns(panelHead.text, panelHead.runs, panelHead), panelCaret.a > 0 && panelHead.text[panelCaret.a - 1] !== '\n' ? panelCaret.a - 1 : panelCaret.a, panelHead)
             : charStyleOf(panelHead)),
         align: scopePatch?.align ?? panelHead.align,
+        direction: scopePatch?.direction ?? panelHead.direction,
         // word-spacing bounds belong to the whole story; leading / alignment show the paragraph in scope (see above)
         leading: scopePatch?.leading ?? panelHead.leading,
         wordSpacingMin: scopePatch?.wordSpacingMin ?? panelHead.wordSpacingMin,
@@ -11532,6 +11599,7 @@ export function Workspace({
         onCharStyle={(patch) => footnoteSel ? applyFootnoteCharStyle(patch) : selFrame ? applyCharStyle(selFrame.id, patch) : applyTableFormatting(patch)}
         onTextScale={(axis, percent) => selFrame && setFrameTextScale(selFrame.id, axis, percent)}
         onAlign={(align) => footnoteSel ? applyFootnoteParagraphStyle({ align }) : selFrame ? applyAlign(selFrame.id, align) : applyTableFormatting({ align })}
+        onDirection={footnoteSel ? (direction) => applyFootnoteParagraphStyle({ direction }) : selFrame ? (direction) => applyParagraphStyle(selFrame.id, { direction }) : undefined}
         onLeading={(leading) => footnoteSel ? applyFootnoteParagraphStyle({ leading }) : selFrame ? applyParagraphStyle(selFrame.id, { leading }) : applyTableFormatting({ leading })}
         onParagraphStyle={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame && applyParagraphStyle(selFrame.id, patch)}
         onParagraphSpacing={(patch) => footnoteSel ? applyFootnoteParagraphStyle(patch) : selFrame ? applyParaSpacing(selFrame.id, patch) : applyTableFormatting(patch)}
@@ -11853,8 +11921,8 @@ export function Workspace({
                   hotCorners={sh.id === selectedId ? hotCorners : undefined}
                   activeCorners={sh.id === selectedId ? [0, 1, 2, 3] : undefined}
                   together={roundTogether}
-                  directMode={tool === 'direct'}
-                  selectedPoints={tool === 'direct' ? (editablePoints(sh)?.map((point) => point.index) ?? undefined) : sh.id === pointSel?.id ? pointSel.indices : undefined}
+                  directMode={tool === 'direct' || tool === 'pen'}
+                  selectedPoints={tool === 'direct' || tool === 'pen' ? (editablePoints(sh)?.map((point) => point.index) ?? undefined) : sh.id === pointSel?.id ? pointSel.indices : undefined}
                   asset={sh.image ? assets[sh.image.assetId] : undefined}
                   onPointerDown={onShapePointerDown(sh.id)}
                   onHandleDown={onHandleDown(sh.id)}
@@ -11874,7 +11942,7 @@ export function Workspace({
                   }}
                   onPegDown={onPegDown(sh.id)}
                   onPointDown={onPointDown(sh.id)}
-                  onDirectMove={tool === 'direct' ? (event) => beginFrameDrag(event as unknown as ReactPointerEvent<HTMLElement>, sh.id, 'move') : undefined}
+                  onDirectMove={tool === 'direct' || tool === 'pen' ? (event) => beginFrameDrag(event as unknown as ReactPointerEvent<HTMLElement>, sh.id, 'move') : undefined}
                   onEdgeDown={onEdgeDown(sh.id)}
                   onHandleGrab={onHandleGrab(sh.id)}
                   onContentGrab={onContentGrab(sh.id)}

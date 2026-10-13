@@ -418,7 +418,7 @@ export const defaultLeading = (style: { fontSize: number }): number => Math.roun
 export const effectiveLeading = (style: { fontSize: number; leading?: number }): number => (style.leading !== undefined && style.leading > 0 ? style.leading : defaultLeading(style))
 
 /**
- * The height of the `.para-gap` spacer every "\n" gets so `spaceAfter` shows up as real space between paragraphs,
+ * The extra space (points) the `.para-gap` spacer every "\n" gets adds above the paragraph that follows, so `spaceAfter` shows up as real space between paragraphs,
  * not just once at the edges of a frame (see richtext.ts's `buildRunNodes`). `undefined` means no spacer at all,
  * so callers can tell "no gap" apart from "a gap of zero" (not that it visibly matters, but it avoids inserting a
  * pointless zero-height element into the DOM on every "\n"). This is the UNIFORM version — every paragraph gets
@@ -428,7 +428,7 @@ export const effectiveLeading = (style: { fontSize: number; leading?: number }):
  */
 export function paraLineHeightOf(style: TextStyle): number | undefined {
   const gap = style.spaceAfter ?? DEFAULT_SPACE_AFTER
-  return gap > 0 ? (effectiveLeading(style)) + gap : undefined
+  return gap > 0 ? gap : undefined
 }
 
 /**
@@ -463,7 +463,7 @@ export function paraGaps(style: TextStyle, frame: { paraSpaceBefore?: (number | 
     const after = frame.paraSpaceAfter?.[i] ?? style.spaceAfter ?? DEFAULT_SPACE_AFTER
     const before = frame.paraSpaceBefore?.[i + 1] ?? 0
     const gap = after + before
-    out.push(gap > 0 ? (effectiveLeading(style)) + gap : undefined)
+    out.push(gap > 0 ? gap : undefined)
   }
   return out
 }

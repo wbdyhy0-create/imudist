@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { BLEND_MODES, DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextFrame, type TextStyle } from '../document'
+import { BLEND_MODES, DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextDirection, type TextFrame, type TextStyle } from '../document'
 import { SHARPNESS_LEVELS } from '../sharpness'
 import { FillPicker } from './FillPicker'
-import { ALIGNS } from './PropertiesPanel'
+import { ALIGNS, TEXT_DIRECTIONS } from './PropertiesPanel'
 import { ArrangeButtons } from './ArrangeButtons'
 import type { ToolId } from './Toolbox'
 import type { ArrangeOp } from '../stacking'
@@ -68,6 +68,8 @@ interface Props {
   onFontPreview?: (family: string | null) => void
   onTextScale?: (axis: 'x' | 'y', percent: number) => void
   onAlign?: (align: TextAlign) => void
+  /** the reading direction of the paragraph (right to left, left to right, or by its first letter); not given where it has no meaning (a table) */
+  onDirection?: (direction: TextDirection) => void
   onLeading?: (value: number) => void
   /** the unit of the document: the indents are shown in it, as in the paragraph panel and the style dialog */
   unit?: Unit
@@ -97,7 +99,7 @@ const LABELS: Partial<Record<ToolId, string>> = {
   get eraser() { return t('מחק') },
 }
 
-export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, sharpness, onSharpness, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
+export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, sharpness, onSharpness, shape, image, frame, textStyle, tableText, fontSizeControl, paragraphStyle, colorSamples, onSwatchFill, onSwatchStroke, outlineWidth, onOutlineWidth, strokeWidth, onStrokeWidth, onFlip, onArrange, onOpacity, onBlendMode, onWhitePoint, onAutoWhitePoint, onImageFit, onImageFlip, onImageWrap, onImageMatchShape, onImageRemoveBackground, imageBackgroundRemovalDisabled, removingImageBackground, onImageDelete, onCharStyle, onFontPreview, onTextScale, onAlign, onDirection, onLeading, onParagraphStyle, onParagraphSpacing, children }: Props) {
   const label = LABELS[tool] ?? t('כלי')
   const char = (textStyle ?? tableText ?? frame) as CharStyle
   const fontCatalog = useFontCatalog()
@@ -205,7 +207,14 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
           <div className="context-align-buttons" role="group" aria-label={t('יישור')}>
             {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
           </div>
-          <ToolbarMenu label={t('ריווח')} title={t('ריווח בין אותיות, מילים, שורות ופסקאות')}>
+          {onDirection && (
+            <ToolbarMenu highlighted compact label={(TEXT_DIRECTIONS.find((d) => d.id === (para.direction ?? 'rtl')) ?? TEXT_DIRECTIONS[0]).short} title={t('כיוון הטקסט')}>
+              <div className="context-align-buttons" role="radiogroup" aria-label={t('כיוון הטקסט')}>
+                {[...TEXT_DIRECTIONS].reverse().map((d) => <button key={d.id} role="radio" aria-checked={(para.direction ?? 'rtl') === d.id} data-tooltip={d.title} title={d.title} className={(para.direction ?? 'rtl') === d.id ? 'active' : ''} onClick={() => onDirection(d.id)}>{d.short}</button>)}
+              </div>
+            </ToolbarMenu>
+          )}
+          <ToolbarMenu compact label={t('ריווח')} title={t('ריווח בין אותיות, מילים, שורות ופסקאות')}>
             <MenuRow label={t('בין אותיות (% מהגופן)')} title={t('מרווח בין אותיות באחוזים מגודל הגופן')}>
               <input type="number" step="1" value={char.tracking / 10} onChange={(event) => onCharStyle?.({ tracking: Math.round((Number(event.target.value) || 0) * 10) })} />
             </MenuRow>
@@ -219,7 +228,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
               <NumberField value={para.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceAfter) => onParagraphSpacing?.({ spaceAfter })} />
             </MenuRow>
           </ToolbarMenu>
-          <ToolbarMenu label={t('הזחות')} title={t('הזחות הפסקה מהצדדים, מלמעלה ומלמטה')}>
+          <ToolbarMenu compact label={t('הזחות')} title={t('הזחות הפסקה מהצדדים, מלמעלה ומלמטה')}>
             <MenuRow label={t('הזחה מימין')}>
               <NumberField value={para.indentRight ?? 0} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(indentRight) => onParagraphStyle?.({ indentRight })} />
             </MenuRow>
