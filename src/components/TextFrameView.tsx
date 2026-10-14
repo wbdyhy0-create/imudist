@@ -7,7 +7,7 @@ import { isOrnamentDecoration, ornamentSideMarkup, type DividerOrnamentImage } f
 import { letterCenterShift } from '../headingMetrics'
 import { cssTextAlign, cssTextDirection, effectiveLeading, startSideOf, EXTERNAL_PAGE_NUMBER_MARKER, FOOTNOTE_MARKER, FOOTNOTE_REFERENCE_SCALE, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, LETTER_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, textFlowBoxOf, TOC_LEADER_MARKER, TOC_PAGE_MARKER, wordSpacingPt, type CharStyle, type Feather, type Run, type TextFrame, type TextStyle } from '../document'
 import { HANDLES, ROTATE_CORNERS, type HandleId, type RotateCorner } from '../frames'
-import { anchorRunCss, baselineShiftCss, isAnchorRun, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
+import { anchorRunCss, baselineShiftCss, isAnchorRun, isHollowText, caretOffsetAt, paragraphListMarker, paragraphListMarkerOffset, paragraphListMarkerWidth, paragraphBoxStyle, paragraphSidePadding, setSelectionIn, splitMarks, textOutlineStroke, textShadow, windowBlockMinHeight, windowFloatStyle, type ParagraphPatch, type WindowFonts } from '../richtext'
 import { substituteMarker } from '../numbering'
 import { normalizeRuns, styleAtChar } from '../story'
 import { shapeOf, type WrapFloat } from '../wrap'
@@ -355,6 +355,7 @@ function RichText({
       fontStyle: part.run.style.italic ? 'italic' : 'normal',
       letterSpacing: part.run.style.tracking ? `${(part.run.style.tracking / 1000) * part.run.style.fontSize * scale}px` : undefined,
       textShadow: textShadow(part.run.style, scale) || undefined,
+      ...(isHollowText(part.run.style) ? { WebkitTextStroke: textOutlineStroke(part.run.style, scale) } : {}),
       ...baselineShiftCss(part.run.style, scale),
       ...(anchored ? anchorRunCss(part.run.style, scale) : {}),
     }

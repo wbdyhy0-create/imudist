@@ -58,7 +58,9 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
   const [model, setModel] = useState<ColorModel>('CMYK')
   const isTextTarget = !!textId && !!onTextColor
   const textTargetColor = textColorTarget === 'outline' ? textStyle?.outlineColor ?? '#000000' : textStyle?.color ?? '#111111'
-  const initialColor = isTextTarget ? textTargetColor : targetShape?.fill ?? '#0066ff'
+  // a text with no fill (transparent) has no colour to show in the fields: they keep a black
+  const textSolidColor = textTargetColor === 'transparent' ? '#000000' : textTargetColor
+  const initialColor = isTextTarget ? textSolidColor : targetShape?.fill ?? '#0066ff'
   const [color, setColor] = useState(initialColor)
   const [baseColor, setBaseColor] = useState<string | null>(initialColor)
   const baseColors = useRef({ fill: targetShape?.fill ?? '#0066ff', stroke: targetShape?.stroke ?? '#000000' })
@@ -74,7 +76,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
   useEffect(() => {
     baseColors.current = { fill: targetShape?.fill ?? '#0066ff', stroke: targetShape?.stroke ?? '#000000' }
     // the panel stays open while the selection moves to another shape: show that shape's colours, not the last one's
-    const selectedColor = isTextTarget ? textTargetColor : baseColors.current[target]
+    const selectedColor = isTextTarget ? textSolidColor : baseColors.current[target]
     setBaseColor(selectedColor)
     setColor(selectedColor)
     setOpacity(targetShape?.opacity ?? 1)
@@ -83,7 +85,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
   }, [shapeSelectionKey, targetShape?.id, textId, textTargetColor, textColorTarget])
 
   useEffect(() => {
-    const targetColor = isTextTarget ? textTargetColor : baseColors.current[target]
+    const targetColor = isTextTarget ? textSolidColor : baseColors.current[target]
     setBaseColor(targetColor)
     setColor(targetColor)
   }, [target, textTargetColor, textColorTarget])
@@ -94,7 +96,13 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
     setColor(next ?? '#000000')
     baseColors.current[target] = next ?? '#000000'
     if (isTextTarget) {
-      const applied = next ? tintHex(next, tintValue) : '#000000'
+      // "none": a text without a fill is transparent, and an outline of none is one of no width
+      if (next === null) {
+        if (textColorTarget === 'outline') onTextOutlineWidth?.(0)
+        else onTextColor?.('transparent')
+        return
+      }
+      const applied = tintHex(next, tintValue)
       if (textColorTarget === 'outline') onTextOutlineColor?.(applied)
       else onTextColor?.(applied)
       return
@@ -355,7 +363,7 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
               : <FillStrokeSwatches kind="shape" fill={targetShape?.fill ?? null} stroke={targetShape?.stroke ?? null} strokeWidth={targetShape?.strokeWidth ?? 0} onWidth={targetShape ? (strokeWidth) => onShape({ strokeWidth }) : undefined} active={target} onSelect={onTarget} label={t('החל צבע על')} />}
           </Group>
           <Group title={t('דוגמיות צבע')}>
-            <FillPicker label={t('דוגמיות צבע')} value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
+            <FillPicker label={t('דוגמיות צבע')} value={isTextTarget ? (textColorTarget === 'outline' ? ((textStyle?.outlineWidth ?? 0) > 0 ? textTargetColor : null) : textTargetColor === 'transparent' ? null : textTargetColor) : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
           </Group>
           <Group title={t('מודל צבע')}>
             <select className="select" value={model} onChange={(e) => setModel(e.target.value as ColorModel)}>

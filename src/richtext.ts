@@ -6,7 +6,8 @@ import { decorationClass, decorationVars } from './decorations'
 
 export function textOutlineShadow(style: CharStyle, scale: number): string {
   const radius = (style.outlineWidth ?? 0) * scale
-  if (radius <= 0) return ''
+  // a text with no fill is drawn hollow, with a stroke (see isHollowText): shadows of its shape would fill it in
+  if (radius <= 0 || style.color === 'transparent') return ''
   const color = style.outlineColor ?? '#000000'
   return Array.from({ length: 16 }, (_, index) => {
     const angle = (index * Math.PI * 2) / 16
@@ -18,6 +19,9 @@ export function textOutlineStroke(style: CharStyle, scale: number): string {
   const width = (style.outlineWidth ?? 0) * scale
   return width > 0 ? `${Number(width.toFixed(3))}px ${style.outlineColor ?? '#000000'}` : ''
 }
+
+/** A text with no fill but an outline: only the outline is drawn, as a stroke round the letters. */
+export const isHollowText = (style: CharStyle): boolean => style.color === 'transparent' && (style.outlineWidth ?? 0) > 0
 
 export function textDropShadow(style: CharStyle, scale: number): string {
   const opacity = Math.max(0, Math.min(1, style.shadowOpacity ?? 0))
@@ -44,7 +48,7 @@ export function applyRunStyle(el: HTMLElement, style: CharStyle, scale: number, 
     outlineMode === 'shadow' ? textOutlineShadow(style, scale) : '',
     textDropShadow(style, scale),
   ].filter(Boolean).join(', ')
-  if (outlineMode === 'stroke') el.style.setProperty('-webkit-text-stroke', textOutlineStroke(style, scale))
+  if (outlineMode === 'stroke' || isHollowText(style)) el.style.setProperty('-webkit-text-stroke', textOutlineStroke(style, scale))
   // tracking is 1/1000 em (the standard typographic unit)
   el.style.letterSpacing = style.tracking ? `${(style.tracking / 1000) * style.fontSize * scale}px` : ''
   // baseline shift: moved by `top`, not by vertical-align, so the line keeps its height

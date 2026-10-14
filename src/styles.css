@@ -292,6 +292,7 @@ svg { display: block; }
 .context-color-preview:hover, .context-color-preview.active { outline: 1px solid var(--accent-line); outline-offset: 1px; }
 .context-color-preview span { font-family: 'Times New Roman', serif; font-size: 22px; font-weight: 700; line-height: 1; }
 .context-outline-preview span { -webkit-text-fill-color: #000; -webkit-text-stroke: 1px #fff; paint-order: stroke fill; }
+.context-fill-preview.none { background: linear-gradient(135deg, transparent 45%, #ff5c5c 45% 55%, transparent 55%), var(--bg-field); }
 .context-outline-preview .context-shape-preview { -webkit-text-stroke: 0; }
 .context-color-preview .context-shape-preview { width: 20px; height: 20px; border-radius: 1px; }
 .context-color-preview .context-shape-fill { border: 1px solid var(--border-strong); background-color: #fff; }

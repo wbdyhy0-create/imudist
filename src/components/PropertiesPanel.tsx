@@ -197,7 +197,7 @@ export function CharControls({ style, onCharStyle, sizeMixed, onSizeStep, onLead
             {afterTracking}
             {samples && (
               <Labeled label={t('דוגמיות צבע')}>
-                <FillPicker label={t('צבע הטקסט')} value={style.color ?? '#111111'} samples={samples} onChange={(color) => onCharStyle({ color: color ?? '#111111' })} />
+                <FillPicker label={t('צבע הטקסט')} value={(style.color ?? '#111111') === 'transparent' ? null : style.color ?? '#111111'} samples={samples} onChange={(color) => onCharStyle({ color: color ?? 'transparent' })} />
               </Labeled>
             )}
             <Labeled label={t('קו מתאר לאותיות')}>

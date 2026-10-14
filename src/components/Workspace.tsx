@@ -11617,9 +11617,9 @@ export function Workspace({
         }}
         onSwatchFill={(color) => {
           if (selShape) updateShape(selShape.id, { fill: color, fillGradient: undefined }, `context-fill:${selShape.id}`)
-          else if (footnoteSel) applyFootnoteCharStyle({ color: color ?? '#ffffff' })
-          else if (selFrame) applyCharStyle(selFrame.id, { color: color ?? '#ffffff' })
-          else if (panelHead) applyCharStyle(panelHead.id, { color: color ?? '#ffffff' })
+          else if (footnoteSel) applyFootnoteCharStyle({ color: color ?? 'transparent' })
+          else if (selFrame) applyCharStyle(selFrame.id, { color: color ?? 'transparent' })
+          else if (panelHead) applyCharStyle(panelHead.id, { color: color ?? 'transparent' })
           else if (toolbarTable) applyTableFormatting({ color: color ?? '#ffffff' })
         }}
         onSwatchStroke={(color) => {

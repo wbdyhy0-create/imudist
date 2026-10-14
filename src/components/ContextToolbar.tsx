@@ -142,7 +142,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
           {shape?.kind !== 'line' && <div className="context-swatch-wrap">
             <button
               type="button"
-              className={'context-color-preview context-fill-preview' + (openPalette === 'fill' ? ' active' : '')}
+              className={'context-color-preview context-fill-preview' + (openPalette === 'fill' ? ' active' : '') + (!shape && fillValue === 'transparent' ? ' none' : '')}
               aria-label={t('צבע מילוי')}
               aria-expanded={openPalette === 'fill'}
               title={t('צבע מילוי')}
@@ -155,7 +155,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
             </button>
             {openPalette === 'fill' && (
               <div className="context-swatch-popover">
-                <FillPicker label={t('צבע מילוי')} value={fillValue} samples={colorSamples} onChange={(color) => { onSwatchFill(color); setOpenPalette(null) }} />
+                <FillPicker label={t('צבע מילוי')} value={fillValue === 'transparent' ? null : fillValue} samples={colorSamples} onChange={(color) => { onSwatchFill(color); setOpenPalette(null) }} />
               </div>
             )}
           </div>}

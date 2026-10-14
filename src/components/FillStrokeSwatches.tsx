@@ -49,7 +49,7 @@ export function FillStrokeSwatches({
         type="button"
         role="radio"
         aria-checked={active === 'fill'}
-        className={'context-color-preview context-fill-preview' + (active === 'fill' ? ' active' : '')}
+        className={'context-color-preview context-fill-preview' + (active === 'fill' ? ' active' : '') + (kind === 'text' && fill === 'transparent' ? ' none' : '')}
         aria-label={t('צבע מילוי')}
         title={t('צבע מילוי')}
         onMouseDown={(event) => event.preventDefault()}
