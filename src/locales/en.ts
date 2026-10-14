@@ -5,6 +5,7 @@ import { enMore } from './en.more'
 import { enStyles } from './en.styles'
 import { enChrome } from './en.chrome'
 import { enPanels } from './en.panels'
+import { enMerge } from './en.merge'
 
 /** English: the Hebrew text of the code on the left, what the interface shows on the right */
 const menus: Record<string, string> = {
@@ -151,6 +152,7 @@ const menus: Record<string, string> = {
   'בחר טבלה': 'Select table',
   'אפשרויות טבלה…': 'Table options…',
   'אפשרויות תא…': 'Cell options…',
+  'הוספת שורה ועמודה': 'Insert row and column',
   'הוספת שורה מעל': 'Insert row above',
   'הוספת שורה מתחת': 'Insert row below',
   'הוספת עמודה מימין': 'Insert column to the right',
@@ -211,4 +213,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages, ...enStyles, ...enMore, ...enModules }
+export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages, ...enStyles, ...enMore, ...enModules, ...enMerge }

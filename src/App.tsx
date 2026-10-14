@@ -7,11 +7,13 @@ import { Modal } from './components/Modal'
 import { MinimumFontNotice } from './components/MinimumFontNotice'
 import { DocumentSetupDialog } from './components/DocumentSetupDialog'
 import { ExportPdfDialog } from './components/ExportPdfDialog'
+import { DataMergeDialog } from './components/DataMergeDialog'
+import { tokensIn, type MergeField } from './dataMerge'
 import { SeparationPreviewDialog } from './components/SeparationPreviewDialog'
 import { NewDocumentDialog } from './components/NewDocumentDialog'
 import { DocTabs } from './components/DocTabs'
 import { Workspace, type WorkspaceHandle } from './components/Workspace'
-import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type ObjectStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
+import { DEFAULT_PARAGRAPH_STYLES, defaultDocSettings, defaultTextStyle, marginsOf, MAX_PAGE_PT, MIN_PAGE_PT, type CharacterStyleRecord, type ObjectStyleRecord, type DocSettings, type Guide, type ImageFrame, type LayerInfo, type PageSection, type ParagraphStyleRecord, type ParentPage, type ShapeFrame, type TextFrame } from './document'
 import { DEFAULT_SHAPE_PREFS, type ShapePrefs } from './shapes'
 import { emptyPrimaryFrameIds, type FlowMode } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
@@ -150,7 +152,7 @@ export default function App() {
   const [newPreset, setNewPreset] = useState<PagePreset | null>(null)
   const [newPresetUnit, setNewPresetUnit] = useState<Unit | null>(null)
   /** the left-hand dialog: creating a document, or changing the open document's settings */
-  const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | 'separations' | null>(null)
+  const [dialog, setDialog] = useState<'new' | 'setup' | 'export' | 'separations' | 'merge' | null>(null)
   /** the page the separation preview opens on (the one that is shown when it is asked for) */
   const [separationPage, setSeparationPage] = useState(0)
   const dialogOpen = dialog !== null
@@ -273,10 +275,25 @@ export default function App() {
   // made while the export dialog is open (and nothing else is edited), not on every change: laying the text out to find
   // the running headers of each page is not cheap
   const exportContent = useMemo(() => {
-    if ((dialog !== 'export' && dialog !== 'separations') || !doc) return null
+    if ((dialog !== 'export' && dialog !== 'separations' && dialog !== 'merge') || !doc) return null
     return exportContentOf(exportSourceOf(session))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialog, doc, session.frames, session.images, session.shapes, session.layerOrder, session.layers, session.assets, session.paragraphStyles, session.characterStyles, session.sections, session.parents, session.pageParents, session.parentOverrides])
+
+  /** the data merge dialog: a text frame with the mark of a field on the first page (the card), one under the other */
+  const addMergeField = (field: MergeField) => {
+    const current = sessionRef.current
+    if (!current.doc) return
+    const card = pageRects(current.doc)[0]
+    if (!card) return
+    const picture = field.type === 'image'
+    const w = picture ? Math.min(80, card.w / 2) : Math.max(40, card.w - 40)
+    const h = picture ? w : 24
+    const placed = current.frames.filter((frame) => tokensIn(frame.text).length > 0).length
+    const y = Math.min(card.y + 20 + placed * (h + 4), card.y + Math.max(0, card.h - h - 4))
+    const frame: TextFrame = { ...defaultTextStyle(), id: crypto.randomUUID(), x: card.x + 20, y, w, h, text: `{{${field.name}}}`, runs: [], next: null }
+    current.pages.commit({ frames: [...current.frames, frame] })
+  }
 
   const exportCurrentPagePng = useCallback(async () => {
     const current = sessionRef.current
@@ -677,6 +694,7 @@ export default function App() {
         spellcheck,
         toggleSpellcheck: () => setSpellcheck(!spellcheck),
         exportPdf: () => setDialog('export'),
+        dataMerge: () => setDialog('merge'),
         separationPreview: () => {
           setSeparationPage(ws.current?.currentPageIndex() ?? 0)
           setDialog('separations')
@@ -1031,6 +1049,9 @@ export default function App() {
         )}
         {dialog === 'separations' && doc && exportContent && (
           <SeparationPreviewDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} layerOrder={session.layerOrder} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} initialPage={separationPage} onClose={closeDialog} />
+        )}
+        {dialog === 'merge' && doc && exportContent && (
+          <DataMergeDialog template={exportContent} onAddField={addMergeField} onClose={closeDialog} />
         )}
         {dialog === 'export' && doc && exportContent && (
           <ExportPdfDialog doc={doc} frames={exportContent.frames} images={exportContent.images} shapes={exportContent.shapes} layerOrder={session.layerOrder} assets={session.assets} paragraphStyles={session.paragraphStyles} sections={session.sections} onClose={closeDialog} />

@@ -9,6 +9,7 @@ import { en } from './locales/en'
 const TRANSLATED = [
   'DocumentSetupDialog',
   'ExportPdfDialog',
+  'DataMergeDialog',
   'PrintMarksFields',
   'TableOptionsDialog',
   'InsertTableDialog',

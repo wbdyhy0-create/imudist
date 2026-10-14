@@ -5,6 +5,7 @@ import { arMore } from './ar.more'
 import { arStyles } from './ar.styles'
 import { arChrome } from './ar.chrome'
 import { arPanels } from './ar.panels'
+import { arMerge } from './ar.merge'
 
 /**
  * Arabic: the Hebrew text of the code on the left, what the interface shows on the right. A draft to be gone over by a native
@@ -75,6 +76,7 @@ const menus: Record<string, string> = {
   'בחר עמודה': 'تحديد عمود',
   'בחר טבלה': 'تحديد الجدول',
   'אפשרויות טבלה…': 'خيارات الجدول…',
+  'הוספת שורה ועמודה': 'إدراج صف وعمود',
   'הוספת שורה מעל': 'إدراج صف أعلاه',
   'הוספת שורה מתחת': 'إدراج صف أدناه',
   'מחיקת שורה': 'حذف صف',
@@ -109,4 +111,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages, ...arStyles, ...arMore, ...arModules }
+export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages, ...arStyles, ...arMore, ...arModules, ...arMerge }

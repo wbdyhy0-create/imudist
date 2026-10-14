@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { getHelpTopicResults, normalizeHelpQuery } from './HelpSearch'
 import { getHelpTopicCategory, HELP_TOPICS } from './HelpTopics'
+
+// each search goes through every help topic: the tests that make dozens of them need more than the default five seconds on a slow machine
+vi.setConfig({ testTimeout: 60_000 })
 
 const search = (query: string) => getHelpTopicResults(normalizeHelpQuery(query))
 

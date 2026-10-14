@@ -304,6 +304,11 @@ svg { display: block; }
 .context-outline-stepper button:first-of-type { grid-column: 1; grid-row: 1; }
 .context-outline-stepper button:last-of-type { grid-column: 1; grid-row: 2; }
 .context-outline-stepper button:hover { border-color: var(--accent-line); color: #fff; }
+/* the small "i" that explains a control in the data merge window: the bubble opens while the pointer (or the keyboard focus) is on it */
+.merge-info { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-inline-start: 8px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text-dim); font: italic 700 11px/1 'Times New Roman', serif; cursor: help; vertical-align: middle; }
+.merge-info:hover, .merge-info:focus-visible { color: #fff; border-color: var(--accent-line); outline: none; }
+.merge-info:hover::after, .merge-info:focus-visible::after { content: attr(data-tip); position: absolute; z-index: 5; bottom: calc(100% + 6px); inset-inline-end: 0; width: max-content; max-width: 230px; padding: 6px 9px; border: 1px solid var(--border-strong); border-radius: 5px; background: #111; color: #fff; font-family: inherit; font-size: 12px; line-height: 1.4; font-style: normal; font-weight: 400; text-align: start; box-shadow: 0 4px 14px #0008; pointer-events: none; }
+.merge-fields td { padding: 3px 6px; }
 .context-swatch-pair { position: relative; width: 34px; height: 28px; flex: none; }
 .context-swatch-row { display: flex; align-items: flex-end; gap: 8px; direction: rtl; }
 .context-swatch-row .swatch-row { flex: 1; direction: rtl; }

@@ -70,6 +70,8 @@ export interface MenuContext {
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
   exportPdf: () => void
+  /** Window > מיזוג נתונים…: the card of the document and a table of records become a PDF of cards on sheets */
+  dataMerge: () => void
   /** the page as the four inks of a press, each shown or hidden (View > Separation Preview) */
   separationPreview: () => void
   exportPng: () => void
@@ -350,10 +352,15 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         doc('אפשרויות טבלה…', '', (ws) => ws.tableCommand('options')),
         doc('אפשרויות תא…', '', (ws) => ws.tableCommand('cell-options')),
         sep,
-        doc('הוספת שורה מעל', '', (ws) => ws.tableCommand('row-above')),
-        doc('הוספת שורה מתחת', '', (ws) => ws.tableCommand('row-below')),
-        doc('הוספת עמודה מימין', '', (ws) => ws.tableCommand('col-start')),
-        doc('הוספת עמודה משמאל', '', (ws) => ws.tableCommand('col-end')),
+        {
+          label: 'הוספת שורה ועמודה',
+          submenu: [
+            doc('הוספת שורה מעל', '', (ws) => ws.tableCommand('row-above')),
+            doc('הוספת שורה מתחת', '', (ws) => ws.tableCommand('row-below')),
+            doc('הוספת עמודה מימין', '', (ws) => ws.tableCommand('col-start')),
+            doc('הוספת עמודה משמאל', '', (ws) => ws.tableCommand('col-end')),
+          ],
+        },
         sep,
         doc('מחיקת שורה', '', (ws) => ws.tableCommand('delete-row')),
         doc('מחיקת עמודה', '', (ws) => ws.tableCommand('delete-col')),
@@ -422,6 +429,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
               : c.fontStatus === 'unavailable'
                 ? [{ label: 'הדפדפן אינו מאפשר לקרוא גופנים מותקנים (נדרש Chrome או Edge).', disabled: true }]
                 : []),
+        { label: 'מיזוג נתונים…', disabled: !c.hasDoc, onClick: c.dataMerge },
         { separator: true },
         {
           label: 'כלים',
