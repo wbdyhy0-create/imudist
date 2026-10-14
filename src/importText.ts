@@ -48,7 +48,7 @@ export interface ImportedFootnote {
 export interface ImportedParagraphStyle {
   wordId: string
   name: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'align'>>
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'weight' | 'italic' | 'fontSize' | 'align'>> & { pageBreakBefore?: boolean }
 }
 
 export class ImportError extends Error {}
@@ -283,7 +283,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   }
 
   // styles: paragraph / character styles with inheritance, plus the document's defaults
-  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string; isDefault: boolean; bidi: boolean }>()
+  const styles = new Map<string, { basedOn: string | null; props: RProps; align?: TextAlign; name: string; type: string; isDefault: boolean; bidi: boolean; pageBreak?: boolean }>()
   let defaults: RProps = {}
   let defaultParagraphStyle: string | null = null
   if (stylesXml) {
@@ -292,7 +292,8 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
     for (const s of elements(sdoc, 'style')) {
       const id = attr(s, 'styleId')
       if (!id) continue
-      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '', isDefault: attr(s, 'default') === '1', bidi: !!child(child(s, 'pPr'), 'bidi') })
+      const pageBreakElement = child(child(s, 'pPr'), 'pageBreakBefore')
+      styles.set(id, { basedOn: attr(child(s, 'basedOn'), 'val'), props: readRPr(child(s, 'rPr'), themeFonts), align: readJc(child(s, 'pPr')), name: attr(child(s, 'name'), 'val') ?? id, type: attr(s, 'type') ?? '', isDefault: attr(s, 'default') === '1', bidi: !!child(child(s, 'pPr'), 'bidi'), ...(pageBreakElement ? { pageBreak: !/^(0|false|off)$/i.test(attr(pageBreakElement, 'val') ?? '') } : {}) })
       if (attr(s, 'type') === 'paragraph' && attr(s, 'default') === '1') defaultParagraphStyle = id
     }
   }
@@ -303,6 +304,11 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
   const styleBidi = (id: string | null, depth = 0): boolean => {
     const style = id && depth < 12 ? styles.get(id) : undefined
     return !!style && (style.bidi || styleBidi(style.basedOn, depth + 1))
+  }
+  // "page break before" of a paragraph style: its own setting, else the one of the style it is based on
+  const stylePageBreak = (id: string | null, depth = 0): boolean => {
+    const style = id && depth < 12 ? styles.get(id) : undefined
+    return !!style && (style.pageBreak ?? stylePageBreak(style.basedOn, depth + 1))
   }
   const baseSize = defaults.size ?? 12
   // Word character styles that runs use (not the default one): they come in as character styles, and the runs stay tied to them
@@ -415,6 +421,7 @@ export async function placedFromDocx(name: string, buffer: ArrayBuffer, options:
           italic: !!resolved.italic,
           ...(resolved.color ? { color: resolved.color } : {}),
           ...(resolved.align ? { align: resolved.align } : {}),
+          ...(stylePageBreak(wordId) ? { pageBreakBefore: true } : {}),
         },
       }
     })

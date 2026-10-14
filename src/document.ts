@@ -226,8 +226,8 @@ export interface ParagraphSequence {
   skipEmpty?: boolean
 }
 
-/** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side */
-export type TextAlign = 'right' | 'center' | 'left' | 'justify' | 'justifyCenter'
+/** `justifyCenter`: justified like `justify`, except its last line is centered instead of run to the story's own side; `justifyAll`: the last line is justified too */
+export type TextAlign = 'right' | 'center' | 'left' | 'justify' | 'justifyCenter' | 'justifyAll'
 
 /**
  * The direction a paragraph reads in. A document written before this was a setting has none, and reads right to left;
@@ -275,9 +275,11 @@ export function lookTurnedBy(patch: SideLook, current: SideLook): SideLook {
 /** The side a paragraph starts on: where its first line begins and its second line is indented from. */
 export const startSideOf = (direction: TextDirection | undefined): 'left' | 'right' => (direction === 'ltr' ? 'left' : 'right')
 
-/** The CSS for an align value: `justifyCenter` isn't a real `text-align` keyword, so it becomes `justify` plus `text-align-last`. */
-export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' | 'left' | 'justify'; textAlignLast?: 'center' } {
-  return align === 'justifyCenter' ? { textAlign: 'justify', textAlignLast: 'center' } : { textAlign: align }
+/** The CSS for an align value: `justifyCenter` and `justifyAll` aren't real `text-align` keywords, so they become `justify` plus `text-align-last`. */
+export function cssTextAlign(align: TextAlign): { textAlign: 'right' | 'center' | 'left' | 'justify'; textAlignLast?: 'center' | 'justify' } {
+  if (align === 'justifyCenter') return { textAlign: 'justify', textAlignLast: 'center' }
+  if (align === 'justifyAll') return { textAlign: 'justify', textAlignLast: 'justify' }
+  return { textAlign: align }
 }
 
 /** Character formatting: can differ from one piece of text to the next. */
@@ -439,7 +441,7 @@ export function paraLineHeightOf(style: TextStyle): number | undefined {
  * wraps lines shorter/longer than the real render actually can, silently mis-measuring a frame's fit.
  */
 export function wordSpacingPt(style: TextStyle): number {
-  const justified = style.align === 'justify' || style.align === 'justifyCenter'
+  const justified = style.align === 'justify' || style.align === 'justifyCenter' || style.align === 'justifyAll'
   // the wanted spacing of any paragraph; a justified one has the middle of its minimum and maximum on top of it
   const percent = (style.wordSpacing ?? 100) - 100 + (justified ? ((style.wordSpacingMin ?? 90) + (style.wordSpacingMax ?? 120)) / 2 - 100 : 0)
   // a typical space is about a quarter of an em; word-spacing is an amount ADDED to it, not a multiplier
@@ -685,7 +687,7 @@ export interface ParagraphStyleRecord {
   basedOnId?: string
   /** the style a NEW paragraph gets when Enter splits one on this style; missing (or equal to this style's own id) means "the same style", the usual default in professional layout tools */
   nextStyleId?: string
-  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'direction'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
+  patch: Partial<Pick<TextStyle, 'fontFamily' | 'color' | 'outlineColor' | 'outlineWidth' | 'weight' | 'italic' | 'fontSize' | 'leading' | 'tracking' | 'align' | 'wordSpacingMin' | 'wordSpacingMax' | 'wordSpacing' | 'spaceBefore' | 'spaceAfter' | 'indentLeft' | 'indentRight' | 'firstLineIndent' | 'direction'>> & { tint?: number; overprintFill?: boolean; overprintStroke?: boolean; strokeWidth?: number; keepLinesTogether?: boolean; keepWithNext?: boolean; pageBreakBefore?: boolean; listKind?: 'bullet' | 'number'; listGap?: number } & ParagraphBox
 }
 
 /** The only paragraph style every new document starts with; part of `DocContent`, saved with the file. */

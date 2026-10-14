@@ -22,6 +22,7 @@ import { chainOf, insetBox, styleOf } from './frames'
 import { buildParagraphNodes, buildRunNodes, buildWrapFloats, type ParagraphPatch, type RunNodeOpts } from './richtext'
 import { openingRange } from './windowText'
 import { firstLineLift } from './firstLine'
+import { cutAtPageBreak, pageBreakStarts } from './pageBreaks'
 import { atParaStart, normalizeRuns, paraIndexAt, sliceRuns } from './story'
 import { floatsFor, floatsKey, type WrapFloat } from './wrap'
 import { footnoteBlockWidth, footnoteDividerHeight, footnoteLabelParts, footnoteReferenceLook, footnoteTextStyle, formatFootnoteNumber, layoutFootnotes, type FootnotePlacement, type FootnoteLayoutItem } from './footnoteLayout'
@@ -872,6 +873,7 @@ export function flowFrames(
       const m = getMeasurer()
       configure(m, style)
       const gaps = paraGapsOf(style, head, story)
+      const breakStarts = pageBreakStarts(head, paragraphStyles)
       const spaceBeforeFirst = frameSpaceBefore(style, head)
       const spaceAfterLast = frameSpaceAfter(style, head, story)
       // a text box of its own has its first line moved down when the leading is tighter than the letters; the frames of a thread are left
@@ -1090,6 +1092,11 @@ export function flowFrames(
             const kept = adjustForKeepLines(m, story, runs, start, chosen.end, chosen.box, floats[i], paraOpts, head.paragraphStylePatches, head.paraKeepFirstLines, head.paraKeepLastLines)
             const settled = adjustForKeepWithNext(m, story, runs, start, kept, chosen.box, floats[i], paraOpts, head.paragraphStylePatches, keepWithNextToOtherStyle(head.paraKeepWithNext, head.paragraphStyleIds), head.paraKeepFirstLines)
             if (settled > start) chosen = { ...chosen, end: settled }
+          }
+          // a paragraph whose style starts on a new page: the frame ends before it, and the next one opens with it
+          if (breakStarts.length && chosen.end > start) {
+            const cut = cutAtPageBreak(breakStarts, start, chosen.end)
+            if (cut !== chosen.end) chosen = { ...chosen, end: cut }
           }
           ranges.push({ start, end: chosen.end })
           start = chosen.end

@@ -55,7 +55,7 @@ function headingLevel(name: string | undefined): number | undefined {
   return /^(?:heading|title|כותרת)/i.test(name.trim()) ? 1 : undefined
 }
 
-const alignOf = (value: string | undefined): ParagraphOut['align'] => (value === 'center' || value === 'left' || value === 'justify' || value === 'right' ? value : value === 'justifyCenter' ? 'justify' : 'right')
+const alignOf = (value: string | undefined): ParagraphOut['align'] => (value === 'center' || value === 'left' || value === 'justify' || value === 'right' ? value : value === 'justifyCenter' || value === 'justifyAll' ? 'justify' : 'right')
 
 /** the pieces of text[from, to) with the style each has; a footnote mark is put where its anchor is */
 function piecesOf(text: string, runs: { len: number; style: CharStyle }[], base: CharStyle, from: number, to: number, anchors: { at: number; number: number }[]): Piece[] {

@@ -396,7 +396,7 @@ function RichText({
       {paragraphNodes.map((paragraph) => {
         const patch = paragraphPatches?.[paragraph.index]
         const marker = paragraph.index > startParaIndex || atParaStart ? paragraphListMarker(paragraphPatches, paragraph.index) : undefined
-        const isJustified = (patch?.align ?? baseAlign) === 'justify' || (patch?.align ?? baseAlign) === 'justifyCenter'
+        const isJustified = (patch?.align ?? baseAlign) === 'justify' || (patch?.align ?? baseAlign) === 'justifyCenter' || (patch?.align ?? baseAlign) === 'justifyAll'
         // the same sum as document.ts's wordSpacingPt: the wanted spacing, and for a justified paragraph its minimum / maximum on top
         const spacingPercent = (patch?.wordSpacing ?? 100) - 100 + (isJustified ? (((patch?.wordSpacingMin ?? 90) + (patch?.wordSpacingMax ?? 120)) / 2 - 100) : 0)
         const wordSpacing = patch && (patch.wordSpacingMin !== undefined || patch.wordSpacingMax !== undefined || patch.wordSpacing !== undefined) ? `${(spacingPercent * 0.25 * baseFontSize) / 100}px` : undefined

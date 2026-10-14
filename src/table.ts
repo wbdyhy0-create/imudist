@@ -747,7 +747,7 @@ export function tableLines(t: TableData, layout: TableLayout): TableLine[] {
 const COLOR = /^#[0-9a-fA-F]{6}$/
 const isColor = (v: unknown): v is string => typeof v === 'string' && COLOR.test(v)
 const num = (v: unknown, min: number, max: number, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback)
-const ALIGNS: TextAlign[] = ['right', 'center', 'left', 'justify', 'justifyCenter']
+const ALIGNS: TextAlign[] = ['right', 'center', 'left', 'justify', 'justifyCenter', 'justifyAll']
 const VALIGNS: CellVAlign[] = ['top', 'middle', 'bottom']
 
 function readStroke(v: unknown, fallback: TableStroke | null): TableStroke | null {

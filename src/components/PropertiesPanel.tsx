@@ -34,15 +34,21 @@ interface Props {
   onUnlink: () => void
 }
 
-/** The five alignments, their tooltip and their toolbar icon (a shared source so every place that offers them - the
- * context toolbar, the Properties panel, paragraph styles - shows the same five, the same way). */
+/** The six alignments, their tooltip and their toolbar icon (a shared source so every place that offers them - the
+ * context toolbar, the Properties panel, paragraph styles - shows the same ones, the same way). The icon of `justify` is for a
+ * paragraph that reads right to left; `alignIcon` gives the one for the direction. */
 export const ALIGNS: { id: TextAlign; label: string; icon: string }[] = [
   { id: 'right', get label() { return t('יישור לימין') }, icon: 'M4 6h16M8 10h12M4 14h16M8 18h12' },
   { id: 'center', get label() { return t('מירכוז') }, icon: 'M4 6h16M7 10h10M4 14h16M7 18h10' },
   { id: 'left', get label() { return t('יישור לשמאל') }, icon: 'M4 6h16M4 10h12M4 14h16M4 18h12' },
-  { id: 'justify', get label() { return t('יישור מלא לשני הצדדים') }, icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
+  { id: 'justify', get label() { return t('יישור מלא לשני הצדדים') }, icon: 'M4 6h16M4 10h16M4 14h16M11 18h9' },
   { id: 'justifyCenter', get label() { return t('יישור מלא לשני הצדדים, שורה אחרונה ממורכזת') }, icon: 'M4 6h16M4 10h16M4 14h16M7 18h10' },
+  { id: 'justifyAll', get label() { return t('יישור מלא לשני הצדדים, כולל שורה אחרונה') }, icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
 ]
+
+/** The icon of an alignment: the last line of a justified paragraph is short on the side the paragraph starts on (the left when it reads left to right). */
+export const alignIcon = (align: { id: TextAlign; icon: string }, direction: TextDirection | undefined): string =>
+  align.id === 'justify' && direction === 'ltr' ? 'M4 6h16M4 10h16M4 14h16M4 18h9' : align.icon
 
 /** the ways a paragraph can read: from the right, from the left, or by its own first letter */
 export const TEXT_DIRECTIONS: { id: TextDirection; short: string; title: string }[] = [
@@ -71,7 +77,7 @@ export function ParagraphTextControls({
               aria-pressed={style.align === align.id}
               onClick={() => onChange({ align: align.id })}
             >
-              <svg viewBox="0 0 24 24"><path d={align.icon} /></svg>
+              <svg viewBox="0 0 24 24"><path d={alignIcon(align, style.direction)} /></svg>
             </button>
           ))}
         </div>
@@ -93,7 +99,7 @@ export function ParagraphTextControls({
           ))}
         </div>
       </Labeled>
-      {(style.align === 'justify' || style.align === 'justifyCenter') && (
+      {(style.align === 'justify' || style.align === 'justifyCenter' || style.align === 'justifyAll') && (
         <>
           <p className="muted">{t('ריווח מילים חל רק ביישור מלא.')}</p>
           <div className="grid2">

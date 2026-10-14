@@ -59,7 +59,7 @@ const styles = `<?xml version="1.0" encoding="UTF-8"?>
       </Properties>
     </ParagraphStyle>
     <ParagraphStyleGroup Self="ParagraphStyleGroup/Titles" Name="Titles">
-      <ParagraphStyle Self="ParagraphStyle/Titles%3aHeading" Name="Heading" PointSize="30" FontStyle="Bold" Justification="FullyJustified">
+      <ParagraphStyle Self="ParagraphStyle/Titles%3aHeading" Name="Heading" PointSize="30" FontStyle="Bold" Justification="FullyJustified" StartParagraph="NextPage">
         <Properties>
           <Leading type="unit">36</Leading>
           <BasedOn type="object">ParagraphStyle/Body</BasedOn>
@@ -427,7 +427,7 @@ describe('the text of an IDML file', () => {
     const body = content.paragraphStyles.find((style) => style.name === 'Body')!
     expect(heading.basedOnId).toBe(body.id)
     expect(heading.nextStyleId).toBe(body.id)
-    expect(heading.patch).toMatchObject({ fontSize: 30, weight: 700, align: 'justify' })
+    expect(heading.patch).toMatchObject({ fontSize: 30, weight: 700, align: 'justify', pageBreakBefore: true })
     expect(body.patch).toMatchObject({ fontSize: 12, leading: 15, align: 'center', indentLeft: 6, color: '#000000' })
   })
 

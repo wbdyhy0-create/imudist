@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type Key
 import type { CharStyle, ColorSample, GradientFill, ShapeFrame } from '../document'
 import { cmykToRgb, hexToRgb, labToHex, rgbToCmyk, rgbToHex, rgbToLab, tintHex, type ColorModel } from '../colorModels'
 import { FillPicker } from './FillPicker'
+import { FillStrokeSwatches } from './FillStrokeSwatches'
 import { ColorLibrary } from './ColorLibrary'
 import { Group } from './PropertiesPanel'
 import { t } from '../i18n'
@@ -15,6 +16,7 @@ interface Props {
   onShape: (patch: Partial<ShapeFrame>) => void
   onTextColor?: (color: string) => void
   onTextOutlineColor?: (color: string) => void
+  onTextOutlineWidth?: (width: number) => void
   textColorTarget?: 'fill' | 'outline'
   onTextColorTarget?: (target: 'fill' | 'outline') => void
   target: 'fill' | 'stroke'
@@ -49,7 +51,7 @@ const INITIAL_SWATCHES: Swatch[] = [
 const DEFAULT_GRADIENT: GradientFill = { type: 'linear', start: '#ffffff', end: '#0066ff', stops: [{ offset: 0, color: '#ffffff' }, { offset: 1, color: '#0066ff' }] }
 const normalizedGradient = (value: GradientFill): GradientFill => value.stops?.length ? value : { ...value, stops: [{ offset: 0, color: value.start }, { offset: 1, color: value.end }] }
 
-export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, onSelectBrushColor, brushColor, brushRadius = 12, onBrushRadiusChange, brushStrength = 100, onBrushStrengthChange, onExitBrush }: Props) {
+export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId, onShape, onTextColor, onTextOutlineColor, onTextOutlineWidth, textColorTarget = 'fill', onTextColorTarget, target, onTarget, samples, onStartSampler, onDeleteSample, onSelectBrushColor, brushColor, brushRadius = 12, onBrushRadiusChange, brushStrength = 100, onBrushStrengthChange, onExitBrush }: Props) {
   const shapeTargets = selectedShapes?.length ? selectedShapes : shape ? [shape] : []
   const targetShape = shapeTargets[0] ?? null
   const shapeSelectionKey = shapeTargets.map((item) => item.id).join('|')
@@ -348,13 +350,12 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
       ) : (
         <>
           <Group title={isTextTarget ? t('יעד צבע') : t('מילוי וקו')}>
-            {isTextTarget ? <div className="seg small" role="radiogroup" aria-label={t('החל צבע על טקסט')}>
-              <button role="radio" aria-checked={textColorTarget === 'fill'} className={textColorTarget === 'fill' ? 'on' : ''} onClick={() => onTextColorTarget?.('fill')}>{t('מילוי')}</button>
-              <button role="radio" aria-checked={textColorTarget === 'outline'} className={textColorTarget === 'outline' ? 'on' : ''} onClick={() => onTextColorTarget?.('outline')}>{t('קו מתאר')}</button>
-            </div> : <div className="seg small" role="radiogroup" aria-label={t('החל צבע על')}>
-                <button role="radio" aria-checked={target === 'fill'} className={target === 'fill' ? 'on' : ''} onClick={() => onTarget('fill')}>{t('מילוי')}</button>
-              <button role="radio" aria-checked={target === 'stroke'} className={target === 'stroke' ? 'on' : ''} onClick={() => onTarget('stroke')}>{t('קו')}</button>
-            </div>}
+            {isTextTarget
+              ? <FillStrokeSwatches kind="text" fill={textStyle?.color ?? '#ffffff'} stroke={textStyle?.outlineColor ?? '#000000'} strokeWidth={textStyle?.outlineWidth ?? 0} onWidth={onTextOutlineWidth} active={textColorTarget === 'outline' ? 'stroke' : 'fill'} onSelect={(next) => onTextColorTarget?.(next === 'stroke' ? 'outline' : 'fill')} label={t('החל צבע על טקסט')} />
+              : <FillStrokeSwatches kind="shape" fill={targetShape?.fill ?? null} stroke={targetShape?.stroke ?? null} strokeWidth={targetShape?.strokeWidth ?? 0} onWidth={targetShape ? (strokeWidth) => onShape({ strokeWidth }) : undefined} active={target} onSelect={onTarget} label={t('החל צבע על')} />}
+          </Group>
+          <Group title={t('דוגמיות צבע')}>
+            <FillPicker label={t('דוגמיות צבע')} value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
           </Group>
           <Group title={t('מודל צבע')}>
             <select className="select" value={model} onChange={(e) => setModel(e.target.value as ColorModel)}>
@@ -370,9 +371,6 @@ export function ColorToolsPanel({ tool, shape, selectedShapes, textStyle, textId
             <input id="color-tint" type="range" min={0} max={100} value={tint} onChange={(e) => applyTint(Number(e.target.value))} />
             {!isTextTarget && <><label className="field-label" htmlFor="color-opacity">{t('שקיפות: {percent}%', { percent: Math.round(opacity * 100) })}</label>
             <input id="color-opacity" type="range" min={0} max={100} value={Math.round(opacity * 100)} onChange={(e) => { const next = Number(e.target.value) / 100; setOpacity(next); onShape({ opacity: next }) }} /></>}
-          </Group>
-          <Group title={t('דוגמיות צבע')}>
-            <FillPicker label={t('דוגמיות צבע')} value={isTextTarget ? textTargetColor : target === 'fill' ? targetShape?.fill ?? null : targetShape?.stroke ?? null} onChange={applyColor} />
           </Group>
         </>
       )}

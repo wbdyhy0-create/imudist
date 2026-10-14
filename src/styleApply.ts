@@ -149,7 +149,7 @@ export function restyleForParagraphChange(frames: TextFrame[], styles: Paragraph
     const usesDefaultStyle = !frame.paragraphStyleId && !hasParagraphStyles && styles[0]?.id === id
     if (!hasFrameStyle && !frame.paragraphStyleIds?.includes(id) && !usesDefaultStyle) return frame
     // the story as a whole is on this style: its look becomes the frame's own (the keep setting is a paragraph one, not a frame field)
-    const { keepLinesTogether, keepWithNext, listKind, listGap, background: _background, borderColor: _borderColor, borderWidth: _borderWidth, ...frameLook } = resolved
+    const { keepLinesTogether, keepWithNext, pageBreakBefore: _pageBreakBefore, listKind, listGap, background: _background, borderColor: _borderColor, borderWidth: _borderWidth, ...frameLook } = resolved
     if ((hasFrameStyle || usesDefaultStyle) && !hasParagraphStyles) {
       const count = frame.text.split('\n').length
       // "keep all lines" follows the style; a minimum of first/last lines set on a paragraph itself stays

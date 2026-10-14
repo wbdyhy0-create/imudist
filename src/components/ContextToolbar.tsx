@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { BLEND_MODES, DEFAULT_SPACE_AFTER, MAX_PAGE_PT, type BlendMode, type CharStyle, type ColorSample, type ImageFrame, type Sharpness, type ShapeFrame, type TextAlign, type TextDirection, type TextFrame, type TextStyle } from '../document'
 import { SHARPNESS_LEVELS } from '../sharpness'
 import { FillPicker } from './FillPicker'
-import { ALIGNS, TEXT_DIRECTIONS } from './PropertiesPanel'
+import { ALIGNS, alignIcon, TEXT_DIRECTIONS } from './PropertiesPanel'
 import { ArrangeButtons } from './ArrangeButtons'
 import type { ToolId } from './Toolbox'
 import type { ArrangeOp } from '../stacking'
@@ -171,7 +171,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
             >
               {shape
                 ? <span className="context-shape-preview context-shape-outline" style={{ borderColor: strokeValue ?? '#ffffff', borderWidth: `${Math.min(6, Math.max(1, (currentOutlineWidth || 0.25) * 96 / 72))}px` }} />
-                : <span style={{ color: 'transparent', WebkitTextStroke: `${Math.max(0.5, (currentOutlineWidth || 0.25) * 96 / 72)}px ${strokeValue ?? '#000000'}` }}>{t('א')}</span>}
+                : <span>{t('א')}</span>}
             </button>
             {openPalette === 'stroke' && (
               <div className="context-swatch-popover">
@@ -205,7 +205,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
           <button className={'context-command' + (char.italic ? ' active' : '')} title={t('נטוי')} onClick={() => onCharStyle?.({ italic: !char.italic })}>I</button>
           {fontSizeControl}
           <div className="context-align-buttons" role="group" aria-label={t('יישור')}>
-            {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={a.icon} /></svg></button>)}
+            {ALIGNS.map((a) => <button key={a.id} data-tooltip={a.label} title={a.label} className={para.align === a.id ? 'active' : ''} onClick={() => onAlign?.(a.id)}><svg viewBox="0 0 24 24"><path d={alignIcon(a, para.direction)} /></svg></button>)}
           </div>
           {onDirection && (
             <ToolbarMenu highlighted compact label={(TEXT_DIRECTIONS.find((d) => d.id === (para.direction ?? 'rtl')) ?? TEXT_DIRECTIONS[0]).short} title={t('כיוון הטקסט')}>

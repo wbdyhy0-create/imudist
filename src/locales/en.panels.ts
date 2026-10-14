@@ -147,6 +147,7 @@ export const enPanels: Record<string, string> = {
   'יישור לשמאל': 'Align left',
   'יישור מלא לשני הצדדים': 'Justify',
   'יישור מלא לשני הצדדים, שורה אחרונה ממורכזת': 'Justify, last line centered',
+  'יישור מלא לשני הצדדים, כולל שורה אחרונה': 'Justify all lines, including the last',
   'ריווח מילים חל רק ביישור מלא.': 'Word spacing applies only with justification.',
   'ריווח מילים מינימלי (%)': 'Minimum word spacing (%)',
   'ריווח מילים מרבי (%)': 'Maximum word spacing (%)',

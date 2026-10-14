@@ -389,6 +389,8 @@ function styleProps(values: Map<string, string>, colors: ColorMap): ParagraphPat
   if (isTrue(values.get('KeepLinesTogether'))) patch.keepLinesTogether = true
   const keepNext = values.get('KeepWithNext')
   if (keepNext && number(keepNext) > 0) patch.keepWithNext = true
+  // "start paragraph" on the next page, column or frame (an odd or even page too: those are taken as the next frame)
+  if (/^Next/i.test(values.get('StartParagraph') ?? '')) patch.pageBreakBefore = true
   const list = values.get('BulletsAndNumberingListType')
   if (list && /^BulletList$/i.test(list)) patch.listKind = 'bullet'
   else if (list && /^NumberedList$/i.test(list)) patch.listKind = 'number'

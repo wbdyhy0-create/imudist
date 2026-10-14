@@ -135,7 +135,7 @@ export function decorationVars(deco: ParagraphDecoration, scale: number, context
     // behind the heading: the drawing (or the fill and the line of the style) is stretched over the box of the text, which is as wide as
     // its longest line (as wide as the column for a justified paragraph) and as high as its lines - so every heading has its own size
     const align = context.align
-    const full = align === 'justify' || align === 'justifyCenter'
+    const full = align === 'justify' || align === 'justifyCenter' || align === 'justifyAll'
     vars['--deco-fit'] = full ? 'auto' : 'fit-content'
     // in a right-to-left column the start is the right: a heading aligned there stays there, one aligned left or centred follows it
     const placement = full ? ['0', '0'] : align === 'center' ? ['auto', 'auto'] : align === 'left' ? ['auto', '0'] : ['0', 'auto']
