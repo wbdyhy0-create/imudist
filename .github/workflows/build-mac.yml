@@ -2,6 +2,10 @@ name: Build macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      trial_days:
+        description: 'Length of the trial build, in days'
+        default: '180'
   push:
     tags: ['v*']
 
@@ -11,11 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-latest, target: aarch64-apple-darwin, variant: full, trial_days: '' }
-          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: full, trial_days: '' }
-          - { runner: macos-latest, target: aarch64-apple-darwin, variant: trial, trial_days: '180' }
-          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: trial, trial_days: '180' }
+          - { runner: macos-latest, target: aarch64-apple-darwin, variant: full }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: full }
+          - { runner: macos-latest, target: aarch64-apple-darwin, variant: trial }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, variant: trial }
     runs-on: ${{ matrix.runner }}
+    env:
+      TRIAL_DAYS: ${{ inputs.trial_days || '180' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,10 +42,10 @@ jobs:
 
       - run: npm ci
 
-      # the trial variant stops working 180 days after its first start (VITE_TRIAL_DAYS, see src/trial.ts)
+      # the trial variant stops working after the given number of days from its first start (VITE_TRIAL_DAYS, see src/trial.ts)
       - run: npx tauri build --target ${{ matrix.target }} --bundles app,dmg
         env:
-          VITE_TRIAL_DAYS: ${{ matrix.trial_days }}
+          VITE_TRIAL_DAYS: ${{ matrix.variant == 'trial' && env.TRIAL_DAYS || '' }}
 
       - name: Check the app signature
         run: codesign --verify --deep --strict --verbose=2 src-tauri/target/${{ matrix.target }}/release/bundle/macos/Imudist.app
@@ -48,10 +54,10 @@ jobs:
         if: matrix.variant == 'trial'
         run: |
           cd src-tauri/target/${{ matrix.target }}/release/bundle/dmg
-          for f in *.dmg; do mv "$f" "${f%.dmg}-trial.dmg"; done
+          for f in *.dmg; do mv "$f" "${f%.dmg}-trial-${TRIAL_DAYS}d.dmg"; done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: imudist-mac-${{ matrix.variant }}-${{ matrix.target }}
+          name: imudist-mac-${{ matrix.variant == 'trial' && format('trial-{0}d', env.TRIAL_DAYS) || 'full' }}-${{ matrix.target }}
           path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
