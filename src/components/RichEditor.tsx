@@ -10,6 +10,7 @@ import { floatsKey, type WrapFloat } from '../wrap'
 import { ContextMenu } from './ContextMenu'
 import { rememberRichTextClipboard, richTextClipboardFor, type RichTextClipboard } from '../richTextClipboard'
 import { t } from '../i18n'
+import { isTauri } from '../fileio'
 
 let lastCopiedText: string | null = null
 
@@ -300,6 +301,21 @@ export function RichEditor(p: Props) {
       if (anchored?.dataset.anchorId) live.current.onAnchorMenu?.(anchored.dataset.anchorId, anchored.getBoundingClientRect())
     }
 
+    // quick repeated clicks go further than the browser's own word (2) and paragraph (3): 4 clicks select the paragraph, 6 the whole story
+    const onMultiClick = (e: MouseEvent) => {
+      if (e.detail === 4) {
+        const text = live.current.text
+        const [a] = range()
+        const start = a > 0 ? text.lastIndexOf('\n', a - 1) + 1 : 0
+        const next = text.indexOf('\n', start)
+        const end = next === -1 ? text.length : next
+        setSelectionIn(el, start, end)
+        live.current.onSelect(start, end)
+      } else if (e.detail === 6) {
+        live.current.onSelectAll?.()
+      }
+    }
+
     document.addEventListener('selectionchange', onSelectionChange)
     el.addEventListener('beforeinput', onBeforeInput)
     el.addEventListener('copy', onCopy)
@@ -307,6 +323,7 @@ export function RichEditor(p: Props) {
     el.addEventListener('paste', onPaste)
     el.addEventListener('dblclick', onDoubleClick)
     el.addEventListener('click', onClick)
+    el.addEventListener('click', onMultiClick)
     el.addEventListener('compositionend', onCompositionEnd)
     el.addEventListener('drop', stop)
     el.addEventListener('dragover', stop)
@@ -318,6 +335,7 @@ export function RichEditor(p: Props) {
       el.removeEventListener('paste', onPaste)
       el.removeEventListener('dblclick', onDoubleClick)
       el.removeEventListener('click', onClick)
+      el.removeEventListener('click', onMultiClick)
       el.removeEventListener('compositionend', onCompositionEnd)
       el.removeEventListener('drop', stop)
       el.removeEventListener('dragover', stop)
@@ -349,7 +367,13 @@ export function RichEditor(p: Props) {
     if (!editor) return
     let clipboardText: string
     try {
-      clipboardText = await navigator.clipboard.readText()
+      if (isTauri) {
+        // the desktop program reads the clipboard itself: the web view would ask permission each time
+        const { readText } = await import('@tauri-apps/plugin-clipboard-manager')
+        clipboardText = (await readText()) ?? ''
+      } else {
+        clipboardText = await navigator.clipboard.readText()
+      }
     } catch (error) {
       if (lastCopiedText === null) {
         console.error('Could not paste text from the context menu.', error)

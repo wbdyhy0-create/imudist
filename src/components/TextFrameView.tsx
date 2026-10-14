@@ -487,7 +487,7 @@ export function TextFrameView(p: Props) {
 
   return (
     <div
-      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '') + (p.previewFontFamily ? ' font-preview' : '')}
+      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (editing ? ' editing' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '') + (p.previewFontFamily ? ' font-preview' : '')}
       data-frame-id={frame.id}
       data-object-id={frame.id}
       data-object-kind="frame"

@@ -721,7 +721,7 @@ export default function App() {
     setPlacingImages([])
   }, [session.docId, !!doc])
 
-  // Ctrl+V outside a text box loads the clipboard text into the text cursor
+  // Ctrl+V outside a text box puts the clipboard text in the selected text frame, or in a new frame on the current page
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (!doc || session.modal || saveWorkspaceDialogOpen || isTyping(e.target)) return
@@ -736,8 +736,7 @@ export default function App() {
       // the marker of objects copied in the program is not text: it is never placed as one
       if (isClipToken(text)) return
       e.preventDefault()
-      setPlacingImages([])
-      setPlacing(placedFromPlainText(t('הטקסט מהלוח'), text))
+      ws.current?.pasteLoadedText(placedFromPlainText(t('הטקסט מהלוח'), text))
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)

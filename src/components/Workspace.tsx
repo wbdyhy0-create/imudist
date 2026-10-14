@@ -411,6 +411,8 @@ export interface WorkspaceHandle {
   canReplaceSelectedText: () => boolean
   /** pours the text into the selected frame; `mode` is how it goes on from there (one frame by default) */
   replaceSelectedText: (placed: PlacedText, mode?: FlowMode) => boolean
+  /** text pasted from the clipboard with no text open: added to the selected text frame, or put in a new frame on the current page */
+  pasteLoadedText: (placed: PlacedText) => void
   /** the way the loaded text cursor flows the text: set by the import dialog */
   setFlowMode: (mode: FlowMode) => void
   /** types the auto-page-number marker at the text caret (טיפוגרפיה > הוספת מספר עמוד אוטומטי) */
@@ -1108,6 +1110,7 @@ export function Workspace({
    * caret's place: the real one stays in `textSel` until the user moves it (clicks, or a key takes the caret off the end).
    */
   const oversetCaret = useRef(false)
+  const lastFramePress = useRef<{ id: string; time: number; x: number; y: number } | null>(null)
   /** the selected text of a story — what the panel's character controls apply to */
   const [textSel, setTextSel] = useState<TextSel | null>(null)
   const [footnoteSel, setFootnoteSel] = useState<FootnoteSel | null>(null)
@@ -3068,6 +3071,30 @@ export function Workspace({
     // semi-automatic: what did not fit stays loaded in the text cursor for the next click
     if (mode === 'semi') onPlacingChange(result.remaining)
     return true
+  }
+
+  const pasteLoadedText = (placed: PlacedText) => {
+    const selected = selectedId ? frames.find((frame) => frame.id === selectedId) : undefined
+    if (selected && !itemLocks[selected.id]) {
+      const head = frames.find((frame) => frame.id === (flow.get(selected.id)?.headId ?? selected.id))
+      if (head) {
+        if (head.text.length === 0) {
+          replaceSelectedText(placed, 'single')
+          return
+        }
+        const end = head.text.length
+        applyEdit(head.id, end, end, (head.text.endsWith('\n') ? '' : '\n') + placed.text)
+        setEditingId(null)
+        return
+      }
+    }
+    const pageIndex = Math.min(selectedPage, doc.pages - 1)
+    const box = columnBoxes(doc, rects[pageIndex], pageSidesOf(doc)[pageIndex], pageIndex)[0]
+    const prepared = preparePlacedText(placed)
+    const result = pourText(doc, frames, images, prepared.placed, { box }, 'single', shapes)
+    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    setSelectedId(result.headId)
+    setEditingId(null)
   }
 
   /**
@@ -5223,6 +5250,29 @@ export function Workspace({
     return () => window.removeEventListener('keydown', onShortcut)
   }, [])
 
+  // Ctrl+Up / Ctrl+Down (Cmd on a Mac): a larger / smaller font for the selected text, the same step as the arrows of the font size field
+  const stepSelectedTextSizeRef = useRef((_delta: number): boolean => false)
+  stepSelectedTextSizeRef.current = (delta) => {
+    if (footnoteSel && (footnoteSel.allNotes || footnoteSel.a !== footnoteSel.b)) {
+      stepFootnoteFontSize(delta)
+      return true
+    }
+    if (!editingId || !textSel || textSel.a === textSel.b) return false
+    stepFontSize(editingId, delta)
+    return true
+  }
+  useEffect(() => {
+    const onArrows = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return
+      if (!stepSelectedTextSizeRef.current(event.key === 'ArrowUp' ? 1 : -1)) return
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onArrows)
+    return () => window.removeEventListener('keydown', onArrows)
+  }, [])
+
   useImperativeHandle(ref, () => ({
     goToIssue,
     selectTool: activateTool,
@@ -5283,6 +5333,7 @@ export function Workspace({
     findReplace: () => openFind(),
     canReplaceSelectedText: () => !!selectedId && !!frames.find((frame) => frame.id === selectedId),
     replaceSelectedText,
+    pasteLoadedText,
     setFlowMode,
     insertPageNumberMarker,
     openSmartLayout: () => setSmartLayoutDialog(true),
@@ -9455,8 +9506,28 @@ export function Workspace({
       setSelectedId(id)
       setEditingId(id)
     } else {
+      // the text of this frame is open: a press places the caret (or selects a word, with a double click), as with the Type tool
+      if (tool === 'select' && editingId === id) {
+        lastFramePress.current = null
+        return
+      }
       if (handleMultiPointer(id, e)) return
       e.preventDefault()
+      // The preventDefault above keeps the browser from sending a double click, so a second press on the same frame is
+      // recognised here: it opens the text for typing (what the Type tool does), with the caret where it was pressed.
+      const now = performance.now()
+      const previous = lastFramePress.current
+      lastFramePress.current = { id, time: now, x: e.clientX, y: e.clientY }
+      if (tool === 'select' && previous && previous.id === id && selectedId === id && now - previous.time < 500 && Math.hypot(e.clientX - previous.x, e.clientY - previous.y) < 6 && !panMode) {
+        lastFramePress.current = null
+        if (relockParentOverride(id)) return
+        enterGroupIsolation(id)
+        const pos = caretOffsetAt(e.clientX, e.clientY, e.currentTarget.querySelector('.text-frame-body'))
+        if (pos !== null) askSelection(id, pos, pos)
+        setSelectedId(id)
+        setEditingId(id)
+        return
+      }
       setTextSel(null)
       setSelectedId(id)
       setEditingId(null)

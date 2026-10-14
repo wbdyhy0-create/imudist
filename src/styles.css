@@ -725,7 +725,8 @@ svg { display: block; }
 .viewport.directtool .text-frame .handle.n, .viewport.directtool .text-frame .handle.s { cursor: ns-resize; }
 .viewport.directtool .text-frame .handle.e, .viewport.directtool .text-frame .handle.w { cursor: ew-resize; }
 .viewport.texttool .text-frame { cursor: text; }
-.viewport.selecttool .text-frame { cursor: move; }
+.viewport.selecttool .text-frame { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='24' viewBox='0 0 20 24'%3E%3Cpath d='M2 1v19l5-5 3.5 7 3-1.5-3.5-7H17z' fill='white' stroke='black' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E") 2 1, default; }
+.viewport.selecttool .text-frame.editing { cursor: text; }
 .viewport.linking .text-frame { cursor: copy; }
 .text-frame { position: absolute; box-sizing: border-box; color: #111; line-height: 1.25; text-rendering: geometricPrecision; }
 .shape-frame.locked, .image-frame.locked, .text-frame.locked { pointer-events: none; }
