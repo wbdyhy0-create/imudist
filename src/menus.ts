@@ -70,6 +70,8 @@ export interface MenuContext {
   openDocs: { id: number; name: string; active: boolean }[]
   switchDoc: (id: number) => void
   exportPdf: () => void
+  /** View > מצגת: the page alone on a full screen, until Esc */
+  togglePresentation: () => void
   /** Window > מיזוג נתונים…: the card of the document and a table of records become a PDF of cards on sheets */
   dataMerge: () => void
   /** the page as the four inks of a press, each shown or hidden (View > Separation Preview) */
@@ -105,7 +107,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
   /** an item that works only while a parent page is being edited (page numbers and running headers are written on parent pages) */
   const inParent = (label: string, run: (ws: WorkspaceHandle) => void): MenuItem => ({ ...doc(label, '', run), disabled: !c.hasDoc || !c.editingParent })
   const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = '') => doc(label, shortcut, (ws) => ws.selectTool(id))
-  const dock = (id: string, label: string, shortcut = ''): MenuItem => ({
+  const dock = (id: string, label: string, shortcut = '', openByKey = false): MenuItem => ({
     label,
     shortcut,
     checked: c.enabledDockPanelIds.includes(id),
@@ -114,6 +116,17 @@ export function buildMenus(c: MenuContext): MenuDef[] {
       c.onDockPanelToggle(id)
       c.onDockOpenChange(enabled ? (c.dockOpenId === id ? null : c.dockOpenId) : id)
     },
+    // the key opens the panel (and shows it among the panels if it was taken away), and closes it when it is open: it never takes it away
+    ...(openByKey
+      ? {
+          onKey: () => {
+            if (!c.enabledDockPanelIds.includes(id)) {
+              c.onDockPanelToggle(id)
+              c.onDockOpenChange(id)
+            } else c.onDockOpenChange(c.dockOpenId === id ? null : id)
+          },
+        }
+      : {}),
   })
 
   return [
@@ -147,7 +160,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         {
           label: 'הוספת קובץ',
           submenu: [
-            { label: 'כל הקבצים הנתמכים…', shortcut: 'Ctrl+Shift+I', disabled: !c.hasDoc, onClick: c.importText },
+            { label: 'כל הקבצים הנתמכים…', shortcut: 'Ctrl+D', aliases: ['Ctrl+Shift+I'], disabled: !c.hasDoc, onClick: c.importText },
             sep,
             { label: 'PDF…', disabled: !c.hasDoc, onClick: () => c.importKind('pdf') },
             { label: 'Word (DOCX)…', disabled: !c.hasDoc, onClick: () => c.importKind('word') },
@@ -161,7 +174,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           ],
         },
         sep,
-        { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+E', disabled: !c.hasDoc, onClick: c.exportPdf },
+        { label: 'ייצוא ל-PDF…', shortcut: 'Ctrl+Alt+Shift+S', aliases: ['Ctrl+E'], disabled: !c.hasDoc, onClick: c.exportPdf },
         {
           label: 'ייצוא תמונה',
           disabled: !c.hasDoc,
@@ -209,7 +222,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         { label: 'העתק', shownShortcut: 'Ctrl+C', disabled: !c.hasDoc, onClick: () => c.ws.current?.copy() },
         { label: 'הדבק', shownShortcut: 'Ctrl+V', disabled: !c.hasDoc, onClick: () => c.ws.current?.paste() },
         doc('שכפל במקום', 'Ctrl+F', (ws) => ws.duplicateInPlace()),
-        doc('שכפל במרווח האחרון', 'Ctrl+D', (ws) => ws.repeatDuplicate()),
+        doc('שכפל במרווח האחרון', 'Ctrl+Alt+Shift+D', (ws) => ws.repeatDuplicate()),
         { label: 'שכפל וגרור', shownShortcut: 'Alt + גרירה', disabled: true },
         sep,
         { label: 'בחר הכול', shortcut: 'Ctrl+A', disabled: !c.hasDoc, onClick: () => c.ws.current?.selectAllText() },
@@ -240,6 +253,27 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         {
           label: 'כלי טקסט',
           submenu: [tool('טקסט', 'type', 'T'), tool('טקסט על קו', 'pathtype', 'Shift+T'), tool('דוגם סגנון', 'eyedropper', 'I')],
+        },
+        sep,
+        {
+          label: 'יישור פסקה',
+          submenu: [
+            doc('יישור לשמאל', 'Ctrl+Shift+L', (ws) => ws.alignText('left')),
+            doc('יישור לימין', 'Ctrl+Shift+R', (ws) => ws.alignText('right')),
+            doc('מירכוז', 'Ctrl+Shift+C', (ws) => ws.alignText('center')),
+            doc('יישור לשני הצדדים', 'Ctrl+Shift+J', (ws) => ws.alignText('justify')),
+          ],
+        },
+        {
+          label: 'גודל וריווח',
+          submenu: [
+            doc('הגדל גופן', 'Ctrl+Shift+>', (ws) => ws.stepTextSize(1)),
+            doc('הקטן גופן', 'Ctrl+Shift+<', (ws) => ws.stepTextSize(-1)),
+            doc('הגדל ריווח שורות', 'Alt+Down', (ws) => ws.stepLineSpacing(1)),
+            doc('הקטן ריווח שורות', 'Alt+Up', (ws) => ws.stepLineSpacing(-1)),
+            doc('הגדל ריווח אותיות', 'Alt+Right', (ws) => ws.stepLetterSpacing(20)),
+            doc('הקטן ריווח אותיות', 'Alt+Left', (ws) => ws.stepLetterSpacing(-20)),
+          ],
         },
         sep,
         doc('ניקוי רווחים כפולים', '', (ws) => ws.cleanSpacing()),
@@ -326,10 +360,16 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             doc('איחוד', 'Ctrl+Alt+U', (ws) => ws.shapeOp('unite')),
             doc('חיסור', 'Ctrl+Alt+M', (ws) => ws.shapeOp('subtract')),
             doc('חיתוך', 'Ctrl+Alt+I', (ws) => ws.shapeOp('intersect')),
-            doc('החרגה', 'Ctrl+Alt+E', (ws) => ws.shapeOp('exclude')),
+            doc('החרגה', 'Ctrl+Alt+Shift+E', (ws) => ws.shapeOp('exclude')),
           ],
         },
         doc('שחרר נתיב מורכב', '', (ws) => ws.releaseCompoundPaths()),
+        sep,
+        doc('התאם תיבה לטקסט', 'Ctrl+Alt+C', (ws) => ws.fitFramesToText()),
+        doc('התאם תמונה לתיבה', 'Ctrl+Alt+E', (ws) => ws.fillFramesWithPictures()),
+        sep,
+        doc('נעל', 'Ctrl+L', (ws) => ws.lockChosenObjects()),
+        doc('שחרר נעילה של הכול', 'Ctrl+Alt+L', (ws) => ws.unlockAllObjects()),
         sep,
         doc('קבץ', 'Ctrl+G', (ws) => ws.group()),
         doc('בטל קיבוץ', 'Ctrl+Shift+G', (ws) => ws.ungroup()),
@@ -401,6 +441,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             { label: 'רגיל', checked: !c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(false) },
             // W flips between the two modes, like in professional layout tools
             { label: 'תצוגה מקדימה', shortcut: 'W', checked: c.previewMode, disabled: !c.hasDoc, onClick: () => c.setPreviewMode(!c.previewMode) },
+            { label: 'מצגת (מסך מלא)', shortcut: 'Shift+W', disabled: !c.hasDoc, onClick: c.togglePresentation },
           ],
         },
       ],
@@ -443,10 +484,10 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         },
         dock('pages', 'לוח עמודים', 'F12'),
         dock('properties', 'מאפיינים'),
-        dock('paragraph', 'פסקה', 'Ctrl+Alt+L'),
+        dock('paragraph', 'פסקה', 'Ctrl+Alt+T'),
         { separator: true },
-        dock('paragraph-styles', 'סגנונות פסקה'),
-        dock('character-styles', 'סגנונות תו'),
+        dock('paragraph-styles', 'סגנונות פסקה', 'F11', true),
+        dock('character-styles', 'סגנונות תו', 'Shift+F11', true),
         dock('object-styles', 'סגנונות אובייקט'),
         dock('style-manager', 'ניהול סגנונות'),
         dock('color', 'צבע'),
@@ -477,12 +518,15 @@ export function buildMenus(c: MenuContext): MenuDef[] {
 
 // ── keyboard shortcuts, derived from the same menu definitions ───────────────────
 
-const CODE: Record<string, string> = { '=': 'Equal', '-': 'Minus', ';': 'Semicolon', '[': 'BracketLeft', ']': 'BracketRight' }
+const CODE: Record<string, string> = { '=': 'Equal', '-': 'Minus', ';': 'Semicolon', '[': 'BracketLeft', ']': 'BracketRight', '.': 'Period', ',': 'Comma', '>': 'Period', '<': 'Comma' }
+/** the names the shortcuts give to the arrow keys */
+const KEY_NAMES: Record<string, string> = { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' }
 
 /** Layout-independent: letters/digits are matched by physical key so Hebrew layouts work too. */
-function matches(e: KeyboardEvent, shortcut: string): boolean {
+export function matches(e: KeyboardEvent, shortcut: string): boolean {
   const parts = shortcut.split('+')
-  const key = parts.pop()!.toLowerCase()
+  const named = parts.pop()!.toLowerCase()
+  const key = KEY_NAMES[named] ?? named
   const mods = new Set(parts.map((p) => p.toLowerCase()))
   if ((e.ctrlKey || e.metaKey) !== mods.has('ctrl')) return false
   if (e.altKey !== mods.has('alt')) return false
@@ -501,7 +545,7 @@ export function findShortcut(menus: MenuDef[], e: KeyboardEvent): MenuItem | und
       if (it.submenu) {
         const hit = walk(it.submenu)
         if (hit) return hit
-      } else if (it.shortcut && it.onClick && !it.disabled && matches(e, it.shortcut)) return it
+      } else if (it.onClick && !it.disabled && [it.shortcut, ...(it.aliases ?? [])].some((keys) => keys && matches(e, keys))) return it
     }
     return undefined
   }
@@ -510,4 +554,23 @@ export function findShortcut(menus: MenuDef[], e: KeyboardEvent): MenuItem | und
     if (hit) return hit
   }
   return undefined
+}
+
+/** Every key the menus answer to, with the labels of the items that use it (a key two items use is a mistake). */
+export function shortcutOwners(menus: MenuDef[]): Map<string, string[]> {
+  const owners = new Map<string, string[]>()
+  const walk = (items: MenuItem[]) => {
+    for (const it of items) {
+      if (it.submenu) walk(it.submenu)
+      else {
+        for (const keys of [it.shortcut, ...(it.aliases ?? [])]) {
+          if (!keys) continue
+          const id = keys.toLowerCase()
+          owners.set(id, [...(owners.get(id) ?? []), it.label ?? ''])
+        }
+      }
+    }
+  }
+  for (const m of menus) walk(m.items)
+  return owners
 }

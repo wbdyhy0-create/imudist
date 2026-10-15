@@ -26,6 +26,7 @@ import { countPicture, emptyReport, extractGlyphs, type FrameGeometry, type Pict
 import { registerFont } from './fontFiles'
 import { isOrnamentDecoration, ornamentSideMarkup } from './footnoteOrnaments'
 import { lineProfileShape } from './lineProfile'
+import { drawPathText } from './pathTextDraw'
 import { letterCenterShift } from './headingMetrics'
 import { shapeToVector, writeShapes, type VectorShape } from './vectorShapes'
 import { stackOrder } from './stacking'
@@ -563,6 +564,7 @@ async function drawTable(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
 
 async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page: PageRect, scale: number, asset?: Asset) {
   if (shape.kind === 'table') return drawTable(ctx, shape, page, scale)
+  const original = shape
   // a line thicker in some places than others is drawn as the shape it covers
   shape = lineProfileShape(shape) ?? shape
   const boxX = (shape.x - page.x) * scale
@@ -655,6 +657,12 @@ async function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeFrame, page:
     }
     ctx.stroke(path)
     clearCanvasShadow(ctx)
+  }
+  if (original.pathText) {
+    drawPathText(ctx, original, scale, {
+      apply: (style) => applyCanvasShadow(ctx, style.shadowOffsetX, style.shadowOffsetY ?? style.shadowOffset, style.shadowOpacity, style.shadowColor, scale),
+      clear: () => clearCanvasShadow(ctx),
+    })
   }
   ctx.restore()
 }
@@ -941,7 +949,7 @@ export function prepareExport(content: ExportContent): PreparedExport {
   let source = content
   if (content.frames.some((frame) => frame.runningHeaderStyleId && frame.text.includes(RUNNING_HEADER_MARKER))) {
     const headerFlows = flowFrames(content.frames, content.images, footnoteConfig, undefined, new Map(), content.paragraphStyles)
-    const headerAtPage = runningHeaderLookup(content.doc, content.frames, headerFlows)
+    const headerAtPage = runningHeaderLookup(content.doc, content.frames, headerFlows, content.paragraphStyles)
     const frames = content.frames.map((frame) => resolvePdfRunningHeader(frame, ownerPage(documentRects, frame.x + frame.w / 2, frame.y + frame.h / 2), headerAtPage))
     if (frames.some((frame, index) => frame !== content.frames[index])) source = { ...content, frames }
   }
@@ -1031,7 +1039,7 @@ export function exportContentOf(source: ExportSource): ExportContent {
   }
   if (!source.pageParents.some(Boolean)) return own
   const hasRunningHeader = source.parents.some((parent) => parent.frames.some((frame) => frame.runningHeaderStyleId))
-  const runningHeader = hasRunningHeader ? runningHeaderLookup(source.doc, own.frames, prepareExport(own).flows) : undefined
+  const runningHeader = hasRunningHeader ? runningHeaderLookup(source.doc, own.frames, prepareExport(own).flows, source.paragraphStyles) : undefined
   const shadow = parentShadowContent(source.doc, source.parents, source.pageParents, source.sections, own.frames, runningHeader, source.parentOverrides ?? [], own.images, own.shapes)
   return {
     ...own,

@@ -28,7 +28,7 @@ export interface VectorShape {
   opacity: number
 }
 
-export type ShapePictureReason = 'table' | 'feather' | 'gradient' | 'shadow' | 'blur' | 'image' | 'color'
+export type ShapePictureReason = 'table' | 'feather' | 'gradient' | 'shadow' | 'blur' | 'image' | 'color' | 'pathText'
 
 export const SHAPE_PICTURE_REASONS: Record<ShapePictureReason, string> = {
   get table() { return t('טבלה') },
@@ -38,6 +38,7 @@ export const SHAPE_PICTURE_REASONS: Record<ShapePictureReason, string> = {
   get blur() { return t('טשטוש') },
   get image() { return t('תמונה בתוך צורה') },
   get color() { return t('צבע שאינו מספר') },
+  get pathText() { return t('טקסט על הקו') },
 }
 
 /** The SVG arc from (x1, y1) to (x2, y2) as cubic curves (the SVG specification's conversion to a centre and angles, then a curve for every quarter turn or less). */
@@ -183,6 +184,7 @@ export function shapeToVector(original: ShapeFrame, pageX: number, pageY: number
   if ((shape.shadowOpacity ?? 0) > 0) return { reason: 'shadow' }
   if ((shape.blur ?? 0) > 0) return { reason: 'blur' }
   if (shape.image) return { reason: 'image' }
+  if (original.pathText?.text) return { reason: 'pathText' }
   const fill = shape.frame ? null : longHex(shape.fill)
   const stroke = shape.stroke && shape.strokeWidth > 0 ? longHex(shape.stroke) : null
   if ((shape.fill && !shape.frame && !fill) || (shape.stroke && shape.strokeWidth > 0 && !stroke)) return { reason: 'color' }

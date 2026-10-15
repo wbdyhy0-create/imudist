@@ -3,6 +3,7 @@ import { chainOf, headFrames, removeFrame } from './frames'
 import { computeLayout, pageMargins, pageSidesOf, rowGroups } from './layout'
 import { formatPageNumber, pageNumberLabel, substituteMarker } from './numbering'
 import { normalizeRuns } from './story'
+import { styleIdOf } from './styleApply'
 
 /** Pure operations on the pages of a document. Text frames and pictures follow the page they sit on. */
 
@@ -274,6 +275,7 @@ export function runningHeaderLookup(
   doc: DocSettings,
   frames: TextFrame[],
   flows: ReadonlyMap<string, { start: number; end: number }>,
+  paragraphStyles: ParagraphStyleRecord[],
 ): (pageIndex: number, styleId: string, strategy: RunningHeaderStrategy) => string {
   interface Candidate {
     page: number
@@ -286,8 +288,7 @@ export function runningHeaderLookup(
     collected = true
     const rects = pageRects(doc)
     for (const head of headFrames(frames)) {
-      const styles = head.paragraphStyleIds
-      if (!styles || !head.text.trim()) continue
+      if (!head.text.trim()) continue
       const paragraphs = head.text.split('\n')
       const starts: number[] = []
       let at = 0
@@ -300,7 +301,8 @@ export function runningHeaderLookup(
         if (!part) continue
         const page = ownerPage(rects, frame.x + frame.w / 2, frame.y + frame.h / 2)
         for (let index = 0; index < paragraphs.length; index++) {
-          const styleId = styles[index]
+          // the style a paragraph is really in: its listed one, else the story's, else the document's base style
+          const styleId = styleIdOf(paragraphStyles, head, index)
           const text = paragraphs[index].trim()
           if (!styleId || !text) continue
           const from = starts[index]
@@ -328,6 +330,19 @@ export function runningHeaderLookup(
     if (last < 0) return ''
     return list[strategy === 'first' && firstOnPage >= 0 ? firstOnPage : last].text
   }
+}
+
+/**
+ * Pages added by a change of the document's settings (rather than by "add page", which chooses a master) follow the
+ * master of the page before them, or the first master when that page has none: new pages of a document with a master look uniform.
+ */
+export function withMasterOnAddedPages(before: DocContent, after: DocContent): DocContent {
+  if (after.doc.pages <= before.doc.pages || after.parents.length === 0) return after
+  const filled = after.pageParents.slice(0, after.doc.pages)
+  while (filled.length < after.doc.pages) filled.push(null)
+  const fallback = [...filled.slice(0, before.doc.pages)].reverse().find(Boolean) ?? after.parents[0].id
+  for (let i = before.doc.pages; i < after.doc.pages; i++) if (!filled[i]) filled[i] = fallback
+  return { ...after, pageParents: filled }
 }
 
 /** A per-page list (sizes, margins) after the pages were renumbered: `map` gives the new index of an old page, or null if it is gone. */

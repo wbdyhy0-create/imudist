@@ -36,6 +36,9 @@ svg { display: block; }
 .app-body { flex: 1; min-height: 0; display: flex; }
 .stage { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; }
 .stage-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 5; }
+/* the presentation: the page alone (the preview mode hides the guides and frames), none of the bars and panels */
+.app.presenting .menubar, .app.presenting .doc-tabs, .app.presenting .context-toolbar, .app.presenting .page-bar, .app.presenting .toolbox, .app.presenting .docking-shell, .app.presenting .statusbar { display: none; }
+.app.presenting .ruler, .app.presenting .ruler-corner { visibility: hidden; }
 
 /* ── menu bar ─────────────────────────────────────────────── */
 .menubar {

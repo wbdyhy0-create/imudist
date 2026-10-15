@@ -18,7 +18,7 @@ import {
 import { changeHistory, newHistory, redoHistory, replaceHistory, shouldMergeChange, undoHistory, type History } from './history'
 import { assetsWeight } from './assetWeight'
 import { resolveLinkedAssets } from './imageLinks'
-import { applySettings, deletePages, insertPages, movePage, type DocContent, type ParentOverride } from './pages'
+import { applySettings, deletePages, insertPages, movePage, withMasterOnAddedPages, type DocContent, type ParentOverride } from './pages'
 import { emptyPrimaryFrameIds, expandPrimaryFramesForColumns, withPrimaryFrames } from './placeText'
 import { addRecent, addRecentPath, listRecent, removeRecent, type RecentEntry } from './recent'
 import { t } from './i18n'
@@ -251,7 +251,7 @@ export function useDocumentSession() {
       change((s) => {
         // decided before the pages move: which empty margin frames there are now
         const drop = options?.dropEmptyFrames ? new Set(emptyPrimaryFrameIds(s.doc, s.frames)) : null
-        const applied = applySettings(s, next, options?.resizeTextFrames)
+        const applied = withMasterOnAddedPages(s, applySettings(s, next, options?.resizeTextFrames))
         const r = drop && drop.size > 0 ? { ...applied, frames: applied.frames.filter((f) => !drop.has(f.id)) } : applied
         if (!next.primaryTextFrame) return r
         const expanded = s.doc.primaryTextFrame && next.columns > s.doc.columns

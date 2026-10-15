@@ -7,6 +7,10 @@ import { HelpAssistant } from './HelpAssistant'
 export interface MenuItem {
   label?: string
   shortcut?: string
+  /** other keys that run the item too (only `shortcut` is written next to it) */
+  aliases?: string[]
+  /** what the keys do when it is not the same as a click on the item */
+  onKey?: () => void
   /** a shortcut that is only written next to the item: the key is handled elsewhere (e.g. Ctrl+C by the browser's copy event) */
   shownShortcut?: string
   onClick?: () => void

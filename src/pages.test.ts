@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultDocSettings, EXTERNAL_PAGE_NUMBER_MARKER, INTERNAL_LETTER_PAGE_NUMBER_MARKER, INTERNAL_PAGE_NUMBER_MARKER, PAGE_NUMBER_MARKER, RUNNING_HEADER_MARKER, type DocSettings, type ParentPage, type TextFrame } from './document'
-import { applySettings, deletePages, detachedParentContent, insertPages, movePage, pageRects, parentShadowContent, runningHeaderLookup, type DocContent } from './pages'
+import { applySettings, deletePages, detachedParentContent, insertPages, movePage, pageRects, parentShadowContent, runningHeaderLookup, withMasterOnAddedPages, type DocContent } from './pages'
 
 const textFrame = (id: string, x: number, text: string): TextFrame => ({
   id,
@@ -77,7 +77,8 @@ describe('running headers', () => {
     ['b', { start: 3, end: 12 }],
     ['c', { start: 12, end: 16 }],
   ])
-  const lookup = runningHeaderLookup(doc, frames, flows)
+  const styles = ['s1', 's2', 'x'].map((id) => ({ id, name: id, patch: {} }))
+  const lookup = runningHeaderLookup(doc, frames, flows, styles)
 
   it('shows the last paragraph of the style up to the page, or the first one on it', () => {
     expect([0, 1, 2].map((page) => lookup(page, 's1', 'last'))).toEqual(['H1', 'B', 'B'])
@@ -94,6 +95,14 @@ describe('running headers', () => {
     const parent = parentOf(doc, [header])
     const shown = parentShadowContent(doc, [parent], ['master', 'master', 'master'], [], frames, lookup)
     expect(shown.frames.map((f) => f.text)).toEqual(['H1', 'A', 'B'])
+  })
+
+  it('counts a paragraph with no style of its own in the story\'s style, or the base style', () => {
+    const plain = { ...onPage(0, textFrame('p', 0, 'one\ntwo')) }
+    const flow = new Map([['p', { start: 0, end: 7 }]])
+    expect(runningHeaderLookup(doc, [plain], flow, styles)(0, 's1', 'last')).toBe('two')
+    expect(runningHeaderLookup(doc, [{ ...plain, paragraphStyleId: 's2' }], flow, styles)(0, 's2', 'first')).toBe('one')
+    expect(runningHeaderLookup(doc, [{ ...plain, paragraphStyleId: 's2' }], flow, styles)(0, 's1', 'first')).toBe('')
   })
 
   it('leaves the header empty when it is not told where the text lies', () => {
@@ -134,5 +143,14 @@ describe('page operations', () => {
       expect(result!.characterStyles, name).toEqual(content.characterStyles)
       expect(result!.colorSamples, name).toEqual(content.colorSamples)
     }
+  })
+
+  it('gives pages added by a change of settings the master of the page before them', () => {
+    const doc = { ...defaultDocSettings('t'), pages: 2 }
+    const parent = parentOf(doc, [])
+    const content: DocContent = { doc, frames: [], images: [], assets: {}, guides: [], shapes: [], paragraphStyles: [], parents: [parent], pageParents: ['master', null], sections: [], parentOverrides: [] }
+    const grown = withMasterOnAddedPages(content, applySettings(content, { ...doc, pages: 4 })!)
+    expect(grown.pageParents).toEqual(['master', null, 'master', 'master'])
+    expect(withMasterOnAddedPages({ ...content, parents: [] }, { ...content, doc: { ...doc, pages: 3 }, parents: [] }).pageParents).toEqual(['master', null])
   })
 })

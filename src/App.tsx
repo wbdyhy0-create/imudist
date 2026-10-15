@@ -226,6 +226,9 @@ export default function App() {
   const [showGuides, setShowGuides] = useState(true)
   const [showHiddenChars, setShowHiddenChars] = useState(false)
   const [previewMode, setPreviewMode] = useState(false)
+  /** the presentation: the page alone on a full screen */
+  const [presenting, setPresenting] = useState(false)
+  const previewBeforePresenting = useRef(false)
   const [showProps, setShowProps] = useState(true)
   const [showPages, setShowPages] = useState(true)
   const [showParagraph, setShowParagraph] = useState(false)
@@ -238,6 +241,56 @@ export default function App() {
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const [importPdfSource, setImportPdfSource] = useState<PdfImportSource | null>(null)
+  const setFullScreen = async (on: boolean) => {
+    try {
+      if (isTauri) {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        await getCurrentWindow().setFullscreen(on)
+      } else if (on) await document.documentElement.requestFullscreen()
+      else if (document.fullscreenElement) await document.exitFullscreen()
+    } catch {
+      // the screen could not go full: the page is still shown alone
+    }
+  }
+  const endPresentation = () => {
+    setPresenting(false)
+    setPreviewMode(previewBeforePresenting.current)
+    void setFullScreen(false)
+    window.setTimeout(() => ws.current?.fitPage(), 150)
+  }
+  const togglePresentation = () => {
+    if (presenting) {
+      endPresentation()
+      return
+    }
+    previewBeforePresenting.current = previewMode
+    setPreviewMode(true)
+    setPresenting(true)
+    void setFullScreen(true)
+    window.setTimeout(() => ws.current?.fitPage(), 250)
+  }
+  // Esc (or the browser's own way out of a full screen) ends the presentation
+  const endPresentationRef = useRef(endPresentation)
+  endPresentationRef.current = endPresentation
+  useEffect(() => {
+    if (!presenting) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        endPresentationRef.current()
+      }
+    }
+    const onFullScreen = () => {
+      if (!document.fullscreenElement && !isTauri) endPresentationRef.current()
+    }
+    window.addEventListener('keydown', onKey, true)
+    document.addEventListener('fullscreenchange', onFullScreen)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('fullscreenchange', onFullScreen)
+    }
+  }, [presenting])
+
   const ws = useRef<WorkspaceHandle>(null)
 
   const editingParent = editingParentId ? (session.parents.find((p) => p.id === editingParentId) ?? null) : null
@@ -694,6 +747,7 @@ export default function App() {
         spellcheck,
         toggleSpellcheck: () => setSpellcheck(!spellcheck),
         exportPdf: () => setDialog('export'),
+        togglePresentation,
         dataMerge: () => setDialog('merge'),
         separationPreview: () => {
           setSeparationPage(ws.current?.currentPageIndex() ?? 0)
@@ -708,15 +762,15 @@ export default function App() {
         toggleBookPanel: () => bookRef.current.setPanelOpen(!bookRef.current.panelOpen),
       }),
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
-    [book.panelOpen, shown, editingParentId, showRulers, showGuides, showHiddenChars, spellcheck, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
+    [book.panelOpen, shown, editingParentId, presenting, showRulers, showGuides, showHiddenChars, spellcheck, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (session.modal || saveWorkspaceDialogOpen) return // a question is open: only the dialog's own keys
       const typing = isTyping(e.target)
-      // single-key shortcuts (like W) must not fire while typing in a field
-      if (typing && !e.ctrlKey && !e.metaKey && !e.altKey) return
+      // single-key shortcuts (like W) must not fire while typing in a field; the function keys are not typed
+      if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && !/^F\d{1,2}$/.test(e.key)) return
       // in ordinary fields Ctrl+Z / Ctrl+Y / Ctrl+A keep their native meaning; only the text editor uses ours
       if (typing && !isTextEditor(e.target) && !(isTableCellEditor(e.target) && (isKey(e, 'z') || isKey(e, 'y'))) && (isKey(e, 'z') || isKey(e, 'y') || isKey(e, 'a'))) return
       if ((e.ctrlKey || e.metaKey) && isKey(e, 'y') && !e.shiftKey && !e.altKey) {
@@ -727,7 +781,7 @@ export default function App() {
       const item = findShortcut(menus, e)
       if (!item) return
       e.preventDefault()
-      item.onClick?.()
+      ;(item.onKey ?? item.onClick)?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -914,7 +968,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={'app' + (presenting ? ' presenting' : '')}>
       <MenuBar menus={menus} />
       <div className="app-body">
         <div className="stage">

@@ -383,8 +383,20 @@ export interface WorkspaceHandle {
   cut: () => void
   paste: () => void
   duplicateInPlace: () => void
-    /** duplicate the selection using the last manually established repeat distance (Ctrl+D) */
-    repeatDuplicate: () => void
+  /** duplicate the selection using the last manually established repeat distance (Ctrl+Alt+Shift+D) */
+  repeatDuplicate: () => void
+  /** the keys of the text: alignment, size, line spacing and letter spacing of the chosen text (a frame, a footnote, table cells) */
+  alignText: (align: TextAlign) => void
+  stepTextSize: (delta: number) => void
+  stepLineSpacing: (delta: number) => void
+  stepLetterSpacing: (delta: number) => void
+  /** the chosen text frames become as tall as their text */
+  fitFramesToText: () => void
+  /** the chosen pictures fill their frames, in proportion */
+  fillFramesWithPictures: () => void
+  /** lock the chosen objects / free everything that was locked one by one */
+  lockChosenObjects: () => void
+  unlockAllObjects: () => void
   /** open the dialog that creates several guides at once */
   createGuides: () => void
   /** delete the guides of the selected page */
@@ -3045,6 +3057,15 @@ export function Workspace({
       return { ...nested, layerId: layer(frame) }
     })
 
+  /** the pages a pour added get the current master, the same as pages added by hand; nothing to set when no page was added */
+  const pageParentsAfterPour = (pages: number): { pageParents?: (string | null)[] } => {
+    if (pages <= doc.pages) return {}
+    const next = pageParents.slice(0, doc.pages)
+    while (next.length < doc.pages) next.push(null)
+    while (next.length < pages) next.push(effectiveActiveParent)
+    return { pageParents: next }
+  }
+
   /**
    * Pour the loaded text into a frame at `target`. Shift = semi-automatic, Alt = automatic, otherwise the mode
    * chosen in the banner. The whole result is one undo step.
@@ -3054,7 +3075,7 @@ export function Workspace({
     const mode: FlowMode = mods.shift ? 'semi' : mods.alt ? 'auto' : flowMode
     const prepared = preparePlacedText(placing)
     const result = pourText(doc, frames, images, prepared.placed, target, mode, shapes)
-    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    pageOps.commit({ ...result.content, ...pageParentsAfterPour(result.content.doc.pages), frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     onPlacingChange(result.remaining)
@@ -3065,7 +3086,7 @@ export function Workspace({
     if (!selected) return false
     const prepared = preparePlacedText(placed)
     const result = pourText(doc, frames, images, prepared.placed, { box: { x: selected.x, y: selected.y, w: selected.w, h: selected.h }, frameId: selected.id }, mode, shapes)
-    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    pageOps.commit({ ...result.content, ...pageParentsAfterPour(result.content.doc.pages), frames: placedFrames(result.content.frames, prepared, (frame) => frame.layerId ?? creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
     // semi-automatic: what did not fit stays loaded in the text cursor for the next click
@@ -3092,7 +3113,7 @@ export function Workspace({
     const box = columnBoxes(doc, rects[pageIndex], pageSidesOf(doc)[pageIndex], pageIndex)[0]
     const prepared = preparePlacedText(placed)
     const result = pourText(doc, frames, images, prepared.placed, { box }, 'single', shapes)
-    pageOps.commit({ ...result.content, frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
+    pageOps.commit({ ...result.content, ...pageParentsAfterPour(result.content.doc.pages), frames: placedFrames(result.content.frames, prepared, () => creationLayerId), ...(prepared.chars !== characterStyles ? { characterStyles: prepared.chars } : {}) })
     setSelectedId(result.headId)
     setEditingId(null)
   }
@@ -5273,6 +5294,107 @@ export function Workspace({
     return () => window.removeEventListener('keydown', onArrows)
   }, [])
 
+  /**
+   * The keys of the text (alignment, size, line spacing, letter spacing): the same change as the toolbar makes, on the footnote,
+   * the cells of the table or the text frame that is chosen - and on the caret, the selection or the whole frame, as the toolbar does
+   */
+  const changeTextLook = (change: { character?: Partial<CharStyle>; paragraph?: Parameters<typeof applyParagraphStyle>[1] }) => {
+    const frame = selectedId ? frames.find((candidate) => candidate.id === selectedId) : undefined
+    if (change.character) {
+      if (footnoteSel) applyFootnoteCharStyle(change.character)
+      else if (frame) applyCharStyle(frame.id, change.character)
+      else if (selectedTable()) applyTableFormatting(change.character)
+    }
+    if (change.paragraph) {
+      if (footnoteSel) applyFootnoteParagraphStyle(change.paragraph)
+      else if (frame) applyParagraphStyle(frame.id, change.paragraph)
+      else if (selectedTable()) applyTableFormatting(change.paragraph)
+    }
+  }
+  const alignText = (align: TextAlign) => changeTextLook({ paragraph: { align } })
+  const stepTextSize = (delta: number) => {
+    const frame = selectedId ? frames.find((candidate) => candidate.id === selectedId) : undefined
+    if (footnoteSel) stepFootnoteFontSize(delta)
+    else if (frame) stepFontSize(frame.id, delta)
+    else if (toolbarTableText) applyTableFormatting({ fontSize: Math.min(999, Math.max(1, toolbarTableText.fontSize + delta)) })
+  }
+  const stepLineSpacing = (delta: number) => {
+    const size = toolbarTextStyle?.fontSize
+    if (!size) return
+    const current = toolbarParagraphStyle?.leading !== undefined && toolbarParagraphStyle.leading > 0 ? toolbarParagraphStyle.leading : Math.round(size * 1.25)
+    changeTextLook({ paragraph: { leading: Math.max(1, current + delta) } })
+  }
+  const stepLetterSpacing = (delta: number) => {
+    if (!toolbarTextStyle) return
+    changeTextLook({ character: { tracking: (toolbarTextStyle.tracking ?? 0) + delta } })
+  }
+
+  /** the height at which the text of a frame just fits, found by laying it out in frames of different heights; null when it never fits */
+  const heightToFitText = (frame: TextFrame): number | null => {
+    const probeId = '__fit-to-text__'
+    const fits = (h: number) => flowFrames(
+      withStyleLayers(withDecorations([{ ...frame, id: probeId, h, next: null }], paragraphStyles, objectStyles), paragraphStyles, characterStyles),
+      images,
+      footnoteConfig,
+      undefined,
+      new Map(),
+      paragraphStyles,
+    ).get(probeId)?.overflow === false
+    let high = Math.max(frame.h, 16)
+    while (!fits(high)) {
+      high *= 2
+      if (high > 20000) return null
+    }
+    let low = 0
+    while (high - low > 0.5) {
+      const middle = (low + high) / 2
+      if (fits(middle)) high = middle
+      else low = middle
+    }
+    return Math.ceil(high)
+  }
+  /** Ctrl+Alt+C: the chosen text frames become as tall as their text */
+  const fitFramesToText = () => {
+    const chosen = new Set(selectedObjectIds())
+    const targets = frames.filter((frame) => chosen.has(frame.id) && !itemLocks[frame.id] && frame.text.trim() && frame.next === null && !frames.some((other) => other.next === frame.id))
+    const heights = new Map(targets.flatMap((frame): [string, number][] => {
+      const h = heightToFitText(frame)
+      return h === null ? [] : [[frame.id, h]]
+    }))
+    if (heights.size === 0) {
+      onNotify(t('אין תיבת טקסט נבחרת שאפשר להתאים לטקסט שלה. תיבות משורשרות לא מותאמות.'))
+      return
+    }
+    onFramesChange(frames.map((frame) => (heights.has(frame.id) ? { ...frame, h: heights.get(frame.id)! } : frame)), 'fit-frame-to-text')
+  }
+  /** Ctrl+Alt+E: the chosen pictures fill their frames, in proportion */
+  const fillFramesWithPictures = () => {
+    const chosen = new Set(selectedObjectIds())
+    const pictures = images.filter((image) => chosen.has(image.id) && !itemLocks[image.id])
+    const graphicFrames = shapes.filter((shape) => chosen.has(shape.id) && shape.image && !itemLocks[shape.id])
+    if (pictures.length === 0 && graphicFrames.length === 0) return
+    pageOps.commit({
+      images: images.map((image) => (pictures.includes(image) ? { ...image, fit: 'fill' as const } : image)),
+      shapes: shapes.map((shape) => (graphicFrames.includes(shape) && shape.image ? { ...shape, image: { ...shape.image, fit: 'fill' as const, offset: undefined, scale: undefined } } : shape)),
+    })
+  }
+  /** Ctrl+L: the chosen objects are locked (they stay where they are, and are not picked by a click); the Layers panel shows and undoes it */
+  const lockChosenObjects = () => {
+    const chosen = new Set(selectedObjectIds())
+    if (chosen.size === 0) return
+    const lock = <T extends { id: string; locked?: true }>(items: T[]): T[] => items.map((item) => (chosen.has(item.id) ? { ...item, locked: true as const } : item))
+    pageOps.commit({ frames: lock(frames), images: lock(images), shapes: lock(shapes) })
+    setSelectedId(null)
+    setMultiSel([])
+  }
+  /** Ctrl+Alt+L: everything that was locked one by one is free again (a locked layer stays locked: that is the Layers panel's) */
+  const unlockAllObjects = () => {
+    const free = <T extends { locked?: true }>(items: T[]): T[] => (items.some((item) => item.locked) ? items.map((item) => { if (!item.locked) return item; const { locked: _locked, ...rest } = item; return rest as T }) : items)
+    const next = { frames: free(frames), images: free(images), shapes: free(shapes) }
+    if (next.frames === frames && next.images === images && next.shapes === shapes) return
+    pageOps.commit(next)
+  }
+
   useImperativeHandle(ref, () => ({
     goToIssue,
     selectTool: activateTool,
@@ -5306,6 +5428,14 @@ export function Workspace({
     paste: () => pasteFromClipboard(),
     duplicateInPlace: () => duplicateSelection(),
     repeatDuplicate: () => repeatDuplicate(),
+    alignText,
+    stepTextSize,
+    stepLineSpacing,
+    stepLetterSpacing,
+    fitFramesToText,
+    fillFramesWithPictures,
+    lockChosenObjects,
+    unlockAllObjects,
     createGuides: () => setGuidesDialog(true),
     clearGuides: () => {
       if (guides.some((g) => g.page === selPage)) onGuidesChange(guides.filter((g) => g.page !== selPage))
@@ -9654,7 +9784,7 @@ export function Workspace({
 
   // which paragraph of a style a running header shows on each page: worked out from where the text really lies, by the same
   // function the PDF export uses, so a page shows the same header on screen and in the file
-  const runningHeaderForPage = useMemo(() => runningHeaderLookup(doc, frames, flow), [doc, frames, flow])
+  const runningHeaderForPage = useMemo(() => runningHeaderLookup(doc, frames, flow, paragraphStyles), [doc, frames, flow, paragraphStyles])
 
   /**
    * Every parent (master) page's objects, translated onto every document page that uses it - behind that page's own

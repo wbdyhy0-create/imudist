@@ -67,7 +67,7 @@ describe('help topic search', () => {
     expect(topic?.answer[0]).toContain('טקסט פשוט מתאים נכתב כטקסט אמיתי')
   })
 
-  it('finds instructions for duplicating a shape with Ctrl+D', () => {
+  it('finds instructions for duplicating a shape at the last offset', () => {
     const topic = search('שכפול צורה על ידי קוטרול D')[0]
     expect(topic?.id).toBe('duplicate-shape-repeat')
     expect(topic?.answer[0]).toContain('העותק הראשון ייווצר בדיוק מעל המקור')
