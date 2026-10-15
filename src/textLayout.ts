@@ -779,6 +779,35 @@ export function fitStoryEnd(
   })
 }
 
+/**
+ * Do two sets of runs lay the text out the same? Only what moves or sizes a letter counts: the colour, the outline and the shadow of
+ * a letter, and the character style it was given, can differ.
+ */
+export function sameLayoutRuns(a: Run[], b: Run[]): boolean {
+  // the runs may be cut in different places (a colour given to a part of a run cuts it): they are compared piece by piece over the text
+  let i = 0
+  let j = 0
+  let usedA = 0
+  let usedB = 0
+  while (i < a.length && j < b.length) {
+    const [p, q] = [a[i].style, b[j].style]
+    if (p.fontFamily !== q.fontFamily || p.fontSize !== q.fontSize || p.weight !== q.weight || p.italic !== q.italic || p.tracking !== q.tracking || (p.baselineShift ?? 0) !== (q.baselineShift ?? 0)) return false
+    if (p.anchor !== q.anchor && JSON.stringify(p.anchor) !== JSON.stringify(q.anchor)) return false
+    const piece = Math.min(a[i].len - usedA, b[j].len - usedB)
+    usedA += piece
+    usedB += piece
+    if (usedA >= a[i].len) {
+      i++
+      usedA = 0
+    }
+    if (usedB >= b[j].len) {
+      j++
+      usedB = 0
+    }
+  }
+  return i === a.length && j === b.length
+}
+
 /** Results per story, so an unchanged story is not measured again (e.g. while another frame is being dragged). */
 const cache = new Map<
   string,
@@ -843,10 +872,15 @@ export function flowFrames(
 
     const hit = cache.get(cacheKey)
     let flows: FrameFlow[]
-    if (hit && hit.text === story && hit.runs === head.runs && hit.sig === sig) {
+    // a change that only repaints the text (its colour, outline or shadow) does not move a single letter: the layout stays as it was
+    const repainted = hit && hit.text === story && hit.sig === sig && hit.runs !== head.runs ? normalizeRuns(story, head.runs, style) : null
+    if (hit && repainted && sameLayoutRuns(hit.normalizedRuns, repainted)) {
+      flows = hit.flows.map((previous) => ({ ...previous, style, runs: sliceRuns(repainted, previous.start, previous.end) }))
+      cache.set(cacheKey, { ...hit, runs: head.runs, normalizedRuns: repainted, flows })
+    } else if (hit && hit.text === story && hit.runs === head.runs && hit.sig === sig) {
       flows = hit.flows
     } else {
-      const runs = normalizeRuns(story, head.runs, style)
+      const runs = repainted ?? normalizeRuns(story, head.runs, style)
       const reusablePrefix: FrameFlow[] = []
       if (hit && hit.reuseSig === reuseSig && dirtyOffset !== undefined) {
         for (const previous of hit.flows) {

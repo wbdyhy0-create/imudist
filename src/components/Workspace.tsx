@@ -2659,6 +2659,8 @@ export function Workspace({
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
     const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) })
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
+    // the layout before the first changed letter is as it was: it is not measured again
+    dirtyOffsetRef.current = sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : undefined
     onFramesChange(
       frames.map((f) => {
         if (sel) return f.id === head.id ? { ...f, runs: styleRange(runs, sel.a, sel.b, patch) } : f
@@ -2685,6 +2687,7 @@ export function Workspace({
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const clampSize = (size: number) => Math.min(999, Math.max(1, size + delta))
+    dirtyOffsetRef.current = sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : undefined
     onFramesChange(
       frames.map((f) => {
         if (sel) return f.id === head.id ? { ...f, runs: restyleRange(runs, sel.a, sel.b, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
@@ -10728,6 +10731,9 @@ export function Workspace({
   }
 
   const changeParagraphStyle = (id: string, patch: Partial<ParagraphStyleRecord>) => {
+    // a change of the style itself is not a change the paragraph made: what its text carries of its own is measured afresh against the new
+    // style, instead of showing up as "changes that are not part of the style" - which "אישור" would write back into the style, undoing the edit
+    paragraphBaselinesRef.current.clear()
     const nextStyles = paragraphStyles.map((style) => style.id === id ? { ...style, ...patch, patch: { ...style.patch, ...(patch.patch ?? {}) } } : style)
     onParagraphStylesChange(nextStyles)
     const previous = resolveParagraphStyle(id)
@@ -12288,15 +12294,28 @@ export function Workspace({
                 }
                 const lastParagraphStart = fl.slice.lastIndexOf('\n') + 1
                 const endsWithFootnoteReference = markerOffsets.some((offset) => offset >= lastParagraphStart)
+                // the preview of a font (hovering a name in the list) shows it where choosing it would put it: on the selected text, or the
+                // caret's paragraph - not on the whole frame. With no text chosen at all, the whole frame, as a choice would change it.
+                const previewFamily = fontPreview?.frameId === f.id ? fontPreview.family : undefined
+                const previewSelection = previewFamily && textSel && textSel.headId === fl.headId && textSel.b <= storyHead.text.length ? textSel : null
+                let shownRuns = fl.runs
+                if (previewFamily && previewSelection) {
+                  const [from, to] = previewSelection.a === previewSelection.b
+                    ? paragraphBounds(storyHead.text, paraIndexAt(storyHead.text, previewSelection.a))
+                    : [Math.min(previewSelection.a, previewSelection.b), Math.max(previewSelection.a, previewSelection.b)]
+                  const low = Math.max(from, fl.start) - fl.start
+                  const high = Math.min(to, fl.end) - fl.start
+                  if (high > low) shownRuns = styleRange(fl.runs, low, high, { fontFamily: previewFamily })
+                }
                 return (
                   <TextFrameView
                     key={f.id}
                     frame={f}
-                    previewFontFamily={fontPreview?.frameId === f.id ? fontPreview.family : undefined}
+                    previewFontFamily={previewSelection ? undefined : previewFamily}
                     featherOverride={featherDrag?.target.kind === 'frame' && featherDrag.target.id === f.id ? featherDrag.feather : undefined}
                     style={fl.style}
                     slice={fl.slice}
-                    runs={fl.runs}
+                    runs={shownRuns}
                     highlight={highlightFor(fl)}
                     floats={floatsFor(f, images, fl.style, fl.prevId === null)}
                     paraGaps={fl.paraGaps}
