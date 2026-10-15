@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultParagraphStyles, defaultTextStyle } from './document'
-import { getLastUsedFontFamily, rememberFontFamily } from './fontPreference'
+import { getLastUsedFontFamily, getRecentFontFamilies, RECENT_FONTS, rememberFontFamily } from './fontPreference'
 
 function mockStorage() {
   const values = new Map<string, string>()
@@ -36,5 +36,37 @@ describe('last used font preference', () => {
     rememberFontFamily('Arial')
     rememberFontFamily('  ')
     expect(getLastUsedFontFamily()).toBe('Arial')
+  })
+})
+
+describe('recently used fonts', () => {
+  it('keeps the fonts that were picked, the latest first, each once', () => {
+    mockStorage()
+    expect(getRecentFontFamilies()).toEqual([])
+    rememberFontFamily('David')
+    rememberFontFamily('Arial')
+    rememberFontFamily('Miriam')
+    rememberFontFamily('David')
+    expect(getRecentFontFamilies()).toEqual(['David', 'Miriam', 'Arial'])
+  })
+
+  it('keeps at least ten, and no more than its limit', () => {
+    mockStorage()
+    for (let i = 1; i <= 20; i++) rememberFontFamily(`Font ${i}`)
+    const recent = getRecentFontFamilies()
+    expect(RECENT_FONTS).toBeGreaterThanOrEqual(10)
+    expect(recent).toHaveLength(RECENT_FONTS)
+    expect(recent[0]).toBe('Font 20')
+    expect(recent[9]).toBe('Font 11')
+  })
+
+  it('leaves out an empty name, and reads damaged storage as nothing', () => {
+    mockStorage()
+    rememberFontFamily('  ')
+    expect(getRecentFontFamilies()).toEqual([])
+    localStorage.setItem('imudist.recentFontFamilies', '{not json')
+    expect(getRecentFontFamilies()).toEqual([])
+    localStorage.setItem('imudist.recentFontFamilies', JSON.stringify(['Arial', 3, '', 'Arial', 'David']))
+    expect(getRecentFontFamilies()).toEqual(['Arial', 'David'])
   })
 })

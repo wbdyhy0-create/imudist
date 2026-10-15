@@ -6,6 +6,7 @@ import { arStyles } from './ar.styles'
 import { arChrome } from './ar.chrome'
 import { arPanels } from './ar.panels'
 import { arMerge } from './ar.merge'
+import { arKeys } from './ar.keys'
 
 /**
  * Arabic: the Hebrew text of the code on the left, what the interface shows on the right. A draft to be gone over by a native
@@ -111,4 +112,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages, ...arStyles, ...arMore, ...arModules, ...arMerge }
+export const ar: Record<string, string> = { ...menus, ...arDialogs, ...arPanels, ...arChrome, ...arMessages, ...arStyles, ...arMore, ...arModules, ...arMerge, ...arKeys }

@@ -222,7 +222,7 @@ export function ContextToolbar({ tool, unit, onShapePatch, onShapeGeometry, shar
               <input type="number" step="10" min="0" max="500" value={para.wordSpacing ?? 100} onChange={(event) => { const value = Number(event.target.value); if (event.target.value !== '' && Number.isFinite(value)) onParagraphStyle?.({ wordSpacing: Math.min(500, Math.max(0, value)) }) }} />
             </MenuRow>
             <MenuRow label={t('בין שורות (pt)')} title={t('מרווח שורות')}>
-              <input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? para.leading : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />
+              <input type="number" min="1" value={para.leading !== undefined && para.leading > 0 ? Math.round(para.leading * 100) / 100 : Math.round(char.fontSize * 1.25)} onChange={(event) => { const value = Number(event.target.value); if (value > 0) onLeading?.(value) }} />
             </MenuRow>
             <MenuRow label={t('בין פסקאות')} title={t('הרווח בין הפסקה לפסקה שאחריה (אותו ערך כמו „הזחה מלמטה” ו„רווח אחרי” בסגנון הפסקה)')}>
               <NumberField value={para.spaceAfter ?? DEFAULT_SPACE_AFTER} unit={unit ?? 'mm'} min={0} max={MAX_PAGE_PT} onChange={(spaceAfter) => onParagraphSpacing?.({ spaceAfter })} />

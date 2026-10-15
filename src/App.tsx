@@ -19,6 +19,8 @@ import { emptyPrimaryFrameIds, type FlowMode } from './placeText'
 import { isTableCellEditor, isTextEditor, isTyping } from './dom'
 import { isClipToken } from './objectClipboard'
 import { buildMenus, findShortcut, type ImportKind } from './menus'
+import { applyShortcuts, keysOf, useShortcutState } from './shortcuts'
+import { defaultKeysFor } from './shortcutCommands'
 import { baseName, isTauri, pickFiles } from './fileio'
 import { mergeCharacterStyles, remapNestedStyles } from './characterStyleTree'
 import { FILE_EXT, FileFormatError, mergeParagraphStyles, parseDocument } from './fileFormat'
@@ -29,6 +31,7 @@ import { GhostscriptMissingError, openGhostscriptDownload, readEpsFile } from '.
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { LicensesDialog } from './components/LicensesDialog'
+import { ShortcutsDialog } from './components/ShortcutsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { deliverPng } from './pngExport'
 import { exportContentOf, prepareExport, renderPage } from './pdfExport'
@@ -238,6 +241,8 @@ export default function App() {
   const [placing, setPlacing] = useState<PlacedText | null>(null)
   const [importOptionsFile, setImportOptionsFile] = useState<File | null>(null)
   const [licensesOpen, setLicensesOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const shortcutState = useShortcutState()
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
   const [placingImages, setPlacingImages] = useState<PlacedImage[]>([])
   const [importPdfSource, setImportPdfSource] = useState<PdfImportSource | null>(null)
@@ -689,7 +694,7 @@ export default function App() {
       session.showError(t('לא ניתן לייבא את הסגנונות'), e instanceof FileFormatError ? e : new Error(t('הקובץ לא נקרא כראוי.')))
     }
   }
-  const menus = useMemo(
+  const baseMenus = useMemo(
     () =>
       buildMenus({
         hasDoc: !!shown,
@@ -721,6 +726,7 @@ export default function App() {
         importText: () => void importFiles(),
         importKind: (kind) => void importKind(kind),
         showLicenses: () => setLicensesOpen(true),
+        openShortcuts: () => setShortcutsOpen(true),
         importParagraphStyles: () => void importParagraphStyles(),
         canUndo: history.canUndo && !preview,
         canRedo: history.canRedo && !preview,
@@ -764,10 +770,12 @@ export default function App() {
     // the session's actions are recreated every render, so they are refreshed whenever what they depend on changes
     [book.panelOpen, shown, editingParentId, presenting, showRulers, showGuides, showHiddenChars, spellcheck, previewMode, showProps, showPages, showParagraph, dockOpenId, enabledDockPanelIds, workspaceStore, selectWorkspace, fontCatalog.status, fontCatalog.families.length, history.canUndo, history.canRedo, preview, session.recent, session.file, session.dirty, session.history.value, session.tabs, session.activeId, autosaveOn, exportCurrentPagePng],
   )
+  // the menus with the keys of the active set of shortcuts: what is written next to the items and what the key presses run
+  const menus = useMemo(() => applyShortcuts(baseMenus, (id, own) => keysOf(shortcutState, id, defaultKeysFor(id, own))), [baseMenus, shortcutState])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (session.modal || saveWorkspaceDialogOpen) return // a question is open: only the dialog's own keys
+      if (session.modal || saveWorkspaceDialogOpen || shortcutsOpen) return // a question is open: only the dialog's own keys
       const typing = isTyping(e.target)
       // single-key shortcuts (like W) must not fire while typing in a field; the function keys are not typed
       if (typing && !e.ctrlKey && !e.metaKey && !e.altKey && !/^F\d{1,2}$/.test(e.key)) return
@@ -785,7 +793,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [menus, preview, history.redo, session.modal, saveWorkspaceDialogOpen])
+  }, [menus, preview, history.redo, session.modal, saveWorkspaceDialogOpen, shortcutsOpen])
 
   // a different document: nothing is loaded any more
   useEffect(() => {
@@ -1120,6 +1128,7 @@ export default function App() {
       {session.modal && <Modal spec={session.modal} />}
       {saveWorkspaceDialogOpen && <SaveWorkspaceDialog onSave={saveWorkspace} onClose={() => setSaveWorkspaceDialogOpen(false)} />}
       {licensesOpen && <LicensesDialog onClose={() => setLicensesOpen(false)} />}
+      {shortcutsOpen && <ShortcutsDialog menus={baseMenus} onClose={() => setShortcutsOpen(false)} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes, flow) => void confirmDocxImport(replaceSelected, includeFootnotes, flow)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}
     </div>

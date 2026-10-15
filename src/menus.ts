@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import { getLanguage, LANGUAGES, setLanguage } from './i18n'
 import type { MenuDef, MenuItem } from './components/MenuBar'
+import { matches } from './shortcuts'
 import type { WorkspaceHandle } from './components/Workspace'
 import type { RecentEntry } from './recent'
 import type { FontStatus } from './fonts'
@@ -50,6 +51,8 @@ export interface MenuContext {
   /** load another Imudist file's paragraph styles and merge them into this document's */
   importParagraphStyles: () => void
   recent: RecentEntry[]
+  /** Edit > קיצורי מקשים…: the window where the user gives commands their own keys */
+  openShortcuts: () => void
   /** the document lives in a file and has unsaved changes */
   canRevert: boolean
   openFile: () => void
@@ -106,9 +109,10 @@ export function buildMenus(c: MenuContext): MenuDef[] {
   })
   /** an item that works only while a parent page is being edited (page numbers and running headers are written on parent pages) */
   const inParent = (label: string, run: (ws: WorkspaceHandle) => void): MenuItem => ({ ...doc(label, '', run), disabled: !c.hasDoc || !c.editingParent })
-  const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = '') => doc(label, shortcut, (ws) => ws.selectTool(id))
+  const tool = (label: string, id: Parameters<WorkspaceHandle['selectTool']>[0], shortcut = ''): MenuItem => ({ ...doc(label, shortcut, (ws) => ws.selectTool(id)), id: 'tool:' + id })
   const dock = (id: string, label: string, shortcut = '', openByKey = false): MenuItem => ({
     label,
+    id: 'dock:' + id,
     shortcut,
     checked: c.enabledDockPanelIds.includes(id),
     onClick: () => {
@@ -146,7 +150,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         {
           label: 'פתח אחרון',
           submenu: c.recent.length
-            ? c.recent.map((r) => ({ label: r.name, onClick: () => c.openRecent(r) }))
+            ? c.recent.map((r) => ({ label: r.name, noKeys: true, onClick: () => c.openRecent(r) }))
             : [{ label: 'אין קבצים אחרונים', disabled: true }],
         },
         sep,
@@ -229,6 +233,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         sep,
         doc('חיפוש והחלפה…', 'Ctrl+H', (ws) => ws.findReplace()),
         off('בטל בחירה', 'Ctrl+Shift+A'),
+        sep,
+        { label: 'קיצורי מקשים…', shortcut: 'Ctrl+Alt+Shift+K', onClick: c.openShortcuts },
       ],
     },
     {
@@ -432,7 +438,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         {
           label: 'שפת הממשק',
           // each language is written in its own letters, whatever the language of the interface
-          submenu: LANGUAGES.map((language) => ({ label: language.name, checked: getLanguage() === language.id, onClick: () => setLanguage(language.id) })),
+          submenu: LANGUAGES.map((language) => ({ label: language.name, noKeys: true, checked: getLanguage() === language.id, onClick: () => setLanguage(language.id) })),
         },
         sep,
         {
@@ -455,6 +461,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
           submenu: c.savedWorkspaces.length
             ? c.savedWorkspaces.map((workspace) => ({
                 label: workspace.name,
+                noKeys: true,
                 checked: workspace.id === c.activeWorkspaceId,
                 onClick: () => c.selectWorkspace(workspace.id),
               }))
@@ -479,7 +486,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
             tool('זום', 'zoom', 'Z'),
             tool('מעבר צבע', 'gradient', 'G'),
             tool('דוגמיות צבע', 'swatches'),
-            { label: 'סרגלים', checked: c.showRulers, onClick: c.toggleRulers },
+            { label: 'סרגלים', id: 'תצוגה›סרגלים', checked: c.showRulers, onClick: c.toggleRulers },
           ],
         },
         dock('pages', 'לוח עמודים', 'F12'),
@@ -498,7 +505,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
         dock('links', 'קישורים'),
         { label: 'ספר', checked: c.bookPanelOpen, onClick: c.toggleBookPanel },
         ...(c.openDocs.length > 0
-          ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
+          ? [sep, ...c.openDocs.map((d): MenuItem => ({ label: d.name, noKeys: true, checked: d.active, onClick: () => c.switchDoc(d.id) }))]
           : []),
       ],
     },
@@ -518,26 +525,8 @@ export function buildMenus(c: MenuContext): MenuDef[] {
 
 // ── keyboard shortcuts, derived from the same menu definitions ───────────────────
 
-const CODE: Record<string, string> = { '=': 'Equal', '-': 'Minus', ';': 'Semicolon', '[': 'BracketLeft', ']': 'BracketRight', '.': 'Period', ',': 'Comma', '>': 'Period', '<': 'Comma' }
-/** the names the shortcuts give to the arrow keys */
-const KEY_NAMES: Record<string, string> = { up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' }
-
-/** Layout-independent: letters/digits are matched by physical key so Hebrew layouts work too. */
-export function matches(e: KeyboardEvent, shortcut: string): boolean {
-  const parts = shortcut.split('+')
-  const named = parts.pop()!.toLowerCase()
-  const key = KEY_NAMES[named] ?? named
-  const mods = new Set(parts.map((p) => p.toLowerCase()))
-  if ((e.ctrlKey || e.metaKey) !== mods.has('ctrl')) return false
-  if (e.altKey !== mods.has('alt')) return false
-  if (e.shiftKey !== mods.has('shift')) return false
-  if (e.key.toLowerCase() === key) return true
-  if (key.length === 1) {
-    const code = /[a-z]/.test(key) ? 'Key' + key.toUpperCase() : /\d/.test(key) ? 'Digit' + key : CODE[key]
-    return e.code === code
-  }
-  return false
-}
+/** Layout-independent matching of a key press and a shortcut (see `matches` in shortcuts.ts). */
+export { matches }
 
 export function findShortcut(menus: MenuDef[], e: KeyboardEvent): MenuItem | undefined {
   const walk = (items: MenuItem[]): MenuItem | undefined => {

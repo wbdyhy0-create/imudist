@@ -6,6 +6,10 @@ import { HelpAssistant } from './HelpAssistant'
 
 export interface MenuItem {
   label?: string
+  /** names the command for the keyboard shortcuts when the menus it sits in are not enough (a tool, a panel, an item that sits in two menus) */
+  id?: string
+  /** a list entry that comes and goes (a recent file, a language): no shortcut can be given to it */
+  noKeys?: boolean
   shortcut?: string
   /** other keys that run the item too (only `shortcut` is written next to it) */
   aliases?: string[]

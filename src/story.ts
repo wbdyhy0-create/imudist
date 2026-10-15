@@ -71,6 +71,90 @@ export function styleAtChar(runs: Run[], i: number, base: CharStyle): CharStyle 
   return runs.length ? runs[runs.length - 1].style : base
 }
 
+/**
+ * The font size most of the characters [a, b) have (the larger one when two sizes have as many; the size of the character at `a`
+ * for an empty range); null when the runs hold none. This is the size a paragraph's leading was set for, the one the toolbar shows.
+ */
+function dominantSizeIn(runs: Run[], a: number, b: number): number | null {
+  const hi = Math.max(b, a + 1)
+  const counts = new Map<number, number>()
+  let pos = 0
+  for (const run of runs) {
+    const start = pos
+    pos += run.len
+    if (start >= hi) break
+    const length = Math.min(pos, hi) - Math.max(start, a)
+    if (length > 0) counts.set(run.style.fontSize, (counts.get(run.style.fontSize) ?? 0) + length)
+  }
+  let size: number | null = null
+  let most = 0
+  for (const [candidate, count] of counts) {
+    if (count > most || (count === most && size !== null && candidate > size)) {
+      size = candidate
+      most = count
+    }
+  }
+  return size
+}
+
+/**
+ * The leading written down follows the size of the letters it was written for, in proportion: letters that become 1.5 times
+ * larger have 1.5 times the leading (a leading of 17 points under letters of 21 would set the lines on top of each other), so
+ * every point of size adds `leading / size` points of leading. The size a paragraph is measured by is the one most of its
+ * characters have, the one the toolbar shows. A paragraph with no leading written (the automatic one) is left to the automatic
+ * leading, which follows the size itself.
+ *
+ * `before` and `after` are the story's runs around the change and `sizeBefore`/`sizeAfter` the story's own size (for a
+ * paragraph with no runs). `scope` is the paragraphs the change reaches, or null for the whole story, whose own leading then
+ * follows too. Returns null when no leading changes.
+ */
+export function leadingFollowingSize(
+  frame: Pick<TextFrame, 'text' | 'leading' | 'paragraphStylePatches'>,
+  before: Run[],
+  after: Run[],
+  sizeBefore: number,
+  sizeAfter: number,
+  scope: number[] | null,
+): { leading: number | undefined; paragraphStylePatches: TextFrame['paragraphStylePatches']; firstParagraph: number } | null {
+  const { text } = frame
+  const starts = [0]
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1)
+  const wholeLeading = frame.leading !== undefined && frame.leading > 0 ? frame.leading : undefined
+  // kept to a thousandth, so that a size stepped up a point at a time and back arrives where it started
+  const round = (value: number) => Math.max(1, Math.round(value * 1000) / 1000)
+  let patches = frame.paragraphStylePatches
+  let first = Infinity
+  for (const i of scope ?? starts.map((_, index) => index)) {
+    if (i < 0 || i >= starts.length) continue
+    const from = starts[i]
+    const to = i + 1 < starts.length ? starts[i + 1] - 1 : text.length
+    const was = dominantSizeIn(before, from, to) ?? sizeBefore
+    const now = dominantSizeIn(after, from, to) ?? sizeAfter
+    if (!(was > 0) || Math.abs(now - was) < 1e-6) continue
+    const own = patches?.[i]?.leading
+    // a paragraph that has no leading of its own has the story's: when only part of the story changes, that is written on the paragraph
+    const written = own !== undefined && own > 0 ? own : scope !== null ? wholeLeading : undefined
+    if (written === undefined) continue
+    const list = patches ? patches.slice() : []
+    while (list.length <= i) list.push({})
+    list[i] = { ...list[i], leading: round((written * now) / was) }
+    patches = list
+    first = Math.min(first, i)
+  }
+  let leading = frame.leading
+  if (scope === null && wholeLeading !== undefined) {
+    // the story's own leading follows the size most of the story has
+    const was = dominantSizeIn(before, 0, text.length) ?? sizeBefore
+    const now = dominantSizeIn(after, 0, text.length) ?? sizeAfter
+    if (was > 0 && Math.abs(now - was) >= 1e-6) {
+      leading = round((wholeLeading * now) / was)
+      first = Math.min(first, 0)
+    }
+  }
+  if (first === Infinity) return null
+  return { leading, paragraphStylePatches: patches, firstParagraph: first }
+}
+
 /** Apply `patch` to the characters [a, b). */
 export function styleRange(runs: Run[], a: number, b: number, patch: Partial<CharStyle>): Run[] {
   const out: Run[] = []

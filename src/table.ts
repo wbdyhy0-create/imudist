@@ -399,7 +399,14 @@ export function setCellText(t: TableData, r: number, c: number, text: string): T
   return { ...t, cells: t.cells.map((row, i) => (i === or ? row.map((cell, j) => (j === oc ? typed(cell) : cell)) : row)) }
 }
 
-/** a setting on every real cell of the range (grown to whole merged cells); a value of undefined takes the setting away */
+/** a leading that is written down, moved along with a change of the size of its letters (a leading that is not written stays so) */
+const leadingWithSize = (leading: number | undefined, from: number, to: number): number | undefined =>
+  leading !== undefined && leading > 0 && from > 0 ? Math.max(1, Math.round((leading * to) / from * 1000) / 1000) : leading
+
+/**
+ * a setting on every real cell of the range (grown to whole merged cells); a value of undefined takes the setting away.
+ * A new font size takes the written leading of the cell with it (unless the leading is given too).
+ */
 export function patchCells(t: TableData, range: CellRange, patch: Partial<Omit<TableCell, 'text' | 'colSpan' | 'rowSpan'>>): TableData {
   const area = expandRange(t, range)
   const hit = new Set(originsOf(t).filter((o) => o.r0 >= area.r0 && o.r1 <= area.r1 && o.c0 >= area.c0 && o.c1 <= area.c1).map((o) => `${o.r0},${o.c0}`))
@@ -409,8 +416,22 @@ export function patchCells(t: TableData, range: CellRange, patch: Partial<Omit<T
       if (!hit.has(`${r},${c}`)) return cell
       const next: TableCell = { ...cell, ...patch }
       for (const key of Object.keys(patch) as (keyof typeof patch)[]) if (patch[key] === undefined) delete next[key]
+      if (patch.fontSize !== undefined && !('leading' in patch)) {
+        const leading = leadingWithSize(cell.leading ?? t.style.leading, cell.fontSize ?? t.style.fontSize, patch.fontSize)
+        if (leading !== undefined) next.leading = leading
+      }
       return next
     })),
+  }
+}
+
+/** the font size of the table's own text style (what the cells that have no size of their own use), the written leadings following it */
+export function withTableFontSize(t: TableData, size: number): TableData {
+  const from = t.style.fontSize
+  return {
+    ...t,
+    style: { ...t.style, fontSize: size, leading: leadingWithSize(t.style.leading, from, size) },
+    cells: t.cells.map((row) => row.map((cell) => (cell.fontSize === undefined && cell.leading !== undefined ? { ...cell, leading: leadingWithSize(cell.leading, from, size) } : cell))),
   }
 }
 

@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { fontSupportsHebrew, setFontListFilter, useFontListFilter, type FontFamily } from '../fonts'
-import { rememberFontFamily } from '../fontPreference'
+import { getRecentFontFamilies, rememberFontFamily } from '../fontPreference'
 import { t } from '../i18n'
 
 interface Props {
@@ -41,11 +41,18 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
     () => fontFilter === 'hebrew' ? families.filter(({ family }) => fontSupportsHebrew(family)) : families,
     [families, fontFilter],
   )
-  const matches = q ? filteredFamilies.filter((f) => f.family.toLowerCase().includes(q)) : filteredFamilies
+  // the fonts picked last come first (with no search going on), then the fonts of the computer; read when the list is opened
+  const recent = useMemo(() => (open ? getRecentFontFamilies() : []), [open])
+  const showRecent = !q && recent.length > 0
+  const matches: FontFamily[] = useMemo(() => {
+    const found = q ? filteredFamilies.filter((f) => f.family.toLowerCase().includes(q)) : filteredFamilies
+    return showRecent ? [...recent.map((family) => ({ family, faces: [] })), ...found] : found
+  }, [q, filteredFamilies, showRecent, recent])
+  const recentCount = showRecent ? recent.length : 0
   useEffect(() => {
     const currentIndex = matches.findIndex((family) => family.family === value)
     setActiveIndex(currentIndex)
-  }, [q, fontFilter, value])
+  }, [q, fontFilter, value, recentCount])
   useLayoutEffect(() => {
     if (activeIndex < 0 || activeIndex >= matches.length) return
     const list = listRef.current
@@ -137,8 +144,11 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
             className="font-picker-list"
             onKeyDown={handleListKeyDown}
           >
+            {recentCount > 0 && <li className="font-picker-section" role="presentation">{t('גופנים אחרונים')}</li>}
             {matches.map((f, index) => (
-              <li key={f.family} role="option" aria-selected={f.family === value}>
+              <Fragment key={(index < recentCount ? 'recent:' : '') + f.family}>
+                {index === recentCount && recentCount > 0 && <li className="font-picker-section" role="presentation">{t('כל הגופנים')}</li>}
+              <li role="option" aria-selected={f.family === value}>
                 <button
                   ref={(element) => { optionRefs.current[index] = element }}
                   className={(f.family === value ? 'on' : '') + (index === activeIndex ? ' previewing' : '')}
@@ -155,6 +165,7 @@ export function FontPicker({ value, families, onChange, onPreview, className }: 
                   <span className="font-picker-specimen" aria-hidden="true" dir="auto">{fontFilter === 'hebrew' ? 'אבגדהוז' : 'Aa אבג 123'}</span>
                 </button>
               </li>
+              </Fragment>
             ))}
             {matches.length === 0 && <li className="font-picker-empty">{t('לא נמצא גופן')}</li>}
           </ul>

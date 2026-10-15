@@ -6,6 +6,7 @@ import { enStyles } from './en.styles'
 import { enChrome } from './en.chrome'
 import { enPanels } from './en.panels'
 import { enMerge } from './en.merge'
+import { enKeys } from './en.keys'
 
 /** English: the Hebrew text of the code on the left, what the interface shows on the right */
 const menus: Record<string, string> = {
@@ -228,4 +229,4 @@ const menus: Record<string, string> = {
 }
 
 /** the menus, and the dialogs on top (a string in both takes the dialogs') */
-export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages, ...enStyles, ...enMore, ...enModules, ...enMerge }
+export const en: Record<string, string> = { ...menus, ...enDialogs, ...enPanels, ...enChrome, ...enMessages, ...enStyles, ...enMore, ...enModules, ...enMerge, ...enKeys }

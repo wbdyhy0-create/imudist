@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { t } from '../i18n'
+import { macKeys } from '../platform'
+import { getShortcutState, keysOf, matches, useShortcutState } from '../shortcuts'
 
 export type ToolId =
   | 'select' | 'marqueeRect' | 'marqueeEllipse' | 'magneticLasso' | 'direct' | 'page' | 'pathtype' | 'gap' | 'collector' | 'type' | 'line' | 'pen' | 'pencil' | 'brush' | 'eraser'
@@ -79,7 +81,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'marqueeRect', get label() { return t('בחירה מלבנית') }, group: 1, enabled: true, icon: <><path d="M7 3v14a2 2 0 0 0 2 2h12" /><path d="M3 7h14a2 2 0 0 1 2 2v12" /></> },
   { id: 'marqueeEllipse', get label() { return t('בחירה אליפטית') }, group: 1, enabled: true, icon: <ellipse cx="12" cy="12" rx="8" ry="7" strokeDasharray="2 2" /> },
   { id: 'magneticLasso', get label() { return t('לאסו מגנטי') }, group: 1, enabled: true, icon: <><path d="M5 18.500 6.200 9.200a5.800 5.800 0 0 1 11.600 0L19 18.500a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2Z" /><path d="m6.500 16.500 2-1.500 2 1 2-2 2 1 2-2" strokeDasharray="1.5 1.5" /></> },
-  { id: 'line', get label() { return t('קו') }, group: 3, key: '\\', enabled: true, icon: <path d="M5 19 19 5" /> },
+  { id: 'line', get label() { return t('קו') }, group: 3, key: '\\', code: 'Backslash', enabled: true, icon: <path d="M5 19 19 5" /> },
   { id: 'pen', get label() { return t('עט') }, group: 3, key: 'P', code: 'KeyP', enabled: true, icon: <><path d="M12 3l6 10-6 8-6-8z" /><circle cx="12" cy="11" r="1.500" /></> },
   { id: 'pencil', get label() { return t('עיפרון') }, group: 3, key: 'N', code: 'KeyN', enabled: true, icon: <path d="m4 20 1-4.500L16.500 4a2 2 0 0 1 3 3L8 18.500zM14 6.500 17.500 10" /> },
   { id: 'brush', get label() { return t('מברשת') }, group: 3, key: 'B', code: 'KeyB', enabled: true, icon: <><path d="M14.500 4.500a2.100 2.100 0 0 1 3 3L11.500 13.500l-3-3z" /><path d="M8.500 11.500c-2.500 0-4 1.600-4 3.800 0 1.500-.8 2.700-1.500 3.500 3.500 1 8-.5 8-4" /></> },
@@ -138,6 +140,18 @@ const FOLD_GROUPS: ToolId[][] = [
 ]
 const foldGroupOf = new Map<ToolId, ToolId[]>(FOLD_GROUPS.flatMap((g) => g.map((id) => [id, g] as const)))
 const toolDef = (id: ToolId) => TOOLS.find((t) => t.id === id)!
+
+/** the keys a tool has in the program's own set of shortcuts: the one written on it, when a key press can reach it */
+export const toolDefaults = (def: Pick<ToolDef, 'key' | 'code'>): string[] => (def.code && def.key ? [def.key] : [])
+
+/** the keys of a tool now: the ones the active set of shortcuts gives it */
+export const toolShortcuts = (def: ToolDef, state = getShortcutState()): string[] => keysOf(state, 'tool:' + def.id, toolDefaults(def))
+
+/** the tool a key press chooses, if any */
+export function toolForKey(e: KeyboardEvent): ToolId | undefined {
+  const state = getShortcutState()
+  return TOOLS.find((def) => def.enabled && toolShortcuts(def, state).some((keys) => matches(e, keys)))?.id
+}
 export const TOOL_HINTS: Partial<Record<ToolId, string>> = {
   get select() { return t('בחירת אובייקטים, הזזה ושינוי גודל') },
   get marqueeRect() { return t('בחירת צורה לחיתוך אובייקטים, תמונות וטקסט') },
@@ -183,6 +197,7 @@ interface ToolboxProps {
 }
 
 export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampler, onSettings, previewMode, onPreviewMode }: ToolboxProps) {
+  const shortcuts = useShortcutState() // drawn again when the user gives a tool other keys
   const toolboxRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null)
   const [floating, setFloating] = useState(false)
@@ -292,6 +307,7 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
         const isActive = active.id === 'colorSampler'
           ? colorSamplerActive
           : !colorSamplerActive && tool === active.id
+        const toolKeys = (def: ToolDef) => macKeys(toolShortcuts(def, shortcuts)[0] ?? '')
         const tooltipLabel = active.id === 'marqueeRect' ? t('מסגרת חיתוך / Crop Frame') : active.label
         const tooltipDescription = active.id === 'marqueeRect'
           ? t('{hint}, לחיצה כפולה להצגת צורות נוספות', { hint: TOOL_HINTS[active.id] ?? active.label })
@@ -306,10 +322,10 @@ export function Toolbox({ tool, onSelect, colorSamplerActive, onToggleColorSampl
                 data-tour-slot={group?.[0] ?? active.id}
                 aria-disabled={!active.enabled}
                 aria-pressed={isActive}
-                aria-label={active.enabled ? `${active.label}${active.key ? ` (${active.key})` : ''}` : t('{label} — עדיין לא זמין', { label: active.label })}
-                onMouseEnter={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                aria-label={active.enabled ? `${active.label}${toolKeys(active) ? ` (${toolKeys(active)})` : ''}` : t('{label} — עדיין לא זמין', { label: active.label })}
+                onMouseEnter={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: toolKeys(active), rect: event.currentTarget.getBoundingClientRect() })}
                 onMouseLeave={() => setHoveredTool(null)}
-                onFocus={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: active.key, rect: event.currentTarget.getBoundingClientRect() })}
+                onFocus={(event) => setHoveredTool({ label: tooltipLabel, description: tooltipDescription, key: toolKeys(active), rect: event.currentTarget.getBoundingClientRect() })}
                 onBlur={() => setHoveredTool(null)}
                 onClick={() => {
                   if (!active.enabled) return
@@ -401,6 +417,7 @@ interface FlyoutProps {
 
 /** The list of alternative tools for one toolbox slot, opened by its corner mark. Closes on a click elsewhere, Escape, scrolling or resizing. */
 function ToolFlyout({ group, anchor, current, onPick, onSettings, onClose }: FlyoutProps) {
+  const shortcuts = useShortcutState()
   const ref = useRef<HTMLDivElement>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pos, setPos] = useState({ left: anchor.left, top: anchor.top })
@@ -470,9 +487,9 @@ function ToolFlyout({ group, anchor, current, onPick, onSettings, onClose }: Fly
               {t.icon}
             </svg>
             <span className="menu-text">{t.label}</span>
-            {t.key && (
+            {toolShortcuts(t, shortcuts)[0] && (
               <span className="menu-shortcut" dir="ltr">
-                {t.key}
+                {macKeys(toolShortcuts(t, shortcuts)[0])}
               </span>
             )}
           </div>

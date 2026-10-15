@@ -20,6 +20,7 @@ const TRANSLATED = [
   'NewDocumentDialog',
   'ContextToolbar',
   'Toolbox',
+  'ShortcutsDialog',
   'PropertiesPanel',
   'ParagraphPanel',
   'PageToolBar',

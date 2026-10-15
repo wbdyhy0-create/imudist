@@ -128,7 +128,7 @@ import { clipForToken, isClipToken, lastClip, setClip, type ClipObjects } from '
 import { frameAsOwnStory } from '../storySlice'
 import { BOOL_OP_NAMES, combineShapes, shapeToPolygons, splitShapeByMask, type BoolOp } from '../shapeOps'
 import { arrange, nextZ, stackOrder, zOfImage, zOfShape, type ArrangeOp } from '../stacking'
-import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
+import { applyCharacterStyle, applyParagraphLook, atParaEnd, characterStyleIdsIn, charStyleOf, cleanSpacingPlan, clearCharacterStyle, clearParagraphFirstLineIndent, editStory, leadingFollowingSize, mergeRuns, normalizeRuns, paraIndexAt, paragraphsInRange, restyleRange, setParaOverride, sliceRuns, spliceParagraphStyles, spliceParaOverrides, styleAtChar, styleKeepOverride, styleRange, updateCharacterStyleRuns, withParaOverride } from '../story'
 import { resolveParagraphStyle as resolveSharedParagraphStyle } from '../styleApply'
 import { countParagraphLines, flowFrames, flowFramesWithFootnoteContinuation, lastLineWordCount, windowOffset, type FrameFlow } from '../textLayout'
 import { lookTurnedBy } from '../document'
@@ -192,7 +192,7 @@ import { descendantsOf, ownSettings, resolveCharacterPatch, resolvedRecords, wit
 import { TableOptionsDialog } from './TableOptionsDialog'
 import { CellOptionsDialog, type CellPatch } from './CellOptionsDialog'
 import type { TableSelection } from './TableView'
-import { createTable, expandRange, mergeRange, originsOf, patchCells, resolveCell, scaleTable, tableCols, tableRows, unmergeAt, type FormulaFormat, type TableCell, type TableData } from '../table'
+import { createTable, expandRange, mergeRange, originsOf, patchCells, resolveCell, scaleTable, tableCols, tableRows, unmergeAt, withTableFontSize, type FormulaFormat, type TableCell, type TableData } from '../table'
 import { clearCellFormula, deleteColsKeepingFormulas, deleteRowsKeepingFormulas, insertColsKeepingFormulas, insertRowsKeepingFormulas, recalcTable, setCellFormula, withoutFormulas } from '../tableFormulas'
 import { sortTable, type SortOptions } from '../tableSort'
 import { TableFormulaDialog } from './TableFormulaDialog'
@@ -218,7 +218,7 @@ import { StatusBar, formatZoom } from './StatusBar'
 import { UNIT_OPTIONS, formatLength, type Unit } from '../units'
 import { TextFrameView } from './TextFrameView'
 import { EndnotesPageView } from './EndnotesPageView'
-import { FRAME_TOOL_KIND, TOOLS, Toolbox, type ToolId } from './Toolbox'
+import { FRAME_TOOL_KIND, Toolbox, toolForKey, type ToolId } from './Toolbox'
 import type { PageOps, TabView } from '../useDocumentSession'
 
 /** pasteboard around the pages, screen px */
@@ -2657,15 +2657,21 @@ export function Workspace({
     const caret = !sel && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
-    const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: styleRange(runs, 0, head.text.length, patch) })
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
-    // the layout before the first changed letter is as it was: it is not measured again
+    const nextRuns = styleRange(runs, sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : 0, sel ? Math.max(sel.a, sel.b) : caret ? caretTo : head.text.length, patch)
+    const applyWholeStyle = (f: TextFrame) => ({ ...f, ...patch, runs: nextRuns })
+    // the leading that is written down follows the size the letters are given
+    const follow = patch.fontSize === undefined
+      ? null
+      : leadingFollowingSize(head, runs, nextRuns, head.fontSize, patch.fontSize, sel ? paragraphsInRange(head.text, sel.a, sel.b) : caret ? [paraIndexAt(head.text, caret.a)] : null)
+    const withLeading = (f: TextFrame): TextFrame => (follow ? { ...f, leading: follow.leading, paragraphStylePatches: follow.paragraphStylePatches } : f)
+    // the layout before the first changed letter is as it was: it is not measured again (a paragraph whose leading changed is, from its start)
     dirtyOffsetRef.current = sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : undefined
+    if (follow && dirtyOffsetRef.current !== undefined) dirtyOffsetRef.current = Math.min(dirtyOffsetRef.current, paragraphBounds(head.text, follow.firstParagraph)[0])
     onFramesChange(
       frames.map((f) => {
-        if (sel) return f.id === head.id ? { ...f, runs: styleRange(runs, sel.a, sel.b, patch) } : f
-        if (caret) return f.id === head.id ? { ...f, runs: styleRange(runs, caretFrom, caretTo, patch) } : f
-        if (f.id === head.id) return applyWholeStyle(f)
+        if (sel || caret) return f.id === head.id ? withLeading({ ...f, runs: nextRuns }) : f
+        if (f.id === head.id) return withLeading(applyWholeStyle(f))
         return chainIds.has(f.id) ? { ...f, ...patch } : f
       }),
       key,
@@ -2687,13 +2693,17 @@ export function Workspace({
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const clampSize = (size: number) => Math.min(999, Math.max(1, size + delta))
+    const nextRuns = restyleRange(runs, sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : 0, sel ? Math.max(sel.a, sel.b) : caret ? caretTo : head.text.length, (style) => ({ fontSize: clampSize(style.fontSize) }))
+    // the leading that is written down follows the size the letters are given
+    const follow = leadingFollowingSize(head, runs, nextRuns, head.fontSize, clampSize(head.fontSize), sel ? paragraphsInRange(head.text, sel.a, sel.b) : caret ? [paraIndexAt(head.text, caret.a)] : null)
+    const withLeading = (f: TextFrame): TextFrame => (follow && f.id === head.id ? { ...f, leading: follow.leading, paragraphStylePatches: follow.paragraphStylePatches } : f)
     dirtyOffsetRef.current = sel ? Math.min(sel.a, sel.b) : caret ? caretFrom : undefined
+    if (follow && dirtyOffsetRef.current !== undefined) dirtyOffsetRef.current = Math.min(dirtyOffsetRef.current, paragraphBounds(head.text, follow.firstParagraph)[0])
     onFramesChange(
       frames.map((f) => {
-        if (sel) return f.id === head.id ? { ...f, runs: restyleRange(runs, sel.a, sel.b, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
-        if (caret) return f.id === head.id ? { ...f, runs: restyleRange(runs, caretFrom, caretTo, (style) => ({ fontSize: clampSize(style.fontSize) })) } : f
+        if (sel || caret) return f.id === head.id ? withLeading({ ...f, runs: nextRuns }) : f
         if (!chainIds.has(f.id)) return f
-        return { ...f, fontSize: clampSize(f.fontSize), ...(f.id === head.id ? { runs: restyleRange(runs, 0, head.text.length, (style) => ({ fontSize: clampSize(style.fontSize) })) } : {}) }
+        return withLeading({ ...f, fontSize: clampSize(f.fontSize), ...(f.id === head.id ? { runs: nextRuns } : {}) })
       }),
       `style:${head.id}:fontSizeStep`,
     )
@@ -3336,7 +3346,11 @@ export function Workspace({
       const sh = selectedTable()
       if (!sh) return
       if (tableSel?.id === sh.id) commitTable(sh.id, patchCells(sh.table, tableSel, patch), 'table-text-style')
-      else commitTable(sh.id, { ...sh.table, style: { ...sh.table.style, ...patch } }, 'table-default-text-style')
+      else {
+        const { fontSize, ...rest } = patch
+        const sized = fontSize !== undefined ? withTableFontSize(sh.table, fontSize) : sh.table
+        commitTable(sh.id, { ...sized, style: { ...sized.style, ...rest } }, 'table-default-text-style')
+      }
     }
 
   // a table is as tall as its text makes it: after a change of its width (or a file written with other fonts) the height is caught up
@@ -5260,20 +5274,6 @@ export function Workspace({
     if (!stillPicked) setIsolatedGroupId(null)
   }, [isolatedGroupId, selectedId])
 
-  // Ctrl+Shift+O: create outlines (the latest closure is kept in a ref so the listener is put on once)
-  const createOutlinesRef = useRef(createOutlines)
-  createOutlinesRef.current = createOutlines
-  useEffect(() => {
-    const onShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey || event.code !== 'KeyO') return
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return
-      event.preventDefault()
-      void createOutlinesRef.current()
-    }
-    window.addEventListener('keydown', onShortcut)
-    return () => window.removeEventListener('keydown', onShortcut)
-  }, [])
-
   // Ctrl+Up / Ctrl+Down (Cmd on a Mac): a larger / smaller font for the selected text, the same step as the arrows of the font size field
   const stepSelectedTextSizeRef = useRef((_delta: number): boolean => false)
   stepSelectedTextSizeRef.current = (delta) => {
@@ -5541,17 +5541,6 @@ export function Workspace({
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  useEffect(() => {
-    const onFootnoteShortcut = (event: KeyboardEvent) => {
-      const inEditor = event.target instanceof HTMLElement && !!event.target.closest('.rich-editor')
-      if (!inEditor || !textSel || !(event.ctrlKey || event.metaKey) || !event.altKey || !event.shiftKey || event.code !== 'KeyF') return
-      event.preventDefault()
-      insertFootnote()
-    }
-    window.addEventListener('keydown', onFootnoteShortcut)
-    return () => window.removeEventListener('keydown', onFootnoteShortcut)
-  }, [textSel, frames])
-
   // tool shortcuts + hold Space for a temporary Hand tool
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -5561,14 +5550,19 @@ export function Workspace({
         drawSpace.current = true
         return
       }
-      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.code === 'Space') {
+      const modified = e.ctrlKey || e.metaKey || e.altKey
+      if (isTyping(e.target) && !modified) return
+      if (e.code === 'Space' && !modified) {
         e.preventDefault()
         setSpace(true)
         return
       }
-      const t = TOOLS.find((t) => t.enabled && t.code === e.code && !!t.shift === e.shiftKey)
-      if (t) activateTool(t.id)
+      // the keys of the tools are the ones of the active set of shortcuts (the user can change them)
+      const id = toolForKey(e)
+      if (id) {
+        if (modified) e.preventDefault()
+        activateTool(id)
+      }
     }
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') {

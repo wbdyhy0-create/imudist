@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   borderX, cellCornerRadii, cellRect, cellSideStroke, createTable, deleteCols, deleteRows, dragColumnBorder, expandRange, insertCols, insertRows, layoutTable, mergeRange, scaleTable,
-  originsOf, ownerGrid, patchCells, regionOf, resolveCell, rowKind, sanitizeTable, setCellText, setHeaderFooter, tableCols, tableLines, tableRows, unmergeAt,
+  originsOf, ownerGrid, patchCells, regionOf, resolveCell, rowKind, sanitizeTable, setCellText, setHeaderFooter, tableCols, tableLines, tableRows, unmergeAt, withTableFontSize,
   type TableData,
 } from './table'
 
@@ -379,3 +379,28 @@ describe('a table shape in a file', () => {
     expect(parseDocument(JSON.stringify(file), 'x').shapes[0].kind).toBe('rect')
   })
 })
+
+describe('a new font size and the leading', () => {
+  it('takes the written leading of a cell along, and leaves an automatic one', () => {
+    const t = grid(1, 2)
+    const styled = { ...t, style: { ...t.style, fontSize: 12, leading: 15 }, cells: [[{ ...t.cells[0][0], fontSize: 10, leading: 20 }, { ...t.cells[0][1] }]] }
+    const both = patchCells(styled, { r0: 0, c0: 0, r1: 0, c1: 1 }, { fontSize: 20 })
+    expect(both.cells[0][0].leading).toBe(40)
+    expect(both.cells[0][1].leading).toBe(25)
+    const auto = patchCells({ ...t, cells: [[{ ...t.cells[0][0] }, { ...t.cells[0][1] }]] }, { r0: 0, c0: 0, r1: 0, c1: 0 }, { fontSize: 20 })
+    expect(auto.cells[0][0].leading).toBeUndefined()
+    // a leading given with the size is the one that is kept
+    expect(patchCells(styled, { r0: 0, c0: 0, r1: 0, c1: 0 }, { fontSize: 20, leading: 22 }).cells[0][0].leading).toBe(22)
+  })
+
+  it('moves the written leadings of the whole table with the size of its text style', () => {
+    const t = grid(1, 2)
+    const styled = { ...t, style: { ...t.style, fontSize: 10, leading: 12 }, cells: [[{ ...t.cells[0][0], leading: 14 }, { ...t.cells[0][1], fontSize: 8, leading: 9 }]] }
+    const bigger = withTableFontSize(styled, 20)
+    expect(bigger.style.fontSize).toBe(20)
+    expect(bigger.style.leading).toBe(24)
+    expect(bigger.cells[0][0].leading).toBe(28)
+    expect(bigger.cells[0][1].leading).toBe(9) // it has a size of its own
+  })
+})
+
