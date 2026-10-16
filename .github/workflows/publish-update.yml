@@ -11,6 +11,9 @@ on:
       trial_days:
         description: 'Length of the trial builds, in days'
         default: '180'
+      artifacts:
+        description: 'Which builds of that run to publish: imudist-* (all), imudist-win-full (only the ordinary Windows build), imudist-win-* (Windows), imudist-mac-* (the Macs)'
+        default: 'imudist-*'
 
 jobs:
   publish:
@@ -26,6 +29,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: ${{ inputs.artifacts }}
           run-id: ${{ inputs.run_id }}
           github-token: ${{ github.token }}
       - name: What was downloaded
