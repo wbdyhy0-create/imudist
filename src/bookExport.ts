@@ -1,5 +1,5 @@
 import type { jsPDF } from 'jspdf'
-import { addPagesToPdf, deliverPdf, prepareExport, sheetSizeOf, type ExportContent, type PageDrawOptions } from './pdfExport'
+import { addPagesToPdf, deliverPdf, ExportCancelled, prepareExport, sheetSizeOf, type ExportContent, type PageDrawOptions } from './pdfExport'
 
 /** One chapter of a book to be exported: how to get its content, and where the book puts it. */
 export interface BookExportChapter {
@@ -40,10 +40,13 @@ export async function exportBookPdf(
   onProgress?: (progress: BookExportProgress) => void,
   /** a window opened from the click that started the export, so the result can be shown in it */
   viewWindow?: Window | null,
+  /** cancels the export (it throws `ExportCancelled`, and nothing is saved) */
+  signal?: AbortSignal,
 ): Promise<boolean> {
   let pdf: jsPDF | null = null
   const bookmarks: { title: string; page: number }[] = []
   for (const [index, chapter] of chapters.entries()) {
+    if (signal?.aborted) throw new ExportCancelled()
     const content = await chapter.load()
     const prepared = prepareExport({ ...content, doc: { ...content.doc, startPage: chapter.startPage } })
     if (prepared.rects.length === 0) continue
@@ -52,7 +55,7 @@ export async function exportBookPdf(
       for (let blank = 0; blank < chapter.skipped; blank++) pdf.addPage([sheet.w, sheet.h])
     }
     const before: number = pdf ? pdf.getNumberOfPages() : 0
-    pdf = await addPagesToPdf(pdf, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, 1, prepared.rects.length, (page, pages) => onProgress?.({ chapter: index + 1, chapters: chapters.length, page, pages }))
+    pdf = await addPagesToPdf(pdf, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, 1, prepared.rects.length, (page, pages) => onProgress?.({ chapter: index + 1, chapters: chapters.length, page, pages }), signal)
     bookmarks.push({ title: chapter.title, page: before + 1 })
   }
   if (!pdf) {

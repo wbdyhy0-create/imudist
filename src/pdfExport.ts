@@ -62,6 +62,20 @@ export interface PdfExportOptions {
   vectorReport?: VectorReport
 }
 
+/** What an export throws when the person cancels it: not a failure, nothing to say about it. */
+export class ExportCancelled extends Error {
+  constructor() {
+    super('export cancelled')
+    this.name = 'ExportCancelled'
+  }
+}
+
+export const isExportCancelled = (error: unknown): error is ExportCancelled => error instanceof ExportCancelled
+
+function throwIfCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) throw new ExportCancelled()
+}
+
 const PT_PER_INCH = 72
 /** a normal image at 100% "fill"/"fit" is already sized in points at screen resolution (72dpi); anything sharper
  *  needs the picture's own pixels drawn smaller than its frame, in proportion to the chosen DPI */
@@ -687,8 +701,9 @@ export async function renderPage(
   page: PageRect,
   bleedPt: number,
   dpi: number,
+  signal?: AbortSignal,
 ): Promise<HTMLCanvasElement> {
-  const [layer] = await renderPageLayers(content, flows, page, bleedPt, dpi, false)
+  const [layer] = await renderPageLayers(content, flows, page, bleedPt, dpi, false, signal)
   return (layer as { kind: 'picture'; canvas: HTMLCanvasElement }).canvas
 }
 
@@ -704,6 +719,8 @@ export async function renderPageLayers(
   bleedPt: number,
   dpi: number,
   vectorRequested: false | { report?: VectorReport },
+  /** cancels the drawing: the page stops at the next object */
+  signal?: AbortSignal,
 ): Promise<PageLayer[]> {
   // an object that is mixed with what is under it (a blend mode) needs what is under it as pixels: such a page is one picture
   const vector = vectorRequested && !pageHasBlend(content, page, bleedPt) ? vectorRequested : false
@@ -814,6 +831,7 @@ export async function renderPageLayers(
       pendingFrames = []
     }
     for (const item of ordered) {
+      throwIfCancelled(signal)
       if (item.kind === 'frame') {
         const frame = frameById.get(item.id)
         if (frame?.blendMode) {
@@ -1056,12 +1074,102 @@ export function sheetSizeOf(page: PageRect, options: PageDrawOptions): { w: numb
   return { w: page.w + 2 * bleedPt + 2 * marksMargin, h: page.h + 2 * bleedPt + 2 * marksMargin }
 }
 
+/** a page picture as raw pixels with its size, as `processRGBFLATE` below takes it */
+type DeflatedPicture = Uint8Array & { pictureWidth?: number; pictureHeight?: number }
+
+/**
+ * jsPDF learns one more kind of picture: RGB pixels that are already deflated (a zlib stream, as a PDF's FlateDecode holds it), taken
+ * into the file as they are. What it does with a PNG is to take it apart into pixels, filter them in plain arrays and compress them
+ * again, which is most of the time an export takes.
+ */
+;(jsPDF.API as unknown as Record<string, unknown>).processRGBFLATE = function (
+  this: { __addimage__: { arrayBufferToBinaryString: (data: Uint8Array) => string } },
+  data: DeflatedPicture,
+  index: number,
+  alias: string,
+) {
+  return {
+    data: this.__addimage__.arrayBufferToBinaryString(data),
+    width: data.pictureWidth,
+    height: data.pictureHeight,
+    colorSpace: 'DeviceRGB',
+    bitsPerComponent: 8,
+    filter: 'FlateDecode',
+    index,
+    alias,
+  }
+}
+
+let rawPictureCount = 0
+
+/**
+ * A page picture written to the PDF without going through a PNG: its pixels are taken a band at a time (without the alpha) and deflated
+ * by the browser itself (native, and not on the main thread), and the PDF holds the result as it is. Two to three times faster than
+ * the PNG, and the same pixels. Returns how many bytes it wrote, or null when it did not write the picture (the browser cannot deflate,
+ * or the picture has see-through parts, which need a mask): the caller then writes the PNG as before.
+ */
+async function addOpaquePicture(pdf: jsPDF, canvas: HTMLCanvasElement, x: number, y: number, w: number, h: number): Promise<number | null> {
+  if (typeof CompressionStream !== 'function' || canvas.width === 0 || canvas.height === 0) return null
+  const context = canvas.getContext('2d')
+  if (!context) return null
+  const { width, height } = canvas
+  const stream = new CompressionStream('deflate')
+  const writer = stream.writable.getWriter()
+  const reader = stream.readable.getReader()
+  const parts: Uint8Array[] = []
+  let size = 0
+  const collected = (async () => {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return
+      parts.push(value)
+      size += value.length
+    }
+  })()
+  try {
+    const rowsPerBand = Math.max(1, Math.floor(4_000_000 / (width * 4)))
+    for (let top = 0; top < height; top += rowsPerBand) {
+      const rows = Math.min(rowsPerBand, height - top)
+      const rgba = context.getImageData(0, top, width, rows).data
+      const rgb = new Uint8Array(width * rows * 3)
+      let alpha = 255
+      for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+        rgb[j] = rgba[i]
+        rgb[j + 1] = rgba[i + 1]
+        rgb[j + 2] = rgba[i + 2]
+        alpha &= rgba[i + 3]
+      }
+      if (alpha !== 255) {
+        await writer.abort().catch(() => undefined)
+        await collected.catch(() => undefined)
+        return null
+      }
+      await writer.write(rgb)
+    }
+    await writer.close()
+    await collected
+  } catch {
+    await collected.catch(() => undefined)
+    return null
+  }
+  const deflated: DeflatedPicture = new Uint8Array(size)
+  let at = 0
+  for (const part of parts) {
+    deflated.set(part, at)
+    at += part.length
+  }
+  deflated.pictureWidth = width
+  deflated.pictureHeight = height
+  pdf.addImage(deflated, 'RGBFLATE', x, y, w, h, `picture-${rawPictureCount++}`, 'NONE')
+  return size
+}
+
 /** about as much as a PDF can hold in the browser: it is one string, and a string cannot be longer than about 512 MB */
 const MAX_PDF_BYTES = 380 * 1024 * 1024
 export const TOO_LARGE_MESSAGE = 'הקובץ יהיה גדול מדי כדי להיווצר. בחר איכות של 150 DPI, או ייצא טווח עמודים קטן יותר (ספר: בחלקים).'
 
 /** Pages `from`..`to` (1-based) of a prepared document, added to the PDF (which is made with the first one when there is none yet). */
-export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport, options: PageDrawOptions, from: number, to: number, onPage?: (done: number, total: number) => void): Promise<jsPDF | null> {
+export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport, options: PageDrawOptions, from: number, to: number, onPage?: (done: number, total: number) => void, signal?: AbortSignal): Promise<jsPDF | null> {
   const bleedPt = options.bleed ? options.bleedPt : 0
   const marksMargin = outerRoomOf(options) // room outside the bleed: for the crop marks, and for the slug
   const last = Math.min(prepared.rects.length, to)
@@ -1070,6 +1178,7 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
   let target = pdf
   let written = 0
   for (let i = first; i <= last; i++) {
+    throwIfCancelled(signal)
     const page = prepared.rects[i - 1]
     if (!page) continue
     const sheet = sheetSizeOf(page, options)
@@ -1077,7 +1186,8 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
     else target.addPage([sheet.w, sheet.h])
     const cmyk = options.colorMode === 'cmyk'
     if (options.vectorText) {
-      const layers = await renderPageLayers(prepared.content, prepared.flows, page, bleedPt, options.dpi, { report: options.vectorReport })
+      const layers = await renderPageLayers(prepared.content, prepared.flows, page, bleedPt, options.dpi, { report: options.vectorReport }, signal)
+      throwIfCancelled(signal)
       for (const [index, layer] of layers.entries()) {
         if (layer.kind === 'text') {
           writeGlyphs(target, layer.glyphs, marksMargin + bleedPt, marksMargin + bleedPt, cmyk)
@@ -1102,6 +1212,11 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
           written += await addCmykPicture(target, layer.canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, index > 0)
           continue
         }
+        const fast = index === 0 ? await addOpaquePicture(target, layer.canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt) : null
+        if (fast !== null) {
+          written += fast
+          continue
+        }
         const picture = layer.canvas.toDataURL('image/png')
         target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
         written += picture.length * 0.75
@@ -1114,15 +1229,20 @@ export async function addPagesToPdf(pdf: jsPDF | null, prepared: PreparedExport,
       onPage?.(i - first + 1, total)
       continue
     }
-    const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi)
+    const canvas = await renderPage(prepared.content, prepared.flows, page, bleedPt, options.dpi, signal)
+    throwIfCancelled(signal)
     if (cmyk) {
       written += await addCmykPicture(target, canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
     } else {
-      const picture = canvas.toDataURL('image/png')
-      // jsPDF takes a PNG apart into raw pixels and, unless it is told to compress them, writes those: a 300 DPI A4 page is 26 MB of them.
-      // Compressed again (lossless, as the PNG was) it takes about what the PNG did
-      target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
-      written += picture.length * 0.75
+      const fast = await addOpaquePicture(target, canvas, marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt)
+      if (fast !== null) written += fast
+      else {
+        const picture = canvas.toDataURL('image/png')
+        // jsPDF takes a PNG apart into raw pixels and, unless it is told to compress them, writes those: a 300 DPI A4 page is 26 MB of them.
+        // Compressed again (lossless, as the PNG was) it takes about what the PNG did
+        target.addImage(picture, 'PNG', marksMargin, marksMargin, page.w + 2 * bleedPt, page.h + 2 * bleedPt, undefined, 'FAST')
+        written += picture.length * 0.75
+      }
     }
     // a PDF is built as one string, and a string cannot be longer than about 512 MB: say so before drawing the rest of the pages
     if (written > MAX_PDF_BYTES) throw new Error(t(TOO_LARGE_MESSAGE))
@@ -1212,11 +1332,13 @@ export async function exportPdf(
   /** a window opened synchronously from the triggering click, so navigating it to the result isn't blocked as a
    *  popup once the (multi-page, `await`-heavy) render work below is done */
   viewWindow?: Window | null,
+  /** cancels the export (it throws `ExportCancelled`, and nothing is saved) */
+  signal?: AbortSignal,
 ) {
   const prepared = prepareExport(content)
   const from = options.range ? Math.max(1, options.range.from) : 1
   const to = options.range ? Math.min(prepared.rects.length, options.range.to) : prepared.rects.length
-  const pdf = await addPagesToPdf(null, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, from, to, onProgress)
+  const pdf = await addPagesToPdf(null, prepared, { ...options, infoName: options.infoName ?? fileBaseName }, from, to, onProgress, signal)
   if (!pdf) {
     viewWindow?.close()
     return false

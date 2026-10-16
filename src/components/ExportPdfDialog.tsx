@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Assets, DocSettings, ImageFrame, PageSection, ParagraphStyleRecord, ShapeFrame, TextFrame } from '../document'
-import { exportPdf } from '../pdfExport'
+import { exportPdf, isExportCancelled } from '../pdfExport'
 import { emptyReport, PICTURE_REASONS, type PictureReason, type VectorReport } from '../vectorText'
 import { SHAPE_PICTURE_REASONS, type ShapePictureReason } from '../vectorShapes'
 import { isTauri } from '../fileio'
@@ -58,6 +58,11 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
   /** what the export did with the frames of text, shown when it is done (only when the text was to be written as text) */
   const [result, setResult] = useState<VectorReport | null>(null)
   const [busy, setBusy] = useState<{ done: number; total: number } | null>(null)
+  /** the export that is running, which the cancel button stops */
+  const running = useRef<AbortController | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  // the window goes away while an export runs: the export stops
+  useEffect(() => () => running.current?.abort(), [])
   const [error, setError] = useState<string | null>(null)
   const unit: Unit = doc.unit
   const staleLinks = new Set(
@@ -82,6 +87,8 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
       viewWindow.document.body.textContent = t('מייצא PDF, נא להמתין…')
     }
     setBusy({ done: 0, total: rangeMode === 'all' ? doc.pages : clampedTo - clampedFrom + 1 })
+    const controller = new AbortController()
+    running.current = controller
     const vectorReport = vectorText ? emptyReport() : undefined
     try {
       const exported = await exportPdf(
@@ -97,6 +104,7 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
         doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם'),
         (done, total) => setBusy({ done, total }),
         viewWindow,
+        controller.signal,
       )
       if (exported) {
         // when the text was to be written as text, say what became of each frame before the dialog goes
@@ -105,12 +113,22 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
       }
     } catch (error) {
       viewWindow?.close()
+      // cancelled by the person: nothing was saved, and there is nothing to report
+      if (isExportCancelled(error)) return
       console.error('PDF export failed:', error)
       const reason = error instanceof Error ? error.message || error.name : String(error)
       setError(reason && reason !== '[object Object]' ? t('הייצוא נכשל: {reason}', { reason }) : t('הייצוא נכשל. נסה שוב.'))
     } finally {
+      running.current = null
+      setCancelling(false)
       setBusy(null)
     }
+  }
+
+  /** the cancel button while an export runs: it stops at the next object it would draw, and the dialog stays as it was */
+  const cancelExport = () => {
+    setCancelling(true)
+    running.current?.abort()
   }
 
   return (
@@ -225,8 +243,8 @@ export function ExportPdfDialog({ doc, frames, images, shapes, layerOrder, asset
               <button className="btn primary" onClick={() => void run()} disabled={!!busy || doc.pages === 0}>
                 {busy ? t('מייצא… ({done}/{total})', { done: busy.done, total: busy.total }) : t('ייצוא')}
               </button>
-              <button className="btn" onClick={onClose} disabled={!!busy}>
-                {t('ביטול')}
+              <button className="btn" onClick={busy ? cancelExport : onClose} disabled={cancelling}>
+                {cancelling ? t('מבטל…') : t('ביטול')}
               </button>
             </>
           )}

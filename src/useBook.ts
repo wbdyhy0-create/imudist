@@ -3,6 +3,7 @@ import { BookFormatError, computeBookNumbering, newBook, newChapterId, normalize
 import { planContentSync, styleSetOf, syncContent, syncText, withStartPage } from './bookOps'
 import { reportCount, type StyleSet, type SyncReport } from './bookStyles'
 import { exportBookPdf, type BookExportChapter, type BookExportProgress } from './bookExport'
+import { isExportCancelled } from './pdfExport'
 import { bookLevelIssues, type BookCheck, type ChapterCheck } from './bookPreflight'
 import { createBookFile, openBookFile, type BookStorage, type ChapterRef } from './bookStorage'
 import { baseName } from './fileio'
@@ -113,6 +114,9 @@ export function useBook(options: Options) {
     return (family: string) => !!installed?.has(family.toLowerCase()) || fontInstalled(family)
   }, [fontCatalog])
   const [exportProgress, setExportProgress] = useState<(BookExportProgress & { title: string }) | null>(null)
+  /** the export that is running, which `cancelExport` stops */
+  const exportRun = useRef<AbortController | null>(null)
+  const [exportCancelling, setExportCancelling] = useState(false)
   const latest = useRef({ book, storage, options, conflicts })
   latest.current = { book, storage, options, conflicts }
   const readToken = useRef(0)
@@ -543,6 +547,8 @@ export function useBook(options: Options) {
       return false
     }
     setBusy(true)
+    const controller = new AbortController()
+    exportRun.current = controller
     try {
       const chapters: BookExportChapter[] = current.chapters.map((chapter, index) => ({
         title: states[chapter.id]?.info?.name || chapter.path.split('/').pop()!.replace(/\.[^.]*$/, ''),
@@ -556,7 +562,7 @@ export function useBook(options: Options) {
           return exportContentOf({ ...content, doc: { ...content.doc, startPage: numbering.chapters[index].startPage! } })
         },
       }))
-      const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ספר'), (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow)
+      const done = await exportBookPdf(chapters, options, current.title.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ספר'), (progress) => setExportProgress({ ...progress, title: chapters[progress.chapter - 1].title }), viewWindow, controller.signal)
       if (done) {
         // when the text was to be written as text, the dialog stays to say what became of each frame (it closes itself then)
         if (!options.vectorReport) setExportOpen(false)
@@ -565,12 +571,25 @@ export function useBook(options: Options) {
       return done
     } catch (e) {
       viewWindow?.close()
+      // cancelled by the person: nothing was saved
+      if (isExportCancelled(e)) {
+        notify(t('הייצוא בוטל'))
+        return false
+      }
       showError(t('הייצוא נכשל'), e)
       return false
     } finally {
+      exportRun.current = null
+      setExportCancelling(false)
       setBusy(false)
       setExportProgress(null)
     }
+  }
+
+  /** stops the export that is running, at the next object it would draw */
+  const cancelExport = () => {
+    setExportCancelling(true)
+    exportRun.current?.abort()
   }
 
   const setStyleSource = (id: string | null) => {
@@ -684,6 +703,8 @@ export function useBook(options: Options) {
     exportOpen,
     setExportOpen,
     exportProgress,
+    exportCancelling,
+    cancelExport,
     runExport,
     create,
     open,

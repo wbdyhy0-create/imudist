@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MAX_PAGE_PT } from '../document'
 import { buildMerge, decodeCsvBytes, imposeGrid, parseCsv, recordsFromRows, tokensIn, type FieldType, type MergeData, type MergeField, type PictureSource } from '../dataMerge'
-import { exportPdf, type ExportContent } from '../pdfExport'
+import { exportPdf, isExportCancelled, type ExportContent } from '../pdfExport'
 import { pageRects } from '../pages'
 import { PAGE_PRESETS, fromPt, toPt } from '../units'
 import { readImageFile } from '../importImage'
@@ -35,6 +35,11 @@ export function DataMergeDialog({ template, onAddField, onClose }: Props) {
   const [autoShrink, setAutoShrink] = useState(true)
   const [dpi, setDpi] = useState(300)
   const [busy, setBusy] = useState(false)
+  /** the export that is running, which the cancel button stops */
+  const running = useRef<AbortController | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  // the window goes away while the export runs: the export stops
+  useEffect(() => () => running.current?.abort(), [])
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ cards: number; pages: number; missing: number; unknown: string[]; shrunk: number } | null>(null)
 
@@ -100,6 +105,8 @@ export function DataMergeDialog({ template, onAddField, onClose }: Props) {
       viewWindow.document.body.textContent = t('מייצא PDF, נא להמתין…')
     }
     setBusy(true)
+    const controller = new AbortController()
+    running.current = controller
     try {
       const baseFile = (template.doc.name.replace(/[\\/:*?"<>|]/g, '_').trim() || t('ללא שם')) + ' - ' + t('מיזוג')
       const merged = await buildMerge(
@@ -109,15 +116,19 @@ export function DataMergeDialog({ template, onAddField, onClose }: Props) {
         pictures,
       )
       if (!merged) throw new Error(t('אי אפשר ליצור את המיזוג: אין רשומות, או שהכרטיס גדול מהשטח שבין השוליים.'))
-      const exported = await exportPdf(merged.content, { range: null, bleed: false, bleedPt: 0, cropMarks: false, dpi, vectorText: true, colorMode: 'rgb' }, baseFile, undefined, viewWindow)
+      const exported = await exportPdf(merged.content, { range: null, bleed: false, bleedPt: 0, cropMarks: false, dpi, vectorText: true, colorMode: 'rgb' }, baseFile, undefined, viewWindow, controller.signal)
       if (exported) setDone({ cards: merged.cards, pages: merged.pages, missing: merged.missingPictures, unknown: merged.unknownFields, shrunk: merged.shrunk })
       else viewWindow?.close()
     } catch (failure) {
       viewWindow?.close()
+      // cancelled by the person: nothing was saved, and there is nothing to report
+      if (isExportCancelled(failure)) return
       console.error('Data merge failed:', failure)
       const reason = failure instanceof Error ? failure.message : String(failure)
       setError(reason ? t('המיזוג נכשל: {reason}', { reason }) : t('המיזוג נכשל. נסה שוב.'))
     } finally {
+      running.current = null
+      setCancelling(false)
       setBusy(false)
     }
   }
@@ -225,7 +236,7 @@ export function DataMergeDialog({ template, onAddField, onClose }: Props) {
           <button className="btn primary" onClick={() => void run()} disabled={busy || !effective || !grid}>
             {busy ? t('מייצא…') : t('צור PDF')}
           </button>
-          <button className="btn" onClick={onClose} disabled={busy}>{done ? t('סגור') : t('ביטול')}</button>
+          <button className="btn" onClick={busy ? () => { setCancelling(true); running.current?.abort() } : onClose} disabled={cancelling}>{cancelling ? t('מבטל…') : done ? t('סגור') : t('ביטול')}</button>
         </div>
       </div>
     </div>

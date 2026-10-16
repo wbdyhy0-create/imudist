@@ -340,7 +340,7 @@ const COLOR_CHOICES = [
 
 /** The book as one PDF: the same choices as a single document's export, for every page of every chapter. */
 export function BookExportDialog({ controller }: { controller: BookController }) {
-  const { book, numbering, exportOpen, exportProgress, busy } = controller
+  const { book, numbering, exportOpen, exportProgress, busy, exportCancelling } = controller
   const [marks, setMarks] = useState(() => initialPrintMarks())
   const [dpi, setDpi] = useState(300)
   const [colorMode, setColorMode] = useState<'rgb' | 'cmyk'>('rgb')
@@ -413,7 +413,7 @@ export function BookExportDialog({ controller }: { controller: BookController })
           ) : (
             <>
               <button className="btn primary" onClick={() => void run()} disabled={busy}>{busy ? t('מייצא…') : t('ייצוא')}</button>
-              <button className="btn" onClick={close} disabled={busy}>{t('ביטול')}</button>
+              <button className="btn" onClick={busy ? controller.cancelExport : close} disabled={exportCancelling}>{exportCancelling ? t('מבטל…') : t('ביטול')}</button>
             </>
           )}
         </div>
