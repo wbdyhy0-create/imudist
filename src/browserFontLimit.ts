@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 /**
  * A browser can be set to a minimum font size (Chrome and Edge: Settings > Appearance > Customize fonts): text set smaller than that is
  * drawn at the minimum, whatever size the page asks for. In a layout program that looks like a size field that stops working at some
@@ -36,4 +38,29 @@ export function detectMinimumFontSize(): number | null {
   } finally {
     probe.remove()
   }
+}
+
+let known: number | null | undefined
+
+/**
+ * The minimum font size the browser holds (null for none), measured once the fonts are in; undefined until then.
+ * Cached: it only changes when the person changes the browser's settings, which takes a restart of the page.
+ */
+export function useMinimumFontSize(): number | null {
+  const [size, setSize] = useState<number | null>(known ?? null)
+  useEffect(() => {
+    if (known !== undefined) return
+    let alive = true
+    const measure = () => {
+      known = detectMinimumFontSize()
+      if (alive) setSize(known)
+    }
+    const ready = typeof document !== 'undefined' ? document.fonts?.ready : undefined
+    if (ready) ready.then(measure, measure)
+    else measure()
+    return () => {
+      alive = false
+    }
+  }, [])
+  return size
 }

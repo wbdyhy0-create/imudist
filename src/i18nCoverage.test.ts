@@ -39,6 +39,7 @@ const TRANSLATED = [
   'PreflightPanel',
   'GuidedToolTour',
   'MinimumFontNotice',
+  'MinimumFontHint',
   'ArrangeButtons',
   'DockingPanels',
   'Workspace',

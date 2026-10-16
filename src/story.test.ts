@@ -100,3 +100,23 @@ describe('a size stepped up a point at a time', () => {
     expect(Math.round(frame.leading! * 100) / 100).toBe(10.29) // 9 × 16 / 14
   })
 })
+
+describe('the automatic leading and a size that is not the story\'s own', () => {
+  const body = { fontFamily: 'Arial', fontSize: 14, weight: 400, italic: false, tracking: 0 }
+  const text = 'שלום\nעולם'
+  const runs = (size: number, size2 = size) => [{ len: 5, style: { ...body, fontSize: size } }, { len: 4, style: { ...body, fontSize: size2 } }]
+
+  it('writes the automatic leading of a paragraph that is given another size than the story has', () => {
+    // paragraph 1 goes from 14 to 28 while the story stays at 14: its lines get 125% of 28, not of 14
+    const follow = leadingFollowingSize({ text, leading: undefined, paragraphStylePatches: undefined }, runs(14), runs(14, 28), 14, 14, [1])!
+    expect(follow.leading).toBeUndefined()
+    expect(follow.paragraphStylePatches).toEqual([{}, { leading: 35 }])
+  })
+
+  it('leaves the automatic leading alone when it follows by itself, and writes it when the text is not at the size of the story', () => {
+    expect(leadingFollowingSize({ text, leading: undefined, paragraphStylePatches: undefined }, runs(14), runs(21), 14, 21, null)).toBeNull()
+    // the story says 14 and its text is 28: the story steps to 15 and the text to 29, but the automatic leading goes by the 15
+    const follow = leadingFollowingSize({ text, leading: undefined, paragraphStylePatches: undefined }, runs(28), runs(29), 14, 15, null)!
+    expect(follow.paragraphStylePatches).toEqual([{ leading: 36 }, { leading: 36 }])
+  })
+})

@@ -37,6 +37,7 @@ export const enKeys: Record<string, string> = {
   'הזזה בחצים': 'moving with the arrow keys',
   'שינוי גודל הגופן בחצים': 'changing the font size with the arrow keys',
   'סגירת החלון': 'closing the window',
+  'בדפדפן מוגדר גודל גופן מינימלי ({size}px), ולכן טקסט בגודל קטן מזה מוצג כאן בגודל {size}. כדי לראות גדלים קטנים יותר יש לשנות את ההגדרה בדפדפן (הגדרות › מראה › התאמה אישית של גופנים › גודל גופן מינימלי).': 'The browser holds a minimum font size ({size}px), so text set smaller than that is drawn here at {size}. To see smaller sizes, change the setting in the browser (Settings › Appearance › Customize fonts › Minimum font size).',
   'גופנים אחרונים': 'Recent fonts',
   'כל הגופנים': 'All fonts',
 }

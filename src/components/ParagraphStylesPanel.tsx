@@ -9,6 +9,7 @@ import { NumberField } from './NumberField'
 import { ALIGNS, alignIcon, Group, Labeled, TEXT_DIRECTIONS } from './PropertiesPanel'
 import type { Unit } from '../units'
 import { FontPicker } from './FontPicker'
+import { MinimumFontHint } from './MinimumFontHint'
 import { useFontCatalog } from '../fonts'
 import { FillPicker } from './FillPicker'
 import { FillStrokeSwatches } from './FillStrokeSwatches'
@@ -154,7 +155,7 @@ export function ParagraphStylesPanel({ styles, unit, shown = true, onApply, onCh
       </Group>}{category === 'basic' && <Group title={t('עיצוב תווים')}>
         <Labeled label={t('גופן')}><FontPicker value={value('fontFamily', 'Segoe UI')} families={fontCatalog.families} onChange={(fontFamily) => edit({ fontFamily })} /></Labeled>
         <Labeled label={t('משקל וסגנון')}><select className="select" value={selectedFace} onChange={(event) => { const [weight, italic] = event.target.value.split('|'); edit({ weight: Number(weight), italic: italic === '1' }) }}>{!selectedFamily?.faces.some((face) => `${face.weight}|${face.italic ? 1 : 0}` === selectedFace) && <option value={selectedFace}>{t('נוכחי')}</option>}{(selectedFamily?.faces ?? [{ weight: 400, italic: false, style: 'Regular' }]).map((face) => <option key={`${face.weight}|${face.italic}`} value={`${face.weight}|${face.italic ? 1 : 0}`}>{face.style}</option>)}</select></Labeled>
-        <div className="grid2"><Labeled label={t('גודל')}><NumberField value={value('fontSize', 14)} unit="px" unitLabel="pt" min={1} max={999} onChange={(v) => edit({ fontSize: v })} /></Labeled><Labeled label={t('מרווח בין שורות')}><NumberField value={value('leading', 17)} unit="px" unitLabel="pt" min={0} max={999} onChange={(v) => edit({ leading: v })} /></Labeled></div>
+        <div className="grid2"><Labeled label={t('גודל')}><NumberField value={value('fontSize', 14)} unit="px" unitLabel="pt" min={1} max={999} onChange={(v) => edit({ fontSize: v })} /><MinimumFontHint size={value('fontSize', 14)} /></Labeled><Labeled label={t('מרווח בין שורות')}><NumberField value={value('leading', 17)} unit="px" unitLabel="pt" min={0} max={999} onChange={(v) => edit({ leading: v })} /></Labeled></div>
         <div className="toggle-group"><button className={value('weight', 400) >= 600 ? 'on' : ''} onClick={() => edit({ weight: value('weight', 400) >= 600 ? 400 : 700 })}>B</button><button className={value('italic', false) ? 'on' : ''} onClick={() => edit({ italic: !value('italic', false) })}><i>I</i></button></div>
         <Labeled label={t('מרווח בין פסקאות')}><NumberField value={value('spaceAfter', DEFAULT_SPACE_AFTER)} unit={unit} min={0} onChange={(v) => edit({ spaceAfter: v })} /></Labeled>
         <Labeled label={t('ריווח בין אותיות (% מגודל הגופן)')}><NumberField value={value('tracking', 0) / 10} suffix="%" step={1} min={-50} max={50} onChange={(v) => edit({ tracking: Math.round(v * 10) })} /></Labeled>

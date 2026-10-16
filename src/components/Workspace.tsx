@@ -151,6 +151,7 @@ import { readBrushFile } from '../brushImport'
 import { SAMPLER_CELL_PX, type ColorSamplerPreview } from './ColorSamplerLens'
 import { ContextToolbar } from './ContextToolbar'
 import { FontPicker } from './FontPicker'
+import { MinimumFontHint } from './MinimumFontHint'
 import type { AlignOp } from './AlignButtons'
 import { MultiSelectionToolbar } from './MultiSelectionToolbar'
 import { CreateGuidesDialog, type CreateGuidesRequest } from './CreateGuidesDialog'
@@ -2653,8 +2654,10 @@ export function Workspace({
     const head = fl && frames.find((f) => f.id === fl.headId)
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
-    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
-    const caret = !sel && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
+    const picked = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    // the whole text selected is a change of the whole story: its own style (size, and with it the automatic leading) changes too
+    const sel = picked && !(Math.min(picked.a, picked.b) <= 0 && Math.max(picked.a, picked.b) >= head.text.length) ? picked : null
+    const caret = !picked && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const key = `style:${head.id}:${Object.keys(patch).join(',')}`
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
@@ -2688,8 +2691,10 @@ export function Workspace({
     if (!fl || !head) return
     const runs = normalizeRuns(head.text, head.runs, head)
     // no `editingId` condition: the arrows of the toolbar take the focus out of the text, and the selection is still the scope
-    const sel = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
-    const caret = !sel && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
+    const picked = textSel && textSel.headId === head.id && textSel.a !== textSel.b && textSel.b <= head.text.length ? textSel : null
+    // the whole text selected is a change of the whole story: its own size (and with it the automatic leading) steps too
+    const sel = picked && !(Math.min(picked.a, picked.b) <= 0 && Math.max(picked.a, picked.b) >= head.text.length) ? picked : null
+    const caret = !picked && textSel && textSel.headId === head.id && textSel.a === textSel.b && textSel.b <= head.text.length ? textSel : null
     const [caretFrom, caretTo] = caret ? paragraphBounds(head.text, paraIndexAt(head.text, caret.a)) : [0, 0]
     const chainIds = new Set(chainOf(frames, id).map((f) => f.id))
     const clampSize = (size: number) => Math.min(999, Math.max(1, size + delta))
@@ -11734,6 +11739,7 @@ export function Workspace({
               onStep={(delta) => footnoteSel ? stepFootnoteFontSize(delta) : stepFontSize(selFrame.id, delta)}
               onChange={(fontSize) => footnoteSel ? applyFootnoteCharStyle({ fontSize }) : applyCharStyle(selFrame.id, { fontSize })}
             />
+            <MinimumFontHint size={toolbarTextStyle.fontSize} />
           </div>
         ) : null}
         paragraphStyle={toolbarParagraphStyle}

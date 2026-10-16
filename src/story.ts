@@ -1,5 +1,5 @@
 import type { CharacterStyleRecord, CharacterStyleSettings, CharStyle, Run, TextFrame } from './document'
-import { KEEP_ALL_LINES } from './document'
+import { defaultLeading, KEEP_ALL_LINES } from './document'
 
 /**
  * Pure helpers for a story's formatted text. A story is a string plus `runs`: consecutive pieces that share a
@@ -101,8 +101,10 @@ function dominantSizeIn(runs: Run[], a: number, b: number): number | null {
  * The leading written down follows the size of the letters it was written for, in proportion: letters that become 1.5 times
  * larger have 1.5 times the leading (a leading of 17 points under letters of 21 would set the lines on top of each other), so
  * every point of size adds `leading / size` points of leading. The size a paragraph is measured by is the one most of its
- * characters have, the one the toolbar shows. A paragraph with no leading written (the automatic one) is left to the automatic
- * leading, which follows the size itself.
+ * characters have, the one the toolbar shows. A paragraph with no leading written has the automatic one, which is a fixed share
+ * of the size of the story's own text: it follows when the story's own size is the one that changes, and when it is not (a part of
+ * the text is given another size) the paragraph gets its automatic leading written down for the size it has now, or its lines
+ * would stay as close as the old size had them.
  *
  * `before` and `after` are the story's runs around the change and `sizeBefore`/`sizeAfter` the story's own size (for a
  * paragraph with no runs). `scope` is the paragraphs the change reaches, or null for the whole story, whose own leading then
@@ -134,10 +136,13 @@ export function leadingFollowingSize(
     const own = patches?.[i]?.leading
     // a paragraph that has no leading of its own has the story's: when only part of the story changes, that is written on the paragraph
     const written = own !== undefined && own > 0 ? own : scope !== null ? wholeLeading : undefined
-    if (written === undefined) continue
+    // no leading written anywhere: the automatic one follows the story's size, which is `sizeAfter` for a change of the whole story
+    // and what it was for a part of it
+    const automatic = own === undefined && wholeLeading === undefined && Math.abs(now - (scope === null ? sizeAfter : sizeBefore)) >= 1e-6
+    if (written === undefined && !automatic) continue
     const list = patches ? patches.slice() : []
     while (list.length <= i) list.push({})
-    list[i] = { ...list[i], leading: round((written * now) / was) }
+    list[i] = { ...list[i], leading: written !== undefined ? round((written * now) / was) : defaultLeading({ fontSize: now }) }
     patches = list
     first = Math.min(first, i)
   }
