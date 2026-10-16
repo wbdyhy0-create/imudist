@@ -708,9 +708,32 @@ export function Workspace({
   const layoutById = useMemo(() => new Map(layoutFrames.map((frame) => [frame.id, frame])), [layoutFrames])
   const primaryFrameIds = useMemo(() => primaryTextFrameOrder(doc, frames), [doc, frames])
   const sharedFootnoteGroups = useMemo(() => primaryTextFramePageGroups(doc, frames), [doc, frames])
+  // Staged layout: a change of the look of a long thread (a size, a leading) lays out the first frames at once and the others one after
+  // the other, each as soon as the screen has had its turn, so the work goes on while the later pages catch up (they are shown as they
+  // were, and cannot be clicked, until then). The frame that is being worked in is among the first. Stories with footnotes are laid out whole.
+  const focusFrameRef = useRef<string | null>(null)
+  const [stage, setStage] = useState<{ frames: TextFrame[]; more: number }>({ frames, more: 0 })
+  let stageMore = stage.more
+  if (stage.frames !== frames) {
+    stageMore = 0
+    setStage({ frames, more: 0 })
+  }
+  const stageLimit = useMemo(() => {
+    if (sharedFootnoteGroups.length || frames.some((frame) => frame.footnotes?.length)) return undefined
+    const focus = focusFrameRef.current
+    const at = focus ? chainOf(frames, focus).findIndex((frame) => frame.id === focus) : 0
+    return Math.max(2, at + 2) + stageMore
+  }, [frames, sharedFootnoteGroups, stageMore])
   const provisionalFlow = useMemo(() => sharedFootnoteGroups.length
     ? flowFramesWithFootnoteContinuation(layoutFrames, images, footnoteConfig, new Map(), primaryFrameIds, paragraphStyles, dirtyOffsetRef.current, sharedFootnoteGroups)
-    : flowFrames(layoutFrames, images, footnoteConfig, undefined, new Map(), paragraphStyles, dirtyOffsetRef.current), [layoutFrames, images, footnoteConfig, paragraphStyles, primaryFrameIds, sharedFootnoteGroups])
+    : flowFrames(layoutFrames, images, footnoteConfig, undefined, new Map(), paragraphStyles, dirtyOffsetRef.current, new Map(), stageLimit), [layoutFrames, images, footnoteConfig, paragraphStyles, primaryFrameIds, sharedFootnoteGroups, stageLimit])
+  const layoutPending = stageLimit !== undefined && [...provisionalFlow.values()].some((frameFlow) => frameFlow.pending)
+  useEffect(() => {
+    if (!layoutPending) return
+    // the next frames, after the screen has been painted
+    const timer = window.setTimeout(() => setStage((current) => (current.frames === frames ? { frames, more: current.more + 2 } : current)), 0)
+    return () => window.clearTimeout(timer)
+  }, [layoutPending, provisionalFlow, frames])
   const footnoteNumbers = useMemo(() => {
     const byId = new Map(frames.map((frame) => [frame.id, frame]))
     const entries = [...provisionalFlow].flatMap(([frameId, frameFlow]) => {
@@ -1108,6 +1131,7 @@ export function Workspace({
   const [selectedAnchor, setSelectedAnchor] = useState<string | null>(null)
   const [objectMenu, setObjectMenu] = useState<{ x: number; y: number; sourceShapeId?: string; targetShapeId?: string; textFrameId?: string } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  focusFrameRef.current = editingId ?? selectedId
   // the newest editing frame, for the selection drag: RichEditor keeps calling the callback it had when it was last
   // rendered even after it unmounts (the drag moved editing to another frame), so a closure over `editingId` is stale there
   const editingIdRef = useRef<string | null>(null)
@@ -12375,6 +12399,7 @@ export function Workspace({
                     onSelectToStartText={(frameId, offset) => selectStoryToStart(frameId, offset)}
                     z={rank.get(f.id) ?? 0}
                     overflow={fl.overflow}
+                    pending={fl.pending}
                     continuesParagraphAtEnd={fl.end < fl.story.length && fl.story[fl.end - 1] !== '\n' && !endsWithFootnoteReference}
                     storyContinues={fl.end < fl.story.length}
                     hasPrev={fl.prevId !== null}

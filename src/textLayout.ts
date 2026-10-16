@@ -42,6 +42,11 @@ export interface FrameFlow {
   runs: Run[]
   /** true on the last frame of a story when some text does not fit anywhere */
   overflow: boolean
+  /**
+   * The frame was not laid out again yet (a staged layout, see `layoutLimit` of `flowFrames`): this is how it was laid out before the
+   * change, and it is shown as it was until its turn comes. Never set on a finished layout.
+   */
+  pending?: boolean
   /** the gap after each "\n" of the WHOLE story (document.ts's `paraGaps`); `startParaIndex` is where `slice` begins in it */
   paraGaps: (number | undefined)[]
   startParaIndex: number
@@ -821,6 +826,8 @@ const cache = new Map<
     normalizedRuns: Run[]
     notes: FootnoteLayoutItem[]
     carried: string
+    /** how many frames (from the first) are laid out for this `sig`; the rest are as they were before (a staged layout that is not finished) */
+    laidOut: number
   }
 >()
 const footnoteMeasurementCache = new Map<string, { width: number; height: number }>()
@@ -838,6 +845,14 @@ export function flowFrames(
   paragraphStyles: ParagraphStyleRecord[] = [],
   dirtyOffset?: number,
   footnoteReservationOverrides: ReadonlyMap<string, number> = new Map(),
+  /**
+   * A staged layout: when a story of more frames than this has its layout changed with its text as it was (a size, a leading, a
+   * frame resized), only this many of its first frames are laid out now and the others are given as they were, `pending`, to be laid
+   * out by the calls that follow with a higher limit (what was laid out is kept). Every frame depends on the end of the one before
+   * it, so the first frames can be had at once and the later ones cost their turn: a book is as quick to work in as its first pages.
+   * Stories with footnotes, and stories with no earlier layout to show, are laid out whole.
+   */
+  layoutLimit?: number,
 ): Map<string, FrameFlow> {
   const result = new Map<string, FrameFlow>()
   const seen = new Set<string>()
@@ -871,25 +886,34 @@ export function flowFrames(
     const sig = `${reuseSig}|${JSON.stringify(head.footnotes)}|${JSON.stringify(footnoteNumbers ? [...footnoteNumbers] : [])}|${JSON.stringify(chain.map((frame) => [frame.id, footnoteContinuations.get(frame.id)]))}`
 
     const hit = cache.get(cacheKey)
+    // a layout that was stopped part of the way (a staged one) is not an answer to a call that wants the whole of it
+    const finished = !!hit && hit.laidOut === hit.flows.length
     let flows: FrameFlow[]
     // a change that only repaints the text (its colour, outline or shadow) does not move a single letter: the layout stays as it was
-    const repainted = hit && hit.text === story && hit.sig === sig && hit.runs !== head.runs ? normalizeRuns(story, head.runs, style) : null
+    const repainted = hit && finished && hit.text === story && hit.sig === sig && hit.runs !== head.runs ? normalizeRuns(story, head.runs, style) : null
     if (hit && repainted && sameLayoutRuns(hit.normalizedRuns, repainted)) {
       flows = hit.flows.map((previous) => ({ ...previous, style, runs: sliceRuns(repainted, previous.start, previous.end) }))
       cache.set(cacheKey, { ...hit, runs: head.runs, normalizedRuns: repainted, flows })
-    } else if (hit && hit.text === story && hit.runs === head.runs && hit.sig === sig) {
+    } else if (hit && finished && hit.text === story && hit.runs === head.runs && hit.sig === sig) {
       flows = hit.flows
     } else {
       const runs = repainted ?? normalizeRuns(story, head.runs, style)
       const reusablePrefix: FrameFlow[] = []
+      // a staged layout (see `layoutLimit`) needs an earlier layout of this very text, to show the frames it leaves for later as they were
+      const staged = layoutLimit !== undefined && !!hit && hit.text === story && hit.flows.length === chain.length && chain.length > layoutLimit && !head.footnotes?.length
       if (hit && hit.reuseSig === reuseSig && dirtyOffset !== undefined) {
-        for (const previous of hit.flows) {
+        for (const previous of hit.flows.slice(0, hit.laidOut)) {
           if (previous.end >= dirtyOffset) break
           const currentRuns = sliceRuns(runs, previous.start, previous.end)
           if (hit.text.slice(previous.start, previous.end) !== story.slice(previous.start, previous.end) || JSON.stringify(previous.runs) !== JSON.stringify(currentRuns)) break
           reusablePrefix.push(previous)
         }
+      } else if (hit && !finished && hit.sig === sig && hit.text === story && hit.runs === head.runs) {
+        // this very layout, stopped part of the way: the frames it laid out are kept and it goes on from there
+        reusablePrefix.push(...hit.flows.slice(0, hit.laidOut))
       }
+      // a staged layout stops after this many frames (the ones kept from before count)
+      const stopAt = staged ? Math.min(chain.length, Math.max(layoutLimit!, reusablePrefix.length)) : chain.length
       // a reusable frame's footnotes were already laid out exactly this way last time (same sig: same config, same
       // continuations carried into it, same text) - assignFootnotes below skips it too, instead of re-measuring
       // every footnote in it (a DOM reflow each) on every one of the stabilization loop's attempts, for a frame the
@@ -1031,7 +1055,7 @@ export function flowFrames(
        * what is carried into the frames is the same.
        */
       const canKeepRest = (i: number, end: number): boolean => {
-        if (!hit || hit.reuseSig !== reuseSig || dirtyOffset === undefined || hit.flows.length !== chain.length || i + 1 >= chain.length) return false
+        if (!hit || !finished || hit.reuseSig !== reuseSig || dirtyOffset === undefined || hit.flows.length !== chain.length || i + 1 >= chain.length) return false
         const before = hit.flows[i].end
         if (end !== before + lengthChange || end <= dirtyOffset) return false
         if (hit.carried !== carriedKey) return false
@@ -1044,7 +1068,7 @@ export function flowFrames(
       const calculateRanges = () => {
         const ranges: { start: number; end: number }[] = reusablePrefix.map(({ start, end }) => ({ start, end }))
         let start = ranges.length ? ranges[ranges.length - 1].end : 0
-        for (let i = reusablePrefix.length; i < chain.length; i++) {
+        for (let i = reusablePrefix.length; i < stopAt; i++) {
           const f = chain[i]
           const isFirst = i === 0
           const isLast = i === chain.length - 1
@@ -1168,10 +1192,17 @@ export function flowFrames(
         [...layouts].map(([id, layout]) => [id, reservationOf(layout, id)]),
       )
       const ranges = calculateRanges()
+      // the frames after the ones laid out are as they were
+      const laidOut = ranges.length
+      for (let k = ranges.length; k < chain.length; k++) ranges.push({ start: hit!.flows[k].start, end: hit!.flows[k].end })
       const noteLayouts = assignFootnotes(ranges)
       const reserved = reserveFor(noteLayouts)
       flows = []
       chain.forEach((f, i) => {
+        if (i >= laidOut) {
+          flows.push({ ...hit!.flows[i], pending: true })
+          return
+        }
         const { start, end } = ranges[i]
         const startParaIndex = paraIndexAt(story, start)
         const atStart = atParaStart(story, start)
@@ -1198,7 +1229,7 @@ export function flowFrames(
           footnoteOverflowItems: noteLayouts.get(f.id)?.overflowItems ?? [],
         })
       })
-      cache.set(cacheKey, { text: story, runs: head.runs, sig, reuseSig, flows, normalizedRuns: runs, notes: footnoteItems, carried: carriedKey })
+      cache.set(cacheKey, { text: story, runs: head.runs, sig, reuseSig, flows, normalizedRuns: runs, notes: footnoteItems, carried: carriedKey, laidOut })
     }
     chain.forEach((f, i) => result.set(f.id, flows[i]))
   }

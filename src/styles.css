@@ -1116,6 +1116,7 @@ svg { display: block; }
 }
 .min-font-notice p { margin: 6px 0 0; color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
 .min-font-notice .btn { flex: none; }
+.text-frame.layout-pending { pointer-events: none; }
 .min-font-hint { margin-inline-start: 6px; color: #ffb020; cursor: help; font-size: 13px; line-height: 1; }
 .context-font-size-field { display: flex; align-items: center; }
 .recent-list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }

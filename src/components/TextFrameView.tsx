@@ -126,6 +126,8 @@ interface Props {
   ty: number
   selected: boolean
   locked?: boolean
+  /** the layout of this frame is the one from before the last change, until its turn comes (a staged layout): it is drawn, but cannot be worked in */
+  pending?: boolean
   /** part of a selection of several objects: outlined, without handles */
   marked?: boolean
   editing: boolean
@@ -488,7 +490,7 @@ export function TextFrameView(p: Props) {
 
   return (
     <div
-      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (editing ? ' editing' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '') + (p.previewFontFamily ? ' font-preview' : '')}
+      className={'text-frame' + (showEdge ? ' edge' : '') + (selected ? ' selected' : '') + (editing ? ' editing' : '') + (marked ? ' marked' : '') + (locked ? ' locked' : '') + (p.pending ? ' layout-pending' : '') + (p.previewFontFamily ? ' font-preview' : '')}
       data-frame-id={frame.id}
       data-object-id={frame.id}
       data-object-kind="frame"
