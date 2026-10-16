@@ -138,21 +138,4 @@ jobs:
         with:
           path: artifacts
       - name: Publish
-        run: |
-          gh auth setup-git
-          git config --global user.name "Imudist releases"
-          git config --global user.email "releases@imudist.invalid"
-          version=$(node -p "require('./package.json').version")
-          # Windows
-          win_full="artifacts/imudist-win-full"
-          win_trial="artifacts/imudist-win-trial-${TRIAL_DAYS}d"
-          node scripts/publish-update.mjs --channel regular --platform windows-x86_64 --clone "$RUNNER_TEMP/releases" --file "$win_full/Imudist_${version}_x64-setup.exe" --sig "$win_full/Imudist_${version}_x64-setup.exe.sig"
-          node scripts/publish-update.mjs --channel trial --platform windows-x86_64 --clone "$RUNNER_TEMP/releases" --file "$win_trial/Imudist_${version}_x64-setup.exe" --sig "$win_trial/Imudist_${version}_x64-setup.exe.sig" --asset-name "Imudist_${version}-trial-${TRIAL_DAYS}d_x64-setup.exe"
-          # the Macs
-          for target in aarch64-apple-darwin x86_64-apple-darwin; do
-            case $target in aarch64-apple-darwin) platform=darwin-aarch64; arch=aarch64;; *) platform=darwin-x86_64; arch=x86_64;; esac
-            full="artifacts/imudist-mac-full-$target"
-            trial="artifacts/imudist-mac-trial-${TRIAL_DAYS}d-$target"
-            node scripts/publish-update.mjs --channel regular --platform $platform --clone "$RUNNER_TEMP/releases"               --file "$full/macos/Imudist.app.tar.gz" --sig "$full/macos/Imudist.app.tar.gz.sig" --asset-name "Imudist_${version}_${arch}.app.tar.gz"
-            node scripts/publish-update.mjs --channel trial --platform $platform --clone "$RUNNER_TEMP/releases"               --file "$trial/macos/Imudist.app.tar.gz" --sig "$trial/macos/Imudist.app.tar.gz.sig" --asset-name "Imudist_${version}-trial-${TRIAL_DAYS}d_${arch}.app.tar.gz"
-          done
+        run: bash scripts/publish-ci.sh

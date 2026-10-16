@@ -31,6 +31,7 @@ the program side is `src/updater.ts` and `src/components/UpdateDialog.tsx`.
 
 Push a tag `v<version>` (or run the **Build macOS and Windows** workflow with `publish` ticked): GitHub builds the Windows and
 Mac installers of both channels, signs them with the secrets above and publishes them. Nothing needs the GitHub CLI on this machine.
+When only the publishing failed, run the workflow **Publish an update** with the number of the run (the builds are not made again).
 
 ## Publishing an update from this machine (Windows)
 

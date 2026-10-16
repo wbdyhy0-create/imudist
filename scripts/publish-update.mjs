@@ -31,7 +31,7 @@ const repo = option('repo', 'wbdyhy0-create/imudist-releases')
 const clone = option('clone', process.platform === 'win32' ? 'D:/Imudist-releases' : join(process.env.HOME ?? '.', 'imudist-releases'))
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-const platform = option('platform', currentPlatform())
+const platform = args.includes('--platform') ? option('platform', '') : currentPlatform()
 
 // the installer and its signature
 let file = option('file', '')

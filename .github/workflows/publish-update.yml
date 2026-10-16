@@ -1,0 +1,34 @@
+name: Publish an update
+
+# Publishes the builds of an earlier run of "Build macOS and Windows" as updates, without building them again (for when only the
+# publishing of that run failed). The run's number is in the address of its page: .../actions/runs/<number>
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'The run of "Build macOS and Windows" whose builds are published'
+        required: true
+      trial_days:
+        description: 'Length of the trial builds, in days'
+        default: '180'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+      TRIAL_DAYS: ${{ inputs.trial_days }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: What was downloaded
+        run: find artifacts -type f | sort
+      - name: Publish
+        run: bash scripts/publish-ci.sh
