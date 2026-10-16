@@ -23,9 +23,8 @@ the program side is `src/updater.ts` and `src/components/UpdateDialog.tsx`.
 
 1. Create the public repository `imudist-releases` under `wbdyhy0-create` (empty, with a README so that `main` exists).
 2. Install the GitHub CLI and log in: `winget install GitHub.cli`, then `gh auth login`.
-3. For the Macs, in the **source** repository's Settings > Secrets and variables > Actions add:
+3. For the builds on GitHub, in the **source** repository's Settings > Secrets and variables > Actions add:
    - `TAURI_SIGNING_PRIVATE_KEY`: the content of `D:\Imudist-keys\updater.key`
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: empty (the key has no password)
    - `RELEASES_REPO_TOKEN`: a personal access token that can write to `imudist-releases` (contents: read and write)
 
 ## Publishing an update (by GitHub: Windows and Mac)

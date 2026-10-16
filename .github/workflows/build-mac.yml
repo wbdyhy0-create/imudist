@@ -28,7 +28,8 @@ jobs:
       TRIAL_DAYS: ${{ inputs.trial_days || '180' }}
       # the key the updater files are signed with (its public half is in tauri.conf.json); a secret, never in the repository
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # the key has no password (a secret cannot be empty, so there is none to read)
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,7 +88,8 @@ jobs:
     env:
       TRIAL_DAYS: ${{ inputs.trial_days || '180' }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # the key has no password (a secret cannot be empty, so there is none to read)
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
     steps:
       - uses: actions/checkout@v4
         with:
