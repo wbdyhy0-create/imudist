@@ -31,6 +31,8 @@ import { GhostscriptMissingError, openGhostscriptDownload, readEpsFile } from '.
 import { ImportError, placedFromPlainText, readPlacedText, type PlacedText } from './importText'
 import { ImportOptionsDialog } from './components/ImportOptionsDialog'
 import { LicensesDialog } from './components/LicensesDialog'
+import { UpdateDialog } from './components/UpdateDialog'
+import { checkForUpdate, dueForAutomaticCheck, lastAutomaticCheck, markChecked, type UpdateStatus } from './updater'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
 import { useDocumentSession, type PageOps } from './useDocumentSession'
 import { deliverPng } from './pngExport'
@@ -241,6 +243,27 @@ export default function App() {
   const [placing, setPlacing] = useState<PlacedText | null>(null)
   const [importOptionsFile, setImportOptionsFile] = useState<File | null>(null)
   const [licensesOpen, setLicensesOpen] = useState(false)
+  // updates of the program (the desktop app only): the window of the check the person asked for, or of the newer version that was found
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null)
+  const checkUpdates = useCallback(async (asked: boolean) => {
+    if (asked) setUpdateStatus({ kind: 'checking' })
+    try {
+      const offer = await checkForUpdate()
+      setUpdateStatus(offer ? { kind: 'available', offer } : asked ? { kind: 'none' } : null)
+    } catch (error) {
+      console.warn('Could not check for updates:', error)
+      setUpdateStatus(asked ? { kind: 'failed' } : null)
+    }
+  }, [])
+  // by itself, a little after the start, and not more often than every twelve hours
+  useEffect(() => {
+    if (!isTauri || !dueForAutomaticCheck(lastAutomaticCheck())) return
+    const timer = window.setTimeout(() => {
+      markChecked()
+      void checkUpdates(false)
+    }, 8000)
+    return () => window.clearTimeout(timer)
+  }, [checkUpdates])
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const shortcutState = useShortcutState()
   /** pictures loaded from files / the clipboard, waiting for a click on the page */
@@ -726,6 +749,7 @@ export default function App() {
         importText: () => void importFiles(),
         importKind: (kind) => void importKind(kind),
         showLicenses: () => setLicensesOpen(true),
+        checkForUpdates: isTauri ? () => void checkUpdates(true) : undefined,
         openShortcuts: () => setShortcutsOpen(true),
         importParagraphStyles: () => void importParagraphStyles(),
         canUndo: history.canUndo && !preview,
@@ -1128,6 +1152,7 @@ export default function App() {
       {session.modal && <Modal spec={session.modal} />}
       {saveWorkspaceDialogOpen && <SaveWorkspaceDialog onSave={saveWorkspace} onClose={() => setSaveWorkspaceDialogOpen(false)} />}
       {licensesOpen && <LicensesDialog onClose={() => setLicensesOpen(false)} />}
+      {updateStatus && <UpdateDialog status={updateStatus} unsaved={session.anyDirty} onClose={() => setUpdateStatus(null)} />}
       {shortcutsOpen && <ShortcutsDialog menus={baseMenus} onClose={() => setShortcutsOpen(false)} />}
       {importOptionsFile && <ImportOptionsDialog fileName={importOptionsFile.name} canReplace={!!ws.current && !!doc && ws.current.canReplaceSelectedText()} onConfirm={(replaceSelected, includeFootnotes, flow) => void confirmDocxImport(replaceSelected, includeFootnotes, flow)} onClose={() => setImportOptionsFile(null)} />}
       {importPdfSource && <ImportPdfOptionsDialog fileName={importPdfSource.file.name} pageCount={importPdfSource.pageCount} onConfirm={(pages) => void confirmPdfImport(pages)} onClose={cancelPdfImport} />}

@@ -21,6 +21,7 @@ const TRANSLATED = [
   'ContextToolbar',
   'Toolbox',
   'ShortcutsDialog',
+  'UpdateDialog',
   'PropertiesPanel',
   'ParagraphPanel',
   'PageToolBar',

@@ -669,6 +669,7 @@ export function useDocumentSession() {
     pages,
     file,
     dirty,
+    anyDirty,
     modal,
     toast,
     recent,

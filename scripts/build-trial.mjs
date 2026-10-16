@@ -11,6 +11,7 @@
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { updaterSigningEnv } from './signing.mjs'
 
 const fromFirstRun = process.argv.includes('--from-first-run')
 const days = Number(process.argv.slice(2).find((argument) => !argument.startsWith('--')) ?? 14)
@@ -25,7 +26,8 @@ const trialEnv = fromFirstRun ? { VITE_TRIAL_DAYS: String(days) } : { VITE_TRIAL
 
 const bundle = join(root, 'src-tauri/target/release/bundle')
 const kinds = ['nsis', 'msi']
-const isInstaller = (name) => name.includes(`_${version}_`) && /\.(exe|msi)$/.test(name)
+// the installers, and the signatures the updater checks them with
+const isInstaller = (name) => name.includes(`_${version}_`) && /\.(exe|msi)(\.sig)?$/.test(name)
 
 // the ordinary installers of this version, kept aside
 const aside = join(root, 'src-tauri/target/trial-aside')
@@ -38,11 +40,12 @@ for (const kind of kinds) {
 }
 
 console.log(fromFirstRun ? `Building ${version} for testing, ${days} days from the first start ...` : `Building ${version} for testing, until ${expiresAt.toISOString()} ...`)
-const run = spawnSync('npx', ['tauri', 'build', '--', '--config', 'profile.release.package.imudist.opt-level=0'], {
+// a build for testing looks for its updates in its own list (tauri.trial.conf.json), not in the one of the ordinary builds
+const run = spawnSync('npx', ['tauri', 'build', '--config', 'src-tauri/tauri.trial.conf.json', '--', '--config', 'profile.release.package.imudist.opt-level=0'], {
   cwd: root,
   stdio: 'inherit',
   shell: true,
-  env: { ...process.env, ...trialEnv },
+  env: { ...process.env, ...updaterSigningEnv(), ...trialEnv },
 })
 if (run.status !== 0) {
   console.error('The build failed.')

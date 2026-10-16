@@ -22,3 +22,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2.6.0"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2.14"
+
+# every release of the `zip` crate that the updater plugin accepts (^4) was withdrawn from crates.io; the plugin only uses it to open .zip update
+# packages, which Imudist never publishes (Windows updates are the signed installer itself), so the last 4.x is taken from its repository
+[patch.crates-io]
+zip = { git = "https://github.com/zip-rs/zip2", tag = "v4.6.1" }

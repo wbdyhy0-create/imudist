@@ -26,6 +26,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJFNUZDMjFFQzRBM0NEOTcKUldTWHphUEVIc0pmdnJMclBXdG80Y2xybGVTOFpDZUVYUlBXMC9yYjJzc20wYi9FUzdNcUZXcC8K",
+      "endpoints": ["https://raw.githubusercontent.com/wbdyhy0-create/imudist-releases/main/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "msi", "app", "dmg"],
@@ -34,7 +41,7 @@
       "minimumSystemVersion": "11.0",
       "signingIdentity": "-"
     },
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"

@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "dist": "tauri build"
+    "dist": "node scripts/build-release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",
@@ -19,6 +19,8 @@
     "@tauri-apps/plugin-dialog": "^2.8.0",
     "@tauri-apps/plugin-fs": "^2.6.0",
     "@tauri-apps/plugin-opener": "^2.6.0",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "ag-psd": "^31.0.3",
     "fast-xml-parser": "^5.11.2",
     "html2canvas": "^1.4.1",

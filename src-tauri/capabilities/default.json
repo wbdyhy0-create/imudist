@@ -16,6 +16,8 @@
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
     "fs:allow-read-file",
-    "clipboard-manager:allow-read-text"
+    "clipboard-manager:allow-read-text",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

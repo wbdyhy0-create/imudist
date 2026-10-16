@@ -1390,3 +1390,6 @@ svg { display: block; }
 .modal-backdrop.object-style-floating { background: transparent; pointer-events: none; align-items: start; justify-items: end; padding: 56px 18px 18px; }
 .modal-backdrop.object-style-floating .modal { pointer-events: auto; max-height: calc(100vh - 90px); overflow-y: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
 .object-style-setting.off { pointer-events: auto; cursor: pointer; }
+.update-dialog { width: min(480px, calc(100vw - 32px)); }
+.update-notes { max-height: 160px; margin: 0 0 14px; padding: 8px 10px; overflow: auto; background: var(--bg-field); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font: 12px/1.5 inherit; white-space: pre-wrap; }
+.modal p.update-warning { color: #ffb020; }

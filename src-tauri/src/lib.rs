@@ -296,6 +296,8 @@ pub fn run() {
     .plugin(tauri_plugin_clipboard_manager::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .setup(|app| {
       let recent_file = app.path().app_local_data_dir()?.join("recent-files.json");
       if let Ok(contents) = fs::read_to_string(recent_file) {

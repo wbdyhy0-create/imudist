@@ -44,6 +44,8 @@ export interface MenuContext {
   /** load a Word / text file into the text cursor */
   /** File > הוספת קובץ > כל הקבצים הנתמכים */
   importText: () => void
+  /** Help > בדוק עדכונים…: asks whether a newer version of the program exists (the desktop app only: missing elsewhere) */
+  checkForUpdates?: () => void
   /** Help > רישיונות: shows the notices of the third-party parts in a window (a new browser window does not open in the desktop app) */
   showLicenses: () => void
   /** File > הוספת קובץ > one kind of file; IDML opens as a new document, so it works with no document open */
@@ -512,6 +514,7 @@ export function buildMenus(c: MenuContext): MenuDef[] {
     {
       label: 'עזרה',
       items: [
+        ...(c.checkForUpdates ? [{ label: 'בדוק עדכונים…', onClick: c.checkForUpdates }, sep] : []),
         {
           label: 'רישיונות',
           onClick: c.showLicenses,
