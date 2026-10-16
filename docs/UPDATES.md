@@ -28,7 +28,12 @@ the program side is `src/updater.ts` and `src/components/UpdateDialog.tsx`.
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: empty (the key has no password)
    - `RELEASES_REPO_TOKEN`: a personal access token that can write to `imudist-releases` (contents: read and write)
 
-## Publishing an update (Windows)
+## Publishing an update (by GitHub: Windows and Mac)
+
+Push a tag `v<version>` (or run the **Build macOS and Windows** workflow with `publish` ticked): GitHub builds the Windows and
+Mac installers of both channels, signs them with the secrets above and publishes them. Nothing needs the GitHub CLI on this machine.
+
+## Publishing an update from this machine (Windows)
 
 ```powershell
 node scripts/build-release.mjs                         # signed installers in src-tauri/target/release/bundle

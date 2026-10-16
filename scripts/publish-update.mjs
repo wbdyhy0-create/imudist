@@ -13,7 +13,7 @@
 // The programs offer a build only when its version is higher than theirs: raise it (package.json, tauri.conf.json, Cargo.toml) first.
 // Options: --repo owner/name  --clone <folder of the releases repository>  --dry-run (shows what it would do and changes nothing)
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { assetUrl, currentPlatform, manifestFileName, releaseTag, withPlatform } from './update-manifest.mjs'
@@ -78,16 +78,26 @@ if (assetName !== basename(file)) {
 }
 run('gh', ['release', 'upload', tag, upload, '--repo', repo, '--clobber'])
 
-// the list the programs read
+// the list the programs read. Several machines publish into it (Windows and the Macs, at about the same time): when the push is
+// refused because another one got in first, the list is taken as it is now and this installer is put into it again.
 const manifestPath = join(clone, manifestFileName(channel))
-const existing = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null
-const manifest = withPlatform(existing, { version, platform, url: assetUrl(repo, tag, assetName), signature, notes })
-console.log(JSON.stringify(manifest, null, 2))
-if (!dryRun) {
-  mkdirSync(clone, { recursive: true })
+let published = dryRun
+for (let attempt = 1; attempt <= 5 && !published; attempt++) {
+  if (attempt > 1) {
+    run('git', ['-C', clone, 'fetch', 'origin'])
+    run('git', ['-C', clone, 'reset', '--hard', '@{u}'])
+  }
+  const existing = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null
+  const manifest = withPlatform(existing, { version, platform, url: assetUrl(repo, tag, assetName), signature, notes })
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  run('git', ['-C', clone, 'add', manifestFileName(channel)])
+  run('git', ['-C', clone, 'commit', '-m', `${channel} ${version} for ${platform}`], { allowFailure: true })
+  published = run('git', ['-C', clone, 'push'], { allowFailure: true }).status === 0
+  if (published) console.log(JSON.stringify(manifest, null, 2))
 }
-run('git', ['-C', clone, 'add', manifestFileName(channel)])
-run('git', ['-C', clone, 'commit', '-m', `${channel} ${version} for ${platform}`], { allowFailure: true })
-run('git', ['-C', clone, 'push'])
+if (dryRun) {
+  const preview = withPlatform(existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null, { version, platform, url: assetUrl(repo, tag, assetName), signature, notes })
+  console.log(JSON.stringify(preview, null, 2))
+}
+if (!published) throw new Error('the list could not be published (the push was refused five times)')
 console.log(dryRun ? 'Nothing was changed.' : 'Published: the programs that ask will be offered it.')
