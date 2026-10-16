@@ -27,6 +27,16 @@ publish_built() {
   fi
 }
 
+# the installers that people are sent for the first installation by hand (the Macs' dmg): put in the release as they are, so that
+# each has an address to download from. Not offered as updates, so a failure here does not stop the publishing.
+upload_downloads() {
+  local tag="$1"; shift
+  for file in "$@"; do
+    [ -f "$file" ] || continue
+    gh release upload "$tag" "$file" --repo "${RELEASES_REPO:-wbdyhy0-create/imudist-releases}" --clobber || echo "could not upload $file"
+  done
+}
+
 # Windows
 win_full="artifacts/imudist-win-full"
 win_trial="artifacts/imudist-win-trial-${days}d"
@@ -43,6 +53,8 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
   trial="artifacts/imudist-mac-trial-${days}d-$target"
   publish_built "$full/macos/Imudist.app.tar.gz" --channel regular --platform "$platform" --asset-name "Imudist_${version}_${arch}.app.tar.gz"
   publish_built "$trial/macos/Imudist.app.tar.gz" --channel trial --platform "$platform" --asset-name "Imudist_${version}-trial-${days}d_${arch}.app.tar.gz"
+  upload_downloads "v${version}" "$full"/dmg/*.dmg
+  upload_downloads "v${version}-trial" "$trial"/dmg/*.dmg
 done
 
 if [ "$published" -eq 0 ]; then

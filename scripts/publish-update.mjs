@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { assetUrl, currentPlatform, manifestFileName, releaseTag, withPlatform } from './update-manifest.mjs'
+import { assetUrl, currentPlatform, isNewer, manifestFileName, releaseTag, withPlatform } from './update-manifest.mjs'
 
 const args = process.argv.slice(2)
 const option = (name, fallback) => {
@@ -90,6 +90,12 @@ for (let attempt = 1; attempt <= 5 && !published; attempt++) {
     run('git', ['-C', clone, 'reset', '--hard', '@{u}'])
   }
   const existing = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, 'utf8')) : null
+  if (existing && isNewer(existing.version, version)) {
+    // the list already offers a newer version: an older build published again is only kept as a download, not offered as an update
+    console.log(`The list is at ${existing.version}, newer than ${version}: it is left as it is.`)
+    published = true
+    break
+  }
   const manifest = withPlatform(existing, { version, platform, url: assetUrl(repo, tag, assetName), signature, notes })
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
   run('git', ['-C', clone, 'add', manifestFileName(channel)])
