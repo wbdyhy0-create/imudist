@@ -48,7 +48,9 @@ if (!existsSync(file)) throw new Error(`the installer is not there: ${file}`)
 if (!existsSync(sigFile)) throw new Error(`the signature is not there: ${sigFile} (the build has to be made with the signing key)`)
 const signature = readFileSync(sigFile, 'utf8')
 const tag = releaseTag(version, channel)
-const notes = option('notes', undefined)
+// what is new, as the window of the update shows it: --notes, or the file release-notes/<version>.txt when there is one
+const notesFile = join(root, 'release-notes', `${version}.txt`)
+const notes = option('notes', existsSync(notesFile) ? readFileSync(notesFile, 'utf8').trim() : undefined)
 
 const run = (command, commandArgs, options = {}) => {
   console.log(`> ${command} ${commandArgs.join(' ')}`)
